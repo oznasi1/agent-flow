@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   renderDashboard, parseMarketplaceJsonl, sliceDays, availablePresets, deltaWithin,
+  faviconDataUri,
 } from "../../../scripts/reach/render.mjs";
 
 const DATA = {
@@ -368,5 +369,41 @@ describe("layout fixes", () => {
   it("says a ranking does not follow the range, since it cannot", () => {
     const html = renderDashboard({ ...DATA, referrers: REFERRERS });
     expect(html).toMatch(/does not follow the range/i);
+  });
+});
+
+describe("the favicon", () => {
+  const href = (html: string) =>
+    /<link rel="icon"[^>]*href="([^"]+)"/.exec(html)?.[1] ?? "";
+
+  it("is declared in the head as an SVG data URI", () => {
+    const html = renderDashboard(DATA);
+    expect(html).toMatch(/<link rel="icon" type="image\/svg\+xml"/);
+    expect(href(html)).toMatch(/^data:image\/svg\+xml,/);
+  });
+
+  it("percent-encodes every hash — a raw one truncates the URI at the first colour", () => {
+    // #0E1113 unencoded makes the browser treat the rest as a fragment: it
+    // parses a document that ends mid-tag and renders nothing at all.
+    const uri = href(renderDashboard(DATA));
+    expect(uri).not.toContain("#");
+    expect((uri.match(/%23/g) ?? []).length).toBe(7);
+  });
+
+  it("decodes back to a complete SVG", () => {
+    const svg = decodeURIComponent(href(renderDashboard(DATA)).replace("data:image/svg+xml,", ""));
+    expect(svg.startsWith("<svg")).toBe(true);
+    expect(svg.endsWith("</svg>")).toBe(true);
+    expect((svg.match(/<circle/g) ?? []).length).toBe(6);
+  });
+
+  it("fetches nothing — the page still opens offline", () => {
+    const html = renderDashboard(DATA);
+    expect(html).not.toMatch(/<link[^>]+rel="icon"[^>]*href="https?:/i);
+    expect(html).not.toMatch(/<link[^>]+href="\/favicon/i);
+  });
+
+  it("encodes whatever it is handed, not just the built-in mark", () => {
+    expect(faviconDataUri('<svg fill="#abc"/>')).toBe("data:image/svg+xml,%3Csvg%20fill%3D%22%23abc%22%2F%3E");
   });
 });
