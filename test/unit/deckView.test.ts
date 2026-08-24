@@ -9043,3 +9043,20 @@ describe("DeckPanel review destination", () => {
     expect(toast.message).not.toContain("in this window");
   });
 });
+
+describe("latestCandidates", () => {
+  it("publishes its attention candidates for the host's badge tick", async () => {
+    // The tick prefers these over gathering its own, so the badge and the column
+    // are the same reduction over the same inputs rather than two guesses.
+    show(true);
+    await settled();
+    const published = DeckPanel.latestCandidates();
+    expect(published).not.toBeNull();
+    expect(published!.at).toBeGreaterThan(0);
+    expect(Array.isArray(published!.candidates)).toBe(true);
+  });
+
+  it("is null before any panel has ever built a pass", () => {
+    expect(DeckPanel.latestCandidates()).toBeNull();
+  });
+});

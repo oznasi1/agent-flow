@@ -2,8 +2,9 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { AttentionCandidate, attentionKeys, nextAnnouncements, ownsWorkToLose } from "../../../src/engine/attention";
-import { PrEntryMap, PrFacts, Run } from "../../../src/types";
-import { deriveBucket } from "../../../src/engine/bucket";
+import { AgentState, PrEntryMap, PrFacts, Run } from "../../../src/types";
+import { deriveBucket, prSignals } from "../../../src/engine/bucket";
+import { shelfFor } from "../../../src/engine/visibility";
 
 const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
   number: 1, url: "https://github.com/o/r/pull/1", title: "t", state: "OPEN", isDraft: false,
@@ -166,5 +167,56 @@ describe("nextAnnouncements", () => {
     const announced = { A: 1 };
     nextAnnouncements(["B"], announced, 100);
     expect(announced).toEqual({ A: 1 });
+  });
+});
+
+describe("attentionKeys agrees with the column the Deck draws", () => {
+  it("selects exactly the boarded candidates deriveBucket calls needs", () => {
+    const states: AgentState[] = ["needs-you", "stalled", "exited", "working", "idle", "unknown"];
+    const prSets: PrEntryMap[] = [
+      {},
+      prs(facts()),
+      prs(facts({ state: "MERGED" })),
+      prs(facts({ isDraft: true })),
+      prs(facts({ review: "changes_requested" })),
+      prs(facts({ review: "approved" })),
+    ];
+    const all: AttentionCandidate[] = [];
+    let n = 0;
+    for (const agentState of states) {
+      for (const p of prSets) {
+        for (const hasLiveSession of [true, false]) {
+          for (const hasWorkToLose of [true, false]) {
+            all.push(cand({ key: `k${n++}`, agentState, prs: p, hasLiveSession, hasWorkToLose }));
+          }
+        }
+      }
+    }
+
+    // The independent restatement: shelf, then column, exactly as buildAll does.
+    const expected = all
+      .filter((c) => {
+        const pr = prSignals(c.prs);
+        return shelfFor({
+          hasLiveSession: c.hasLiveSession,
+          prOpen: Object.values(c.prs).some((e) => e.facts?.state === "OPEN"),
+          merged: pr.merged,
+          justLaunched: c.justLaunched,
+          hasWorkToLose: c.hasWorkToLose,
+        }) === "board";
+      })
+      .filter((c) => {
+        const pr = prSignals(c.prs);
+        return deriveBucket({
+          ticketStatus: c.ticketStatus, agentState: c.agentState,
+          prOpen: pr.open, prBlocked: pr.blocked, prReady: pr.ready, prMerged: pr.merged,
+        }) === "needs";
+      })
+      .map((c) => c.key);
+
+    expect(attentionKeys(all)).toEqual(expected);
+    // A parity test that compares two empty arrays proves nothing.
+    expect(expected.length).toBeGreaterThan(0);
+    expect(expected.length).toBeLessThan(all.length);
   });
 });
