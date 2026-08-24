@@ -176,7 +176,7 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 - Test: `test/unit/engine/attention.test.ts` (create)
 
 **Interfaces:**
-- Consumes: `deriveBucket`, `prSignals` from `./bucket`; `shelfFor`, `JUST_LAUNCHED_MS` from `./visibility`; `runKind`, `isTicketRun` from `../types`
+- Consumes: `deriveBucket`, `prSignals` from `./bucket`; `shelfFor` from `./visibility`; `runKind`, `isTicketRun` from `../types` — exactly these three specifiers, which the leaf test asserts
 - Produces:
   - `interface AttentionCandidate { key: string; agentState: AgentState; prs: PrEntryMap; ticketStatus: string | null; hasLiveSession: boolean; justLaunched: boolean; hasWorkToLose: boolean; showAll: boolean }`
   - `attentionKeys(candidates: readonly AttentionCandidate[]): string[]`
@@ -745,6 +745,8 @@ Create `test/unit/engine/attentionFs.test.ts`:
 
 ```ts
 import { describe, it, expect, beforeEach, vi } from "vitest";
+import * as fs from "fs";
+import * as path from "path";
 import { AttentionDeps, NEEDS_STATES, gatherAttention } from "../../../src/engine/attentionFs";
 import { AgentActivity, OpenSession, PresenceRecord, RepoGit, Run } from "../../../src/types";
 
@@ -896,8 +898,8 @@ describe("gatherAttention: the cost ladder", () => {
   it("reaches no forge module at all", () => {
     // Asserted on the import graph, not a mocked call site: a mocked call site
     // would not catch a new import.
-    const src = require("fs").readFileSync(
-      require("path").join(__dirname, "../../../src/engine/attentionFs.ts"), "utf8");
+    const src = fs.readFileSync(
+      path.join(__dirname, "../../../src/engine/attentionFs.ts"), "utf8");
     expect(src).not.toMatch(/forge|child_process|execFile|spawnSync/);
   });
 });
@@ -1644,7 +1646,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { commands, window } from "./_mocks/vscode";
+import { commands, window } from "../_mocks/vscode";
 import { AttentionPassDeps, runAttentionPass } from "../../src/attentionJob";
 import { AttentionCandidate } from "../../src/engine/attention";
 
@@ -1757,8 +1759,6 @@ describe("runAttentionPass: the notification", () => {
   });
 });
 ```
-
-Check the mock's import path from `test/unit/` — `extension.test.ts` uses `../_mocks/vscode`; match whatever depth your file sits at.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -1962,6 +1962,39 @@ function attentionPass(provider: TasksViewProvider, log: (m: string) => void): v
 ```
 
 Import `POLL_MS as DECK_POLL_MS` from `./deckView`.
+
+- [ ] **Step 3b: Export `attentionPass` and test it directly**
+
+`export function attentionPass(...)` rather than a bare module-local function. The interval
+callback is never driven by `extension.test.ts` (real timers), so without an export this
+function's body is unreachable from any test and `npm run test:cov` will be short on
+`extension.ts`. Exporting it is safe: `compat.test.ts` freezes the *manifest* surface —
+commands, settings, storage keys — not this module's exports.
+
+Append to `test/unit/extension.test.ts`:
+
+```ts
+  it("prefers the open Deck's candidates over gathering its own", () => {
+    // Same reduction over the same inputs is what keeps the badge from
+    // contradicting the column beside it.
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue({
+      candidates: [{ key: "BITE-9", agentState: "needs-you", prs: {}, ticketStatus: null,
+        hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false }],
+      at: Date.now(),
+    });
+    attentionPass(providerStub as never, () => {});
+    expect(providerStub.setAttention).toHaveBeenCalledWith(["BITE-9"]);
+  });
+
+  it("gathers its own candidates when no Deck panel is open", () => {
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue(null);
+    attentionPass(providerStub as never, () => {});
+    expect(providerStub.setAttention).toHaveBeenCalled();
+  });
+```
+
+`extension.test.ts` already mocks `../../src/deckView` (it stubs `DeckPanel.show`) — add
+`latestCandidates: vi.fn(() => null)` to that stub rather than creating a second mock.
 
 - [ ] **Step 4: Run the full gate**
 
