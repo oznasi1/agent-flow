@@ -126,7 +126,7 @@ prompt modes, and Remote Control.
 
 ## Settings
 
-The seven that matter to start. The rest are in the Settings UI under `agentFlow`, and
+The eight that matter to start. The rest are in the Settings UI under `agentFlow`, and
 documented in [docs/SETTINGS.md](docs/SETTINGS.md).
 
 | Setting | Default | Notes |
