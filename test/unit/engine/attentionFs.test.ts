@@ -20,17 +20,18 @@ vi.mock("../../../src/engine/transcript", async (importOriginal) => {
 });
 
 // Same wiring-test purpose as the transcript mock above: prove
-// `defaultAttentionDeps.branchOf` is actually `currentBranch` from git.ts,
-// without letting a real `git rev-parse` run (or matter) in this file's
-// other tests, which never touch `defaultAttentionDeps` at all. `gitState`,
-// `prEligible`, and `repoRoot` — also imported from `./git` by
-// attentionFs.ts — are left as `actual` so nothing else in this file's
-// wiring changes shape.
+// `defaultAttentionDeps`'s `branchOf` and `prEligible` really are `currentBranch`
+// and `prEligible` from git.ts, without letting a real `git rev-parse` run (or
+// matter) in this file's other tests, which never touch `defaultAttentionDeps` at
+// all — every `gatherAttention` test injects its own readers. `gitState` and
+// `repoRoot` — also imported from `./git` by attentionFs.ts — are left as
+// `actual` so nothing else in this file's wiring changes shape.
 vi.mock("../../../src/engine/git", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../src/engine/git")>();
   return {
     ...actual,
     currentBranch: vi.fn(() => "mocked-branch"),
+    prEligible: vi.fn(() => true),
   };
 });
 
@@ -375,6 +376,41 @@ describe("defaultAttentionDeps: real readers wired in the right argument order",
   });
 });
 
+describe("defaultAttentionDeps: the wiring nothing else in this file can see", () => {
+  // Every gatherAttention test above injects its own `prEligible`, so mis-wiring
+  // the real one to `() => true` here would leave this whole file green while
+  // reproducing exactly the orphan-entry divergence two rounds were spent
+  // closing: an entry for a repo on its default branch, or one that has left the
+  // run, voting `prMerged`/`prOpen` on a card it no longer belongs to.
+  it("wires prEligible to git.ts's own rule, repo object and all", () => {
+    const wired = defaultAttentionDeps({ nowMs: 1, showAll: false, openAgents: true, prFacts: true });
+    const repo = { path: "/repo/api", isGit: true, branch: "feat" };
+    wired.prEligible(repo);
+    expect(git.prEligible).toHaveBeenCalledWith(repo);
+  });
+
+  it("returns what git.ts's prEligible answered, rather than a hardcoded verdict", () => {
+    vi.mocked(git.prEligible).mockReturnValueOnce(false);
+    const wired = defaultAttentionDeps({ nowMs: 1, showAll: false, openAgents: true, prFacts: true });
+    expect(wired.prEligible({ path: "/repo/api", isGit: true, branch: "main" })).toBe(false);
+  });
+
+  it("carries each config field to its own field — these are adjacent booleans a swap would typecheck", () => {
+    // `openAgents` and `prFacts` sit next to each other in the returned object
+    // and mean different things: one gates the session half of the state union,
+    // the other the PR-cache read. Asymmetric values, or the swap is invisible.
+    const wired = defaultAttentionDeps({ nowMs: 77, showAll: false, openAgents: true, prFacts: false });
+    expect({ nowMs: wired.nowMs, showAll: wired.showAll, openAgents: wired.openAgents, prFacts: wired.prFacts })
+      .toEqual({ nowMs: 77, showAll: false, openAgents: true, prFacts: false });
+  });
+
+  it("carries them the other way round too", () => {
+    const wired = defaultAttentionDeps({ nowMs: 78, showAll: true, openAgents: false, prFacts: true });
+    expect({ nowMs: wired.nowMs, showAll: wired.showAll, openAgents: wired.openAgents, prFacts: wired.prFacts })
+      .toEqual({ nowMs: 78, showAll: true, openAgents: false, prFacts: true });
+  });
+});
+
 const windowRec = (over: Partial<PresenceRecord> = {}): PresenceRecord => ({
   identity: "/ws/team.code-workspace", kind: "workspace", label: "team.code-workspace",
   folders: 2, roots: ["/repo/a", "/repo/b"], pid: 4242, updatedAt: 1_700_000_000_000, ...over,
@@ -612,5 +648,42 @@ describe("gatherAttention: PR facts for a local card, filtered the way the Deck 
     }));
     expect(got.length).toBe(1);
     expect(got[0].prs).toEqual({ a: { facts: null, fetchedAt: 0 } });
+  });
+});
+
+describe("gatherAttention: what a candidate is called", () => {
+  // `key` is the identity the badge counts and the latch stamps; `label` is the
+  // only thing a notification should ever say out loud. For a local card the two
+  // are not the same string at all — `localKey` is a slug plus a sha1 — and
+  // announcing the key gave "local-solo-<hash> is waiting on you".
+  it("labels a local card with its folder name, not localKey's hash", () => {
+    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    const [c] = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
+    expect(c.key).toBe(localKey("/repo/solo"));
+    expect(c.key).toContain("local-");
+    expect(c.label).toBe("solo");
+  });
+
+  it("labels a multi-root card with its workspace's name, .code-workspace stripped", () => {
+    const [c] = gatherAttention(deps({
+      sessions: () => [
+        session({ pid: 1, sessionId: "s1", cwd: "/repo/a" }),
+        session({ pid: 2, sessionId: "s2", cwd: "/repo/b" }),
+      ],
+      windows: () => [windowRec()],
+    }));
+    expect(c.label).toBe("team");
+  });
+
+  it("labels a task run with its key — which IS its ticket key", () => {
+    const [c] = gatherAttention(deps({ runs: () => [run()] }));
+    expect(c.label).toBe("BITE-1");
+  });
+
+  it("labels a ticketless Explore run with its summary, not its slug key", () => {
+    const [c] = gatherAttention(deps({
+      runs: () => [run({ key: "explore-why-the-queue-stalls", summary: "why the queue stalls", url: "", kind: "explore" })],
+    }));
+    expect(c.label).toBe("why the queue stalls");
   });
 });
