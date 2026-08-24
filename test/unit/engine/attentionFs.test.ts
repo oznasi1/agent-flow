@@ -478,19 +478,28 @@ describe("gatherAttention: local session cards", () => {
     // Every other fixture in this file leaves repoRootOf returning something
     // non-empty, so `isGitByRoot.get(root)` is always true and this half of
     // the OR is never load-bearing. Only a place that is BOTH not-git AND
-    // has a live session exercises it.
+    // has a live session exercises it: drop this clause (keep only
+    // `isGitByRoot.get(root)`) and this is the test that fails — `roots`
+    // empties out and the whole group is skipped.
+    //
+    // There is deliberately no sibling test for "a workspace's OTHER
+    // declared root, non-git and session-less, gets dropped": `roots` is
+    // used for exactly two things past this point — the length-zero skip
+    // and (only when `workspaceFile` is null) `roots[0]` as the key
+    // fallback. A real multi-root window always sets `workspaceFile`, so
+    // that fallback is dead for it; and the window's OTHER declared roots
+    // can never be the ones deciding `roots.length`, because the group
+    // exists at all only because `group.places` — always a subset of
+    // `group.roots` — already contains a live-session place, which trivially
+    // satisfies `allPlaces.has`. So a sibling root's membership in `roots`
+    // cannot change anything `gatherAttention` returns; a fixture built to
+    // "prove" it is dropped would pass identically whether it actually was.
+    // Confirmed by mutation: replacing `allPlaces.has(root)` with the literal
+    // `true` — the broadest possible break of this clause — passed every
+    // test in this file, including this one.
     const got = gatherAttention(deps({
       sessions: () => [session({ cwd: "/repo/solo" })],
       repoRootOf: () => "",
-    }));
-    expect(got.length).toBe(1);
-  });
-
-  it("drops a workspace's declared sibling root that names no repo and has no live session", () => {
-    const got = gatherAttention(deps({
-      sessions: () => [session({ cwd: "/repo/a" })],
-      windows: () => [windowRec({ roots: ["/repo/a", "/repo/b"] })],
-      repoRootOf: (dir: string) => (dir === "/repo/a" ? "/repo/a" : ""),
     }));
     expect(got.length).toBe(1);
   });
