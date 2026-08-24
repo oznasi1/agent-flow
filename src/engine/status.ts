@@ -3,7 +3,7 @@ import { AgentActivity, AgentState, CardAgent, Run, RunStatus, PrEntryMap, runKi
 // nothing else) so the webview's browser bundle can reach it without dragging in
 // this module's child_process/fs/path/os graph. main's own change here only added
 // type imports, so the merge is the union of the two.
-import { mostActive, UNKNOWN_ACTIVITY } from "./activity";
+import { mostActive, promoteExited, UNKNOWN_ACTIVITY } from "./activity";
 import { gitState } from "./git";
 import { runTarget } from "./runs";
 import { readAgentActivity } from "./transcript";
@@ -69,25 +69,7 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
     ...agents.map((a) => a.activity),
     ...activityRepos.map((r) => readAgentActivity(projectsRoot, r.path, r.branch ?? null, nowMs)),
   ]);
-  // A transcript that stops mid-work with no live session behind it did not
-  // finish — the agent died holding the work. "idle" renders that in the calmest
-  // tone on the board, which is exactly backwards. Liveness is invisible to a
-  // per-file reducer, so the promotion happens here, against the session
-  // registry this function already reads.
-  //
-  // Deliberately narrow: "has a transcript, no live session" would be half the
-  // board on a working machine, and `parked` already says "nothing is running
-  // here". This fires only when work was actually in flight.
-  //
-  // `state !== "working"` is also required: deriveActivity stamps midWork:true
-  // on a transcript written moments ago with a pending tool call too — that
-  // reading is "working", not dead, however sparse the `agents` list handed in
-  // happens to be. Only a reading that has already gone stale (stalled, or an
-  // idle/never-answered prompt) with no live session behind it has actually died.
-  const agent: AgentActivity =
-    reduced.midWork && reduced.state !== "working" && agents.length === 0
-      ? { ...reduced, state: "exited" }
-      : reduced;
+  const agent: AgentActivity = promoteExited(reduced, agents.length);
   const pr = prSignals(prs);
   const column = deriveBucket({
     ticketStatus: ticket?.status ?? null,

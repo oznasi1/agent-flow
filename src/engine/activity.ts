@@ -67,3 +67,26 @@ export function mostActive(activities: AgentActivity[]): AgentActivity {
     return (b.lastActivityMs ?? 0) - (a.lastActivityMs ?? 0);
   })[0];
 }
+
+/**
+ * A transcript that stops mid-work with no live session behind it did not finish
+ * — the agent died holding the work. "idle" renders that in the calmest tone on
+ * the board, which is exactly backwards.
+ *
+ * Liveness is invisible to a per-file reducer, which is why this is a separate
+ * step applied against the session registry rather than a rank in `mostActive`.
+ * Deliberately narrow: "has a transcript, no live session" would be half the
+ * board on a working machine. `state !== "working"` is also required —
+ * `deriveActivity` stamps `midWork` on a transcript written moments ago with a
+ * pending tool call, and that reading is alive, however sparse the caller's
+ * session list happens to be.
+ *
+ * Lives here rather than in status.ts so `attentionFs.ts` derives the same state
+ * the Deck does. Two copies of this rule is the fork the attention badge exists
+ * to avoid.
+ */
+export function promoteExited(reduced: AgentActivity, liveSessionCount: number): AgentActivity {
+  return reduced.midWork && reduced.state !== "working" && liveSessionCount === 0
+    ? { ...reduced, state: "exited" }
+    : reduced;
+}
