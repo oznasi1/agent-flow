@@ -49,6 +49,7 @@ export interface AttentionCandidate {
   key: string;
   agentState: AgentState;
   prs: PrEntryMap;
+  ticketStatus: string | null;
   hasLiveSession: boolean;
   justLaunched: boolean;
   hasWorkToLose: boolean;
@@ -63,6 +64,17 @@ export function attentionKeys(candidates: AttentionCandidate[]): string[];
  *  in progress, not the session's. Extracted so neither caller re-derives it. */
 export function ownsWorkToLose(run: Run): boolean;
 ```
+
+`attentionKeys` derives `prOpen`, `merged` and the full `prSignals` from `prs` *itself*
+rather than taking them as fields, because `shelfFor`'s `prOpen` (any state `OPEN`, drafts
+included) and `prSignals().open` (non-draft only) are two different questions and a caller
+that has to remember which is which is a caller that will get it wrong.
+
+`ticketStatus` is passed through and handed to `deriveBucket` even though nothing above
+`needs` in the precedence chain reads it — the Deck supplies its real value and the gatherer
+supplies `null`, which is safe *only* while that stays true. A test asserts that
+`ticketStatus` never changes an attention verdict, so a future precedence change that would
+make the gatherer's `null` diverge from the Deck fails there instead of in the badge.
 
 `attentionKeys` runs `shelfFor` and then `deriveBucket` per candidate and keeps the ones that
 land in `needs`. It returns **keys, not a count**: the badge needs only cardinality but the
@@ -85,17 +97,26 @@ The `*Fs` sibling the repo's pure/`*Fs` convention mandates. It produces
 
 ```ts
 export interface AttentionDeps {
-  runsDir: string;
-  sessionsDir: string;
-  prFactsDir: string;
-  projectsRoot: string;
-  nowMs: number;
-  showAll: boolean;
-  openAgents: boolean;
-  gitState: (name: string, repoPath: string) => RepoGit;   // injected: the expensive one
+  runs: () => Run[];
+  sessions: () => OpenSession[];
+  windows: () => PresenceRecord[];
+  prEntries: (key: string) => PrEntryMap;
+  sessionActivity: (cwd: string, sessionId: string) => AgentActivity;
+  repoActivity: (repoPath: string, branch: string | null) => AgentActivity;
+  gitState: (name: string, repoPath: string) => RepoGit;   // the expensive one
+  repoRootOf: (dir: string) => string;
+  nowMs: number; showAll: boolean; openAgents: boolean;
 }
+export function defaultAttentionDeps(nowMs: number, showAll: boolean, openAgents: boolean): AttentionDeps;
 export function gatherAttention(deps: AttentionDeps): AttentionCandidate[];
 ```
+
+Every reader is injected rather than imported at the call site, for two reasons that both
+turned up while planning the tests. The cost promise below — "no git call for a run nobody is
+waiting on" — is a claim about behavior, and a claim about behavior needs a spy to hold it.
+And `readOpenSessions` and `readLiveWindows` both filter their inputs by *live PID*, so a
+temp-dir fixture would need two simultaneously-alive process ids to model two sessions.
+`defaultAttentionDeps` wires the real readers.
 
 **Cost ladder per tick**, cheapest first:
 
@@ -151,9 +172,8 @@ A pure edge function, also in `attention.ts`, table-testable:
 
 ```ts
 export function nextAnnouncements(
-  current: string[],
+  current: readonly string[],
   announced: Record<string, number>,
-  knownKeys: string[],
   nowMs: number,
 ): { toAnnounce: string[]; announced: Record<string, number> };
 ```
@@ -162,8 +182,10 @@ The latch is **level-triggered**, unlike the flow engine's `firedAt` (permanent 
 Entering the set announces; leaving it clears. Park → you answer → park again therefore
 toasts twice, which is the correct behavior — the second parking is new news.
 
-`knownKeys` is what prunes the record so it cannot grow without bound, the same discipline
-`pruneNoteOrder` already applies to note order in `tasksView.ts`.
+The record prunes itself: a stamp survives only while its key is still in `current`, so a run
+that left the set has already dropped its stamp by the time the next pass reads it. No
+separate prune input is needed — the first draft of this signature took a `knownKeys`
+argument for that job, and it was dead weight.
 
 The latch is durable and cross-window, at `~/.agentflow/attention.json`. In-memory would
 re-announce on every extension-host restart and once per open window besides. A lost write
@@ -197,6 +219,12 @@ which is meaningfully less new machinery than the requirement assumes.
 The attention job runs on **every other tick (12s)**. Transcript reads are the new recurring
 cost and no human needs sub-10-second latency on a badge.
 
+The pass itself lives in `src/attentionJob.ts` as `runAttentionPass(deps)` with its inputs
+injected, rather than inline in the interval callback: `extension.test.ts` drives real timers
+(its own teardown comment explains why), so a pass buried in a 12-second callback would be
+the least-tested code in the feature. `extension.ts` keeps only the wiring — build the deps,
+call the pass.
+
 ### 6. One writer, and what the open panel contributes — `src/deckView.ts`
 
 `buildAll` already computes every `AttentionCandidate` field. It is refactored to build the
@@ -205,10 +233,11 @@ required inline — that refactor *is* the "share the reduction rather than fork
 requirement, and parity becomes true by construction rather than by inspection.
 
 The tick stays the **sole writer** of the badge, to avoid a 6s panel and a 12s tick
-flip-flopping the number. When the panel is open it publishes its freshly built candidate
-array to a small holder that `extension.ts` owns and passes into `DeckPanel.show`; the tick
-prefers those candidates when they are younger than `2 × POLL_MS` and otherwise gathers its
-own. So while the Deck is open the tick spends no I/O at all, and the badge can never
+flip-flopping the number. `DeckPanel` is already a static singleton (`DeckPanel.current`), so the tick
+reads its candidates through a new `static latestCandidates(): { candidates, at } | null`
+rather than through a holder threaded into `show()` — no new parameter, no change to the
+eleven existing `DeckPanel.show` call sites. The tick prefers those candidates when they are
+younger than `2 × POLL_MS` and otherwise gathers its own. So while the Deck is open the tick spends no I/O at all, and the badge can never
 disagree with the column next to it.
 
 ## Rejected approaches
@@ -254,8 +283,9 @@ never notice a run parking. Recorded here so nobody re-proposes it.
 - **`tasksView.setAttention`** — zero clears the badge to `undefined`; a value set before
   `resolveWebviewView` is applied on resolve; tooltip says "sessions".
 - **Mock extension.** `test/_mocks/vscode.ts` has `onDidChangeWindowState` but no
-  `window.state`, and no `WebviewView.badge`. Both need adding — the mock is hand-written
-  infrastructure, not part of the frozen released surface.
+  `window.state`; that needs adding — the mock is hand-written infrastructure, not part of
+  the frozen released surface. `WebviewView.badge` needs nothing: `tasksView.test.ts` builds
+  its view as a plain object literal cast `as never`, so `badge` is just another field on it.
 - Coverage thresholds in `vitest.config.ts` (90% lines/statements, 85% branches/functions)
   apply. The full CI gate is `npm ci`, `npm run typecheck`, `npm test`, `npm run build`; all
   four must pass, and `npm test` needs `timeout: 600000` when run through a tool.
@@ -274,8 +304,11 @@ never notice a run parking. Recorded here so nobody re-proposes it.
 | File | Change |
 | --- | --- |
 | `src/engine/attention.ts` | new — pure reduction (`attentionKeys`, `ownsWorkToLose`, `nextAnnouncements`) |
-| `src/engine/attentionFs.ts` | new — `gatherAttention` over injected cheap readers |
-| `src/extension.ts` | attention job on the existing 6s timer at 12s cadence; candidate holder passed to `DeckPanel.show` |
+| `src/engine/attentionFs.ts` | new — `gatherAttention` / `defaultAttentionDeps` over injected cheap readers |
+| `src/engine/attentionStore.ts` | new — the cross-window announcement latch |
+| `src/attentionJob.ts` | new — `runAttentionPass`: badge, then the focus-gated coalesced toast |
+| `src/engine/paths.ts` | `claudeProjectsRoot` moves here from `deckView.ts` |
+| `src/extension.ts` | runs the pass on every other tick of the existing 6s poll, and builds its deps |
 | `src/tasksView.ts` | `setAttention`, badge held across an unresolved view |
 | `src/deckView.ts` | `buildAll` refactored onto the shared reduction; publishes candidates to the holder |
 | `src/config.ts` | `notifyOnActionRequired` |
