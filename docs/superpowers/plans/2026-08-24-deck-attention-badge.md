@@ -1875,7 +1875,7 @@ E1 asked for a new host-side tick. It does not need one: `extension.ts:144` alre
 - Test: `test/unit/extension.test.ts` (append)
 
 **Interfaces:**
-- Consumes: `runAttentionPass` (Task 10); `defaultAttentionDeps`, `gatherAttention` (Tasks 5-6); `DeckPanel.latestCandidates` (Task 7); `TasksViewProvider.setAttention` (Task 8); `getConfig().notifyOnActionRequired` (Task 9); `defaultAttentionFile` (Task 4); `POLL_MS` from `./deckView`
+- Consumes: `runAttentionPass` (Task 10); `gatherAttention` and `defaultAttentionDeps({ nowMs, showAll, openAgents, prFacts })` (Tasks 5-6 — a single named-field options object, NOT positional parameters); `DeckPanel.latestCandidates` (Task 7); `TasksViewProvider.setAttention` (Task 8); `getConfig().notifyOnActionRequired` and `getConfig().prFacts` (Task 9 / existing config); `defaultAttentionFile` (Task 4); `POLL_MS` from `./deckView`
 - Produces: nothing further
 
 - [ ] **Step 1: Add `window.state` to the mock**
@@ -1950,7 +1950,9 @@ function attentionPass(provider: TasksViewProvider, log: (m: string) => void): v
   const fresh = DeckPanel.latestCandidates();
   const usable = fresh && now - fresh.at < 2 * DECK_POLL_MS ? fresh.candidates : null;
   runAttentionPass({
-    candidates: () => usable ?? gatherAttention(defaultAttentionDeps(now, cfg.inflightShowAll, cfg.openAgents)),
+    candidates: () => usable ?? gatherAttention(defaultAttentionDeps({
+      nowMs: now, showAll: cfg.inflightShowAll, openAgents: cfg.openAgents, prFacts: cfg.prFacts,
+    })),
     setAttention: (keys) => provider.setAttention(keys),
     notify: cfg.notifyOnActionRequired,
     focused: vscode.window.state.focused,
