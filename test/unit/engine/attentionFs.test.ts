@@ -47,17 +47,18 @@ let gitState: ReturnType<typeof vi.fn>;
 let prEntries: ReturnType<typeof vi.fn>;
 let sessionActivity: ReturnType<typeof vi.fn>;
 let repoActivity: ReturnType<typeof vi.fn>;
-let defaultBranch: ReturnType<typeof vi.fn>;
+let prEligible: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   gitState = vi.fn((name: string, repoPath: string) => repoGit({ name, path: repoPath }));
   prEntries = vi.fn(() => ({}));
   sessionActivity = vi.fn(() => activity({ state: "working" }));
   repoActivity = vi.fn(() => activity({ state: "unknown" }));
-  // "main", never "feat" — the fixture run's repo sits on "feat", so the
-  // default-branch eligibility rule (finding 1) does not accidentally filter
-  // out every existing fixture's PR entries.
-  defaultBranch = vi.fn(() => "main");
+  // Eligible by default, so an existing fixture's PR entry survives filtering
+  // unless a test says otherwise — the real rule (git.ts's `prEligible`) is
+  // exercised by git.test.ts; this module only has to prove it is CALLED and
+  // OBEYED, never re-derive it.
+  prEligible = vi.fn(() => true);
 });
 
 const deps = (over: Partial<AttentionDeps> = {}): AttentionDeps => ({
@@ -68,11 +69,12 @@ const deps = (over: Partial<AttentionDeps> = {}): AttentionDeps => ({
   sessionActivity: sessionActivity as unknown as AttentionDeps["sessionActivity"],
   repoActivity: repoActivity as unknown as AttentionDeps["repoActivity"],
   gitState: gitState as unknown as AttentionDeps["gitState"],
-  defaultBranch: defaultBranch as unknown as AttentionDeps["defaultBranch"],
+  prEligible: prEligible as unknown as AttentionDeps["prEligible"],
   repoRootOf: (dir: string) => dir,
   nowMs: 1_000_000_000,
   showAll: false,
   openAgents: true,
+  prFacts: true,
   ...over,
 });
 
@@ -139,12 +141,14 @@ describe("gatherAttention: tracked runs", () => {
 describe("gatherAttention: the cost ladder", () => {
   it("spends no git call and no PR read on a run nobody is waiting on", () => {
     // The whole point of the hidden path: a quiet machine costs transcript reads
-    // and nothing else. If someone hoists either reader out of the needs branch,
-    // this fails.
+    // and nothing else. If someone hoists a reader out of the needs branch, or
+    // reorders the `prs` filter's short-circuit so `prEligible` runs before
+    // `stored[r.name]`, this fails.
     repoActivity.mockReturnValue(activity({ state: "working" }));
     const [c] = gatherAttention(deps({ runs: () => [run()] }));
     expect(gitState).not.toHaveBeenCalled();
     expect(prEntries).not.toHaveBeenCalled();
+    expect(prEligible).not.toHaveBeenCalled();
     expect(c.prs).toEqual({});
   });
 
@@ -184,7 +188,7 @@ describe("gatherAttention: the cost ladder", () => {
     // is blind to a transitive reach through a helper module. An exact
     // specifier-list assertion catches a new import and documents every
     // existing one — `./git` included, which really does spawn a subprocess
-    // through `deps.gitState`/`deps.defaultBranch`, entirely on purpose.
+    // through `deps.gitState`/`deps.prEligible`, entirely on purpose.
     const src = fs.readFileSync(
       path.join(__dirname, "../../../src/engine/attentionFs.ts"), "utf8");
     const specifiers = [...src.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
@@ -203,12 +207,21 @@ describe("gatherAttention: PR facts filtered the way the Deck filters them", () 
     expect(prEntries).not.toHaveBeenCalled();
   });
 
-  it("drops a PR entry for a repo sitting on its own default branch", () => {
+  it("drops a PR entry the injected prEligible rejects — the case round 1's local copy missed", () => {
+    // Round 1 re-implemented prEligible's rule locally and dropped its
+    // `def !== ""` clause: a repo whose default branch cannot be resolved (no
+    // `origin/HEAD` — very common in a fresh clone) has `defaultBranch(...)`
+    // return "", which never equals a real branch name, so the copy called it
+    // eligible when the Deck's own `prEligible` (git.test.ts's "no origin"
+    // case) calls it ineligible. Injecting the real function rather than a
+    // local rule is the fix; this test locks in that gatherAttention actually
+    // calls `deps.prEligible` with the real repo shape and obeys a `false`.
     repoActivity.mockReturnValue(activity({ state: "needs-you" }));
     prEntries.mockReturnValue({ api: { facts: null, fetchedAt: 0 } });
-    defaultBranch.mockReturnValue("feat"); // same as the fixture repo's branch
+    prEligible.mockReturnValue(false);
     const [c] = gatherAttention(deps({ runs: () => [run()] }));
     expect(c.prs).toEqual({});
+    expect(prEligible).toHaveBeenCalledWith(run().repos[0]);
   });
 
   it("drops an entry for a repo that has since left the run, instead of carrying the orphan forward", () => {
@@ -221,13 +234,25 @@ describe("gatherAttention: PR facts filtered the way the Deck filters them", () 
     expect(c.prs).toEqual({});
   });
 
-  it("keeps a PR entry for a repo that is eligible and still in the run", () => {
+  it("keeps a PR entry for a repo the injected prEligible accepts and that is still in the run", () => {
     repoActivity.mockReturnValue(activity({ state: "needs-you" }));
     const entry = { facts: null, fetchedAt: 0 };
     prEntries.mockReturnValue({ api: entry });
-    defaultBranch.mockReturnValue("main"); // fixture repo's branch is "feat"
+    prEligible.mockReturnValue(true);
     const [c] = gatherAttention(deps({ runs: () => [run()] }));
     expect(c.prs).toEqual({ api: entry });
+  });
+
+  it("never reads the PR cache when agentFlow.prFacts is off, even with entries already on disk and the run waiting", () => {
+    // `prFacts` off does not delete what is on disk — deckView.ts's
+    // `onConfigChanged` only clears the branch-CI caches — so without this
+    // gate the badge would keep reading stale entries the Deck itself has
+    // stopped showing.
+    repoActivity.mockReturnValue(activity({ state: "needs-you" }));
+    prEntries.mockReturnValue({ api: { facts: null, fetchedAt: 0 } }); // entries ARE on disk
+    const [c] = gatherAttention(deps({ runs: () => [run()], prFacts: false }));
+    expect(c.prs).toEqual({});
+    expect(prEntries).not.toHaveBeenCalled();
   });
 });
 
@@ -300,7 +325,7 @@ describe("defaultAttentionDeps: real readers wired in the right argument order",
     // All-string argument lists compile clean no matter the order; only a call-
     // site assertion catches two positions swapped.
     const nowMs = 1_234_567;
-    const wired = defaultAttentionDeps(nowMs, false, true);
+    const wired = defaultAttentionDeps({ nowMs, showAll: false, openAgents: true, prFacts: true });
 
     wired.sessionActivity("/repo/api", "sess-1");
     expect(transcript.readSessionActivity).toHaveBeenCalledWith(

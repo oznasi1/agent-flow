@@ -15,7 +15,7 @@ import { readPrEntries, defaultPrFactsDir } from "./pr/store";
 import { readRuns, defaultRunsDir } from "./runs";
 import { PresenceRecord, readLiveWindows, defaultWindowsDir } from "./presence";
 import { readAgentActivity, readSessionActivity } from "./transcript";
-import { defaultBranch as realDefaultBranch, gitState as realGitState, repoRoot } from "./git";
+import { gitState as realGitState, prEligible as realPrEligible, repoRoot } from "./git";
 import { JUST_LAUNCHED_MS } from "./visibility";
 
 /** `deriveBucket`'s needs rung, named once so the cost ladder and its test agree. */
@@ -33,11 +33,15 @@ export interface AttentionDeps {
   /** The expensive one: three git calls per repo. The tests assert it is never
    * called for a run nobody is waiting on. */
   gitState: (name: string, repoPath: string) => RepoGit;
-  /** A repo on its default branch cannot own a pull request of its own — see
-   * `git.ts`'s `prEligible`, which this module cannot call directly: it reaches
-   * the real `defaultBranch`, and the whole point of this deps object is that
-   * nothing here does that except through a spy. */
-  defaultBranch: (repoPath: string) => string;
+  /** `git.ts`'s own rule for whether a repo's branch can own a pull request of
+   * its own, injected rather than re-implemented: a local copy of this rule
+   * already dropped a clause once (round 1's filter forgot `defaultBranch`
+   * can return "", which never equals a branch name) — one definition, every
+   * caller, is the whole reason this module exists. Spawns a git process, so
+   * it is spent under the same discipline as `gitState`: the cost test at
+   * `attentionFs.test.ts` asserts it is never called for a run nobody is
+   * waiting on. */
+  prEligible: (repo: { path: string; isGit: boolean; branch?: string }) => boolean;
   repoRootOf: (dir: string) => string;
   nowMs: number;
   showAll: boolean;
@@ -47,6 +51,13 @@ export interface AttentionDeps {
    * transcript reading joins the state union — exactly `deckView.ts`'s
    * `places = this.openAgents ? allPlaces : new Map()`. */
   openAgents: boolean;
+  /** `agentFlow.prFacts` — off means no PR cache read at all, mirroring
+   * `deckView.ts`'s `stored = this.prFacts && !prLess ? readPrEntries(...) : {}`.
+   * Defaults true, but turning it off does not delete what is already on disk
+   * (`onConfigChanged` only clears the branch-CI caches), so without this gate
+   * the badge would keep reading stale entries the Deck itself has stopped
+   * showing. */
+  prFacts: boolean;
 }
 
 /** A directory's repo root does not change under us, and the alternative is one
@@ -54,7 +65,13 @@ export interface AttentionDeps {
  * in every open window. Module-level so it survives across ticks. */
 const repoRootMemo = new Map<string, string>();
 
-export function defaultAttentionDeps(nowMs: number, showAll: boolean, openAgents: boolean): AttentionDeps {
+export function defaultAttentionDeps(opts: {
+  nowMs: number;
+  showAll: boolean;
+  openAgents: boolean;
+  prFacts: boolean;
+}): AttentionDeps {
+  const { nowMs, showAll, openAgents, prFacts } = opts;
   const projectsRoot = claudeProjectsRoot();
   return {
     runs: () => readRuns(defaultRunsDir()),
@@ -64,7 +81,7 @@ export function defaultAttentionDeps(nowMs: number, showAll: boolean, openAgents
     sessionActivity: (cwd, sessionId) => readSessionActivity(projectsRoot, cwd, sessionId, nowMs),
     repoActivity: (repoPath, branch) => readAgentActivity(projectsRoot, repoPath, branch, nowMs),
     gitState: (name, repoPath) => realGitState(name, repoPath),
-    defaultBranch: (repoPath) => realDefaultBranch(repoPath),
+    prEligible: (repo) => realPrEligible(repo),
     repoRootOf: (dir) => {
       const hit = repoRootMemo.get(dir);
       if (hit !== undefined) return hit;
@@ -75,6 +92,7 @@ export function defaultAttentionDeps(nowMs: number, showAll: boolean, openAgents
     nowMs,
     showAll,
     openAgents,
+    prFacts,
   };
 }
 
@@ -121,20 +139,24 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
     // attentionFs.test.ts asserts both spies stay untouched otherwise.
     const waiting = NEEDS_STATES.has(agentState);
     // A notepad run owns no pull request — see deckView.ts's `prLess` for why a
-    // stranger's branch cannot be attributed to a note. Reading the cache for it
-    // would be wasted work as well as wrong, so it is skipped entirely, not
+    // stranger's branch cannot be attributed to a note — and `prFacts` off
+    // means the cache is not read for anything at all. Reading it anyway would
+    // be wasted work as well as wrong, so both are skipped entirely, not
     // fetched-then-discarded.
-    const stored = waiting && runKind(run) !== "notepad" ? deps.prEntries(run.key) : {};
+    const stored = waiting && deps.prFacts && runKind(run) !== "notepad" ? deps.prEntries(run.key) : {};
     // Filtered exactly as deckView.ts filters `readPrEntries`'s result before a
-    // card ever sees it: a repo on its default branch owns no PR of its own
-    // (`prEligible`'s rule, reimplemented against the injected `defaultBranch`
-    // rather than calling the real one), and a repo that has since left the run
-    // — re-taken with a different repo selection — is dropped simply by never
-    // being looked up, rather than carried forward as an orphaned entry that
-    // could still vote `prMerged` or `prOpen` on a run it no longer belongs to.
+    // card ever sees it: `deps.prEligible` is the real `prEligible` from
+    // git.ts, not a local copy, so a repo on its default branch owns no PR of
+    // its own here for the identical reason it owns none there. A repo that
+    // has since left the run — re-taken with a different repo selection — is
+    // dropped simply by never being looked up, rather than carried forward as
+    // an orphaned entry that could still vote `prMerged` or `prOpen` on a run
+    // it no longer belongs to. `stored[r.name] &&` short-circuits first, so
+    // `prEligible` — which spawns git — is never reached for an entry that
+    // was never there.
     const prs: PrEntryMap = Object.fromEntries(
       run.repos
-        .filter((r) => stored[r.name] && r.isGit && r.branch && r.branch !== deps.defaultBranch(r.path))
+        .filter((r) => stored[r.name] && deps.prEligible(r))
         .map((r) => [r.name, stored[r.name]]),
     );
     // `!hasLiveSession`: with a session open the shelf is already `board`, so
