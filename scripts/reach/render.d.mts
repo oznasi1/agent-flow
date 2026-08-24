@@ -47,3 +47,6 @@ export declare function deltaWithin(
   days: number | null,
   anchorDay: string | null,
 ): { vsx: number; vsm: number } | null;
+
+/** The inlined favicon as a `data:image/svg+xml,` URI, percent-encoded. */
+export declare function faviconDataUri(svg?: string): string;

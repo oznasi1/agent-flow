@@ -228,6 +228,41 @@ function rankSection(title, column, snapshot, label, blurb) {
     + `<tbody>${rows}</tbody></table>`;
 }
 
+/**
+ * The page's favicon, inlined.
+ *
+ * It has to be a data URI, not a file: the dashboard must open from a file://
+ * URL with no network, and a `/favicon.ico` reference would simply fail there
+ * (and 404 on the way past Pages besides).
+ *
+ * It is a *simplification* of the project mark, not a copy of it. The real
+ * store icon is a field of ~40 dots; at 16px that resolves to a dark blob with
+ * the teal washed out entirely. Six dots on the same dark tile keep the family
+ * resemblance and still read as dots in a tab strip, which is the only size
+ * that matters here.
+ *
+ * Coordinates are literal rather than computed: six points on a radius-9.5
+ * ring about (16,16), starting at twelve o'clock and stepping 60 degrees.
+ */
+const FAVICON = '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">'
+  + '<rect width="32" height="32" rx="7" fill="#0E1113"/>'
+  + '<circle cx="16" cy="6.5" r="3.4" fill="#2AA79B"/>'
+  + '<circle cx="24.23" cy="11.25" r="3.4" fill="#2AA79B"/>'
+  + '<circle cx="24.23" cy="20.75" r="3.4" fill="#2AA79B"/>'
+  + '<circle cx="16" cy="25.5" r="3.4" fill="#2AA79B"/>'
+  + '<circle cx="7.77" cy="20.75" r="3.4" fill="#2AA79B"/>'
+  + '<circle cx="7.77" cy="11.25" r="3.4" fill="#2AA79B"/>'
+  + '</svg>';
+
+/**
+ * Percent-encoding is not optional here. The fills are hex colours, and a raw
+ * `#` inside a data URI starts the fragment — the browser would fetch a
+ * truncated document ending at the first colour and render nothing.
+ */
+export function faviconDataUri(svg = FAVICON) {
+  return `data:image/svg+xml,${encodeURIComponent(svg)}`;
+}
+
 export function renderDashboard(data) {
   const { meta = {}, views = {}, clones = {}, stars = [], marketplace = [],
     referrers = null, paths = null } = data;
@@ -265,6 +300,7 @@ export function renderDashboard(data) {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Agent Flow — reach</title>
+<link rel="icon" type="image/svg+xml" href="${faviconDataUri()}">
 <style>
   /* --bar is validated against its surface by the dataviz palette checker:
      light #3b6ea5 and dark #5594cf both pass lightness band, chroma floor and
