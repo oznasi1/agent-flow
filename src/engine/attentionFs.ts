@@ -182,48 +182,78 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
   // has never heard of. `openAgents` gates this exactly as buildAll does — with
   // the display toggle off, `places` is empty there, so no local card is ever
   // built; here there is no `places`/`allPlaces` split to lean on, so the whole
-  // half returns early instead. `claimed` was populated above regardless of the
+  // half is skipped instead. `claimed` was populated above regardless of the
   // toggle (a hidden place is still owned), which is exactly why this can't
-  // reuse it as the gate — it has to be `deps.openAgents` itself.
+  // reuse it as the gate — it has to be `deps.openAgents` itself. An `if` rather
+  // than an early `return out`: a later addition after this block must not be
+  // silently skipped just because this half happens to be gated off.
   //
   // A local card always has a live session by construction, so its shelf is
   // `board` without asking git anything, and there is no PR cache for a key the
   // Deck never launched. The only git this pass can reach is the memoized
   // `repoRootOf` normalization.
-  if (!deps.openAgents) return out;
-  const unclaimed = [...allPlaces.keys()].filter((place) => !claimed.has(place));
-  for (const group of groupPlacesByWindow(unclaimed, deps.windows())) {
-    const isGitByRoot = new Map<string, boolean>();
-    for (const root of group.roots) {
-      const rr = deps.repoRootOf(root);
-      const norm = canon(rr || root);
-      if (!isGitByRoot.has(norm)) isGitByRoot.set(norm, rr !== "");
+  if (deps.openAgents) {
+    const unclaimed = [...allPlaces.keys()].filter((place) => !claimed.has(place));
+    for (const group of groupPlacesByWindow(unclaimed, deps.windows())) {
+      const isGitByRoot = new Map<string, boolean>();
+      for (const root of group.roots) {
+        const rr = deps.repoRootOf(root);
+        const norm = canon(rr || root);
+        if (!isGitByRoot.has(norm)) isGitByRoot.set(norm, rr !== "");
+      }
+      const roots = [...isGitByRoot.keys()].filter(
+        (root) => !claimed.has(root) && (isGitByRoot.get(root) || allPlaces.has(root)),
+      );
+      if (roots.length === 0) continue;
+      const sessions = group.places.flatMap((place) => allPlaces.get(place) ?? []);
+      // The union of both readings, exactly the shape buildRunStatus's own
+      // reduction takes for a local run (status.ts: agents' own activity plus
+      // `activityRepos.map((r) => readAgentActivity(...))`, with
+      // `activityRoots` narrowing that second half to roots with a live
+      // session — here, `group.places`). Skipping the per-place half would
+      // undercount: `readSessionActivity` returns UNKNOWN_ACTIVITY with no
+      // fallback when a session's own `<sessionId>.jsonl` is missing or
+      // unreadable (transcript.ts:154-160), and that can leave a session
+      // reading "unknown" while a louder transcript sits beside it in the
+      // same project directory — one `readAgentActivity` directory scan away.
+      //
+      // `branch: null` rather than `currentBranch(root)`: the real branch is
+      // an unmemoized git spawn per root per tick, which the cost ladder
+      // forbids for a card that boards unconditionally anyway.
+      // `readAgentActivity` already falls back to the newest transcript
+      // overall when nothing matches a branch (transcript.ts:135-137), so a
+      // null branch agrees with the real one whenever the branch-matched
+      // transcript IS the newest — the ordinary case. It can only disagree
+      // when one directory holds transcripts for several branches and an
+      // older branch-matched one reads a different needs-state than a newer,
+      // unrelated one — and only in the direction of counting a card the
+      // Deck's own branch-aware read would not have shown, never the
+      // reverse: `mostActive` only ever raises the reading toward the
+      // liveliest input, so adding this half can't lower a count either way.
+      const reduced = mostActive([
+        ...sessions.map((s) => deps.sessionActivity(s.cwd, s.sessionId)),
+        ...group.places.map((p) => deps.repoActivity(p, null)),
+      ]);
+      out.push({
+        // `roots[0]`, the loop's own post-normalization list, not the LocalGroup's
+        // raw `group.roots[0]` — deckView.ts's `localRunFor` is handed `liveGroup`
+        // (roots already normalized the identical way), so its fallback key reads
+        // the normalized root too. The two are the same string in practice, since
+        // `allPlaces`/`unclaimed` are already repo-root-normalized by the real
+        // (uninjected) `repoRoot` inside `groupByPlace` — but matching the literal
+        // line the Deck runs is what keeps a future divergence from being silent.
+        key: localKey(group.workspaceFile ?? roots[0]),
+        // Called even though it cannot fire here (the sessions exist), so both
+        // paths in this file read identically.
+        agentState: promoteExited(reduced, sessions.length).state,
+        prs: {},
+        ticketStatus: null,
+        hasLiveSession: true,
+        justLaunched: false,
+        hasWorkToLose: false,
+        showAll: deps.showAll,
+      });
     }
-    const roots = [...isGitByRoot.keys()].filter(
-      (root) => !claimed.has(root) && (isGitByRoot.get(root) || allPlaces.has(root)),
-    );
-    if (roots.length === 0) continue;
-    const sessions = group.places.flatMap((place) => allPlaces.get(place) ?? []);
-    const reduced = mostActive(sessions.map((s) => deps.sessionActivity(s.cwd, s.sessionId)));
-    out.push({
-      // `roots[0]`, the loop's own post-normalization list, not the LocalGroup's
-      // raw `group.roots[0]` — deckView.ts's `localRunFor` is handed `liveGroup`
-      // (roots already normalized the identical way), so its fallback key reads
-      // the normalized root too. The two are the same string in practice, since
-      // `allPlaces`/`unclaimed` are already repo-root-normalized by the real
-      // (uninjected) `repoRoot` inside `groupByPlace` — but matching the literal
-      // line the Deck runs is what keeps a future divergence from being silent.
-      key: localKey(group.workspaceFile ?? roots[0]),
-      // Called even though it cannot fire here (the sessions exist), so both
-      // paths in this file read identically.
-      agentState: promoteExited(reduced, sessions.length).state,
-      prs: {},
-      ticketStatus: null,
-      hasLiveSession: true,
-      justLaunched: false,
-      hasWorkToLose: false,
-      showAll: deps.showAll,
-    });
   }
   return out;
 }

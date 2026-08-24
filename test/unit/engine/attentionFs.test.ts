@@ -453,4 +453,45 @@ describe("gatherAttention: local session cards", () => {
     expect(got.length).toBe(1);
     expect(got[0].key).toBe(localKey("/repo/solo"));
   });
+
+  it("counts a local card the repo-directory reading would show even if its own session transcript reads unknown", () => {
+    // The reachable failure this guards: readSessionActivity returns
+    // UNKNOWN_ACTIVITY with no directory fallback when a session's own
+    // <sessionId>.jsonl is missing or unreadable (transcript.ts:154-160),
+    // while the same project directory holds a louder transcript
+    // readAgentActivity's directory scan would find. Without the per-place
+    // repo reading in the union, this session would board the badge as
+    // "unknown" while the Deck's own card — which takes the identical
+    // union, per status.ts's `activityRepos` — shows needs-you.
+    sessionActivity.mockReturnValue(activity({ state: "unknown" }));
+    repoActivity.mockReturnValue(activity({ state: "needs-you" }));
+    const got = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
+    expect(got.length).toBe(1);
+    expect(got[0].agentState).toBe("needs-you");
+    // The per-place reading added for this is `deps.repoActivity` — a
+    // transcript read — never `deps.gitState`, which is what keeps this
+    // affordable on every tick regardless of whether anyone is waiting.
+    expect(gitState).not.toHaveBeenCalled();
+  });
+
+  it("keeps a non-git place alive by its live session — the `|| allPlaces.has(root)` half of the disjunction", () => {
+    // Every other fixture in this file leaves repoRootOf returning something
+    // non-empty, so `isGitByRoot.get(root)` is always true and this half of
+    // the OR is never load-bearing. Only a place that is BOTH not-git AND
+    // has a live session exercises it.
+    const got = gatherAttention(deps({
+      sessions: () => [session({ cwd: "/repo/solo" })],
+      repoRootOf: () => "",
+    }));
+    expect(got.length).toBe(1);
+  });
+
+  it("drops a workspace's declared sibling root that names no repo and has no live session", () => {
+    const got = gatherAttention(deps({
+      sessions: () => [session({ cwd: "/repo/a" })],
+      windows: () => [windowRec({ roots: ["/repo/a", "/repo/b"] })],
+      repoRootOf: (dir: string) => (dir === "/repo/a" ? "/repo/a" : ""),
+    }));
+    expect(got.length).toBe(1);
+  });
 });
