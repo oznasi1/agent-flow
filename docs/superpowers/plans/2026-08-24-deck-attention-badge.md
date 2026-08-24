@@ -719,6 +719,7 @@ export interface AttentionDeps {
   sessions: () => OpenSession[];
   windows: () => PresenceRecord[];
   prEntries: (key: string) => PrEntryMap;
+  prEligible: (repo: { path: string; isGit: boolean; branch?: string }) => boolean;
   sessionActivity: (cwd: string, sessionId: string) => AgentActivity;
   repoActivity: (repoPath: string, branch: string | null) => AgentActivity;
   gitState: (name: string, repoPath: string) => RepoGit;
@@ -726,11 +727,22 @@ export interface AttentionDeps {
   nowMs: number;
   showAll: boolean;
   openAgents: boolean;
+  prFacts: boolean;
 }
-export function defaultAttentionDeps(nowMs: number, showAll: boolean, openAgents: boolean): AttentionDeps;
+export function defaultAttentionDeps(opts: {
+  nowMs: number; showAll: boolean; openAgents: boolean; prFacts: boolean;
+}): AttentionDeps;
 export function gatherAttention(deps: AttentionDeps): AttentionCandidate[];
 export const NEEDS_STATES: ReadonlySet<AgentState>;
 ```
+
+> **As built.** Review rounds changed three things from the sketch below. `prEligible` is
+> *injected*, not re-implemented — round 1 hand-copied `git.ts`'s rule and dropped its
+> `def !== ""` clause, which is exactly the drift this task's design exists to prevent.
+> `prFacts` is threaded, because the Deck gates its cache read on `agentFlow.prFacts` and
+> disabling that setting does not delete the stored entries. And `openAgents` gates the
+> session half of the agent-state union, as `deckView.ts:2479` does. The code blocks further
+> down predate all three.
 
 - [ ] **Step 1: Move `claudeProjectsRoot` to where two callers can reach it**
 
