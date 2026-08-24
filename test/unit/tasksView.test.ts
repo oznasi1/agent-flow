@@ -346,6 +346,10 @@ function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown
   const view = {
     title: "Tasks",
     description: undefined as string | undefined,
+    // VS Code disposes a hidden WebviewView and the provider subscribes to that,
+    // so the fake carries the event too — a fake missing it would make
+    // resolveWebviewView throw here and nowhere in production.
+    onDidDispose: (_cb: () => void) => ({ dispose() {} }),
     webview: {
       options: {},
       html: "",
@@ -7043,12 +7047,24 @@ describe("takeTask: orchestrator mode", () => {
 describe("setAttention", () => {
   // Deliberately minimal and local: setAttention touches nothing but `view.badge`,
   // and the file's full mount helper builds a webview these tests never use.
-  const bareView = () => ({ title: "Tasks", description: undefined as string | undefined,
-    badge: undefined as unknown,
-    webview: {
-      options: {}, html: "", asWebviewUri: (u: unknown) => u, cspSource: "",
-      postMessage: vi.fn(), onDidReceiveMessage: () => ({ dispose() {} }),
-    } });
+  const bareView = () => {
+    // `dispose()` fires what the provider subscribed to, which is how VS Code
+    // signals a hidden sidebar's view going away.
+    const listeners: (() => void)[] = [];
+    return {
+      title: "Tasks", description: undefined as string | undefined,
+      badge: undefined as unknown,
+      onDidDispose: (cb: () => void) => {
+        listeners.push(cb);
+        return { dispose() {} };
+      },
+      dispose: () => listeners.forEach((l) => l()),
+      webview: {
+        options: {}, html: "", asWebviewUri: (u: unknown) => u, cspSource: "",
+        postMessage: vi.fn(), onDidReceiveMessage: () => ({ dispose() {} }),
+      },
+    };
+  };
   const bareProvider = () =>
     new TasksViewProvider(fakeContext().context as never, makeFixtureConnector() as never, () => {});
 
@@ -7090,5 +7106,52 @@ describe("setAttention", () => {
 
   it("does not throw when no view has ever been resolved", () => {
     expect(() => bareProvider().setAttention(["BITE-1"])).not.toThrow();
+  });
+
+  it("lets go of a view VS Code disposed, rather than writing to a dead one", () => {
+    // A hidden sidebar's WebviewView is disposed, and `.badge` on a disposed view
+    // throws. runAttentionPass swallows that (best-effort by design), so the badge
+    // would silently stop updating for the rest of the window's life.
+    const provider = bareProvider();
+    const view = bareView();
+    provider.resolveWebviewView(view as never);
+    view.dispose();
+    Object.defineProperty(view, "badge", {
+      get: () => undefined,
+      set: () => { throw new Error("Webview is disposed"); },
+    });
+    expect(() => provider.setAttention(["BITE-1"])).not.toThrow();
+  });
+
+  it("replays the count onto the view that resolves after a dispose", () => {
+    // The count lives in a field, so nothing is lost while there is no view —
+    // the same reason a count set before the first resolve is applied on resolve.
+    const provider = bareProvider();
+    const first = bareView();
+    provider.resolveWebviewView(first as never);
+    first.dispose();
+    // As VS Code behaves: touching a disposed view throws. Without the handle
+    // being dropped, this setAttention is the throw itself.
+    Object.defineProperty(first, "badge", {
+      get: () => undefined,
+      set: () => { throw new Error("Webview is disposed"); },
+    });
+    provider.setAttention(["BITE-1", "BITE-2"]);
+    const second = bareView();
+    provider.resolveWebviewView(second as never);
+    expect(second.badge).toEqual({ value: 2, tooltip: "2 sessions are waiting on you — open the Deck" });
+  });
+
+  it("ignores an older view's dispose once a newer one has resolved", () => {
+    // VS Code can resolve the replacement before disposing the old view; clearing
+    // `this.view` unconditionally would then drop the badge on a live view.
+    const provider = bareProvider();
+    const first = bareView();
+    provider.resolveWebviewView(first as never);
+    const second = bareView();
+    provider.resolveWebviewView(second as never);
+    first.dispose();
+    provider.setAttention(["BITE-1"]);
+    expect(second.badge).toEqual({ value: 1, tooltip: "1 session is waiting on you — open the Deck" });
   });
 });

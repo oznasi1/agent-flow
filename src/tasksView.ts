@@ -217,6 +217,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     };
     view.webview.html = this.html(view.webview);
     view.webview.onDidReceiveMessage((m: InboundMessage) => this.onMessage(m));
+    // VS Code disposes a WebviewView when the sidebar is hidden, and writing
+    // `.badge` on a disposed view throws. The attention pass swallows that throw
+    // (best-effort by design), so the badge would silently stop updating for the
+    // rest of the window's life — until the view happened to resolve again. The
+    // count itself survives in `this.attention`, so a later resolve replays it.
+    // Guarded on identity: a dispose arriving after a NEWER view resolved must
+    // not clear the live one.
+    view.onDidDispose(() => {
+      if (this.view === view) this.view = undefined;
+    });
     this.applyAttention();
   }
 
