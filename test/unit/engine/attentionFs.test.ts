@@ -413,6 +413,31 @@ describe("gatherAttention: local session cards", () => {
     expect(got[0].showAll).toBe(true);
   });
 
+  it("does not leak a claimed root's session activity into an unclaimed sibling's local card", () => {
+    // The outer `unclaimed` filter (over allPlaces, before grouping) and the
+    // inner `roots` filter (over the window's full declared root list, after
+    // normalization) both check `claimed`, mirroring deckView.ts's own
+    // double-check exactly. A standalone group's inner filter alone is enough
+    // to keep a claimed place from becoming its own card (see the
+    // double-count test above) — but only the OUTER filter keeps a claimed
+    // root's session out of `group.places`, and so out of the reduction, for
+    // an unclaimed SIBLING root sharing its multi-root window. Drop the outer
+    // filter and "/repo/a"'s loud "needs-you" session would leak into "/repo/b"'s
+    // card even though "/repo/a" belongs to run BITE-1.
+    sessionActivity.mockImplementation((_cwd: string, sessionId: string) =>
+      sessionId === "s1" ? activity({ state: "needs-you" }) : activity({ state: "idle" }));
+    const got = gatherAttention(deps({
+      runs: () => [run({ key: "BITE-1", repos: [{ name: "a", path: "/repo/a", isGit: true }] })],
+      sessions: () => [
+        session({ pid: 1, sessionId: "s1", cwd: "/repo/a" }),
+        session({ pid: 2, sessionId: "s2", cwd: "/repo/b" }),
+      ],
+      windows: () => [windowRec()],
+    }));
+    const local = got.find((c) => c.key !== "BITE-1");
+    expect(local?.agentState).toBe("idle");
+  });
+
   it("keys a standalone place by its normalized repo root, not the raw place string — matching deckView.ts's liveGroup.roots[0], not the pre-normalization group.roots[0]", () => {
     // groupByPlace already normalizes every session's cwd through the real
     // (uninjected) repoRoot before it ever reaches attentionFs, so in
