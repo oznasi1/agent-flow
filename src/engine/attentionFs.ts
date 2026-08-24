@@ -234,9 +234,16 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
       // reading "unknown" while a louder transcript sits beside it in the
       // same project directory — one `readAgentActivity` directory scan away.
       //
-      // `branch: null` rather than `currentBranch(root)`: the real branch is
-      // an unmemoized git spawn per root per tick, which the cost ladder
-      // forbids for a card that boards unconditionally anyway.
+      // `branch: null` rather than `currentBranch(root)`: this read runs for
+      // every unclaimed place on every tick, whether or not the card ends up
+      // waiting — a card boards unconditionally here regardless of the
+      // answer — and the cost ladder forbids an unmemoized git spawn at that
+      // frequency. That is not a ban on this file ever spawning
+      // `currentBranch`: see `deps.branchOf` ~45 lines below, spent only once
+      // this same card is already waiting, `prFacts` is on, AND a PR entry is
+      // already cached for it — three gates, not zero. The ban is on paying
+      // the spawn here, per place, per tick, for an answer nobody may ever
+      // need.
       // `readAgentActivity` already falls back to the newest transcript
       // overall when nothing matches a branch (transcript.ts:135-137), so a
       // null branch agrees with the real one whenever the branch-matched

@@ -19,8 +19,24 @@ vi.mock("../../../src/engine/transcript", async (importOriginal) => {
   };
 });
 
+// Same wiring-test purpose as the transcript mock above: prove
+// `defaultAttentionDeps.branchOf` is actually `currentBranch` from git.ts,
+// without letting a real `git rev-parse` run (or matter) in this file's
+// other tests, which never touch `defaultAttentionDeps` at all. `gitState`,
+// `prEligible`, and `repoRoot` — also imported from `./git` by
+// attentionFs.ts — are left as `actual` so nothing else in this file's
+// wiring changes shape.
+vi.mock("../../../src/engine/git", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../../src/engine/git")>();
+  return {
+    ...actual,
+    currentBranch: vi.fn(() => "mocked-branch"),
+  };
+});
+
 import { AttentionDeps, NEEDS_STATES, defaultAttentionDeps, gatherAttention } from "../../../src/engine/attentionFs";
 import * as transcript from "../../../src/engine/transcript";
+import * as git from "../../../src/engine/git";
 import { localKey } from "../../../src/engine/localRuns";
 
 const activity = (over: Partial<AgentActivity> = {}): AgentActivity => ({
@@ -345,6 +361,18 @@ describe("defaultAttentionDeps: real readers wired in the right argument order",
       expect.any(String), "/repo/api", "feat", nowMs,
     );
   });
+
+  it("calls the branch reader with the plain root — mis-wiring this to () => null would silently revert prEligible's fix", () => {
+    // Wiring `branchOf` to a stub that always returns null would make every
+    // repo look branchless, and `prEligible` returns false on `!repo.branch`
+    // for every one of them — so every PR entry would be dropped and a
+    // merged local card would start being counted again, with every other
+    // test in this file (which injects its own `branchOf`) still green.
+    // Only a call-site assertion against the real wiring catches that.
+    const wired = defaultAttentionDeps({ nowMs: 1, showAll: false, openAgents: true, prFacts: true });
+    wired.branchOf("/repo/api");
+    expect(git.currentBranch).toHaveBeenCalledWith("/repo/api");
+  });
 });
 
 const windowRec = (over: Partial<PresenceRecord> = {}): PresenceRecord => ({
@@ -526,6 +554,19 @@ describe("gatherAttention: PR facts for a local card, filtered the way the Deck 
     sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
     gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
     expect(prEntries).toHaveBeenCalledWith(localKey("/repo/solo"));
+  });
+
+  it("spends no branch call on a waiting local card with nothing cached", () => {
+    // Different from the "nobody is waiting on" cost test above: this card IS
+    // waiting and the PR cache IS read, but comes back empty, so
+    // `stored[r.name] &&` short-circuits before `deps.prEligible`/`branchOf`
+    // are ever reached — the same short-circuit order the tracked half's
+    // "drops an entry for a repo that has since left the run" test locks in.
+    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    // prEntries's default beforeEach mock already returns {} — nothing cached.
+    gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
+    expect(prEntries).toHaveBeenCalled();
+    expect(branchOf).not.toHaveBeenCalled();
   });
 
   it("keeps a PR entry for the live-session root, filtered exactly like the tracked half", () => {
