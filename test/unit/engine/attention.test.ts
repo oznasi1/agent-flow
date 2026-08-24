@@ -3,6 +3,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { AttentionCandidate, attentionKeys, ownsWorkToLose } from "../../../src/engine/attention";
 import { PrEntryMap, PrFacts, Run } from "../../../src/types";
+import { deriveBucket } from "../../../src/engine/bucket";
 
 const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
   number: 1, url: "https://github.com/o/r/pull/1", title: "t", state: "OPEN", isDraft: false,
@@ -82,12 +83,26 @@ describe("attentionKeys", () => {
 
   it("never lets the ticket status change an attention verdict", () => {
     // The gatherer passes null because reading Jira on the hidden path is
-    // forbidden; the Deck passes the real value. That is only safe while nothing
-    // above `needs` in deriveBucket's ladder reads it. This test is the guard.
+    // forbidden; the Deck passes the real value. Nothing above `needs` in
+    // deriveBucket's ladder reads ticketStatus today, so this cannot fail now —
+    // it exists to fail the day something above `needs` starts reading it, which
+    // is exactly when the gatherer's null would start diverging from the Deck.
+    // See the positive control below for why that premise is not vacuous.
     for (const ticketStatus of [null, "In Review", "Done", "In Progress", "QA"]) {
       expect(attentionKeys([cand({ ticketStatus })])).toEqual(["BITE-1"]);
       expect(attentionKeys([cand({ ticketStatus, agentState: "working" })])).toEqual([]);
     }
+  });
+
+  it("guards a parameter that deriveBucket really does read", () => {
+    // The positive control for the test above. Without this, "ticketStatus never
+    // changes an attention verdict" is trivially true and proves nothing: the
+    // review rung that reads it sits below `needs`, so attentionKeys can never
+    // see it matter. This asserts it is a live input one rung down — which is
+    // what makes the guard above meaningful the day someone reorders the ladder.
+    const quiet = { agentState: "idle" as const, prOpen: false, prBlocked: false, prReady: false, prMerged: false };
+    expect(deriveBucket({ ...quiet, ticketStatus: "In Review" })).toBe("review");
+    expect(deriveBucket({ ...quiet, ticketStatus: null })).toBe("progress");
   });
 
   it("keeps input order, so the count and the board agree on which card is first", () => {
