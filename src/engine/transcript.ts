@@ -133,9 +133,33 @@ export function readAgentActivity(
   // Prefer the newest transcript whose branch matches this run; otherwise the
   // newest overall. (A worktree cwd already isolates one branch; a repo checked
   // out directly can hold sessions for several, so the branch join matters there.)
-  const parsed = files.map((f) => ({ ...f, lines: parseLines(f.path) }));
-  const match = branch ? parsed.find((f) => lastBranch(f.lines) === branch) : undefined;
-  const chosen = match ?? parsed[0];
+  //
+  // Parsed one file at a time, and only as far as the answer needs. This used to
+  // be `files.map(parseLines)` up front, which read EVERY transcript in the
+  // directory before choosing one — and `parseLines` reads a whole `.jsonl` to
+  // keep its last 200 lines. Claude Code never prunes ~/.claude/projects, so a
+  // long-lived repo's directory grows without bound: measured here at 137 files
+  // / 356 MB, one call cost ~1.0s of blocking I/O on the extension host's main
+  // thread. The attention pass runs this on every other 6s poll whether or not
+  // the Deck is open, so that was ~1.0s every 12s, forever, in every window.
+  // Laziness is the whole fix — the read shape is deliberately unchanged.
+  //
+  // Behaviour-preserving by construction: `parsed.find` returned the FIRST
+  // mtime-ordered branch match and fell back to `parsed[0]`, so parsing
+  // `files[0]` eagerly and then stopping at the first match gives the identical
+  // choice for every input. transcript.test.ts and status.test.ts pass
+  // unmodified; transcriptLazy.test.ts pins the read count.
+  const first = { ...files[0], lines: parseLines(files[0].path) };
+  let chosen = first;
+  if (branch) {
+    for (let i = 0; i < files.length; i++) {
+      const lines = i === 0 ? first.lines : parseLines(files[i].path);
+      if (lastBranch(lines) === branch) {
+        chosen = { ...files[i], lines };
+        break;
+      }
+    }
+  }
   return deriveActivity(chosen.lines, chosen.mtimeMs, nowMs);
 }
 
