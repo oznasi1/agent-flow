@@ -7038,3 +7038,56 @@ describe("takeTask: orchestrator mode", () => {
     expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).toEqual([]);
   });
 });
+
+describe("setAttention", () => {
+  // Deliberately minimal and local: setAttention touches nothing but `view.badge`,
+  // and the file's full mount helper builds a webview these tests never use.
+  const bareView = () => ({ title: "Tasks", description: undefined as string | undefined,
+    badge: undefined as unknown,
+    webview: {
+      options: {}, html: "", asWebviewUri: (u: unknown) => u, cspSource: "",
+      postMessage: vi.fn(), onDidReceiveMessage: () => ({ dispose() {} }),
+    } });
+  const bareProvider = () =>
+    new TasksViewProvider(fakeContext().context as never, makeFixtureConnector() as never, () => {});
+
+  it("badges the count of sessions waiting on you", () => {
+    const provider = bareProvider();
+    const view = bareView();
+    provider.resolveWebviewView(view as never);
+    provider.setAttention(["BITE-1", "BITE-2"]);
+    expect(view.badge).toEqual({ value: 2, tooltip: "2 sessions are waiting on you — open the Deck" });
+  });
+
+  it("says session, singular, for one", () => {
+    const provider = bareProvider();
+    const view = bareView();
+    provider.resolveWebviewView(view as never);
+    provider.setAttention(["BITE-1"]);
+    expect(view.badge).toEqual({ value: 1, tooltip: "1 session is waiting on you — open the Deck" });
+  });
+
+  it("clears the badge to undefined rather than badging a zero", () => {
+    const provider = bareProvider();
+    const view = bareView();
+    provider.resolveWebviewView(view as never);
+    provider.setAttention(["BITE-1"]);
+    provider.setAttention([]);
+    expect(view.badge).toBeUndefined();
+  });
+
+  it("applies a count set before the sidebar was ever opened", () => {
+    // VS Code resolves a webview view lazily, so the first ticks of a window land
+    // before there is any view to badge. Dropping them would mean no badge at all
+    // until the count next changed.
+    const provider = bareProvider();
+    provider.setAttention(["BITE-1", "BITE-2"]);
+    const view = bareView();
+    provider.resolveWebviewView(view as never);
+    expect(view.badge).toEqual({ value: 2, tooltip: "2 sessions are waiting on you — open the Deck" });
+  });
+
+  it("does not throw when no view has ever been resolved", () => {
+    expect(() => bareProvider().setAttention(["BITE-1"])).not.toThrow();
+  });
+});
