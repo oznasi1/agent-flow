@@ -35,6 +35,7 @@ const providerStub = {
   takeTask: vi.fn(async () => undefined),
   postNotepad: vi.fn(() => undefined),
   sweepNotepadImages: vi.fn(() => undefined),
+  setAttention: vi.fn(),
 };
 
 const trackSpy = vi.fn();
@@ -65,12 +66,16 @@ vi.mock("../../src/engine/presence", () => ({
   writePresence: vi.fn(),
   removePresence: vi.fn(),
   defaultWindowsDir: vi.fn(() => "/win"),
+  // attentionFs.ts's defaultAttentionDeps() reads this too, now that extension.ts's
+  // attentionPass() reaches it on a real (unmocked) gather.
+  readLiveWindows: vi.fn(() => []),
 }));
 vi.mock("../../src/marketplaceView", () => ({
   MarketplacePanel: { show: vi.fn() },
 }));
 vi.mock("../../src/deckView", () => ({
-  DeckPanel: { show: vi.fn() },
+  DeckPanel: { show: vi.fn(), latestCandidates: vi.fn(() => null) },
+  POLL_MS: 6000,
 }));
 vi.mock("../../src/doctorView", () => ({
   showDoctor: vi.fn(async () => undefined),
@@ -82,11 +87,12 @@ vi.mock("../../src/telemetry/telemetry", () => ({
   disposeTelemetry: (...a: unknown[]) => disposeSpy(...a),
 }));
 
-import { activate, deactivate } from "../../src/extension";
+import { activate, deactivate, attentionPass } from "../../src/extension";
 import { maybeSeedAgent, watchPlansAndSeed } from "../../src/engine/workspace";
 import { maybeRunSetup, runSetup } from "../../src/setup";
 import { windowIdentity, writePresence, removePresence } from "../../src/engine/presence";
 import { MarketplacePanel } from "../../src/marketplaceView";
+import { DeckPanel } from "../../src/deckView";
 import { BASE_SCHEME } from "../../src/engine/diffView";
 import { resolveConnector } from "../../src/tasks/registry";
 
@@ -161,6 +167,18 @@ describe("activate", () => {
     expect(watchPlansAndSeed).toHaveBeenCalledTimes(1);
     expect(watchPlansAndSeed).toHaveBeenCalledWith(context, expect.any(Function));
     expect(context.subscriptions.length).toBeGreaterThan(0);
+  });
+
+  it("runs an attention pass on the poll that outlives the panel", () => {
+    // The interval itself is not driven here: extension.test.ts uses real timers
+    // (see the liveContexts teardown), and Task 10's own suite covers the pass.
+    // What this asserts is the wiring — that activate() sets up a poll at all and
+    // that disposing the context tears it down, so ~30 activations in this file
+    // cannot leave intervals firing into a mocked-out module.
+    const { context } = fakeContext();
+    activate(context);
+    expect(context.subscriptions.length).toBeGreaterThan(0);
+    expect(() => context.subscriptions.forEach((d) => d.dispose())).not.toThrow();
   });
 
   it("survives a live-seeding failure — activate does not throw and commands stay registered", () => {
@@ -627,5 +645,39 @@ describe("deactivate", () => {
     });
     expect(() => deactivate()).not.toThrow();
     expect(removePresence).toHaveBeenCalled();
+  });
+});
+
+describe("attentionPass", () => {
+  it("prefers the open Deck's candidates over gathering its own", () => {
+    // Same reduction over the same inputs is what keeps the badge from
+    // contradicting the column beside it.
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue({
+      candidates: [{ key: "BITE-9", agentState: "needs-you", prs: {}, ticketStatus: null,
+        hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false }],
+      at: Date.now(),
+    });
+    attentionPass(providerStub as never, () => {});
+    expect(providerStub.setAttention).toHaveBeenCalledWith(["BITE-9"]);
+  });
+
+  it("gathers its own candidates when the Deck's are stale (older than 2 * POLL_MS)", () => {
+    // Same shape as the "prefers" test above, but `at` is just past the freshness
+    // window — proves the gate actually reads `at`, not just presence/absence of
+    // a panel. Without this, deleting the freshness check entirely (always trust
+    // whatever the Deck last built) would pass every other test in this file.
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue({
+      candidates: [{ key: "STALE-1", agentState: "needs-you", prs: {}, ticketStatus: null,
+        hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false }],
+      at: Date.now() - 2 * 6000 - 1,
+    });
+    attentionPass(providerStub as never, () => {});
+    expect(providerStub.setAttention).not.toHaveBeenCalledWith(["STALE-1"]);
+  });
+
+  it("gathers its own candidates when no Deck panel is open", () => {
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue(null);
+    attentionPass(providerStub as never, () => {});
+    expect(providerStub.setAttention).toHaveBeenCalled();
   });
 });
