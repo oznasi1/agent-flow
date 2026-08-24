@@ -55,11 +55,13 @@ export function runAttentionPass(deps: AttentionPassDeps): void {
       toAnnounce.length === 1
         ? `${toAnnounce[0]} is waiting on you`
         : `${toAnnounce.length} sessions are waiting on you`;
-    void vscode.window.showInformationMessage(message, "Open Deck").then((choice) => {
-      // The EXISTING command — compat.test.ts asserts the manifest's command ids
-      // as an exact set, so this feature adds none.
-      if (choice === "Open Deck") void vscode.commands.executeCommand("agentFlow.openDeck");
-    });
+    void (vscode.window.showInformationMessage(message, "Open Deck") as Promise<string | undefined>).then(
+      (choice) => {
+        // The EXISTING command — compat.test.ts asserts the manifest's command ids
+        // as an exact set, so this feature adds none.
+        if (choice === "Open Deck") return vscode.commands.executeCommand("agentFlow.openDeck");
+      },
+    ).catch((e: unknown) => deps.log(`attention: toast failed: ${e}`));
   } catch (e) {
     // Same posture as every other best-effort nicety on this poll: a failure here
     // must never take the badge, the notepad poll, or the extension down with it.

@@ -113,4 +113,17 @@ describe("runAttentionPass: the notification", () => {
     await Promise.resolve();
     expect(commands.executeCommand).not.toHaveBeenCalled();
   });
+
+  it("logs and survives a notification that rejects", async () => {
+    vi.mocked(window.showInformationMessage).mockRejectedValueOnce(new Error("no UI"));
+    runAttentionPass(deps({ candidates: () => [cand("A")], notify: true }));
+    await vi.waitFor(() => expect(logged.join()).toContain("attention"));
+  });
+
+  it("logs and survives an openDeck command that rejects", async () => {
+    vi.mocked(window.showInformationMessage).mockResolvedValueOnce("Open Deck");
+    vi.mocked(commands.executeCommand).mockRejectedValueOnce(new Error("no command"));
+    runAttentionPass(deps({ candidates: () => [cand("A")], notify: true }));
+    await vi.waitFor(() => expect(logged.join()).toContain("attention"));
+  });
 });
