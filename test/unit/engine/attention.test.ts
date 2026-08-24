@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { AttentionCandidate, attentionKeys, nextAnnouncements, ownsWorkToLose } from "../../../src/engine/attention";
+import { AttentionCandidate, attentionKeys, attentionLabel, nextAnnouncements, ownsWorkToLose, sameAnnounced } from "../../../src/engine/attention";
 import { AgentState, PrEntryMap, PrFacts, Run } from "../../../src/types";
 import { deriveBucket, prSignals } from "../../../src/engine/bucket";
 import { shelfFor } from "../../../src/engine/visibility";
@@ -231,5 +231,66 @@ describe("attentionKeys agrees with the column the Deck draws", () => {
     // A parity test that compares two empty arrays proves nothing.
     expect(expected.length).toBeGreaterThan(0);
     expect(expected.length).toBeLessThan(all.length);
+  });
+});
+
+describe("attentionLabel", () => {
+  it("names a ticket run by the ticket key its caller resolved", () => {
+    // The design doc's promise: "BITE-42 is waiting on you".
+    expect(attentionLabel(run({ key: "BITE-42", summary: "isolate the renew queue" }), "BITE-42")).toBe("BITE-42");
+  });
+
+  it("prefers the resolved ticket key over the record key", () => {
+    // A local card promoted with Track it keeps its place-hash key and carries
+    // the ticket only in its url, so the key is not the name even here.
+    const promoted = run({ key: "local-centaur-3f2a91bc", summary: "centaur", url: "https://jira/browse/BITE-9" });
+    expect(attentionLabel(promoted, "BITE-9")).toBe("BITE-9");
+  });
+
+  it("names a ticketless run by its summary — the key is a generated slug", () => {
+    const explore = run({ key: "explore-why-the-queue-stalls", summary: "why the queue stalls", url: "", kind: "explore" });
+    expect(attentionLabel(explore, "explore-why-the-queue-stalls")).toBe("why the queue stalls");
+  });
+
+  it("names an untracked local card by its summary, never by localKey's hash", () => {
+    // The bug: "local-agent-flow-3f2a91bc is waiting on you".
+    const local = run({ key: "local-agent-flow-3f2a91bc", summary: "agent-flow", url: "", kind: "local" });
+    expect(attentionLabel(local, "local-agent-flow-3f2a91bc")).toBe("agent-flow");
+  });
+
+  it("names a notepad run by its summary — its key carries a hash suffix", () => {
+    const notepad = run({ key: "notepad-check-the-copy-mt45dsy5-t2wu9y", summary: "check the copy", url: "", kind: "notepad" });
+    expect(attentionLabel(notepad, "notepad-check-the-copy-mt45dsy5-t2wu9y")).toBe("check the copy");
+  });
+});
+
+describe("sameAnnounced", () => {
+  it("is true for the same keys carrying the same stamps", () => {
+    expect(sameAnnounced({ A: 1, B: 2 }, { A: 1, B: 2 })).toBe(true);
+  });
+
+  it("ignores key order — a parsed record and a rebuilt one differ in it", () => {
+    expect(sameAnnounced({ A: 1, B: 2 }, { B: 2, A: 1 })).toBe(true);
+  });
+
+  it("is true for two empty records", () => {
+    expect(sameAnnounced({}, {})).toBe(true);
+  });
+
+  it("is false when a key entered", () => {
+    expect(sameAnnounced({ A: 1 }, { A: 1, B: 2 })).toBe(false);
+  });
+
+  it("is false when a key left", () => {
+    expect(sameAnnounced({ A: 1, B: 2 }, { A: 1 })).toBe(false);
+  });
+
+  it("is false when a key was swapped for another — same size, different set", () => {
+    expect(sameAnnounced({ A: 1 }, { B: 1 })).toBe(false);
+  });
+
+  it("is false when a stamp moved", () => {
+    // A re-announce rewrites the stamp with the same key set; that has to persist.
+    expect(sameAnnounced({ A: 1 }, { A: 2 })).toBe(false);
   });
 });

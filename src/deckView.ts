@@ -56,7 +56,7 @@ import { canon, claudeProjectsRoot } from "./engine/paths";
 import { OwnedRun, resolveOwnership } from "./engine/ownership";
 import { JUST_LAUNCHED_MS, shelfFor } from "./engine/visibility";
 import { prSignals } from "./engine/bucket";
-import { AttentionCandidate, ownsWorkToLose } from "./engine/attention";
+import { AttentionCandidate, attentionLabel, ownsWorkToLose } from "./engine/attention";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
@@ -2700,6 +2700,12 @@ export class DeckPanel {
         // needing you must count exactly as it draws in the column beside it.
         attentionCandidates.push({
           key: run.key,
+          // The key here is `localKey`'s `local-<slug>-<sha1>`, which is an
+          // identity and not a name — the toast reads `label ?? key`, so without
+          // this the notification announced the hash. `attentionLabel` picks the
+          // inferred ticket key when the card has one and the card's own name
+          // (workspace or folder) when it does not.
+          label: attentionLabel(run, ticketKeyFor(run, this.connector)),
           agentState: status.agent.state,
           prs: status.prs,
           ticketStatus: status.ticketStatus,
@@ -2741,6 +2747,11 @@ export class DeckPanel {
       out.push(shelved);
       attentionCandidates.push({
         key: run.key,
+        // A task run's key IS its ticket key, so this resolves to the same string
+        // and the toast wording is unchanged. It differs for the two records whose
+        // key is generated rather than named — an Explore or Notepad slug — and
+        // for a Track it card, whose key stayed a place hash.
+        label: attentionLabel(run, ticketKeyFor(run, this.connector)),
         agentState: status.agent.state,
         prs: status.prs,
         ticketStatus: status.ticketStatus,

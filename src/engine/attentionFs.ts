@@ -7,14 +7,14 @@
 // `defaultAttentionDeps` wires the real ones.
 import * as path from "path";
 import { AgentActivity, AgentState, OpenSession, PrEntryMap, RepoGit, Run, runKind } from "../types";
-import { AttentionCandidate, ownsWorkToLose } from "./attention";
+import { AttentionCandidate, attentionLabel, ownsWorkToLose } from "./attention";
 import { mostActive, promoteExited } from "./activity";
 import { canon, claudeProjectsRoot } from "./paths";
 import { resolveOwnership } from "./ownership";
 import { groupByPlace, readOpenSessions, defaultSessionsDir } from "./sessions";
 import { readPrEntries, defaultPrFactsDir } from "./pr/store";
 import { readRuns, defaultRunsDir } from "./runs";
-import { groupPlacesByWindow, localKey } from "./localRuns";
+import { groupPlacesByWindow, localFallbackName, localKey } from "./localRuns";
 import { PresenceRecord, readLiveWindows, defaultWindowsDir } from "./presence";
 import { readAgentActivity, readSessionActivity } from "./transcript";
 import { currentBranch, gitState as realGitState, prEligible as realPrEligible, repoRoot } from "./git";
@@ -141,8 +141,12 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
     const hasLiveSession = ownership.runsWithSession.has(run.key);
 
     // Rungs 3 and 4, spent ONLY where they could change the answer. A quiet
-    // machine reaches neither. Do NOT hoist either out of this branch —
-    // attentionFs.test.ts asserts both spies stay untouched otherwise.
+    // machine reaches none of them. Do NOT hoist any of them out of this branch —
+    // attentionFs.test.ts's "spends no git call and no PR read on a run nobody is
+    // waiting on" asserts that all three costly readers this branch can reach
+    // stay untouched: `prEntries` (a file read), and `gitState` and `prEligible`
+    // (each a git process). The local half below has a fourth, `branchOf`, under
+    // the same discipline and its own cost test.
     const waiting = NEEDS_STATES.has(agentState);
     // A notepad run owns no pull request — see deckView.ts's `prLess` for why a
     // stranger's branch cannot be attributed to a note — and `prFacts` off
@@ -179,6 +183,14 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
 
     out.push({
       key: run.key,
+      // Display text for the toast, never the identity. A task run's key already
+      // IS its ticket key, so this changes nothing for the common case; it names
+      // the records whose key is generated instead — an Explore or Notepad slug.
+      // `run.key` rather than a resolved ticket key: this path has no connector
+      // to parse `run.url` with (and must not acquire one — no Jira on the hidden
+      // path), so a Track it card announces its hash here where the Deck's own
+      // candidates, preferred whenever a panel is open, announce its ticket.
+      label: attentionLabel(run, run.key),
       agentState,
       prs,
       // Forbidden on the hidden path; attention.test.ts proves it cannot change
@@ -291,6 +303,13 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
       );
       out.push({
         key,
+        // `localKey`'s output is a slug plus a sha1 — an identity, not something
+        // to put in a notification. The same string `localRunFor` gives the card
+        // the Deck draws, through the one shared helper, so the two paths cannot
+        // announce the same place under two different names. No inferred ticket
+        // here: that needs the project key and base url from config, which this
+        // path does not read.
+        label: localFallbackName(group.workspaceFile, roots[0]),
         agentState,
         prs,
         ticketStatus: null,

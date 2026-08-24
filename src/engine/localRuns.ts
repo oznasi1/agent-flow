@@ -61,6 +61,17 @@ function workspaceName(file: string): string {
 }
 
 /**
+ * What a local card is called when no ticket names it: its workspace's name, or
+ * its folder's. Exported because the attention gatherer needs the same string for
+ * a card it never builds a `Run` for (engine/attentionFs.ts) — the notification
+ * would otherwise announce `localKey`'s hash — and two copies of "the name of a
+ * place" is exactly the kind of thing that drifts.
+ */
+export function localFallbackName(workspaceFile: string | null, firstRoot: string): string {
+  return workspaceFile ? workspaceName(workspaceFile) : path.basename(firstRoot) || firstRoot;
+}
+
+/**
  * The card for a group of places Agent Flow Deck never launched, shaped as a Run so
  * the whole existing pipeline — gitState, deriveBucket, prSignals, presence, Open,
  * Diff — renders it with no special case. Never written to the runs store unless the
@@ -79,9 +90,7 @@ export function localRunFor(
   nowMs: number,
 ): Run {
   const started = sessions.map((s) => s.startedAt).filter((n) => n > 0);
-  const fallbackName = group.workspaceFile
-    ? workspaceName(group.workspaceFile)
-    : path.basename(group.roots[0]) || group.roots[0];
+  const fallbackName = localFallbackName(group.workspaceFile, group.roots[0]);
   return {
     key: localKey(group.workspaceFile ?? group.roots[0]),
     summary: ticket?.summary ?? fallbackName,
