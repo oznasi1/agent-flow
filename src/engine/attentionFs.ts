@@ -13,6 +13,7 @@ import { resolveOwnership } from "./ownership";
 import { groupByPlace, readOpenSessions, defaultSessionsDir } from "./sessions";
 import { readPrEntries, defaultPrFactsDir } from "./pr/store";
 import { readRuns, defaultRunsDir } from "./runs";
+import { groupPlacesByWindow, localKey } from "./localRuns";
 import { PresenceRecord, readLiveWindows, defaultWindowsDir } from "./presence";
 import { readAgentActivity, readSessionActivity } from "./transcript";
 import { gitState as realGitState, prEligible as realPrEligible, repoRoot } from "./git";
@@ -60,11 +61,6 @@ export interface AttentionDeps {
   prFacts: boolean;
 }
 
-/** A directory's repo root does not change under us, and the alternative is one
- * `git rev-parse --show-toplevel` per unclaimed session place per tick, forever,
- * in every open window. Module-level so it survives across ticks. */
-const repoRootMemo = new Map<string, string>();
-
 export function defaultAttentionDeps(opts: {
   nowMs: number;
   showAll: boolean;
@@ -82,13 +78,11 @@ export function defaultAttentionDeps(opts: {
     repoActivity: (repoPath, branch) => readAgentActivity(projectsRoot, repoPath, branch, nowMs),
     gitState: (name, repoPath) => realGitState(name, repoPath),
     prEligible: (repo) => realPrEligible(repo),
-    repoRootOf: (dir) => {
-      const hit = repoRootMemo.get(dir);
-      if (hit !== undefined) return hit;
-      const resolved = repoRoot(dir);
-      repoRootMemo.set(dir, resolved);
-      return resolved;
-    },
+    // `repoRoot` (git.ts) already memoizes per path for the life of the
+    // extension host (its own `rootMemo`) — a second cache layer here bought
+    // nothing but a copy that can never be invalidated, which is worse than no
+    // cache at all.
+    repoRootOf: (dir) => repoRoot(dir),
     nowMs,
     showAll,
     openAgents,
@@ -184,6 +178,52 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
       showAll: deps.showAll,
     });
   }
-  // Task 6 appends local session candidates here, using `claimed`.
+  // Whatever no tracked run claimed is a place you are working in that the Deck
+  // has never heard of. `openAgents` gates this exactly as buildAll does — with
+  // the display toggle off, `places` is empty there, so no local card is ever
+  // built; here there is no `places`/`allPlaces` split to lean on, so the whole
+  // half returns early instead. `claimed` was populated above regardless of the
+  // toggle (a hidden place is still owned), which is exactly why this can't
+  // reuse it as the gate — it has to be `deps.openAgents` itself.
+  //
+  // A local card always has a live session by construction, so its shelf is
+  // `board` without asking git anything, and there is no PR cache for a key the
+  // Deck never launched. The only git this pass can reach is the memoized
+  // `repoRootOf` normalization.
+  if (!deps.openAgents) return out;
+  const unclaimed = [...allPlaces.keys()].filter((place) => !claimed.has(place));
+  for (const group of groupPlacesByWindow(unclaimed, deps.windows())) {
+    const isGitByRoot = new Map<string, boolean>();
+    for (const root of group.roots) {
+      const rr = deps.repoRootOf(root);
+      const norm = canon(rr || root);
+      if (!isGitByRoot.has(norm)) isGitByRoot.set(norm, rr !== "");
+    }
+    const roots = [...isGitByRoot.keys()].filter(
+      (root) => !claimed.has(root) && (isGitByRoot.get(root) || allPlaces.has(root)),
+    );
+    if (roots.length === 0) continue;
+    const sessions = group.places.flatMap((place) => allPlaces.get(place) ?? []);
+    const reduced = mostActive(sessions.map((s) => deps.sessionActivity(s.cwd, s.sessionId)));
+    out.push({
+      // `roots[0]`, the loop's own post-normalization list, not the LocalGroup's
+      // raw `group.roots[0]` — deckView.ts's `localRunFor` is handed `liveGroup`
+      // (roots already normalized the identical way), so its fallback key reads
+      // the normalized root too. The two are the same string in practice, since
+      // `allPlaces`/`unclaimed` are already repo-root-normalized by the real
+      // (uninjected) `repoRoot` inside `groupByPlace` — but matching the literal
+      // line the Deck runs is what keeps a future divergence from being silent.
+      key: localKey(group.workspaceFile ?? roots[0]),
+      // Called even though it cannot fire here (the sessions exist), so both
+      // paths in this file read identically.
+      agentState: promoteExited(reduced, sessions.length).state,
+      prs: {},
+      ticketStatus: null,
+      hasLiveSession: true,
+      justLaunched: false,
+      hasWorkToLose: false,
+      showAll: deps.showAll,
+    });
+  }
   return out;
 }

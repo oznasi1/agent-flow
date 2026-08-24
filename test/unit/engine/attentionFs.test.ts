@@ -21,6 +21,7 @@ vi.mock("../../../src/engine/transcript", async (importOriginal) => {
 
 import { AttentionDeps, NEEDS_STATES, defaultAttentionDeps, gatherAttention } from "../../../src/engine/attentionFs";
 import * as transcript from "../../../src/engine/transcript";
+import { localKey } from "../../../src/engine/localRuns";
 
 const activity = (over: Partial<AgentActivity> = {}): AgentActivity => ({
   state: "idle", lastActivityMs: 1, slug: null, ...over,
@@ -193,8 +194,9 @@ describe("gatherAttention: the cost ladder", () => {
       path.join(__dirname, "../../../src/engine/attentionFs.ts"), "utf8");
     const specifiers = [...src.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
     expect(specifiers.sort()).toEqual([
-      "../types", "./activity", "./attention", "./git", "./ownership", "./paths",
-      "./pr/store", "./presence", "./runs", "./sessions", "./transcript", "./visibility",
+      "../types", "./activity", "./attention", "./git", "./localRuns", "./ownership",
+      "./paths", "./pr/store", "./presence", "./runs", "./sessions", "./transcript",
+      "./visibility",
     ]);
   });
 });
@@ -336,5 +338,94 @@ describe("defaultAttentionDeps: real readers wired in the right argument order",
     expect(transcript.readAgentActivity).toHaveBeenCalledWith(
       expect.any(String), "/repo/api", "feat", nowMs,
     );
+  });
+});
+
+const windowRec = (over: Partial<PresenceRecord> = {}): PresenceRecord => ({
+  identity: "/ws/team.code-workspace", kind: "workspace", label: "team.code-workspace",
+  folders: 2, roots: ["/repo/a", "/repo/b"], pid: 4242, updatedAt: 1_700_000_000_000, ...over,
+});
+
+describe("gatherAttention: local session cards", () => {
+  it("makes no local candidate when openAgents is off", () => {
+    expect(gatherAttention(deps({
+      sessions: () => [session({ cwd: "/repo/solo" })],
+      openAgents: false,
+    }))).toEqual([]);
+  });
+
+  it("makes a candidate for a session in a place no run claims", () => {
+    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    const got = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
+    expect(got.length).toBe(1);
+    expect(got[0].agentState).toBe("needs-you");
+    expect(got[0].hasLiveSession).toBe(true);
+    expect(got[0].hasWorkToLose).toBe(false);
+    expect(got[0].prs).toEqual({});
+  });
+
+  it("does not double-count a place a tracked run already owns", () => {
+    const got = gatherAttention(deps({
+      runs: () => [run()],
+      sessions: () => [session({ cwd: "/repo/api" })],
+    }));
+    expect(got.map((c) => c.key)).toEqual(["BITE-1"]);
+  });
+
+  it("folds two roots of one multi-root window into a single card", () => {
+    const got = gatherAttention(deps({
+      sessions: () => [
+        session({ pid: 1, sessionId: "s1", cwd: "/repo/a" }),
+        session({ pid: 2, sessionId: "s2", cwd: "/repo/b" }),
+      ],
+      windows: () => [windowRec()],
+    }));
+    expect(got.length).toBe(1);
+  });
+
+  it("keeps two unrelated places as two cards", () => {
+    const got = gatherAttention(deps({
+      sessions: () => [
+        session({ pid: 1, sessionId: "s1", cwd: "/repo/a" }),
+        session({ pid: 2, sessionId: "s2", cwd: "/repo/c" }),
+      ],
+    }));
+    expect(got.length).toBe(2);
+  });
+
+  it("spends no gitState call on a local card — a live session already boards it", () => {
+    gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
+    expect(gitState).not.toHaveBeenCalled();
+  });
+
+  it("gives a local card a stable key across passes, so the latch holds", () => {
+    const d = { sessions: () => [session({ cwd: "/repo/solo" })] };
+    const first = gatherAttention(deps(d)).map((c) => c.key);
+    const second = gatherAttention(deps({ ...d, nowMs: 2_000_000_000 })).map((c) => c.key);
+    expect(second).toEqual(first);
+    expect(first[0]).toBeTruthy();
+  });
+
+  it("passes inflightShowAll to a local card too", () => {
+    const got = gatherAttention(deps({
+      sessions: () => [session({ cwd: "/repo/solo" })], showAll: true,
+    }));
+    expect(got[0].showAll).toBe(true);
+  });
+
+  it("keys a standalone place by its normalized repo root, not the raw place string — matching deckView.ts's liveGroup.roots[0], not the pre-normalization group.roots[0]", () => {
+    // groupByPlace already normalizes every session's cwd through the real
+    // (uninjected) repoRoot before it ever reaches attentionFs, so in
+    // production repoRootOf (which wraps that same real function) can never
+    // disagree with it. Diverging deps.repoRootOf from what groupByPlace saw
+    // is the only way to exercise the line in isolation — it proves the key
+    // is built from the loop's own normalized `roots[0]`, not the LocalGroup's
+    // raw `group.roots[0]`, the way deckView.ts's `liveGroup.roots[0]` is.
+    const got = gatherAttention(deps({
+      sessions: () => [session({ cwd: "/repo/solo/nested" })],
+      repoRootOf: () => "/repo/solo",
+    }));
+    expect(got.length).toBe(1);
+    expect(got[0].key).toBe(localKey("/repo/solo"));
   });
 });
