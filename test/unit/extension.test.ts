@@ -66,9 +66,6 @@ vi.mock("../../src/engine/presence", () => ({
   writePresence: vi.fn(),
   removePresence: vi.fn(),
   defaultWindowsDir: vi.fn(() => "/win"),
-  // attentionFs.ts's defaultAttentionDeps() reads this too, now that extension.ts's
-  // attentionPass() reaches it on a real (unmocked) gather.
-  readLiveWindows: vi.fn(() => []),
 }));
 vi.mock("../../src/marketplaceView", () => ({
   MarketplacePanel: { show: vi.fn() },
@@ -76,6 +73,19 @@ vi.mock("../../src/marketplaceView", () => ({
 vi.mock("../../src/deckView", () => ({
   DeckPanel: { show: vi.fn(), latestCandidates: vi.fn(() => null) },
   POLL_MS: 6000,
+}));
+// The gather half of the attention pass — mocked so the "no fresh Deck
+// candidates" tests never touch this machine's real ~/.agentflow or
+// ~/.claude/projects (and never spawn a real `git` process for a run record
+// that happens to live there). `defaultAttentionDeps` is asserted against
+// directly (it echoes its input back) rather than left to build real reader
+// closures nothing here would exercise.
+vi.mock("../../src/engine/attentionFs", () => ({
+  gatherAttention: vi.fn(() => [{
+    key: "GATHERED-1", agentState: "needs-you", prs: {}, ticketStatus: null,
+    hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false,
+  }]),
+  defaultAttentionDeps: vi.fn((o: unknown) => o),
 }));
 vi.mock("../../src/doctorView", () => ({
   showDoctor: vi.fn(async () => undefined),
@@ -93,6 +103,7 @@ import { maybeRunSetup, runSetup } from "../../src/setup";
 import { windowIdentity, writePresence, removePresence } from "../../src/engine/presence";
 import { MarketplacePanel } from "../../src/marketplaceView";
 import { DeckPanel } from "../../src/deckView";
+import { gatherAttention, defaultAttentionDeps } from "../../src/engine/attentionFs";
 import { BASE_SCHEME } from "../../src/engine/diffView";
 import { resolveConnector } from "../../src/tasks/registry";
 
@@ -169,16 +180,27 @@ describe("activate", () => {
     expect(context.subscriptions.length).toBeGreaterThan(0);
   });
 
-  it("runs an attention pass on the poll that outlives the panel", () => {
-    // The interval itself is not driven here: extension.test.ts uses real timers
-    // (see the liveContexts teardown), and Task 10's own suite covers the pass.
-    // What this asserts is the wiring — that activate() sets up a poll at all and
-    // that disposing the context tears it down, so ~30 activations in this file
-    // cannot leave intervals firing into a mocked-out module.
-    const { context } = fakeContext();
-    activate(context);
-    expect(context.subscriptions.length).toBeGreaterThan(0);
-    expect(() => context.subscriptions.forEach((d) => d.dispose())).not.toThrow();
+  it("runs the attention pass on every other tick, and the notepad poll on every one", () => {
+    // The one place this file drives the shared interval itself, rather than
+    // calling attentionPass() directly — proving the wiring (the modulo, and
+    // that the call is actually there) rather than just the pass's own logic.
+    // DeckPanel.latestCandidates is the first thing attentionPass touches, so
+    // its call count is a sound proxy for "did the pass run this tick".
+    vi.useFakeTimers();
+    try {
+      const { context } = fakeContext();
+      activate(context);
+      vi.advanceTimersByTime(6000);
+      expect(providerStub.postNotepad).toHaveBeenCalledTimes(1);
+      expect(DeckPanel.latestCandidates).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(6000);
+      expect(providerStub.postNotepad).toHaveBeenCalledTimes(2);
+      expect(DeckPanel.latestCandidates).toHaveBeenCalledTimes(1);
+    } finally {
+      // The rest of this file (and its afterEach's context.dispose() calls)
+      // depends on real timers — this must run even if an assertion above throws.
+      vi.useRealTimers();
+    }
   });
 
   it("survives a live-seeding failure — activate does not throw and commands stay registered", () => {
@@ -659,6 +681,9 @@ describe("attentionPass", () => {
     });
     attentionPass(providerStub as never, () => {});
     expect(providerStub.setAttention).toHaveBeenCalledWith(["BITE-9"]);
+    // "While the Deck is open the pass costs no I/O at all" — the whole point
+    // of preferring the panel's own candidates.
+    expect(gatherAttention).not.toHaveBeenCalled();
   });
 
   it("gathers its own candidates when the Deck's are stale (older than 2 * POLL_MS)", () => {
@@ -673,11 +698,53 @@ describe("attentionPass", () => {
     });
     attentionPass(providerStub as never, () => {});
     expect(providerStub.setAttention).not.toHaveBeenCalledWith(["STALE-1"]);
+    expect(providerStub.setAttention).toHaveBeenCalledWith(["GATHERED-1"]);
   });
 
   it("gathers its own candidates when no Deck panel is open", () => {
     vi.mocked(DeckPanel.latestCandidates).mockReturnValue(null);
     attentionPass(providerStub as never, () => {});
-    expect(providerStub.setAttention).toHaveBeenCalled();
+    // Pins that the gather's own result is what reaches the badge — not just
+    // that setAttention was called at all, which runAttentionPass does
+    // unconditionally regardless of what candidates() returns.
+    expect(providerStub.setAttention).toHaveBeenCalledWith(["GATHERED-1"]);
+  });
+
+  it("maps config fields to defaultAttentionDeps by name, not by position", () => {
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue(null);
+    setConfig({ inflightShowAll: false, openAgents: true, prFacts: true });
+    attentionPass(providerStub as never, () => {});
+    expect(defaultAttentionDeps).toHaveBeenCalledWith({
+      nowMs: expect.any(Number),
+      showAll: false,
+      openAgents: true,
+      prFacts: true,
+    });
+  });
+
+  it("does not announce when the window is unfocused, even with notifications on", () => {
+    setConfig({ notifyOnActionRequired: true });
+    window.state.focused = false;
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue({
+      candidates: [{ key: "BITE-9", agentState: "needs-you", prs: {}, ticketStatus: null,
+        hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false }],
+      at: Date.now(),
+    });
+    attentionPass(providerStub as never, () => {});
+    expect(providerStub.setAttention).toHaveBeenCalledWith(["BITE-9"]);
+    expect(window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it("never lets a synchronous read (getConfig, latestCandidates, window.state, the latch path) escape activate()'s interval", () => {
+    // attentionPass's own eager reads run before runAttentionPass's internal
+    // try/catch. A throw here must be caught right here, matching this file's
+    // stated posture (see the comment above the shared poll in extension.ts)
+    // that nothing may propagate out of the interval callback.
+    vi.mocked(DeckPanel.latestCandidates).mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    const log = vi.fn();
+    expect(() => attentionPass(providerStub as never, log)).not.toThrow();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("attention:"));
   });
 });

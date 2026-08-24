@@ -231,21 +231,31 @@ export function activate(context: vscode.ExtensionContext): void {
  * interval callback above is never driven by that file's real timers, and an
  * unexported function's body would otherwise be unreachable from any test. */
 export function attentionPass(provider: TasksViewProvider, log: (m: string) => void): void {
-  const cfg = getConfig();
-  const now = Date.now();
-  const fresh = DeckPanel.latestCandidates();
-  const usable = fresh && now - fresh.at < 2 * DECK_POLL_MS ? fresh.candidates : null;
-  runAttentionPass({
-    candidates: () => usable ?? gatherAttention(defaultAttentionDeps({
-      nowMs: now, showAll: cfg.inflightShowAll, openAgents: cfg.openAgents, prFacts: cfg.prFacts,
-    })),
-    setAttention: (keys) => provider.setAttention(keys),
-    notify: cfg.notifyOnActionRequired,
-    focused: vscode.window.state.focused,
-    latchFile: defaultAttentionFile(),
-    nowMs: now,
-    log,
-  });
+  // Everything in this body runs before runAttentionPass's own try/catch even
+  // starts — getConfig(), DeckPanel.latestCandidates(), window.state, and
+  // defaultAttentionFile()'s os.homedir() call are all synchronous reads that
+  // could throw. Caught right here so a failure in any of them can never
+  // escape the shared interval callback, matching the poll's own posture
+  // (nothing pushed onto it may take the notepad badge down with it).
+  try {
+    const cfg = getConfig();
+    const now = Date.now();
+    const fresh = DeckPanel.latestCandidates();
+    const usable = fresh && now - fresh.at < 2 * DECK_POLL_MS ? fresh.candidates : null;
+    runAttentionPass({
+      candidates: () => usable ?? gatherAttention(defaultAttentionDeps({
+        nowMs: now, showAll: cfg.inflightShowAll, openAgents: cfg.openAgents, prFacts: cfg.prFacts,
+      })),
+      setAttention: (keys) => provider.setAttention(keys),
+      notify: cfg.notifyOnActionRequired,
+      focused: vscode.window.state.focused,
+      latchFile: defaultAttentionFile(),
+      nowMs: now,
+      log,
+    });
+  } catch (e) {
+    log(`attention: pass setup failed: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 export function deactivate(): void {
