@@ -58,6 +58,27 @@ describe("writeAnnounced", () => {
   });
 
   it("swallows an unwritable path — a failed latch write costs a duplicate toast, never a crash", () => {
-    expect(() => writeAnnounced(path.join(dir, "attention.json", "nope.json"), { A: 1 })).not.toThrow();
+    // Pre-create attention.json as a FILE, so mkdirSync on a path *through* it
+    // genuinely throws EEXIST/ENOTDIR. Without this the recursive mkdir simply
+    // creates attention.json as a directory, the write succeeds, and the test
+    // passes without ever entering the catch it claims to exercise.
+    const blocker = path.join(dir, "attention.json");
+    fs.writeFileSync(blocker, "not a directory");
+    expect(() => writeAnnounced(path.join(blocker, "nope.json"), { A: 1 })).not.toThrow();
+  });
+
+  it("cleans up orphaned temp files when rename fails — target exists as a directory", () => {
+    // The implementation uses atomic write (temp + rename + cleanup).
+    // Make the target path a directory instead of a file, so renameSync will
+    // fail trying to replace a directory with a file. The catch block should
+    // clean up the temp file. This verifies the cleanup pattern from pr/store.ts.
+    fs.mkdirSync(file);
+
+    expect(() => writeAnnounced(file, { A: 1 })).not.toThrow();
+
+    // After the failed rename, the directory should contain only the 'file'
+    // directory — no temp files left behind if cleanup in catch block works.
+    const tmpFiles = fs.readdirSync(dir).filter((f) => f.endsWith(".tmp"));
+    expect(tmpFiles).toHaveLength(0);
   });
 });

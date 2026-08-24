@@ -37,12 +37,17 @@ export function readAnnounced(file: string): Record<string, number> {
 /** Persist the record. Best-effort: a failed write costs at most one duplicate
  * toast on the next pass, and must never propagate into the poll. */
 export function writeAnnounced(file: string, announced: Record<string, number>): void {
+  const temp = `${file}.${process.pid}.tmp`;
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    const temp = `${file}.${process.pid}.tmp`;
     fs.writeFileSync(temp, JSON.stringify(announced) + "\n");
     fs.renameSync(temp, file);
   } catch {
     // See the doc comment: advisory store, deliberately silent.
+    try {
+      fs.rmSync(temp, { force: true });
+    } catch {
+      /* best-effort cleanup */
+    }
   }
 }
