@@ -52,7 +52,7 @@ import { sortRequests } from "./engine/review/sort";
 import { groupPlacesByWindow, inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity } from "./engine/transcript";
-import { canon } from "./engine/paths";
+import { canon, claudeProjectsRoot } from "./engine/paths";
 import { OwnedRun, resolveOwnership } from "./engine/ownership";
 import { JUST_LAUNCHED_MS, shelfFor } from "./engine/visibility";
 import { prSignals } from "./engine/bucket";
@@ -68,15 +68,6 @@ const TICKET_TTL_MS = 30_000;
  * transcripts is the one read here that scales with corpus size rather than
  * with board size, and `refresh()` must never block on it. */
 export const USAGE_POLL_MS = 60_000;
-
-/** ~/.claude/projects — where Claude Code keeps one directory of transcripts per
- * cwd. Hoisted from the inline const the status build used, so the usage sweep
- * and the activity read cannot drift onto two different roots. A function
- * rather than a module-level const because `os.homedir()` at import time is a
- * needless load-order dependency in a module the extension host loads early. */
-function claudeProjectsRoot(): string {
-  return path.join(os.homedir(), ".claude", "projects");
-}
 
 /** The footer note per reason PR facts are off, named with the configured
  * forge's own CLI (a function rather than a constant, now that the CLI is no

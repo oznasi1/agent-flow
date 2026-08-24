@@ -1,4 +1,15 @@
 import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
+
+/** ~/.claude/projects — where Claude Code keeps one directory of transcripts per
+ * cwd. Hoisted from the inline const the status build used, so the usage sweep
+ * and the activity read cannot drift onto two different roots. A function
+ * rather than a module-level const because `os.homedir()` at import time is a
+ * needless load-order dependency in a module the extension host loads early. */
+export function claudeProjectsRoot(): string {
+  return path.join(os.homedir(), ".claude", "projects");
+}
 
 /** Resolve symlinks so two spellings of one directory compare equal — /var vs
  * /private/var on macOS being the case that bites. Falls back to the input for a
