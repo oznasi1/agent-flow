@@ -60,8 +60,8 @@ export interface AttentionCandidate {
  * url, so the caller that has a connector (`ticketKeyFor`) resolves a real key
  * where a caller reading raw records can only pass `run.key` through.
  */
-export function attentionLabel(run: Pick<Run, "key" | "summary" | "url" | "kind">, ticketKey: string): string {
-  return isTicketRun(run as Run) ? ticketKey : run.summary;
+export function attentionLabel(run: Run, ticketKey: string): string {
+  return isTicketRun(run) ? ticketKey : run.summary;
 }
 
 /** Does this run's dirty/ahead state count as work it would be a shame to lose?
