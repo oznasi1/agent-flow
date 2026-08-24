@@ -76,3 +76,30 @@ export function attentionKeys(candidates: readonly AttentionCandidate[]): string
   }
   return out;
 }
+
+/**
+ * Which of `current` has not been announced yet, and the record to persist.
+ *
+ * Level-triggered, unlike the flow engine's `firedAt` (a permanent stamp cleared
+ * only by Reset): a stamp survives exactly as long as its key stays in
+ * `current`. So a run that parks, gets answered, and parks again is announced
+ * twice — the second parking is new news — and the record prunes itself without
+ * needing to be told which runs still exist.
+ *
+ * Pure and total: the caller owns reading and writing the record, and owns the
+ * decision about whether this window is the one that gets to announce.
+ */
+export function nextAnnouncements(
+  current: readonly string[],
+  announced: Record<string, number>,
+  nowMs: number,
+): { toAnnounce: string[]; announced: Record<string, number> } {
+  const live = new Set(current);
+  const next: Record<string, number> = {};
+  for (const [key, at] of Object.entries(announced)) {
+    if (live.has(key)) next[key] = at;
+  }
+  const toAnnounce = current.filter((key) => !(key in next));
+  for (const key of toAnnounce) next[key] = nowMs;
+  return { toAnnounce, announced: next };
+}

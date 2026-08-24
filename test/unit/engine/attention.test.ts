@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { AttentionCandidate, attentionKeys, ownsWorkToLose } from "../../../src/engine/attention";
+import { AttentionCandidate, attentionKeys, nextAnnouncements, ownsWorkToLose } from "../../../src/engine/attention";
 import { PrEntryMap, PrFacts, Run } from "../../../src/types";
 import { deriveBucket } from "../../../src/engine/bucket";
 
@@ -125,5 +125,46 @@ describe("ownsWorkToLose", () => {
 
   it("allows a plain task run", () => {
     expect(ownsWorkToLose(run())).toBe(true);
+  });
+});
+
+describe("nextAnnouncements", () => {
+  it("announces a run that just entered Action required", () => {
+    const out = nextAnnouncements(["A"], {}, 100);
+    expect(out.toAnnounce).toEqual(["A"]);
+    expect(out.announced).toEqual({ A: 100 });
+  });
+
+  it("says nothing on the next pass — level-triggered, not repeated every tick", () => {
+    const first = nextAnnouncements(["A"], {}, 100);
+    const second = nextAnnouncements(["A"], first.announced, 200);
+    expect(second.toAnnounce).toEqual([]);
+    expect(second.announced).toEqual({ A: 100 });
+  });
+
+  it("re-announces a run that parked, was answered, and parked again", () => {
+    const parked = nextAnnouncements(["A"], {}, 100);
+    const answered = nextAnnouncements([], parked.announced, 200);
+    expect(answered.toAnnounce).toEqual([]);
+    const again = nextAnnouncements(["A"], answered.announced, 300);
+    expect(again.toAnnounce).toEqual(["A"]);
+    expect(again.announced).toEqual({ A: 300 });
+  });
+
+  it("prunes itself — a stamp survives only while its run is still waiting", () => {
+    const out = nextAnnouncements([], { GONE: 1, ALSO_GONE: 2 }, 300);
+    expect(out.announced).toEqual({});
+  });
+
+  it("hands back every new key at once, so the caller can raise one toast", () => {
+    const out = nextAnnouncements(["A", "B", "C"], { B: 50 }, 100);
+    expect(out.toAnnounce).toEqual(["A", "C"]);
+    expect(out.announced).toEqual({ A: 100, B: 50, C: 100 });
+  });
+
+  it("does not mutate the record it was given", () => {
+    const announced = { A: 1 };
+    nextAnnouncements(["B"], announced, 100);
+    expect(announced).toEqual({ A: 1 });
   });
 });
