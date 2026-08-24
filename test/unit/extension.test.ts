@@ -711,13 +711,17 @@ describe("attentionPass", () => {
   });
 
   it("maps config fields to defaultAttentionDeps by name, not by position", () => {
+    // All three booleans distinguishable from one another (not the symmetric
+    // openAgents: true, prFacts: true this test originally shipped with) —
+    // swapping openAgents/prFacts in the mapping must actually change the
+    // call-args object, or the swap is invisible to this assertion.
     vi.mocked(DeckPanel.latestCandidates).mockReturnValue(null);
-    setConfig({ inflightShowAll: false, openAgents: true, prFacts: true });
+    setConfig({ inflightShowAll: true, openAgents: false, prFacts: true });
     attentionPass(providerStub as never, () => {});
     expect(defaultAttentionDeps).toHaveBeenCalledWith({
       nowMs: expect.any(Number),
-      showAll: false,
-      openAgents: true,
+      showAll: true,
+      openAgents: false,
       prFacts: true,
     });
   });
