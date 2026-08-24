@@ -126,7 +126,7 @@ prompt modes, and Remote Control.
 
 ## Settings
 
-The six that matter to start. The rest are in the Settings UI under `agentFlow`, and
+The seven that matter to start. The rest are in the Settings UI under `agentFlow`, and
 documented in [docs/SETTINGS.md](docs/SETTINGS.md).
 
 | Setting | Default | Notes |
@@ -138,6 +138,7 @@ documented in [docs/SETTINGS.md](docs/SETTINGS.md).
 | `agentFlow.agentSurface` | `extension` | The tool's chat panel, or `terminal` for its CLI. |
 | `agentFlow.forge` | `github` | Where your pull requests live: `github` (via `gh`) or `gitlab` (via `glab`). |
 | `agentFlow.openIn` | `ask` | Where a task opens: a new window, this one, or an existing workspace. |
+| `agentFlow.notifyOnActionRequired` | `false` | Notify when a run enters Action required, once until it's answered and parks again. |
 
 ## Privacy
 

@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The activity-bar icon now badges how many sessions are waiting on you**, and keeps
+  tracking it while the Deck is closed — the Deck's own poll stops when its panel hides, so
+  a run entering Action required used to be silent. The badge costs no PR or ticket lookups:
+  it reads Claude Code's transcripts, your open sessions, and PR facts already cached.
+- **Optional notification when a run enters Action required**, off by default
+  (`agentFlow.notifyOnActionRequired`). Raised once when a run parks, by whichever window is
+  focused at the time, and not repeated until that run is answered and parks again.
+
 ## [0.41.1] — 2026-08-23
 
 ### Changed
