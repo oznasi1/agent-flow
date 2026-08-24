@@ -49,6 +49,7 @@ let prEntries: ReturnType<typeof vi.fn>;
 let sessionActivity: ReturnType<typeof vi.fn>;
 let repoActivity: ReturnType<typeof vi.fn>;
 let prEligible: ReturnType<typeof vi.fn>;
+let branchOf: ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
   gitState = vi.fn((name: string, repoPath: string) => repoGit({ name, path: repoPath }));
@@ -60,6 +61,7 @@ beforeEach(() => {
   // exercised by git.test.ts; this module only has to prove it is CALLED and
   // OBEYED, never re-derive it.
   prEligible = vi.fn(() => true);
+  branchOf = vi.fn(() => "feat");
 });
 
 const deps = (over: Partial<AttentionDeps> = {}): AttentionDeps => ({
@@ -71,6 +73,7 @@ const deps = (over: Partial<AttentionDeps> = {}): AttentionDeps => ({
   repoActivity: repoActivity as unknown as AttentionDeps["repoActivity"],
   gitState: gitState as unknown as AttentionDeps["gitState"],
   prEligible: prEligible as unknown as AttentionDeps["prEligible"],
+  branchOf: branchOf as unknown as AttentionDeps["branchOf"],
   repoRootOf: (dir: string) => dir,
   nowMs: 1_000_000_000,
   showAll: false,
@@ -189,14 +192,17 @@ describe("gatherAttention: the cost ladder", () => {
     // is blind to a transitive reach through a helper module. An exact
     // specifier-list assertion catches a new import and documents every
     // existing one — `./git` included, which really does spawn a subprocess
-    // through `deps.gitState`/`deps.prEligible`, entirely on purpose.
+    // through `deps.gitState`/`deps.prEligible`/`deps.branchOf`, entirely on
+    // purpose. `path` is a bare Node builtin (basename only, no fs/network) —
+    // it names a local card's repo the same way `deckView.ts`'s `localRunFor`
+    // does, so a stored PR entry's key can be found at all.
     const src = fs.readFileSync(
       path.join(__dirname, "../../../src/engine/attentionFs.ts"), "utf8");
     const specifiers = [...src.matchAll(/from\s+"([^"]+)"/g)].map((m) => m[1]);
     expect(specifiers.sort()).toEqual([
       "../types", "./activity", "./attention", "./git", "./localRuns", "./ownership",
       "./paths", "./pr/store", "./presence", "./runs", "./sessions", "./transcript",
-      "./visibility",
+      "./visibility", "path",
     ]);
   });
 });
@@ -502,5 +508,68 @@ describe("gatherAttention: local session cards", () => {
       repoRootOf: () => "",
     }));
     expect(got.length).toBe(1);
+  });
+});
+
+describe("gatherAttention: PR facts for a local card, filtered the way the Deck filters them", () => {
+  it("spends no PR read and no branch call on a local card nobody is waiting on", () => {
+    // The same promise the tracked half's cost-ladder test makes: a quiet
+    // machine costs transcript reads and nothing else.
+    const [c] = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
+    expect(prEntries).not.toHaveBeenCalled();
+    expect(prEligible).not.toHaveBeenCalled();
+    expect(branchOf).not.toHaveBeenCalled();
+    expect(c.prs).toEqual({});
+  });
+
+  it("reads the PR cache for a local card that IS waiting", () => {
+    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
+    expect(prEntries).toHaveBeenCalledWith(localKey("/repo/solo"));
+  });
+
+  it("keeps a PR entry for the live-session root, filtered exactly like the tracked half", () => {
+    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    const entry = { facts: null, fetchedAt: 0 };
+    prEntries.mockReturnValue({ solo: entry });
+    const [c] = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
+    expect(c.prs).toEqual({ solo: entry });
+    // `branchOf`, not a static field — a local card has no run record to hold
+    // one, unlike a tracked run's `run.repos[i].branch`.
+    expect(prEligible).toHaveBeenCalledWith({ path: "/repo/solo", isGit: true, branch: "feat" });
+  });
+
+  it("drops a local PR entry the injected prEligible rejects", () => {
+    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    prEntries.mockReturnValue({ solo: { facts: null, fetchedAt: 0 } });
+    prEligible.mockReturnValue(false);
+    const [c] = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
+    expect(c.prs).toEqual({});
+  });
+
+  it("never reads the PR cache for a local card when agentFlow.prFacts is off", () => {
+    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    prEntries.mockReturnValue({ solo: { facts: null, fetchedAt: 0 } }); // entry IS on disk
+    const [c] = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })], prFacts: false }));
+    expect(c.prs).toEqual({});
+    expect(prEntries).not.toHaveBeenCalled();
+  });
+
+  it("drops a stored entry for a sibling root nobody has a live session in", () => {
+    // deckView.ts's own local PR-facts filter is scoped to `activeRoots` — the
+    // roots with a live session — not the window's full declared root list.
+    // A stale or stranger's PR fact under the sibling's name must not vote on
+    // this card just because that root happens to share the workspace.
+    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    prEntries.mockReturnValue({
+      a: { facts: null, fetchedAt: 0 },
+      b: { facts: null, fetchedAt: 0 }, // "/repo/b" has no live session
+    });
+    const got = gatherAttention(deps({
+      sessions: () => [session({ cwd: "/repo/a" })],
+      windows: () => [windowRec()],
+    }));
+    expect(got.length).toBe(1);
+    expect(got[0].prs).toEqual({ a: { facts: null, fetchedAt: 0 } });
   });
 });

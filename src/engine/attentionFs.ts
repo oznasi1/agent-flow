@@ -5,6 +5,7 @@
 // below is the reason: "no git call for a run nobody is waiting on" is a promise
 // about behaviour, and a promise about behaviour needs a spy to hold it.
 // `defaultAttentionDeps` wires the real ones.
+import * as path from "path";
 import { AgentActivity, AgentState, OpenSession, PrEntryMap, RepoGit, Run, runKind } from "../types";
 import { AttentionCandidate, ownsWorkToLose } from "./attention";
 import { mostActive, promoteExited } from "./activity";
@@ -16,7 +17,7 @@ import { readRuns, defaultRunsDir } from "./runs";
 import { groupPlacesByWindow, localKey } from "./localRuns";
 import { PresenceRecord, readLiveWindows, defaultWindowsDir } from "./presence";
 import { readAgentActivity, readSessionActivity } from "./transcript";
-import { gitState as realGitState, prEligible as realPrEligible, repoRoot } from "./git";
+import { currentBranch, gitState as realGitState, prEligible as realPrEligible, repoRoot } from "./git";
 import { JUST_LAUNCHED_MS } from "./visibility";
 
 /** `deriveBucket`'s needs rung, named once so the cost ladder and its test agree. */
@@ -43,6 +44,16 @@ export interface AttentionDeps {
    * `attentionFs.test.ts` asserts it is never called for a run nobody is
    * waiting on. */
   prEligible: (repo: { path: string; isGit: boolean; branch?: string }) => boolean;
+  /** The branch a live-session root is currently on — the one thing a local
+   * candidate cannot get for free the way a tracked run's `prEligible` check
+   * does (`run.repos[i].branch` is a static field written once at launch, no
+   * git spawn needed to read it back). A local card has no run record to hold
+   * that snapshot, so this is a real, unmemoized git spawn — `git.ts`'s
+   * `currentBranch` is not cached the way `repoRootOf` is. Spent under the
+   * same discipline as `gitState`/`prEligible`: only for a root that is
+   * already both waiting and has a cached PR entry to judge — see the cost
+   * test in `attentionFs.test.ts`. */
+  branchOf: (root: string) => string | null;
   repoRootOf: (dir: string) => string;
   nowMs: number;
   showAll: boolean;
@@ -78,6 +89,7 @@ export function defaultAttentionDeps(opts: {
     repoActivity: (repoPath, branch) => readAgentActivity(projectsRoot, repoPath, branch, nowMs),
     gitState: (name, repoPath) => realGitState(name, repoPath),
     prEligible: (repo) => realPrEligible(repo),
+    branchOf: (root) => currentBranch(root),
     // `repoRoot` (git.ts) already memoizes per path for the life of the
     // extension host (its own `rootMemo`) — a second cache layer here bought
     // nothing but a copy that can never be invalidated, which is worse than no
@@ -189,9 +201,14 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
   // silently skipped just because this half happens to be gated off.
   //
   // A local card always has a live session by construction, so its shelf is
-  // `board` without asking git anything, and there is no PR cache for a key the
-  // Deck never launched. The only git this pass can reach is the memoized
-  // `repoRootOf` normalization.
+  // `board` without asking git anything. It DOES have a PR cache, though:
+  // deckView.ts's `prLess` gate is notepad-only, so a local run reads and
+  // writes `readPrEntries`/`enqueuePr` under its own `localKey` exactly like a
+  // tracked one (deckView.ts's PR-facts section makes no `kind === "local"`
+  // exception). An earlier version of this comment claimed otherwise and
+  // shipped `prs: {}` unconditionally, which cannot see a merge that already
+  // landed — the badge would then count a card the column shows as `merge`,
+  // and the count would visibly change the moment the Deck panel closed.
   if (deps.openAgents) {
     const unclaimed = [...allPlaces.keys()].filter((place) => !claimed.has(place));
     for (const group of groupPlacesByWindow(unclaimed, deps.windows())) {
@@ -234,19 +251,41 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
         ...sessions.map((s) => deps.sessionActivity(s.cwd, s.sessionId)),
         ...group.places.map((p) => deps.repoActivity(p, null)),
       ]);
+      // Called even though it cannot fire here (the sessions exist), so both
+      // paths in this file read identically.
+      const agentState = promoteExited(reduced, sessions.length).state;
+      // `roots[0]`, the loop's own post-normalization list, not the LocalGroup's
+      // raw `group.roots[0]` — deckView.ts's `localRunFor` is handed `liveGroup`
+      // (roots already normalized the identical way), so its fallback key reads
+      // the normalized root too. The two are the same string in practice, since
+      // `allPlaces`/`unclaimed` are already repo-root-normalized by the real
+      // (uninjected) `repoRoot` inside `groupByPlace` — but matching the literal
+      // line the Deck runs is what keeps a future divergence from being silent.
+      const key = localKey(group.workspaceFile ?? roots[0]);
+      const waiting = NEEDS_STATES.has(agentState);
+      // The tracked half's exact gates, restated for a card with no run record
+      // to read a repo name or a launch-time branch off of: `waiting`,
+      // `deps.prFacts`, then `stored[name] &&` before `deps.prEligible` is ever
+      // reached — never the other order, or an ineligible repo's git spawn
+      // would be paid for nothing. Scoped to `group.places`, not the wider
+      // `roots`: deckView.ts's own local PR-facts filter is `activeRoots`-gated
+      // to roots with a live session (see its `localActiveRootsByKey`), so a
+      // sibling root nobody is sitting in must not vote here either — matching
+      // the Deck's own card exactly, not just its shelf.
+      const stored = waiting && deps.prFacts ? deps.prEntries(key) : {};
+      const placeSet = new Set(group.places);
+      const prs: PrEntryMap = Object.fromEntries(
+        roots
+          .filter((root) => placeSet.has(root) && isGitByRoot.get(root))
+          .map((root) => ({ name: path.basename(root) || root, path: root }))
+          .filter((r) => stored[r.name])
+          .filter((r) => deps.prEligible({ path: r.path, isGit: true, branch: deps.branchOf(r.path) ?? undefined }))
+          .map((r) => [r.name, stored[r.name]]),
+      );
       out.push({
-        // `roots[0]`, the loop's own post-normalization list, not the LocalGroup's
-        // raw `group.roots[0]` — deckView.ts's `localRunFor` is handed `liveGroup`
-        // (roots already normalized the identical way), so its fallback key reads
-        // the normalized root too. The two are the same string in practice, since
-        // `allPlaces`/`unclaimed` are already repo-root-normalized by the real
-        // (uninjected) `repoRoot` inside `groupByPlace` — but matching the literal
-        // line the Deck runs is what keeps a future divergence from being silent.
-        key: localKey(group.workspaceFile ?? roots[0]),
-        // Called even though it cannot fire here (the sessions exist), so both
-        // paths in this file read identically.
-        agentState: promoteExited(reduced, sessions.length).state,
-        prs: {},
+        key,
+        agentState,
+        prs,
         ticketStatus: null,
         hasLiveSession: true,
         justLaunched: false,

@@ -2622,7 +2622,10 @@ export class DeckPanel {
     // A run this pass retires (see `applyVerdict` below) is excluded exactly as
     // `out` excludes it, so what gets published matches what a fresh
     // `gatherAttention()` would see once the retirement is on disk.
-    const candidates: AttentionCandidate[] = [];
+    // Named `attentionCandidates`, not `candidates` — this function already has
+    // an unrelated block-scoped `candidates` (the ticket-inference root list, a
+    // few lines up) with no relation to this one.
+    const attentionCandidates: AttentionCandidate[] = [];
     let stale = 0;
     for (const [i, run] of all.entries()) {
       const ticket = tickets[i];
@@ -2695,7 +2698,7 @@ export class DeckPanel {
         // a live session, by construction. The badge's "local/untracked session
         // cards included" requirement (design doc) means a local card stalled or
         // needing you must count exactly as it draws in the column beside it.
-        candidates.push({
+        attentionCandidates.push({
           key: run.key,
           agentState: status.agent.state,
           prs: status.prs,
@@ -2736,7 +2739,7 @@ export class DeckPanel {
       // `applyVerdict` ever writes.
       if (this.verdictFor(shelved, livePlaces, now, true).action === "retire") stale++;
       out.push(shelved);
-      candidates.push({
+      attentionCandidates.push({
         key: run.key,
         agentState: status.agent.state,
         prs: status.prs,
@@ -2749,7 +2752,15 @@ export class DeckPanel {
     }
     this.sweepReviewRuns(livePlaces, now, false, () => stale++);
     this.staleCount = stale;
-    this.attentionCandidates = { candidates, at: now };
+    // Guarded against an older overlapping pass finishing last: `buildAll` can
+    // race itself (see `refresh`'s own `refreshSeq` guard on `out`), and an
+    // older pass publishing after a newer one would hand the extension host's
+    // attention tick a backwards `at` — which its own `now - fresh.at < 2 *
+    // POLL_MS` freshness check would then wrongly reject as stale on some
+    // later tick. Only ever move `at` forward.
+    if (!this.attentionCandidates || now >= this.attentionCandidates.at) {
+      this.attentionCandidates = { candidates: attentionCandidates, at: now };
+    }
     return out;
   }
 

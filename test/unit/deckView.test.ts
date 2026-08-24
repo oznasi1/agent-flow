@@ -13,6 +13,7 @@ import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branc
 import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
 import type { AgentProvider, AgentProviderSetting } from "../../src/config";
 import type { FlowCommand } from "../../src/types";
+import { attentionKeys } from "../../src/engine/attention";
 
 /** The shape `child_process.exec`'s callback is invoked with, narrowed to the four
  * fields `shellCommandRunner` actually branches on. A real `ExecException` carries
@@ -9056,7 +9057,64 @@ describe("latestCandidates", () => {
     expect(Array.isArray(published!.candidates)).toBe(true);
   });
 
-  it("is null before any panel has ever built a pass", () => {
+  it("is null when no panel is open", () => {
+    // Not "before any panel has ever run" — the top-level afterEach disposes
+    // whatever panel a previous test opened, which is what actually makes this
+    // pass. It would also catch a module-level cache that outlived its panel.
     expect(DeckPanel.latestCandidates()).toBeNull();
+  });
+
+  it("counts a local card in Action required, not just tracked runs", async () => {
+    // Distinguishes the local-candidate push from its own absence: deleting it
+    // leaves `published.candidates` a valid (empty) array, which the two tests
+    // above cannot tell apart from this. A local card has no run record to
+    // hold a mocked status by key, so the stub keys off `run.kind` instead.
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.buildRunStatus.mockReset().mockImplementation(
+      (i: { run: Run; ticket: { category: string | null } | null }) =>
+        i.run.kind === "local"
+          ? { ...statusFor(i.run, i.ticket?.category ?? null), agent: { state: "needs-you" as const, lastActivityMs: null, slug: null } }
+          : statusFor(i.run, i.ticket?.category ?? null),
+    );
+    show(true);
+    await settled();
+    const published = DeckPanel.latestCandidates();
+    expect(published?.candidates.length).toBe(1);
+    const [local] = published!.candidates;
+    expect(local.hasLiveSession).toBe(true);
+    expect(local.agentState).toBe("needs-you");
+    expect(attentionKeys(published!.candidates)).toEqual([local.key]);
+  });
+
+  it("does not count a local card whose PR already merged, even though its agent state alone would need you", async () => {
+    // Pins the direction of the sibling fix in attentionFs.ts's gatherer: a
+    // local candidate has to carry its own real `prs`, not an empty map — an
+    // empty map would hide the merge veto here exactly as it did there, and
+    // this test would then wrongly see the key counted.
+    const facts: PrFacts = {
+      number: 1, url: "https://github.com/o/r/pull/1", title: "t", state: "MERGED", isDraft: false,
+      ci: { passing: 1, pending: 0, failing: [] }, review: "none", unresolved: null,
+      mergeable: "clean", ciAdvisory: false,
+    };
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.buildRunStatus.mockReset().mockImplementation(
+      (i: { run: Run; ticket: { category: string | null } | null }) =>
+        i.run.kind === "local"
+          ? {
+              ...statusFor(i.run, i.ticket?.category ?? null),
+              agent: { state: "needs-you" as const, lastActivityMs: null, slug: null },
+              prs: { centaur: { facts, fetchedAt: Date.now() } },
+            }
+          : statusFor(i.run, i.ticket?.category ?? null),
+    );
+    show(true);
+    await settled();
+    const published = DeckPanel.latestCandidates();
+    expect(published?.candidates.length).toBe(1);
+    const [local] = published!.candidates;
+    expect(local.prs.centaur?.facts?.state).toBe("MERGED");
+    expect(attentionKeys(published!.candidates)).toEqual([]);
   });
 });

@@ -172,6 +172,16 @@ describe("nextAnnouncements", () => {
 
 describe("attentionKeys agrees with the column the Deck draws", () => {
   it("selects exactly the boarded candidates deriveBucket calls needs", () => {
+    // What this actually guards, since both sides below call the same
+    // `deriveBucket`/`shelfFor` from this same file — it is NOT a guard
+    // against a future `deriveBucket` precedence change, and `deckView.ts`
+    // is not even imported here. The real thing it pins is the one place
+    // `attentionKeys`'s own shelf check reads a DIFFERENT field than the
+    // column check right below it: `shelfFor`'s `prOpen` counts a draft PR as
+    // open (unmerged work in flight), while `prSignals(c.prs).open` — what
+    // feeds the column check — does not. The `isDraft: true` entry in
+    // `prSets` below exists to exercise exactly that seam; swap which of the
+    // two `prOpen`s attentionKeys reads and this fails.
     const states: AgentState[] = ["needs-you", "stalled", "exited", "working", "idle", "unknown"];
     const prSets: PrEntryMap[] = [
       {},
@@ -193,7 +203,10 @@ describe("attentionKeys agrees with the column the Deck draws", () => {
       }
     }
 
-    // The independent restatement: shelf, then column, exactly as buildAll does.
+    // `attentionKeys`'s own two-step logic, restated inline rather than called.
+    // Independent of `attentionKeys`'s CONTROL FLOW (its early `continue`, its
+    // one loop over `candidates`), but not of `deriveBucket`/`shelfFor`
+    // themselves — see the note above on what that does and does not prove.
     const expected = all
       .filter((c) => {
         const pr = prSignals(c.prs);
