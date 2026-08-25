@@ -29,14 +29,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a green one, so a pull request whose review-thread count could not be fetched
   keeps its button withheld.
 
-  On GitLab, `squash` and `merge` map onto `glab mr merge`, and `rebase` is
-  refused with a message, since GitLab's merge API takes no per-request rebase —
-  a project's own **Merge method** setting decides that. **The GitLab merge path
-  has never been run against a live `glab`.** It was built and tested against the
-  CLI's documented flags and exit behaviour only, so a GitLab user's first press
-  of **Merge** is also its first real execution; the refusal of `rebase` and the
-  wording of a failure are what we are least sure of. See
-  [docs/FORGES.md](docs/FORGES.md).
+  On GitLab, `squash` and `merge` both go through GitLab's own merge endpoint —
+  `PUT /projects/:id/merge_requests/:iid/merge`, issued through `glab api`, the
+  same REST passthrough every other GitLab call here uses — not the
+  `glab mr merge` porcelain. `squash` is the only strategy that endpoint accepts
+  per request, so `rebase` is refused with a message rather than substituted: a
+  project's own **Merge method** setting decides whether a non-squashed merge is
+  rebased or fast-forwarded. **The GitLab merge path has never been run against a
+  live `glab`.** It was built against GitLab's documented REST contract for that
+  endpoint and is covered by unit tests on the argv it produces and nothing more,
+  so a GitLab user's first press of **Merge** is also its first real execution;
+  what a refusal looks like coming back through `glab api` is what we are least
+  sure of. See [docs/FORGES.md](docs/FORGES.md).
 
 ## [0.41.1] — 2026-08-23
 

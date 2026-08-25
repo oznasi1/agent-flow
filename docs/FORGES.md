@@ -89,32 +89,43 @@ directory. Treat it as no safer to import from webview code than `github.ts` or
 | CI status on a card | in the PR query | not in the MR list | `prs.fetch` follows its list call with a single-MR read, because that is the only response carrying `head_pipeline` |
 | How many reviews are waiting in total? | `issueCount` | no total in the body | the count is however many rows came back, so a queue longer than 50 reads as complete rather than truncated |
 | Is a skipped required check green? | folded toward `SUCCESS` | `skipped` → `unknown` | GitLab is stricter; a skipped pipeline does not open a deploy gate |
-| Merge with a named strategy | `--squash` / `--merge` / `--rebase` on `gh pr merge` | `squash` is the only per-request override; the project's own **Merge method** setting decides whether a merge is rebased or fast-forwarded | `agentFlow.mergeMethod: rebase` is REFUSED with a message naming the setting, never silently merged another way — a substituted merge strategy is the one degradation a user cannot see afterwards. **This whole row is untested against a live `glab`** — see below |
+| Merge with a named strategy | `--squash` / `--merge` / `--rebase` on `gh pr merge` | `squash=true`/`false` on `PUT …/merge_requests/:iid/merge`, issued through `glab api` — the only per-request override there is; the project's own **Merge method** setting decides whether a merge is rebased or fast-forwarded | `agentFlow.mergeMethod: rebase` is REFUSED with a message naming the setting, never silently merged another way — a substituted merge strategy is the one degradation a user cannot see afterwards. **This whole row is untested against a live `glab`** — see below |
 
 ### GitLab merge is untested — stated, not verified
 
 **The GitLab merge path has never been run against a live `glab`.** `glab` was not
-installed on any machine this feature was built on, so `GlabProvider.prs.merge` was
-written from `glab mr merge`'s documented flags and is covered by unit tests against
-that documentation and nothing else. A GitLab user's first press of **Merge** is also
-its first real execution.
+installed on any machine this feature was built on. What `GlabProvider.prs.merge`
+actually runs is the REST passthrough, not the porcelain:
 
-That is the same mistake the section immediately below warns about — fixtures
-written from the docs rather than from a response — and it is recorded here rather
-than quietly shipped. Three things are therefore unproven on GitLab, in the order
-they are likely to bite:
+```
+glab api projects/:fullpath/merge_requests/<iid>/merge --method PUT -F squash=<bool>
+```
 
-- whether `glab mr merge --squash` and the plain merge succeed at all, and what a
-  success prints;
+— the same `glab api` mechanism every other call in that provider goes through. The
+route was chosen for exactly the reason this section exists: `glab mr merge`'s flags
+and output could not be pinned without a live `glab`, whereas GitLab's documented
+REST contract for `PUT …/merge` can be. So `merge()` was written against that
+contract and is covered by unit tests on the argv it produces — and nothing else. A
+GitLab user's first press of **Merge** is also its first real execution.
+
+A documented request contract is a genuinely stronger footing than a CLI's flags,
+so this is not quite the mistake the section immediately below records — fixtures
+written from the docs rather than from a response. What is unproven here is
+everything on the way *back*, and it is recorded rather than quietly shipped. Three
+things, in the order they are likely to bite:
+
+- whether the call succeeds at all against a real project, and what `glab api`
+  prints on success;
 - whether a refusal (an unapproved MR, a failing pipeline, a protected branch) comes
-  back as a non-zero exit with a message worth showing, which is what the failure
-  toast assumes;
+  back as a non-zero exit with GitLab's own message on stderr — which is what the
+  failure toast assumes, and `glab api` is the layer that decides it;
 - whether the `rebase` refusal — which Agent Flow Deck raises itself, before any CLI
   call — is the right call for a project whose **Merge method** is already
   *fast-forward*.
 
 If you use GitLab and press **Merge**, the output channel records the strategy and
-the response — please open an issue with what you saw, whichever way it went.
+whatever `glab api` came back with — please open an issue with what you saw,
+whichever way it went.
 
 ### The MR list carries no pipeline data — verified, not assumed
 
