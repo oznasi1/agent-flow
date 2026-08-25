@@ -89,6 +89,16 @@ export interface DoctorInputs {
     installUrl: string;
     gap: { kind: "missing" | "signed-out"; detail: string } | null;
     foundAt: string | null;
+    /** A human-readable mode, for a forge whose capability depends on which
+     *  build of its CLI is installed — `"passthrough (full)"` or
+     *  `"projected (limited — upgrade atlassian-cli for full support)"`. Null
+     *  (or omitted) for the forges that have exactly one mode, where a mode row
+     *  would be noise.
+     *
+     *  Structural rather than importing anything from `forge/`, matching how
+     *  `gap` is already declared here. Optional so the existing constructions
+     *  of this object elsewhere keep compiling untouched. */
+    mode?: string | null;
   };
   claudeCode: { installed: boolean; version: string | null };
   claudeProjectsReadable: boolean;
@@ -260,7 +270,11 @@ function forgeChecks(i: DoctorInputs): Check[] {
   // a signed-in user, as the Deck simply being broken.
   const where = f.foundAt ?? f.cli;
   if (!f.gap) {
-    return [{ group: f.label, label: f.cli, status: "ok", detail: `signed in — ${where}` }];
+    // Only a forge whose capability depends on the installed CLI build has a
+    // mode worth naming — GitHub and GitLab have exactly one, so `f.mode` is
+    // null there and this stays silent, matching the passing test's own row.
+    const mode = f.mode ? ` — ${f.mode}` : "";
+    return [{ group: f.label, label: f.cli, status: "ok", detail: `signed in — ${where}${mode}` }];
   }
   return [
     {

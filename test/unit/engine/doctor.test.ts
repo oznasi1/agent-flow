@@ -525,3 +525,29 @@ describe("runChecks — a GitLab forge", () => {
     expect(groups.has("GitHub")).toBe(false);
   });
 });
+
+describe("runChecks — forge mode", () => {
+  it("names the forge's mode when it has one, and stays silent when it does not", () => {
+    const withMode = runChecks({
+      ...healthy(),
+      forge: {
+        label: "Bitbucket",
+        cli: "atlassian-cli",
+        installUrl: "https://example.test/atlassian-cli",
+        gap: null,
+        foundAt: "/opt/homebrew/bin/atlassian-cli",
+        mode: "projected (limited)",
+      },
+    });
+    const row = withMode.find((c) => c.group === "Bitbucket");
+    // Exact equality, not just `.toContain`: a detail that leaked "undefined" or
+    // "null" alongside the mode string, or hardcoded the wrong mode, would still
+    // satisfy a bare substring check.
+    expect(row?.detail).toBe("signed in — /opt/homebrew/bin/atlassian-cli — projected (limited)");
+
+    // gh has one mode, so a mode row would be noise — byte-identical to the
+    // pre-mode wording, so a stray "— null"/"— undefined" suffix would fail this.
+    const noMode = runChecks({ ...healthy(), forge: { ...healthy().forge, mode: null } });
+    expect(noMode.find((c) => c.group === "GitHub")?.detail).toBe("signed in — /opt/homebrew/bin/gh");
+  });
+});
