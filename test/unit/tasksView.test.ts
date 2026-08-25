@@ -191,6 +191,8 @@ const CFG = {
   reviewRequests: true,
   reviewRequestsTtlSeconds: 300,
   reviewWrites: false,
+  mergeWrites: false,
+  mergeMethod: "squash" as const,
   orchestrator: false,
   reviewRequestModes: [{ id: "full", label: "Full review", prompt: "Review {url}{files}" }],
   reviewRequestMode: "ask",

@@ -1,6 +1,6 @@
 import {
   AgentFlowConfig, DEFAULT_ENVIRONMENTS, DEFAULT_EXPLORE_ACTIONS,
-  DEFAULT_PROMPT_MODES, shippedPrReviewPrompt, shippedReviewRequestModes,
+  DEFAULT_PROMPT_MODES, MERGE_METHODS, shippedPrReviewPrompt, shippedReviewRequestModes,
 } from "../config";
 import { PromptMode } from "../types";
 import { CONNECTOR_IDS } from "../tasks/registry";
@@ -119,6 +119,8 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     review_requests: cfg.reviewRequests,
     open_agents: cfg.openAgents,
     review_writes: cfg.reviewWrites,
+    merge_writes: cfg.mergeWrites,
+    merge_method: enumOrInvalid(cfg.mergeMethod, MERGE_METHODS),
     orchestrator: cfg.orchestrator,
     child_worktrees: cfg.childWorktrees,
     stamp_label_on_write: cfg.stampLabelOnWrite,

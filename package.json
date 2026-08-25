@@ -672,7 +672,18 @@
         "agentFlow.reviewWrites": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Allow submitting **approve / comment / request changes** to GitHub from the Deck's review strip. Off by default — this is the only setting that lets Agent Flow Deck write to GitHub. Every submit still asks for confirmation."
+          "markdownDescription": "Allow submitting **approve / comment / request changes** to GitHub from the Deck's review strip. Off by default — this is one of two settings that let Agent Flow Deck write to GitHub, alongside `#agentFlow.mergeWrites#`. Every submit still asks for confirmation."
+        },
+        "agentFlow.mergeWrites": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show a **Merge** button on a Deck card when its pull request is provably ready — approved, every check green, no unresolved review threads, and mergeable cleanly. Off by default: this is the only setting that lets Agent Flow Deck merge. Every merge still asks for confirmation, and names the strategy from `#agentFlow.mergeMethod#`. A card with two ready pull requests shows no button — merging one of a pair on a single click is not something this decides for you."
+        },
+        "agentFlow.mergeMethod": {
+          "type": "string",
+          "enum": ["squash", "merge", "rebase"],
+          "default": "squash",
+          "markdownDescription": "Which strategy a card's **Merge** button uses. Named in the confirmation dialog every time, so you always see it before the merge. Under `#agentFlow.forge#: gitlab` only `squash` and `merge` can be expressed per request — GitLab's own project **Merge method** setting decides whether a merge is rebased — so `rebase` is refused with a message rather than quietly merging another way. See [docs/FORGES.md](https://github.com/oznasi1/agent-flow/blob/main/docs/FORGES.md)."
         },
         "agentFlow.orchestrator": {
           "type": "boolean",

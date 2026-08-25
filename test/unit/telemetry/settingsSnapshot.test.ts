@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { AgentFlowConfig, DEFAULT_PROMPT_MODES, DEFAULT_REVIEW_REQUEST_MODES, getConfig } from "../../../src/config";
+import { AgentFlowConfig, DEFAULT_PROMPT_MODES, DEFAULT_REVIEW_REQUEST_MODES, MERGE_METHODS, getConfig } from "../../../src/config";
 import {
   AGENT_PROVIDERS, AGENT_SURFACES, DEFAULT_FILTER_VALUES, EXPLORE_MODES, OPEN_IN_MODES, REMOTE_CONTROL_MODES,
   settingsSnapshot, WORKSPACE_MODES, WORKTREE_MODES,
@@ -304,6 +304,10 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
     expect([...WORKTREE_MODES]).toEqual(props["agentFlow.worktree"].enum);
   });
 
+  it("keeps MERGE_METHODS in step with the manifest enum", () => {
+    expect([...MERGE_METHODS]).toEqual(props["agentFlow.mergeMethod"].enum);
+  });
+
   it("keeps REMOTE_CONTROL_MODES equal to agentFlow.remoteControl's manifest enum", () => {
     expect([...REMOTE_CONTROL_MODES]).toEqual(props["agentFlow.remoteControl"].enum);
   });
@@ -452,10 +456,10 @@ describe("settingsSnapshot — field-count guard", () => {
   // field is enum-ish, the "invalid" sentinel paragraph and its own field
   // list) — update the doc, don't just bump the number here.
 
-  it("emits exactly 41 fields — a count also stated in docs/TELEMETRY.md's " +
+  it("emits exactly 43 fields — a count also stated in docs/TELEMETRY.md's " +
     "'Settings snapshot' section; a mismatch means that doc is now wrong too", () => {
     const s = settingsSnapshot(getConfig());
-    expect(Object.keys(s)).toHaveLength(41);
+    expect(Object.keys(s)).toHaveLength(43);
   });
 
   it("reports the \"invalid\" sentinel on exactly 11 fields when every enum-ish " +
