@@ -29,6 +29,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Merge** button already followed. This is also what lets the new warning reach
   the card: those rows are drawn *instead of* the signal line, so the card most in
   need of the warning was the one that could not show it.
+## [0.44.1] — 2026-08-25
+
+### Changed
+
+- **The README and guide screenshots match the released UI again.** All five —
+  the Tasks sidebar, the Notepad, the Deck, and both Marketplace shots — are
+  reshot from the current bundles; the oldest had lagged the UI by three weeks.
 
 ## [0.44.0] — 2026-08-25
 
