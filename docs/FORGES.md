@@ -24,17 +24,19 @@ export interface Forge {
 ```
 
 Declared in `src/engine/forge/types.ts`, alongside `ForgeCaps` (what a forge can
-answer — today, just `changesRequested`) and `ForgeGap` (why `probe()` came back
-unhappy: `missing` or `signed-out`). `prs` is a `PrProvider`, `reviews` a
-`ReviewProvider` — both declared in `src/engine/pr/provider.ts` and
-`src/engine/review/provider.ts`, and shared with the pre-seam `gh`-only code
-they replaced.
+answer — `changesRequested` and `reviewSearch`, see §7 below) and `ForgeGap`
+(why `probe()` came back unhappy: `missing` or `signed-out`). `prs` is a
+`PrProvider`, `reviews` a `ReviewProvider` — both declared in
+`src/engine/pr/provider.ts` and `src/engine/review/provider.ts`, and shared with
+the pre-seam `gh`-only code they replaced. `Forge` also carries an optional
+`resolveCaps()` — see §7 — for a forge whose true capability cannot be known
+until its CLI has been probed.
 
-`agentFlow.forge` selects the active forge by id. Two are registered: `github`,
-which is the shipped default, and `gitlab`. `src/engine/forge/registry.ts`'s
-`FORGES` map is the full list; `FORGE_IDS` is exported so the manifest, the
-telemetry allowlist and the registry test all derive from it instead of a second
-hand-written list that can drift.
+`agentFlow.forge` selects the active forge by id. Three are registered: `github`,
+which is the shipped default, `gitlab`, and `bitbucket`.
+`src/engine/forge/registry.ts`'s `FORGES` map is the full list; `FORGE_IDS` is
+exported so the manifest, the telemetry allowlist and the registry test all
+derive from it instead of a second hand-written list that can drift.
 
 **Every registered id must appear in this file wrapped in backticks** —
 `test/unit/docs.test.ts` asserts it, so a new forge cannot ship undocumented.
@@ -42,7 +44,14 @@ hand-written list that can drift.
 ## 2. The one hard constraint
 
 `src/engine/forge/*` imports `child_process` and must never be imported — even
-transitively — by anything the webview bundles.
+transitively — by anything the webview bundles. `src/engine/pr/bb/provider.ts`
+reaches `child_process` the same way `pr/glab/provider.ts` does, through the
+injected `Runner`'s `execRunner`, and is subject to the identical rule. Its
+siblings `pr/bb/pr.ts`, `pr/bb/projected.ts` and `pr/bb/rest.ts` are pure — no
+import of `provider.ts`, `child_process`, or anything else that reaches it — so
+splitting the wire-shape mappers out of `provider.ts` is what keeps them safe to
+reference from anywhere, even though nothing under `src/webview/` needs them
+today.
 
 Two files this reaches through are on that graph **today**: `conditions.ts` and
 `branchCi.ts`. `OrchestratorDrawer.tsx` imports `conditions.ts` directly, and
@@ -77,7 +86,7 @@ keyword as a "cleanup" on a file that's "just types" and it reaches
 directory. Treat it as no safer to import from webview code than `github.ts` or
 `gitlab.ts`.
 
-## 3. What GitLab cannot answer
+## 3. What GitLab and Bitbucket cannot answer
 
 | Question | GitHub | GitLab | What the Deck does |
 |---|---|---|---|
@@ -90,6 +99,99 @@ directory. Treat it as no safer to import from webview code than `github.ts` or
 | How many reviews are waiting in total? | `issueCount` | no total in the body | the count is however many rows came back, so a queue longer than 50 reads as complete rather than truncated |
 | Is a skipped required check green? | folded toward `SUCCESS` | `skipped` → `unknown` | GitLab is stricter; a skipped pipeline does not open a deploy gate |
 | Merge with a named strategy | `--squash` / `--merge` / `--rebase` on `gh pr merge` | `squash=true`/`false` on `PUT …/merge_requests/:iid/merge`, issued through `glab api` — the only per-request override there is; the project's own **Merge method** setting decides whether a merge is rebased or fast-forwarded | `agentFlow.mergeMethod: rebase` is REFUSED with a message naming the setting, never silently merged another way — a substituted merge strategy is the one degradation a user cannot see afterwards. **This whole row is untested against a live `glab`** — see below |
+
+### Bitbucket has two modes
+
+`bitbucket` (via the `atlassian-cli` CLI) is not one forge with one capability
+set — it is two, selected by which build of the CLI is installed. Verified by
+reading `crates/cli/src/commands/bitbucket/` at `omar16100/atlassian-cli@main`:
+every `bb` subcommand deserializes Bitbucket's API response into a narrow
+hand-written row struct and re-serializes *that*, dropping the PR url, the
+draft flag, mergeable/conflict state, per-PR CI, per-reviewer identity,
+comment-resolution state and diff size along the way. A raw `bb api` passthrough
+exists in the CLI's own codebase — it is simply not wired to the Bitbucket
+command group yet (see the design spec's Appendix A for the four-line patch).
+Until it lands and ships, every install runs **projected** mode; once it does,
+an install on the newer build runs **passthrough** mode and gets parity with
+GitHub and GitLab on nearly everything below.
+
+Detected with `atlassian-cli bb api --help`: exit 0 means passthrough, a clap
+"unrecognized subcommand" error means projected. `--help` is handled at parse
+time, before workspace resolution and before any HTTP call, so detection costs
+no network round trip, needs no repo, and works signed out. Probed once per
+Deck session, memoized alongside `probe()`, and reset with it when settings
+change.
+
+`caps.reviewSearch` is `false` in **both** modes — this is not a mode
+difference. Bitbucket Cloud has no cross-repo "which PRs are waiting on my
+review" endpoint at all; the only workspace-level query,
+`GET /2.0/workspaces/{ws}/pullrequests/{user}`, returns PRs *authored by* that
+user, not PRs assigned to them as a reviewer. That is an API limit, not a CLI
+one, so a future passthrough build does not fix it. The review-requests strip
+is hidden on Bitbucket rather than shown empty or stale.
+
+Doctor reports which mode a Bitbucket install is running, not just whether the
+CLI is signed in — its Bitbucket group renders a mode row reading
+`passthrough (full)` or `projected (limited — upgrade atlassian-cli for full
+support)` (`FORGE_MODE_PASSTHROUGH` / `FORGE_MODE_PROJECTED` in
+`src/engine/doctor.ts`). Doctor is where a user goes when the board looks
+wrong, and "your board is mostly empty because you're on projected mode" is
+the answer they need to find there — a Bitbucket card in projected mode shows
+branch CI and little else.
+
+### What each mode answers
+
+| Question | GitHub | GitLab | BB passthrough | BB projected |
+|---|---|---|---|---|
+| Find PR by branch | `--head` | `source_branch=` | `q=source.branch.name` | client-side over 25 rows |
+| Find PR by Jira key | `in:title` | `search=&in=title` | `q=title~` | client-side substring |
+| PR url | yes | yes | `links.html.href` | **synthesized** |
+| Draft | `isDraft` | `draft` | `draft` | **always false** |
+| Mergeable | `mergeable` | `detailed_merge_status` | `/conflicts` | **`unknown`** |
+| Approved? | `reviewDecision` | approvals call | `participants[].state` | **`none`** |
+| Changes requested? | `reviewDecision` | **not exposed** | `participants[].state` | **`none`** |
+| Merge with a named strategy | all three | squash/merge only, rebase refused | all three (`merge_strategy` accepts `rebase_merge`) | squash/merge_commit only, rebase refused |
+| Unresolved threads | GraphQL | discussions | `comment.resolution` | **`null`** |
+| CI on a card | in the query | single-MR read | `/statuses` | pipeline verdict only |
+| Branch CI | rollup | newest pipeline | newest pipeline | newest pipeline |
+| Diff size in queue | in the search | file count only | `diffstat` real | n/a |
+| Reviews waiting on me | search | `reviews_for_me` | **none** | **none** |
+
+Passthrough mode beats GitLab on two rows — changes-requested and diff size —
+and on merge strategy, where GitLab cannot rebase at all but Bitbucket's REST
+`merge_strategy` enum accepts `rebase_merge`. It matches GitLab everywhere else
+except the review queue, which neither answers. Projected mode is a card with
+CI and little else.
+
+### Bitbucket merge is untested — stated, not verified
+
+**The Bitbucket merge path has never been run against a live `atlassian-cli`.**
+No one on this project has it installed, and it is not on the CI image — every
+wire shape here, merge included, comes from reading the CLI's Rust source and
+Bitbucket's OpenAPI spec, not from a real response. That is a genuinely
+stronger footing than guessing at undocumented CLI flags, and it is still not
+verification. A Bitbucket user's first press of **Merge** is also this code's
+first real execution, exactly as GitLab's is below — this project has now
+shipped that gap twice, and both are recorded rather than quietly papered over.
+
+Merge is mode-dependent, which is its own source of risk beyond "unverified":
+
+- **Passthrough** issues `bb api '/2.0/repositories/{ws}/{slug}/pullrequests/{id}/merge' -X POST -d '{"merge_strategy":"<strategy>"}'`.
+  Bitbucket's OpenAPI `pullrequest_merge_parameters` schema lists `merge_strategy`
+  as an enum of `merge_commit`, `squash`, and `rebase_merge` — all three of
+  Agent Flow's merge methods, matching GitHub and beating GitLab.
+- **Projected** issues `bb pr merge <slug> <id> --strategy <strategy> --format json`.
+  `bb pr merge --help` documents only `merge_commit`, `squash` and
+  `fast_forward` for `--strategy` — no rebase — so `agentFlow.mergeMethod:
+  rebase` is **refused before any CLI call**, with a message naming the setting,
+  exactly the same discipline GitLab's refusal below follows. Nothing is quietly
+  substituted; the argument is untyped on the CLI side, so silently forwarding
+  `rebase_merge` anyway was considered and rejected as a guess this design will
+  not make.
+
+If you use Bitbucket and press **Merge**, the output channel records the mode,
+the strategy, and whatever `atlassian-cli` came back with — please open an
+issue with what you saw either way.
 
 ### GitLab merge is untested — stated, not verified
 
@@ -171,3 +273,15 @@ write fixtures from what came back, not from what the docs list.
   the CLI through `resolveBin`, whose Homebrew/MacPorts fallbacks cover the bare
   launchd PATH the extension host inherits when the editor gives up resolving the
   user's shell environment.
+- **A forge whose capability depends on its CLI's version states the weaker
+  mode in its static `caps` and the truth from `resolveCaps()`.** `bitbucket`'s
+  static `caps.changesRequested` is `false` — the safe answer for a fresh
+  install, which is always on projected mode until Appendix A ships — and
+  `resolveCaps()` reports `true` once the CLI has actually been probed and
+  found to have `bb api`. Anything that reads `caps` synchronously (a pure
+  module like `armability.ts`, which must not import this directory) sees only
+  the static, conservative value; only `deckView`'s `caps()` accessor, which
+  awaits `resolveCaps()` once per session, sees the live one. Getting this
+  backwards — a static `caps` that claims the stronger mode — would let
+  `armability.ts` promise an orchestrator rule that a projected build can never
+  actually fire.
