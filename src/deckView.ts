@@ -108,6 +108,35 @@ const VERB_LABEL: Record<ReviewVerb, string> = {
   "request-changes": "Request changes",
 };
 
+/** What "request changes" actually does on a forge that has no such review state,
+ *  keyed by forge id — because the two forges in that position differ
+ *  MATERIALLY, not cosmetically.
+ *
+ *  GitLab DEGRADES: `GlabReviewProvider.submit` really does post the note and
+ *  withdraw any standing approval, which is what the default wording below
+ *  describes. A projected `atlassian-cli` REFUSES: `BbReviewProvider.submit`
+ *  returns `ok: false` before it builds a single argv, because that build has no
+ *  way to request changes at all. Telling a Bitbucket user we will post their
+ *  message as a comment would be a confirmation dialog describing a write that
+ *  never happens — and they would press it, see an error toast, and have no idea
+ *  which of the two statements was true.
+ *
+ *  Keyed lookup rather than a ternary for the same reason `READ_ONLY_PROMPT` is
+ *  one: a fourth forge with no changes-requested state gets the honest generic
+ *  wording until someone writes its own. */
+const NO_CHANGES_REQUESTED_DETAIL: Record<string, string> = {
+  bitbucket:
+    "This build of atlassian-cli has no way to request changes, so this will be refused — " +
+    "upgrade to one with `bb api`, or use the pull request in your browser.",
+};
+
+export function noChangesRequestedDetail(forge: { id: string; label: string }): string {
+  return Object.hasOwn(NO_CHANGES_REQUESTED_DETAIL, forge.id)
+    ? NO_CHANGES_REQUESTED_DETAIL[forge.id]
+    : `${forge.label} has no "request changes" review, so this posts your message as a comment ` +
+      "and withdraws your approval if you had one.";
+}
+
 /** What the confirmation dialog calls each strategy. The dialog names the
  * resolved `agentFlow.mergeMethod` every time, so the setting can never merge a
  * way the user did not see. */
@@ -2416,12 +2445,13 @@ export class DeckPanel {
     this.reviewSubmitsInFlight.add(id);
     try {
       const label = VERB_LABEL[verb];
-      // GitLab has no stable "request changes" verb, so ours is a note plus a
-      // withdrawal of any standing approval. That is materially different from
-      // GitHub's, and the person clicking deserves to know before they click.
+      // A forge with no "request changes" review does something else instead, and
+      // the person clicking deserves to know WHICH something before they click:
+      // GitLab degrades to a note plus a withdrawn approval, a projected
+      // atlassian-cli refuses outright. See `noChangesRequestedDetail`.
       const detail =
         verb === "request-changes" && !this.caps().changesRequested
-          ? `${this.forge.label} has no "request changes" review, so this posts your message as a comment and withdraws your approval if you had one.`
+          ? noChangesRequestedDetail(this.forge)
           : undefined;
       const answer = await vscode.window.showWarningMessage(
         `${label} on ${req.repo}#${req.number}?`,

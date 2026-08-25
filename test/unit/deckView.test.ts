@@ -529,7 +529,9 @@ vi.mock("../../src/config", async (importActual) => {
     }),
   };
 });
-import { DeckPanel, POLL_MS, USAGE_POLL_MS, reviewProvenance, shellCommandRunner } from "../../src/deckView";
+import {
+  DeckPanel, POLL_MS, USAGE_POLL_MS, noChangesRequestedDetail, reviewProvenance, shellCommandRunner,
+} from "../../src/deckView";
 // The real ceiling, not a number restated here: a call site that passed a literal
 // (or nothing at all) would still satisfy a test that hardcoded 120_000.
 import { COMMAND_TIMEOUT_MS } from "../../src/engine/orchestrator/command";
@@ -3804,6 +3806,38 @@ describe("DeckPanel review submit", () => {
       { modal: true, detail: expect.stringContaining('GitLab has no "request changes" review') },
       "Request changes",
     );
+  });
+
+  // The Bitbucket half of the same disclosure, unit-tested directly because the
+  // review strip is hidden on Bitbucket (`caps.reviewSearch` is false in both
+  // modes), so the modal above cannot be reached through a panel there today —
+  // and the wording must still be right the day it can. GitLab DEGRADES; a
+  // projected atlassian-cli REFUSES, before it builds a single argv. Telling a
+  // Bitbucket user we would post their message as a comment describes a write
+  // that never happens.
+  describe("noChangesRequestedDetail", () => {
+    it("does not promise Bitbucket a mechanism its projected mode refuses outright", () => {
+      const detail = noChangesRequestedDetail({ id: "bitbucket", label: "Bitbucket" });
+      expect(detail).not.toContain("posts your message as a comment");
+      expect(detail).not.toContain("withdraws your approval");
+      expect(detail).toContain("refused");
+      // Names the way out, the same way the provider's own refusal does.
+      expect(detail).toContain("bb api");
+    });
+
+    it("keeps GitLab's degradation wording, which its provider really performs", () => {
+      expect(noChangesRequestedDetail({ id: "gitlab", label: "GitLab" }))
+        .toBe('GitLab has no "request changes" review, so this posts your message as a comment ' +
+          "and withdraws your approval if you had one.");
+    });
+
+    it("gives an unregistered forge the generic wording rather than another forge's", () => {
+      // `Object.hasOwn`, not a bare index: `constructor` must not resolve to a
+      // truthy non-string and be shown to a user as a confirmation detail.
+      for (const id of ["not-a-forge", "constructor", "__proto__"]) {
+        expect(noChangesRequestedDetail({ id, label: "Gitea" })).toContain('Gitea has no "request changes" review');
+      }
+    });
   });
 
   // The other side of that disclosure: `approve` and `comment` mean exactly what
@@ -8421,6 +8455,37 @@ describe("arm, disarm and reset", () => {
     // report this" to read naturally alongside its siblings "1 needs PR facts"
     // and "1 needs the Live signal".
     expect(toast?.message).toContain("1 rule's forge cannot report this");
+  });
+
+  // The negative of the test above, and the ONLY thing that exercises the
+  // `resolveCaps()` assignment in `forgeReady()`: deleting that whole `void
+  // this.forge.resolveCaps?.().then(...)` block left all 556 tests in this file
+  // passing. Bitbucket in passthrough mode is the one forge whose caps are only
+  // knowable after a probe — `caps.changesRequested` is statically false and
+  // becomes true once `bb api --help` has answered — so with the block gone,
+  // `caps()` falls back to the conservative static record and this flow is told
+  // its rule can never fire, when in fact it can. Restore the block and this is
+  // green; delete it and it goes red.
+  it("does NOT name a changes-requested rule unfirable on a passthrough bitbucket", async () => {
+    setConfig({ orchestrator: true, forge: "bitbucket" });
+    // `bb api --help` exiting zero is the entire passthrough signal (probeBbApi),
+    // and the mocked `execRunner` seam is what atlassian-cli spawns through here —
+    // the same seam the gitlab cases above use, with no new mock of its own.
+    h.ghRun.mockResolvedValue("Usage: atlassian-cli bb api <PATH>");
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "changes-requested" }, action: "notify" }],
+    }];
+    const { p, send } = await openPanel();
+    // Bitbucket's caps are ASYNC, unlike gitlab's static record: the probe is
+    // kicked off inside the tick that first reads it, so it cannot have settled by
+    // the time that tick returns. One warmed tick, exactly as `showAndWarm` does.
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(true);
+    expect(posts(p).some((m) => m.type === "toast" && /can never fire/i.test(m.message ?? ""))).toBe(false);
   });
 
   it("flow:arm with armed:false disarms", async () => {

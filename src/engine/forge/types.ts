@@ -56,11 +56,27 @@ export interface Forge {
   /** Capabilities that cannot be known until the CLI has been probed — for a CLI
    *  whose command surface differs by version, where the same forge id is more
    *  capable on a newer build. Resolved once per Deck session, alongside
-   *  `probe()`, and reset with it when settings change.
+   *  `probe()`, and re-resolved with it when settings change.
+   *
+   *  Re-resolved, but not necessarily re-PROBED: `deckView` clears its memo and
+   *  calls this again, while the `Forge` object itself is built once in the
+   *  panel's constructor, so an implementation that memoizes its probe (see
+   *  `makeBitbucketForge`'s `once`) answers the second call from the first
+   *  probe's result. The mode a Bitbucket install is in therefore lasts the
+   *  panel's life, and installing a newer CLI mid-session needs the Deck
+   *  reopened.
    *
    *  Optional on purpose: a forge whose caps are fully static omits this, and
    *  the static `caps` record above stands. That is what keeps this addition
-   *  inert for `github` and `gitlab`. */
+   *  inert for `github` and `gitlab`.
+   *
+   *  **This MUST NEVER REJECT.** `deckView.forgeReady()` calls it as
+   *  `void this.forge.resolveCaps?.().then(...)` with no `.catch()`, so a
+   *  rejection here is an unhandled promise rejection on a background tick — not
+   *  a caught degradation. An implementation that probes (Bitbucket spawns
+   *  `bb api --help`) owns that probe's failure itself and answers with the
+   *  CONSERVATIVE caps, which is the same thing `caps` above already claims. A
+   *  cap this cannot establish is false, never a throw. */
   resolveCaps?(): Promise<ForgeCaps>;
   /** Is the CLI installed and logged in? Probed once per Deck session. */
   probe(): Promise<ForgeGap | null>;
