@@ -42,11 +42,19 @@ const READ_ONLY_GITLAB_PROMPT =
 /** The Bitbucket wording: substitution-only, same relationship to
  *  `READ_ONLY_GITHUB_PROMPT` as `READ_ONLY_GITLAB_PROMPT` has. Bitbucket's own
  *  nouns: "pull request" (not "merge request"), and "destination branch" (not
- *  "base branch" or "target branch"). */
+ *  "base branch" or "target branch").
+ *
+ *  The ref is `refs/pull-requests/{n}/from`, and the LEAF is the part to get
+ *  right: all three forges spell this differently and only the namespace is
+ *  obviously forge-flavoured. GitHub is `refs/pull/{n}/head`, GitLab is
+ *  `refs/merge-requests/{n}/head`, and Bitbucket Cloud is
+ *  `refs/pull-requests/{n}/from` — Bitbucket's own namespace with GitHub's `head`
+ *  leaf is a ref that exists on no forge at all, and the fetch would simply fail
+ *  for the reviewer. */
 const READ_ONLY_BITBUCKET_PROMPT =
   'Review pull request {url} — {repo}#{number}, "{summary}", by {author}. ' +
   "Do NOT check the branch out — this repo may be someone's live checkout, and other reviews may be running beside you. " +
-  "Fetch the pull request's own commit instead: `git fetch origin refs/pull-requests/{number}/head` gives you FETCH_HEAD, and " +
+  "Fetch the pull request's own commit instead: `git fetch origin refs/pull-requests/{number}/from` gives you FETCH_HEAD, and " +
   "`git merge-base HEAD FETCH_HEAD` gives you its destination branch point. Read the diff with `git diff <destination>...FETCH_HEAD`, and read any " +
   "file at the pull request's own revision with `git show FETCH_HEAD:<path>` — never from the working tree, which is on a different commit. " +
   "Assess correctness, edge cases, tests, and anything that would break in production. " +

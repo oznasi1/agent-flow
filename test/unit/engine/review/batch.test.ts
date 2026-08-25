@@ -35,7 +35,12 @@ describe("readOnlyReviewMode", () => {
 
   it("names Bitbucket's own ref and vocabulary under the bitbucket forge", () => {
     const m = readOnlyReviewMode("bitbucket");
-    expect(m.prompt).toContain("refs/pull-requests/{number}/head");
+    // `/from`, not `/head`. All three forges spell this ref differently and the
+    // LEAF is the easy half to get wrong: Bitbucket's `refs/pull-requests/`
+    // namespace with GitHub's `head` leaf is a ref that exists on no forge at
+    // all, so the reviewer's fetch just fails.
+    expect(m.prompt).toContain("refs/pull-requests/{number}/from");
+    expect(m.prompt).not.toContain("refs/pull-requests/{number}/head");
     expect(m.prompt).toContain("pull request");
     expect(m.prompt).toContain("destination branch");
     expect(m.prompt).not.toContain("merge request");
