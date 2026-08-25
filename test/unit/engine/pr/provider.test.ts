@@ -249,8 +249,13 @@ describe("GhProvider.merge", () => {
   });
 
   it("prefers stderr — GitHub's own wording — over the reconstructed command line", async () => {
+    // The two fields carry DIVERGENT text on purpose: `stripCommandLine(message)`
+    // would return "gh: exit status 1", so only an implementation that actually
+    // prefers `stderr` can produce the expected message. A fixture whose stderr
+    // merely repeats message's trailing half passes either way, and proves only
+    // that the result is argv-free.
     const err = Object.assign(
-      new Error("Command failed: gh pr merge 4821 --squash\nPull request is not mergeable: the merge commit cannot be cleanly created."),
+      new Error("Command failed: gh pr merge 4821 --squash\ngh: exit status 1"),
       { stderr: "Pull request is not mergeable: the merge commit cannot be cleanly created." },
     );
     const { run } = scripted(err);
