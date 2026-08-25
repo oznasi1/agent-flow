@@ -119,8 +119,8 @@ Detected with `atlassian-cli bb api --help`: exit 0 means passthrough, a clap
 "unrecognized subcommand" error means projected. `--help` is handled at parse
 time, before workspace resolution and before any HTTP call, so detection costs
 no network round trip, needs no repo, and works signed out. Probed once per
-Deck session, memoized alongside `probe()`, and reset with it when settings
-change.
+Deck session, memoized for the panel's entire life, and survives settings
+changes — a newly installed or upgraded `atlassian-cli` is picked up on a window reload.
 
 `caps.reviewSearch` is `false` in **both** modes — this is not a mode
 difference. Bitbucket Cloud has no cross-repo "which PRs are waiting on my
