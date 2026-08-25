@@ -6,10 +6,14 @@ import type { Runner } from "../../../../src/engine/pr/provider";
 const never: Runner = async () => { throw new Error("no call expected"); };
 
 describe("FORGE_IDS", () => {
-  // The one place this list is pinned. It was asserted twice — here and again at
-  // the end of the `resolveForge` block — under a title ("both shipped forges")
-  // that had counted two since before Bitbucket existed. One assertion, one
-  // accurate title.
+  // The registry's own pin on this list. Its title used to say "both shipped
+  // forges" — a count that had been right since before Bitbucket existed, and
+  // stopped being right the moment it did.
+  //
+  // The other pin lives in `test/unit/telemetry/settingsSnapshot.test.ts`, which
+  // checks this list against the manifest's `agentFlow.forge` enum. That one is
+  // a different assertion, not a duplicate of this one: it catches a forge
+  // registered in code but never offered in settings.
   it("lists exactly the three registered forges, github first", () => {
     expect(FORGE_IDS).toEqual(["github", "gitlab", "bitbucket"]);
   });
