@@ -2498,6 +2498,18 @@ export class DeckPanel {
       release();
       return;
     }
+    // The board only treats the PR store as authoritative while `prFacts` is on:
+    // with it off it posts `prs: {}`, so no card can render a Merge button and no
+    // honest message can arrive here. A crafted one still could, and it would merge
+    // off facts the board itself declines to show — so the write needs the same
+    // gate the render has. `this.prFacts` rather than `cfg.prFacts`, matching every
+    // other read of it in this class: that field is the value the currently-posted
+    // board was built from, and `onConfigChanged` re-seeds it.
+    if (!this.prFacts) {
+      this.log(`deck: mergePr ignored — agentFlow.prFacts is off`);
+      release();
+      return;
+    }
     const run = this.run(key);
     if (!run) {
       this.toast("error", `No run record for ${key}.`);
@@ -2535,7 +2547,10 @@ export class DeckPanel {
     try {
       const label = MERGE_LABEL[cfg.mergeMethod];
       const answer = await vscode.window.showWarningMessage(
-        `${label} on ${target.repo}#${target.number}?`,
+        // No preposition: every label is already a verb phrase, so `Squash and merge
+        // svc#124?` and `Merge svc#124?` both read as sentences, where the old
+        // `Merge on svc#124?` read as a typo.
+        `${label} ${target.repo}#${target.number}?`,
         { modal: true, detail: "Approved, every check green, and no unresolved review threads." },
         label,
       );

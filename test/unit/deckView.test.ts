@@ -4262,6 +4262,21 @@ describe("deck:mergePr", () => {
     expect(posts(p)).toContainEqual(CANCELLED());
   });
 
+  it("releases the button when prFacts is off, however green the stored facts", async () => {
+    // The store is only authoritative while `prFacts` is on — with it off the board
+    // posts `prs: {}`, so no card renders a Merge button and no honest message can
+    // arrive. A crafted one would otherwise merge off facts the board itself
+    // declines to show, which is the whole reason the write re-gates what the render
+    // gated.
+    h.mergeWrites = true;
+    h.prFacts = false;
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(h.prMerge).not.toHaveBeenCalled();
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual(CANCELLED());
+  });
+
   it("releases the button for a key with no run record", async () => {
     h.mergeWrites = true;
     const p = await openWith(greenFacts());
@@ -4317,6 +4332,25 @@ describe("deck:mergePr", () => {
     expect(message).toContain("Squash and merge");
     expect(opts).toMatchObject({ modal: true });
     expect(h.prMerge).toHaveBeenCalledWith("/r/svc", 124, "squash");
+  });
+
+  // `Merge on svc#124?` read like a typo. Every label is already a verb phrase, so
+  // the dialog drops the preposition and reads as a sentence for all three. Pinned
+  // exactly, not by substring: this is the one string the user parses with a write
+  // behind it, and a substring assertion would not have caught the old wording.
+  it.each([
+    ["squash", "Squash and merge", "Squash and merge svc#124?"],
+    ["merge", "Merge", "Merge svc#124?"],
+    ["rebase", "Rebase and merge", "Rebase and merge svc#124?"],
+  ] as const)("asks about %s as a sentence, with no preposition", async (method, label, expected) => {
+    h.mergeWrites = true;
+    h.mergeMethod = method;
+    vi.mocked(window.showWarningMessage).mockResolvedValue(label);
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    const [message] = vi.mocked(window.showWarningMessage).mock.calls[0] as [string, unknown];
+    expect(message).toBe(expected);
+    expect(h.prMerge).toHaveBeenCalledWith("/r/svc", 124, method);
   });
 
   it("passes the configured strategy through, not a hardcoded squash", async () => {
