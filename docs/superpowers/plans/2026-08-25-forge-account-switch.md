@@ -21,7 +21,7 @@ Copied verbatim from `CLAUDE.md` and the spec. Every task's requirements implici
 - **Coverage thresholds are enforced** by `npm run test:cov`: 90% lines, 90% statements, 85% branches, 85% functions (`vitest.config.ts`).
 - **No hardcoded organization values.** No literal `"gh"` in the webview, no site, project key, or account name anywhere.
 - **Vocabulary.** A *session* is one run of a coding tool; an *agent* is a worker a session delegates to. Identifiers keep their released spelling. `test/unit/vocabulary.test.ts` enforces this.
-- **Docs are tested.** `test/unit/docs.test.ts` asserts the `Forge` interface block in `docs/FORGES.md` matches the real one. Task 2 fails CI without its docs edit.
+- **Docs.** `test/unit/docs.test.ts` asserts only that every id in `FORGE_IDS` appears in `docs/FORGES.md` in backticks — it does **not** diff the `Forge` interface block. (Corrected after Task 2: the earlier claim here was wrong.) This change registers no new forge, so that test passes with or without the docs edit. Update §1's interface block anyway — the spec requires it, and nothing else will catch it going stale.
 - **Every user-facing change gets a `## [Unreleased]` entry** in `CHANGELOG.md` (Task 5).
 - **Work in a git worktree.** `main` moves fast — several sessions land on it a day, and one is already live in this checkout. Re-check `main`'s HEAD before starting.
 

@@ -283,8 +283,15 @@ is the signal to stop and revisit this section.
 - **Cancellation.** Dismissing the QuickPick or declining the modal invalidates
   nothing and switches nothing.
 - **Docs.** `docs/FORGES.md` must gain `ForgeAccount`, `caps.accounts`,
-  `accounts()` and `switchAccount()` — `test/unit/docs.test.ts` asserts the
-  interface block matches.
+  `accounts()` and `switchAccount()`.
+
+  Note, corrected after implementation: `test/unit/docs.test.ts` does **not**
+  assert the interface block matches the real interface. It asserts only that
+  every id in `FORGE_IDS` appears somewhere in `docs/FORGES.md` wrapped in
+  backticks. Since this change registers no new forge, that test passes whether
+  the interface block is updated or not — so keeping §1's code block honest is a
+  manual discipline here, not a gate. Worth knowing before trusting "docs are
+  tested" to catch a stale interface block.
 
 Coverage thresholds are 90% lines/statements and 85% branches/functions
 (`vitest.config.ts`), enforced by `npm run test:cov`.
