@@ -224,3 +224,75 @@ describe("bbBranchCi", () => {
     await expect(bbBranchCi(run, () => BB, async () => false, "/r", "main")).resolves.toBe("unknown");
   });
 });
+
+describe("BbProvider.merge", () => {
+  it("maps each method to Bitbucket's own strategy name, in passthrough mode", async () => {
+    for (const [method, strategy] of [["squash", "squash"], ["merge", "merge_commit"], ["rebase", "rebase_merge"]] as const) {
+      const { run, calls } = routed({ "remote.origin.url": REMOTE, "/merge": "{}" });
+      await expect(provider(run, true).merge("/r", 42, method)).resolves.toEqual({ ok: true });
+      const merge = calls.find((c) => c.args.some((a) => a.includes("/merge")))!;
+      expect(merge.args[2]).toContain("/2.0/repositories/acme/api-service/pullrequests/42/merge");
+      expect(merge.args).toContain("POST");
+      expect(merge.args.join(" ")).toContain(strategy);
+    }
+  });
+
+  it("merges through the CLI's own subcommand in projected mode", async () => {
+    const { run, calls } = routed({ "remote.origin.url": REMOTE, "merge": "{}" });
+    await expect(provider(run, false).merge("/r", 42, "squash")).resolves.toEqual({ ok: true });
+    const merge = calls.find((c) => c.args.includes("merge"))!;
+    expect(merge.args).toEqual([
+      "--workspace", "acme", "bb", "pr", "merge", "api-service", "42",
+      "--strategy", "squash", "--format", "json",
+    ]);
+  });
+
+  it("REFUSES rebase in projected mode instead of substituting a strategy", async () => {
+    // The one degradation a user cannot see after the fact — the commit is
+    // already made. Must name the setting so they can act on it.
+    const { run, calls } = routed({ "remote.origin.url": REMOTE });
+    const res = await provider(run, false).merge("/r", 42, "rebase");
+    expect(res).toMatchObject({ ok: false });
+    expect((res as { message: string }).message).toContain("agentFlow.mergeMethod");
+    expect(calls.some((c) => c.args.includes("merge"))).toBe(false);
+  });
+
+  it("DOES rebase in passthrough mode, where Bitbucket's REST enum has one", async () => {
+    // The one place Bitbucket beats GitLab, which has no per-request rebase at all.
+    const { run } = routed({ "remote.origin.url": REMOTE, "/merge": "{}" });
+    await expect(provider(run, true).merge("/r", 42, "rebase")).resolves.toEqual({ ok: true });
+  });
+
+  it("fails closed on a method outside the union, prototype keys included", async () => {
+    const { run, calls } = routed({ "remote.origin.url": REMOTE });
+    await expect(provider(run, true).merge("/r", 42, "constructor" as never)).resolves.toMatchObject({ ok: false });
+    expect(calls.some((c) => c.args.includes("merge"))).toBe(false);
+  });
+
+  it("fails when the checkout has no Bitbucket remote", async () => {
+    const { run } = routed({ "remote.origin.url": "https://github.com/acme/api-service.git" });
+    await expect(provider(run, false).merge("/r", 42, "squash")).resolves.toMatchObject({ ok: false });
+  });
+
+  it("says the merge may already have landed when the CLI is killed", async () => {
+    // Not the same as a refusal: a merge is not idempotent, so claiming Bitbucket
+    // refused would invite a retry that merges twice.
+    const { run } = routed({
+      "remote.origin.url": REMOTE,
+      "merge": Object.assign(new Error("killed"), { killed: true }),
+    });
+    const res = await provider(run, false).merge("/r", 42, "squash");
+    expect((res as { message: string }).message).toMatch(/may already have gone through/);
+  });
+
+  it("prefers the CLI's stderr over the reconstructed argv", async () => {
+    const { run } = routed({
+      "remote.origin.url": REMOTE,
+      "merge": Object.assign(new Error("Command failed: /opt/homebrew/bin/atlassian-cli bb pr merge ..."), {
+        stderr: "403 Forbidden: you do not have write access to this repository",
+      }),
+    });
+    const res = await provider(run, false).merge("/r", 42, "squash");
+    expect((res as { message: string }).message).toBe("403 Forbidden: you do not have write access to this repository");
+  });
+});

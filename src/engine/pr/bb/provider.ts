@@ -10,10 +10,10 @@ import type { BranchCiStatus } from "../../orchestrator/branchCi";
 // interfaces-only module whose safety rests on every import of and from it being
 // erased at build time (see its header).
 import type { ForgeGap } from "../../forge/types";
-import { execRunner } from "../provider";
+import { execRunner, stripCommandLine } from "../provider";
 import type { FetchResult, Locate, PrProvider, Runner } from "../provider";
 import { resolveBin } from "../which";
-import { PrFacts } from "../../../types";
+import { MergeMethod, PrFacts } from "../../../types";
 import { BbRepo, parseBitbucketRemote, pickBbPr } from "./pr";
 import { BbProjectedPr, projectedBranchStatus, projectedCi, toProjectedFacts } from "./projected";
 import {
@@ -105,7 +105,16 @@ const pipelineArgs = (repo: BbRepo, branch: string): string[] => [
   "--branch", branch, "--recent", "1", "--format", "json",
 ];
 
-const apiArgs = (path: string): string[] => ["bb", "api", path, "--format", "json"];
+// `method`/`body` are optional and appended after `path`, so every existing call
+// site — `apiArgs(path)`, read-only — produces the exact argv it always did.
+// `-X`/`-d` are `bb api`'s own flags for an HTTP method and a JSON body (see
+// `ApiArgs` in the CLI's `crates/cli/src/commands/api.rs`).
+const apiArgs = (path: string, method?: string, body?: string): string[] => [
+  "bb", "api", path,
+  ...(method ? ["-X", method] : []),
+  ...(body !== undefined ? ["-d", body] : []),
+  "--format", "json",
+];
 
 // `q` is Bitbucket's own filter-expression syntax (`source.branch.name="…"`),
 // so its OPERATORS — the `=`, the `"` quotes, the `&` separating this from
@@ -132,6 +141,23 @@ const prSubPath = (repo: BbRepo, id: number, leaf: string): string =>
 const pipelinesPath = (repo: BbRepo, branch: string): string =>
   `/2.0/repositories/${repo.workspace}/${repo.slug}/pipelines?target.ref_name=${encodeURIComponent(branch)}` +
   `&sort=-created_on&pagelen=1`;
+
+const prMergePath = (repo: BbRepo, id: number): string =>
+  `/2.0/repositories/${repo.workspace}/${repo.slug}/pullrequests/${id}/merge`;
+
+/** Agent Flow's three merge methods in Bitbucket's own vocabulary.
+ *
+ * `rebase` maps only on the passthrough path: Bitbucket's REST `merge_strategy`
+ * enum carries `rebase_merge`, but `bb pr merge --strategy` documents only
+ * `merge_commit`, `squash` and `fast_forward`. Its argument is an untyped
+ * `Option<String>` so it might forward `rebase_merge` anyway — that is exactly
+ * the kind of undocumented behaviour this project has already shipped a bug on,
+ * so projected mode refuses rather than guesses (see `BbProvider.merge`). */
+const BB_STRATEGY: Record<MergeMethod, string> = {
+  squash: "squash",
+  merge: "merge_commit",
+  rebase: "rebase_merge",
+};
 
 async function jsonList(p: Promise<string>): Promise<unknown[]> {
   const parsed = JSON.parse(await p) as unknown;
@@ -264,6 +290,62 @@ export class BbProvider implements PrProvider {
       return JSON.parse(await exec(this.run, this.locate, repoPath, apiArgs(prSubPath(repo, id, leaf)))) as unknown;
     } catch {
       return null;
+    }
+  }
+
+  /** Merge this repo's pull request. Along with the review write path, one of only
+   * two places Agent Flow writes to a forge. The caller confirms with the user
+   * first; this refuses only what Bitbucket would refuse anyway.
+   *
+   * `Object.hasOwn`, not `!BB_STRATEGY[method]`: `agentFlow.mergeMethod` reaches
+   * here from settings.json and can be any string, including a prototype key like
+   * `"constructor"` that a bare index would resolve to a truthy non-strategy. */
+  async merge(
+    repoPath: string,
+    number: number,
+    method: MergeMethod,
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    if (!Object.hasOwn(BB_STRATEGY, method)) {
+      return { ok: false, message: `Unknown merge method: ${String(method)}` };
+    }
+    const repo = await repoOf(this.run, this.locate, repoPath);
+    if (!repo) return { ok: false, message: "This checkout has no Bitbucket Cloud remote." };
+    const passthrough = await this.apiMode();
+    // Refused, never substituted: a merge strategy we quietly swapped is the one
+    // degradation the user cannot see after the fact — the commit is already made.
+    if (method === "rebase" && !passthrough) {
+      return {
+        ok: false,
+        message:
+          "This build of atlassian-cli can only merge with squash or merge_commit — `bb pr merge` has no rebase " +
+          "strategy. Set agentFlow.mergeMethod to squash or merge, upgrade to a build with `bb api`, or merge from Bitbucket.",
+      };
+    }
+    try {
+      await (passthrough
+        ? exec(this.run, this.locate, repoPath, apiArgs(
+            prMergePath(repo, number), "POST", JSON.stringify({ merge_strategy: BB_STRATEGY[method] }),
+          ))
+        : exec(this.run, this.locate, repoPath, [
+            "--workspace", repo.workspace, "bb", "pr", "merge", repo.slug, String(number),
+            "--strategy", BB_STRATEGY[method], "--format", "json",
+          ]));
+      return { ok: true };
+    } catch (e) {
+      const err = e as { killed?: boolean; code?: unknown; stderr?: string };
+      // A killed-by-timeout rejection has the same shape as any other failure and
+      // means something different: the CLI may well have reached Bitbucket before
+      // the clock ran out. A merge is NOT idempotent, so "Bitbucket refused" would
+      // be a lie about a write that could have landed — and would invite a retry
+      // that merges twice.
+      if (err.killed || err.code === "ETIMEDOUT") {
+        return {
+          ok: false,
+          message: `Timed out after ${BB_TIMEOUT_MS / 1000}s — the merge may already have gone through. Open the pull request to check.`,
+        };
+      }
+      // stderr is the CLI's own complaint; `.message` is the reconstructed argv.
+      return { ok: false, message: err.stderr?.trim() || (e instanceof Error ? stripCommandLine(e.message) : String(e)) };
     }
   }
 }
