@@ -82,7 +82,19 @@ mode**. `--help` is handled at parse time, before workspace resolution and befor
 any HTTP, so this costs no network call, needs no repo, and works signed out.
 
 Probed **once per Deck session**, memoized alongside `probe()` in
-`deckView.ts:1658`, and reset with it when settings change (`deckView.ts:2992`).
+`deckView.ts:1658`.
+
+> **Post-implementation correction (2026-08-25, final branch review).** This
+> paragraph originally ended "…and reset with it when settings change
+> (`deckView.ts:2992`)". That is not what ships, and the distinction matters.
+> `deckView` does clear its own `forgeCaps` memo on a settings change and call
+> `resolveCaps()` again — but the `Forge` object itself is built ONCE, in the
+> panel's constructor, and `makeBitbucketForge`'s `once()` holds the `bb api
+> --help` answer for that object's whole life. So the second `resolveCaps()`
+> re-reads the FIRST probe's result: the mode a Bitbucket install is in lasts
+> the panel's life, and installing a newer `atlassian-cli` mid-session needs
+> the Deck reopened, not a setting toggled. The seam's own docblock in
+> `src/engine/forge/types.ts` now states this.
 
 ### 3.2 Why both modes ship
 
@@ -324,9 +336,19 @@ It is implemented rather than stubbed, because the `Forge` interface requires a
 `ReviewProvider` and a stub would lie the day the strip is enabled:
 
 - `search()` → `null`. Never called; documented as such.
-- `detail()` → passthrough: `diffstat` (`lines_added`/`lines_removed`) plus the
-  statuses call, so the row's size and CI chips are real. Projected: `null`
-  (`bb pr diff` is a stub, and there is no failing-checks projection).
+- `detail()` → passthrough: the statuses call, so the row's CI chip is real.
+  Projected: `null` (`bb pr diff` is a stub, and there is no failing-checks
+  projection).
+
+  > **Post-implementation correction (2026-08-25, final branch review).** This
+  > bullet asked for a `diffstat` call (`lines_added`/`lines_removed`) alongside
+  > the statuses call, and `detail()` never made one. Rather than add it, the
+  > claim is withdrawn: diff size is a fact about a review QUEUE ROW, and
+  > `caps.reviewSearch` is false in BOTH Bitbucket modes, so there is no queue
+  > row for it to fill and no way to see it. Implementing an unreachable network
+  > call against a wire shape no one here has seen come back is the exact
+  > failure mode docs/FORGES.md already records twice. docs/FORGES.md's mode
+  > table now reads n/a on that row for both modes.
 - `submit()` → passthrough: `approve` and `request-changes` via `bb api -X POST`,
   `comment` via the comments endpoint. Projected: `bb pr approve` and
   `bb pr comment --text`, with `request-changes` refused.
@@ -384,12 +406,13 @@ install, which is the direction that destroys the metric.
 | Unresolved threads | GraphQL | discussions | `comment.resolution` | **`null`** |
 | CI on a card | in the query | single-MR read | `/statuses` | pipeline verdict only |
 | Branch CI | rollup | newest pipeline | newest pipeline | newest pipeline |
-| Diff size in queue | in the search | file count only | `diffstat` real | n/a |
+| Diff size in queue | in the search | file count only | **n/a** (see the correction in §7) | n/a |
 | Reviews waiting on me | search | `reviews_for_me` | **none** | **none** |
 
-Passthrough mode beats GitLab on two rows — changes-requested and diff size —
-and matches it everywhere else except the review queue. Projected mode is a card
-with CI and little else.
+Passthrough mode beats GitLab on one row — changes-requested — and matches it
+everywhere else except the review queue and diff size, neither of which
+Bitbucket answers in either mode (see the §7 correction). Projected mode is a
+card with CI and little else.
 
 ## 9. Verification gates
 

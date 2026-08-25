@@ -6,7 +6,11 @@ import type { Runner } from "../../../../src/engine/pr/provider";
 const never: Runner = async () => { throw new Error("no call expected"); };
 
 describe("FORGE_IDS", () => {
-  it("lists both shipped forges, github first", () => {
+  // The one place this list is pinned. It was asserted twice — here and again at
+  // the end of the `resolveForge` block — under a title ("both shipped forges")
+  // that had counted two since before Bitbucket existed. One assertion, one
+  // accurate title.
+  it("lists exactly the three registered forges, github first", () => {
     expect(FORGE_IDS).toEqual(["github", "gitlab", "bitbucket"]);
   });
 });
@@ -105,10 +109,6 @@ describe("resolveForge", () => {
       args.includes("--help") ? "Usage: atlassian-cli bb api <PATH>" : "";
     const caps = await makeBitbucketForge(run).resolveCaps?.();
     expect(caps?.reviewSearch).toBe(false);
-  });
-
-  it("lists exactly the three registered forges", () => {
-    expect(FORGE_IDS).toEqual(["github", "gitlab", "bitbucket"]);
   });
 });
 

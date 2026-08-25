@@ -154,14 +154,24 @@ branch CI and little else.
 | Unresolved threads | GraphQL | discussions | `comment.resolution` | **`null`** |
 | CI on a card | in the query | single-MR read | `/statuses` | pipeline verdict only |
 | Branch CI | rollup | newest pipeline | newest pipeline | newest pipeline |
-| Diff size in queue | in the search | file count only | `diffstat` real | n/a |
+| Diff size in queue | in the search | file count only | **n/a** | **n/a** |
 | Reviews waiting on me | search | `reviews_for_me` | **none** | **none** |
 
-Passthrough mode beats GitLab on two rows — changes-requested and diff size —
-and on merge strategy, where GitLab cannot rebase at all but Bitbucket's REST
+Passthrough mode beats GitLab on one row — changes-requested — and on merge
+strategy, where GitLab cannot rebase at all but Bitbucket's REST
 `merge_strategy` enum accepts `rebase_merge`. It matches GitLab everywhere else
 except the review queue, which neither answers. Projected mode is a card with
 CI and little else.
+
+Diff size is **n/a in both Bitbucket modes**, and that is a consequence of the
+row below it rather than a gap of its own: diff size is a fact about a REVIEW
+QUEUE ROW, and Bitbucket has no review queue in either mode. `BbReviewProvider.detail()`
+accordingly makes no `/diffstat` call — there is no row for it to fill.
+Bitbucket's `/diffstat` route would give real additions and deletions if the
+strip were ever reachable here, which is more than GitLab's file-count-only
+answer; until it is, this table says n/a rather than claiming a capability the
+code does not have. An earlier draft of this table claimed `diffstat` real for
+passthrough, which was never true of the shipped code.
 
 ### Bitbucket merge is untested — stated, not verified
 
@@ -178,8 +188,12 @@ Merge is mode-dependent, which is its own source of risk beyond "unverified":
 
 - **Passthrough** issues `bb api '/2.0/repositories/{ws}/{slug}/pullrequests/{id}/merge' -X POST -d '{"merge_strategy":"<strategy>"}'`.
   Bitbucket's OpenAPI `pullrequest_merge_parameters` schema lists `merge_strategy`
-  as an enum of `merge_commit`, `squash`, and `rebase_merge` — all three of
-  Agent Flow's merge methods, matching GitHub and beating GitLab.
+  as an enum of `merge_commit`, `squash`, `fast_forward`, `squash_fast_forward`,
+  `rebase_fast_forward` and `rebase_merge` — covering all three of Agent Flow's
+  merge methods, matching GitHub and beating GitLab. **`rebase_merge` is real in
+  that schema and re-verified against it, and like everything else in this
+  section it has never been exercised against a live instance** — the enum is a
+  documented contract, not a response anyone here has seen come back.
 - **Projected** issues `bb pr merge <slug> <id> --strategy <strategy> --format json`.
   `bb pr merge --help` documents only `merge_commit`, `squash` and
   `fast_forward` for `--strategy` — no rebase — so `agentFlow.mergeMethod:
