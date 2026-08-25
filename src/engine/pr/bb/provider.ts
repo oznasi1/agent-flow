@@ -108,10 +108,21 @@ const pipelineArgs = (repo: BbRepo, branch: string): string[] => [
 const apiArgs = (path: string): string[] => ["bb", "api", path, "--format", "json"];
 
 // `q` is Bitbucket's own filter-expression syntax (`source.branch.name="…"`),
-// not a single opaque value, so it is embedded raw rather than
-// `encodeURIComponent`-ed whole — encoding it would turn the `=` and `"` the
-// syntax depends on into `%3D`/`%22` and the server would read a filter it
-// does not recognise as a syntax error, not as "no results".
+// so its OPERATORS — the `=`, the `"` quotes, the `&` separating this from
+// `state=OPEN&pagelen=10` — must reach the server literally: encoding the whole
+// expression would turn them into `%3D`/`%22`/`%26` and the server would read a
+// filter it does not recognise as a syntax error, not as "no results".
+//
+// The INTERPOLATED VALUE is a different matter and must be encoded by the
+// caller before it reaches here (see the two call sites in `fetchRest`) — a
+// branch or task key is attacker- and user-controlled text, not part of the
+// filter grammar. Unescaped, a branch containing `&` injects bogus query
+// params and truncates `&state=OPEN&pagelen=10` off the end; one containing `#`
+// starts a fragment that strips everything after it client-side, silently
+// dropping the state/pagelen constraints; one containing `+` can be read as a
+// literal space, turning a real PR into a false "no PR". `pipelinesPath`, two
+// lines below, already encodes its own interpolated `branch` for exactly this
+// reason — this is that same convention, not an exception to it.
 const prSearchPath = (repo: BbRepo, q: string): string =>
   `/2.0/repositories/${repo.workspace}/${repo.slug}/pullrequests?q=${q}&state=OPEN&pagelen=10`;
 
@@ -218,8 +229,14 @@ export class BbProvider implements PrProvider {
     repoPath: string, repo: BbRepo, branch: string | null, key: string,
   ): Promise<FetchResult> {
     let found: BbRestPr | undefined;
-    if (branch) found = pickBbPr(await this.search(repoPath, prSearchPath(repo, `source.branch.name="${branch}"`)));
-    if (!found) found = pickBbPr(await this.search(repoPath, prSearchPath(repo, `title~"${key}"`)));
+    if (branch) {
+      found = pickBbPr(
+        await this.search(repoPath, prSearchPath(repo, `source.branch.name="${encodeURIComponent(branch)}"`)),
+      );
+    }
+    if (!found) {
+      found = pickBbPr(await this.search(repoPath, prSearchPath(repo, `title~"${encodeURIComponent(key)}"`)));
+    }
     if (!found) return { ok: true, facts: null };
     const id = found.id as number; // `pickBbPr` only ever returns a row whose id is a number.
 

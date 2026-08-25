@@ -133,7 +133,23 @@ describe("BbProvider.fetch — passthrough mode", () => {
     });
     expect(calls[1].args[0]).toBe("bb");
     expect(calls[1].args[1]).toBe("api");
-    expect(calls[1].args[2]).toContain('/2.0/repositories/acme/api-service/pullrequests?q=source.branch.name="feat/ASM-1"');
+    // The branch VALUE is percent-encoded (its `/` becomes `%2F`); the filter's
+    // own `=`, `"` and the trailing `&state=OPEN&pagelen=10` clause stay literal.
+    expect(calls[1].args[2]).toContain('/2.0/repositories/acme/api-service/pullrequests?q=source.branch.name="feat%2FASM-1"&state=OPEN&pagelen=10');
+  });
+
+  it("encodes a branch's `&` as a value, so the filter's own `&state=OPEN` clause survives intact", async () => {
+    // Unescaped, a branch named `feat/a&b` would inject a bogus `b="` query
+    // param and truncate `&state=OPEN&pagelen=10` off the end — the search
+    // would then return PRs of ANY state, not just OPEN ones. This is the case
+    // ruling G exists to pin: mutate the value-encoding back to raw
+    // interpolation and this must go red.
+    const { run, calls } = routed({
+      "remote.origin.url": REMOTE,
+      "source.branch.name": JSON.stringify({ values: [REST_PR] }),
+    });
+    await provider(run, true).fetch("/repos/api-service", "feat/a&b", "ASM-1");
+    expect(calls[1].args[2]).toContain('q=source.branch.name="feat%2Fa%26b"&state=OPEN&pagelen=10');
   });
 
   it("keeps the PR when a detail call fails, losing only that detail", async () => {
