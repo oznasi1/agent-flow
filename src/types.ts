@@ -355,6 +355,10 @@ export type PrEntryMap = Record<string, PrEntry>;
 export type ReviewSize = "S" | "M" | "L";
 export type ReviewSort = "oldest" | "smallest";
 export type ReviewVerb = "approve" | "comment" | "request-changes";
+/** How a merge is performed. One spelling shared by the `agentFlow.mergeMethod`
+ * setting, the confirmation dialog, and each forge provider's flag map — a second
+ * spelling anywhere is a merge strategy the user did not choose. */
+export type MergeMethod = "squash" | "merge" | "rebase";
 
 /** One PR asking for your review — everything the strip renders unexpanded.
  * `localPath`, `runKey` and `draftPath` are observed locally on every refresh and
