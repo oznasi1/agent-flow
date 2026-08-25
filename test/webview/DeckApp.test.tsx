@@ -3058,6 +3058,63 @@ describe("the card's Merge row", () => {
     await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(false));
   });
 
+  it("is absent on a local card even with mergeWrites on", async () => {
+    // The `local ||` short-circuit is otherwise only ever exercised with the
+    // setting OFF, where `!mergeWrites` alone would withhold the row — so the
+    // guard could be deleted and the suite would stay green. A local card's
+    // ticket is inferred from a branch name that may belong to somebody else's
+    // ticket, and merging off that inference on one click is what must never
+    // ship. Same shape, and same reasoning, as the action-row local tests.
+    render(<DeckApp />);
+    host({
+      ...runsMsg([mkStatus({
+        run: { ...mkStatus().run, key: "local-a", url: "", kind: "local" } as never,
+        prs: { svc: { facts: mergeablePr(), fetchedAt: 1 } },
+      })]),
+      mergeWrites: true,
+    });
+    // waitFor over a bare tick, then assert the absence: an async read from an
+    // earlier test can land its postMessage in this one, and a queryBy that ran
+    // before this test's own message rendered would pass for the wrong reason.
+    await waitFor(() => expect(screen.getByText("local")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+    expect(document.querySelector(".card .c-rows")).toBeNull();
+  });
+
+  it("keeps the button disabled after a successful merge, and drops the row once the facts catch up", async () => {
+    // The re-arm window. `deck:mergeDone` releases on "failed" and "cancelled" but
+    // NOT on "ok", because `r.prs` still holds the pre-merge OPEN facts for up to a
+    // poll window after the merge landed — so a symmetric release would put a live
+    // Merge button back on an already-merged PR, and a second click would reach the
+    // forge. The host stales the entry on success; when the refetched facts say
+    // MERGED the row goes away on its own.
+    render(<DeckApp />);
+    host({ ...runsMsg([withPr(mergeablePr())]), mergeWrites: true });
+    const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
+    fireEvent.click(btn);
+    host({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 2044, outcome: "ok" });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(true));
+    // Still disabled after a fresh board post that carries the STALE open facts —
+    // the exact poll that used to re-arm it.
+    host({ ...runsMsg([withPr(mergeablePr())]), mergeWrites: true });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(true));
+    // And gone once the refetch lands the truth.
+    host({ ...runsMsg([withPr({ ...mergeablePr(), state: "MERGED" })]), mergeWrites: true });
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Merge" })).toBeNull());
+  });
+
+  it("re-enables the button after a failed merge — the PR is still open", async () => {
+    // The other half of the asymmetry: "failed" means nothing landed, so the row
+    // must come back for a second try.
+    render(<DeckApp />);
+    host({ ...runsMsg([withPr(mergeablePr())]), mergeWrites: true });
+    const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
+    fireEvent.click(btn);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(true));
+    host({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 2044, outcome: "failed" });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
   it("clicking Merge does not select the card", async () => {
     // The problem rows already stopPropagation for this reason and the merge row
     // shares their container; this pins that it kept the behaviour. Asserting on

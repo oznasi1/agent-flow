@@ -471,12 +471,26 @@ export function DeckApp(): JSX.Element {
         setSyncedAt(Date.now());
         setHasLoaded(true);
       } else if (m.type === "deck:mergeDone") {
-        // Keyed, not a single slot: the reply can land after the board re-rendered.
-        setMerging((s) => {
-          const next = { ...s };
-          delete next[`${m.key}:${m.repo}#${m.number}`];
-          return next;
-        });
+        // Deliberately asymmetric on `outcome`, and NOT to be tidied into matching
+        // `deck:reviewSubmitDone`'s release-on-any-outcome below. A review leaves
+        // the PR open, so its row must come back either way. A merge does not:
+        // on "ok" the PR is merged, but `r.prs` still holds the pre-merge OPEN
+        // facts until the next `deck:runs` — a poll window plus fetch latency —
+        // so releasing here re-renders the same "approved · green · no open
+        // threads" row with a live Merge button over a PR that is already gone.
+        // Clicking it passes the host's re-check (the success path stales the
+        // entry but leaves the facts saying OPEN) and fires a second merge that
+        // only the forge refuses. The host's staling is what resolves this: the
+        // next tick refetches, the refreshed facts say MERGED, and the row
+        // disappears — taking its disabled button with it.
+        if (m.outcome !== "ok") {
+          // Keyed, not a single slot: the reply can land after the board re-rendered.
+          setMerging((s) => {
+            const next = { ...s };
+            delete next[`${m.key}:${m.repo}#${m.number}`];
+            return next;
+          });
+        }
       } else if (m.type === "deck:usage") {
         // Keyed rather than a single "current drawer" slot: a reply can land after
         // the user has moved to another card, and dropping it would leave the new
