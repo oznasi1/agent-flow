@@ -74,8 +74,9 @@ const h = vi.hoisted(() => ({
   writeReviewCache: vi.fn(),
   // Row expansion (Task 9): the two facts the search cannot return.
   reviewDetail: vi.fn(async (_repo: string, _number: number): Promise<ReviewDetail | null> => ({ failing: [], unresolved: null })),
-  // The write path (Task 14): the only setting that lets the Deck post to GitHub,
-  // the Jira-provenance toggle reused for a review body, and the submit call itself.
+  // The review write path (Task 14): the setting that lets the Deck post a review to
+  // GitHub — one of the two write settings, alongside `mergeWrites` below — the
+  // Jira-provenance toggle reused for a review body, and the submit call itself.
   reviewWrites: false as boolean,
   stampLabelOnWrite: true as boolean,
   seedAgent: true as boolean,

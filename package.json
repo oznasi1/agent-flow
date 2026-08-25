@@ -677,7 +677,7 @@
         "agentFlow.mergeWrites": {
           "type": "boolean",
           "default": false,
-          "markdownDescription": "Show a **Merge** button on a Deck card when its pull request is provably ready — approved, every check green, no unresolved review threads, and mergeable cleanly. Off by default: this is the only setting that lets Agent Flow Deck merge. Every merge still asks for confirmation, and names the strategy from `#agentFlow.mergeMethod#`. A card with two ready pull requests shows no button — merging one of a pair on a single click is not something this decides for you."
+          "markdownDescription": "Show a **Merge** button on a Deck card when its pull request is provably ready — approved, every check green, no unresolved review threads, and mergeable cleanly. Off by default: this is the only setting that lets Agent Flow Deck merge. Every merge still asks for confirmation, and names the strategy from `#agentFlow.mergeMethod#`. A card needs exactly one pull request left to merge, with every other repo's already merged: two ready pull requests show no button, and neither does a card whose sibling repo still has one open — merging one of a coupled pair on a single click is not something this decides for you."
         },
         "agentFlow.mergeMethod": {
           "type": "string",

@@ -89,7 +89,32 @@ directory. Treat it as no safer to import from webview code than `github.ts` or
 | CI status on a card | in the PR query | not in the MR list | `prs.fetch` follows its list call with a single-MR read, because that is the only response carrying `head_pipeline` |
 | How many reviews are waiting in total? | `issueCount` | no total in the body | the count is however many rows came back, so a queue longer than 50 reads as complete rather than truncated |
 | Is a skipped required check green? | folded toward `SUCCESS` | `skipped` → `unknown` | GitLab is stricter; a skipped pipeline does not open a deploy gate |
-| Merge with a named strategy | `--squash` / `--merge` / `--rebase` on `gh pr merge` | `squash` is the only per-request override; the project's own **Merge method** setting decides whether a merge is rebased or fast-forwarded | `agentFlow.mergeMethod: rebase` is REFUSED with a message naming the setting, never silently merged another way — a substituted merge strategy is the one degradation a user cannot see afterwards |
+| Merge with a named strategy | `--squash` / `--merge` / `--rebase` on `gh pr merge` | `squash` is the only per-request override; the project's own **Merge method** setting decides whether a merge is rebased or fast-forwarded | `agentFlow.mergeMethod: rebase` is REFUSED with a message naming the setting, never silently merged another way — a substituted merge strategy is the one degradation a user cannot see afterwards. **This whole row is untested against a live `glab`** — see below |
+
+### GitLab merge is untested — stated, not verified
+
+**The GitLab merge path has never been run against a live `glab`.** `glab` was not
+installed on any machine this feature was built on, so `GlabProvider.prs.merge` was
+written from `glab mr merge`'s documented flags and is covered by unit tests against
+that documentation and nothing else. A GitLab user's first press of **Merge** is also
+its first real execution.
+
+That is the same mistake the section immediately below warns about — fixtures
+written from the docs rather than from a response — and it is recorded here rather
+than quietly shipped. Three things are therefore unproven on GitLab, in the order
+they are likely to bite:
+
+- whether `glab mr merge --squash` and the plain merge succeed at all, and what a
+  success prints;
+- whether a refusal (an unapproved MR, a failing pipeline, a protected branch) comes
+  back as a non-zero exit with a message worth showing, which is what the failure
+  toast assumes;
+- whether the `rebase` refusal — which Agent Flow Deck raises itself, before any CLI
+  call — is the right call for a project whose **Merge method** is already
+  *fast-forward*.
+
+If you use GitLab and press **Merge**, the output channel records the strategy and
+the response — please open an issue with what you saw, whichever way it went.
 
 ### The MR list carries no pipeline data — verified, not assumed
 
