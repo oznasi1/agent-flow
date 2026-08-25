@@ -350,6 +350,13 @@ export interface PrEntry {
 /** Repo name → its PR entry, as stored per run and rendered per card. */
 export type PrEntryMap = Record<string, PrEntry>;
 
+/** The footer legend's account entry: which CLI, acting as whom. */
+export interface AccountSlot {
+  cli: string;
+  login: string;
+  canSwitch: boolean;
+}
+
 // ── Review requests: PRs waiting on you ─────────────────────────────────────
 
 export type ReviewSize = "S" | "M" | "L";

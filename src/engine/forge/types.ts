@@ -17,6 +17,15 @@ import type { ReviewProvider } from "../review/provider";
  * could not validate. `detail` is for the log; the Deck shows only the kind. */
 export type ForgeGap = { kind: "missing" | "signed-out"; detail: string };
 
+/** One account the forge's CLI holds credentials for. `scopes` is display-only —
+ *  it goes in the QuickPick's detail line so a user with two similar logins can
+ *  tell them apart, and nothing branches on it. */
+export interface ForgeAccount {
+  login: string;
+  active: boolean;
+  scopes: string;
+}
+
 /** What a forge can answer, for the questions where they genuinely differ. Held
  * as data rather than probed, because the consumers are pure modules that must
  * not import this directory. */
