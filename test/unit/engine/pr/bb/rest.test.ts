@@ -28,6 +28,37 @@ describe("toRestFacts", () => {
     });
   });
 
+  it("pins every field of the returned PrFacts, not a subset", () => {
+    // This test uses toEqual with a complete object, not toMatchObject with a
+    // subset of keys. It catches mutations that hardcode fields (e.g. review:
+    // "approved") because the participants here include a reviewer with
+    // changes_requested, which must flow through mapBbReview into the facts.
+    const ci = { passing: 1, pending: 0, failing: [] };
+    const facts = toRestFacts(
+      {
+        id: 42,
+        title: "Add export",
+        state: "OPEN",
+        draft: false,
+        links: { html: { href: "https://bitbucket.org/acme/api-service/pull-requests/42" } },
+        participants: [{ role: "REVIEWER", approved: false, state: "changes_requested" }],
+      },
+      { ci, mergeable: "conflicting", unresolved: 2 },
+    );
+    expect(facts).toEqual({
+      number: 42,
+      url: "https://bitbucket.org/acme/api-service/pull-requests/42",
+      title: "Add export",
+      state: "OPEN",
+      isDraft: false,
+      ci,
+      review: "changes_requested",
+      unresolved: 2,
+      mergeable: "conflicting",
+      ciAdvisory: false,
+    });
+  });
+
   it("returns null without an id or a usable html link", () => {
     expect(toRestFacts({ ...PR, id: "42" }, { ci: NO_CI, mergeable: "unknown", unresolved: null })).toBeNull();
     expect(toRestFacts({ ...PR, links: {} }, { ci: NO_CI, mergeable: "unknown", unresolved: null })).toBeNull();
