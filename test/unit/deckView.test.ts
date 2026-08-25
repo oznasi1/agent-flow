@@ -546,6 +546,11 @@ import { DEFAULT_REVIEW_REQUEST_MODES } from "../../src/config";
 // answers with — including the fallback-to-the-main-checkout a batch must refuse.
 import { createWorktrees } from "../../src/engine/worktree";
 import { TaskAuthError } from "../../src/tasks/provider";
+// Not mocked (only the GitHub-flavored `pr/provider` and `review/provider`
+// modules are, above): Bitbucket's real classes are what the forge selection
+// tests below drive through `setConfig({ forge: "bitbucket" })`, exactly as the
+// gitlab tests already drive the real GlabProvider/GlabReviewProvider.
+import { BbReviewProvider } from "../../src/engine/review/bb/provider";
 
 describe("reviewProvenance", () => {
   it("stamps the drafting agent's name", () => {
@@ -2782,6 +2787,36 @@ describe("forge selection", () => {
     expect(note).toContain("glab");
     expect(note).not.toContain("gh CLI");
   });
+
+  // Task 7 gives `caps()` its first REAL `resolveCaps()` to fall back from.
+  // Bitbucket's `reviewSearch` is false in both of its modes (see
+  // src/engine/forge/bitbucket.ts), so `reviewsEnabled()` must stay false
+  // regardless of which mode the (mocked) probe resolves to, and the strip's
+  // own sweep must never reach the provider at all.
+  it("hides the review strip entirely on bitbucket, and never asks its provider to search", async () => {
+    setConfig({ forge: "bitbucket" });
+    const search = vi.spyOn(BbReviewProvider.prototype, "search");
+    try {
+      const p = await showAndWarm();
+      expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({ enabled: false });
+      expect(search).not.toHaveBeenCalled();
+    } finally {
+      search.mockRestore();
+    }
+  });
+
+  // The other half of the same fallback: github has no `resolveCaps` at all
+  // (registry.test.ts pins this), so `caps()` must keep reading `forge.caps`
+  // statically on every tick this suite's other fixtures rely on — Task 1's
+  // addition of `resolveCaps`/`caps()` must be a no-op for a forge that never
+  // had one.
+  it("still reads github's static caps with no resolveCaps to fall back from", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({ enabled: true });
+    expect(h.reviewSearch).toHaveBeenCalled();
+  });
 });
 
 describe("DeckPanel review strip", () => {
@@ -3751,7 +3786,8 @@ describe("DeckPanel review submit", () => {
 
   // Task 10: GitLab has no stable "request changes" verb, so ours degrades to a
   // comment plus withdrawing any standing approval — gated on
-  // `this.forge.caps.changesRequested`, the one capability that differs by
+  // `this.caps().changesRequested` (Task 7: preferring a resolved value over the
+  // static record when a forge has one), the one capability that differs by
   // forge. The person clicking deserves to know before they click, not after.
   it("discloses GitLab's request-changes semantics in the confirmation modal", async () => {
     setConfig({ forge: "gitlab" });
@@ -8364,12 +8400,14 @@ describe("arm, disarm and reset", () => {
     expect(toast).toBeTruthy();
   });
 
-  // Task 10 threads `forge: this.forge.caps` through this call site — until now,
+  // Task 10 threads `forge: this.caps()` through this call site — until now,
   // `unfirableRules` was always called with no `forge` at all, so the
   // "forge-unsupported" branch (Task 9, armability.ts) was dead code from here.
-  // `caps` is static data on the `Forge` object, resolved synchronously at
-  // construction, so this needs no probe-warming tick the way a PR-facts or
-  // footer-note test does.
+  // GitLab has no `resolveCaps` (Task 7's addition is a no-op for it), so
+  // `caps()` here just reads the static `Forge.caps` record — no probe-warming
+  // tick is needed the way a PR-facts or footer-note test needs one. A forge
+  // that DOES resolve its caps asynchronously (Bitbucket) is covered in the
+  // "forge selection" suite instead.
   it("flow:arm names a changes-requested rule as forge-unsupported on gitlab", async () => {
     setConfig({ orchestrator: true, forge: "gitlab" });
     h.flows = [{

@@ -1,4 +1,5 @@
 import type { Runner } from "../pr/provider";
+import { makeBitbucketForge } from "./bitbucket";
 import { makeGithubForge } from "./github";
 import { makeGitlabForge } from "./gitlab";
 import type { Forge } from "./types";
@@ -8,6 +9,7 @@ import type { Forge } from "./types";
 const FORGES: Record<string, (run?: Runner) => Forge> = {
   github: makeGithubForge,
   gitlab: makeGitlabForge,
+  bitbucket: makeBitbucketForge,
 };
 
 /** The registered ids. Exported so the telemetry snapshot's allowlist and the
