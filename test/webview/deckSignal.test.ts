@@ -326,3 +326,36 @@ describe("cardSignal — an unread PR", () => {
     expect(bits.some((b) => b.kind === "text" && b.text.startsWith("⚠"))).toBe(false);
   });
 });
+
+describe("cardActions — an unread PR authorizes nothing", () => {
+  const failed = (f: PrFacts): PrEntryMap =>
+    ({ svc: { facts: f, fetchedAt: 1, error: true } }) as PrEntryMap;
+
+  it("offers no button when the facts behind it could not be re-read", () => {
+    // `mergeTarget` already refuses such an entry — stale facts do not authorize a
+    // write however green they look. A button that seeds a session is a smaller
+    // commitment than a merge but the same kind of claim: it says "this IS the
+    // problem", off a reading that may be an hour stale and already resolved.
+    const f = facts({ ci: { passing: 0, pending: 0, failing: [{ name: "e2e", url: "" }] },
+      review: "changes_requested", mergeable: "conflicting" });
+    expect(cardActions(status({ prs: failed(f) }))).toEqual([]);
+  });
+
+  it("still offers the buttons when the same facts were read cleanly", () => {
+    // The guard must key on the READ failing, never on the facts themselves —
+    // otherwise it silently disables every button on the board.
+    const f = facts({ ci: { passing: 0, pending: 0, failing: [{ name: "e2e", url: "" }] },
+      review: "changes_requested", mergeable: "conflicting" });
+    expect(cardActions(status({ prs: pr(f) }))).toHaveLength(3);
+  });
+
+  it("lets the warning reach the card, since the rows no longer replace it", () => {
+    // DeckApp draws the action rows INSTEAD of the signal line. While cardActions
+    // spoke for an unread PR, the row won and the warning was never rendered —
+    // the one card that most needed it was the one that could not show it.
+    const f = facts({ number: 863, review: "approved", mergeable: "conflicting" });
+    const s = status({ prs: failed(f) });
+    expect(cardActions(s)).toEqual([]);
+    expect(cardSignal(s, null)[0]).toMatchObject({ text: "⚠ PR unread" });
+  });
+});

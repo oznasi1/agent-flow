@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and Doctor gains a **PR reads** row under its forge group. The row is separate
   from the CLI row on purpose — `auth status` asks a global question and passes
   even when every per-repository read fails, so the two are allowed to disagree.
+- **A card no longer offers to fix a problem it could not re-read.** The
+  **Fix CI**, **Resolve conflict** and **Address review** rows keyed off whatever
+  the last successful fetch had said, so a failed read left a card naming — and
+  offering to seed a session against — a conflict that may have been resolved an
+  hour earlier. They now withhold on an unreadable pull request, the same rule the
+  **Merge** button already followed. This is also what lets the new warning reach
+  the card: those rows are drawn *instead of* the signal line, so the card most in
+  need of the warning was the one that could not show it.
 
 
 ## [0.43.0] — 2026-08-25

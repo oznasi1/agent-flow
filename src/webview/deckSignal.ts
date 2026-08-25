@@ -23,13 +23,18 @@ const REVIEW_TEXT: Record<PrFacts["review"], string> = {
  * one it must pick the same one every render: the first failing PR by repo name,
  * else the first PR by repo name. Sorting is what makes it deterministic —
  * `Object.entries` order follows insertion, which the host does not promise. */
-function leadPr(r: RunStatus): PrFacts | null {
+function leadPrEntry(r: RunStatus): { facts: PrFacts; failed: boolean } | null {
   const withFacts = Object.entries(r.prs)
-    .map(([repo, e]) => [repo, e.facts] as const)
-    .filter((x): x is readonly [string, PrFacts] => x[1] !== null)
+    .map(([repo, e]) => [repo, e.facts, e.error === true] as const)
+    .filter((x): x is readonly [string, PrFacts, boolean] => x[1] !== null)
     .sort((a, b) => a[0].localeCompare(b[0]));
   if (withFacts.length === 0) return null;
-  return (withFacts.find(([, f]) => f.ci.failing.length > 0) ?? withFacts[0])[1];
+  const [, facts, failed] = withFacts.find(([, f]) => f.ci.failing.length > 0) ?? withFacts[0];
+  return { facts, failed };
+}
+
+function leadPr(r: RunStatus): PrFacts | null {
+  return leadPrEntry(r)?.facts ?? null;
 }
 
 /**
@@ -139,7 +144,18 @@ export interface SignalAction {
  * contradict the bits they replace.
  */
 export function cardActions(r: RunStatus): SignalAction[] {
-  const f = leadPr(r);
+  const lead = leadPrEntry(r);
+  // An entry whose last fetch failed authorizes nothing, on the same reasoning
+  // `mergeTarget` states for the Merge button: its facts are the PREVIOUS value
+  // carried forward, and "it conflicted an hour ago" is not "it conflicts". A row
+  // here is a smaller commitment than a merge but the same kind of claim — it
+  // names THE problem and seeds a session to go and fix it.
+  //
+  // This also un-hides the warning. DeckApp draws these rows INSTEAD of the
+  // signal line, so while an unread PR still produced rows, `cardSignal`'s
+  // "⚠ PR unread" never reached the card that most needed it.
+  if (lead?.failed) return [];
+  const f = lead?.facts ?? null;
   // Nothing to act on unless a PR is open and out of draft: GitHub stops
   // computing mergeability once a PR closes, so a merged PR's `conflicting` is
   // stale, and a draft is not asking for anything yet.
