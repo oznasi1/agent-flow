@@ -21,18 +21,33 @@ Separately, Agent Flow Deck
 also sends anonymous *usage* telemetry (not any of the above) — see
 [Telemetry](TELEMETRY.md).
 
-GitHub access is **read-only by default** — Agent Flow Deck never merges or pushes.
-The one exception is opt-in: with `agentFlow.reviewWrites` on (it ships **off**),
-the Deck's review strip can submit a review — approve, comment, or request
-changes — on a PR that asked for yours. Every submit shows a modal confirmation
-naming the verb, the repo and the PR number before anything reaches GitHub, and
-every submit attempt — success or failure — is logged to the **Agent Flow Deck**
-output channel. A review body loaded from the session's draft is marked as
-session-drafted when it goes out (a fixed line, not the configurable
-`agentFlow.provenanceLabel`), unless `agentFlow.stampLabelOnWrite` is off.
-Nothing else about the feature writes anywhere: the review session itself is told,
-in its seeded prompt, not to post anything to GitHub — the human submits the
-review.
+GitHub access is **read-only by default** — Agent Flow Deck never pushes, and out
+of the box it never merges either. There are exactly **two** exceptions, each
+behind its own setting, each shipping **off**, and each asking for a modal
+confirmation before anything reaches GitHub.
+
+The first is `agentFlow.reviewWrites`: with it on, the Deck's review strip can
+submit a review — approve, comment, or request changes — on a PR that asked for
+yours. Every submit shows a modal confirmation naming the verb, the repo and the
+PR number before anything reaches GitHub, and every submit attempt — success or
+failure — is logged to the **Agent Flow Deck** output channel. A review body
+loaded from the session's draft is marked as session-drafted when it goes out (a
+fixed line, not the configurable `agentFlow.provenanceLabel`), unless
+`agentFlow.stampLabelOnWrite` is off. Nothing else about the feature writes
+anywhere: the review session itself is told, in its seeded prompt, not to post
+anything to GitHub — the human submits the review.
+
+The second is `agentFlow.mergeWrites`: with it on, a card whose one pull request
+is provably ready — approved, every check green, no unresolved review threads,
+and mergeable cleanly — offers a **Merge** button, and pressing it merges that
+pull request into its base branch. That is the only write Agent Flow Deck makes
+that lands code on a default branch, so it is fenced the same way the review
+write is: every merge shows a modal confirmation naming the repo, the pull
+request number and the strategy (`agentFlow.mergeMethod`, `squash` by default)
+before anything reaches GitHub, and every merge attempt — success or failure — is
+logged to the **Agent Flow Deck** output channel. The button is the only path:
+nothing merges on a timer, from an Orchestrator rule, or in the background, and
+one press merges one pull request.
 
 The **Doctor** command probes rather than only reading config: it makes two
 authenticated GETs to your own Jira site and runs `gh auth status`, which is what

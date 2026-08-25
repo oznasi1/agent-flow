@@ -6,7 +6,7 @@ import type { Flow } from "../engine/orchestrator/model";
 import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
-import { prSignals } from "../engine/bucket";
+import { prSignals, type MergeTarget } from "../engine/bucket";
 import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
 import { LoadingMark } from "./LoadingMark";
@@ -15,7 +15,7 @@ import { keyLabel, timeAgo } from "./helpers";
 import { type Tone } from "./deckParts";
 import { DeckDetail } from "./DeckDetail";
 import { useDrawerExit } from "./Drawer";
-import { cardActions, cardSignal } from "./deckSignal";
+import { cardActions, cardMerge, cardSignal } from "./deckSignal";
 // src/engine/usage.ts imports NOTHING — this is what makes it legal in a
 // browser bundle. npm run build is the only gate that would catch a violation
 // here; neither tsc nor the test suite resolves real module graphs.
@@ -160,13 +160,16 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
   }
 }
 
-function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
+function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, selected, onSelect }: {
   r: RunStatus;
   /** Non-null on the Sessions lens: this card is that one session, and its state
    * line and action target come from the agent rather than the run. */
   agent: CardAgent | null;
   column: DeckColumn;
   sourceLabel: string;
+  mergeWrites: boolean;
+  merging: Record<string, true>;
+  onMerge: (t: MergeTarget) => void;
   selected: boolean;
   onSelect: () => void;
 }): JSX.Element {
@@ -189,6 +192,15 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
   // somebody else's ticket, and seeding an agent against that inference on one
   // click is what this must never do. The host re-checks it anyway.
   const acts = local ? [] : cardActions(r);
+  // The merge row and the problem rows are mutually exclusive by construction:
+  // mergeTarget requires every fact cardActions reports as wrong to be absent.
+  // The `acts.length === 0` guard below is therefore belt-and-braces, and cheap.
+  // The `local` guard is the same one `acts` carries, for the same reason: a local
+  // card's ticket is inferred from a branch name that may be someone else's, and
+  // merging off that inference on one click is what must never ship. The host
+  // re-checks it anyway.
+  const merge = local || !mergeWrites ? null : cardMerge(r);
+  const mergeBusy = merge ? merging[`${r.run.key}:${merge.repo}#${merge.number}`] === true : false;
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the ticket status on this card would
   // then be theirs. Computed host-side (the webview has no connector to parse
@@ -256,7 +268,7 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
         </span>
       </div>
 
-      {acts.length > 0 ? (
+      {acts.length > 0 || (merge && acts.length === 0) ? (
         /* The failure rows REPLACE the signal line rather than joining it: the
            bits it would show (#pr, ✗ check, conflicts) name the very facts these
            rows name, and restating them above the actions is noise. A failing
@@ -277,6 +289,20 @@ function Card({ r, agent, column, sourceLabel, selected, onSelect }: {
               </button>
             </div>
           ))}
+          {acts.length === 0 && merge && (
+            <div className="c-row">
+              <span className="m">#{merge.number}</span>
+              <span className="lbl ok">approved · green · no open threads</span>
+              <button
+                className="act"
+                disabled={mergeBusy}
+                title={`Merge ${merge.repo}#${merge.number} — asks for confirmation first`}
+                onClick={() => onMerge(merge)}
+              >
+                Merge
+              </button>
+            </div>
+          )}
         </div>
       ) : sigBits.length > 0 ? (
         <div className="c-sig">
@@ -352,6 +378,15 @@ export function DeckApp(): JSX.Element {
    * setting is off by default, and flashing a total that then vanishes would be
    * worse than never showing it. */
   const [showTokenTotal, setShowTokenTotal] = React.useState(false);
+  /** `agentFlow.mergeWrites`. `?? false` is required, not defensive: the field is
+   * optional on `deck:runs`, and an in-flight message from before this build's
+   * host reloaded carries none — off is the safe reading of "I do not know" for
+   * a write. Same shape as `agentLabel`'s fallback. */
+  const [mergeWrites, setMergeWrites] = React.useState(false);
+  /** PRs whose merge is in flight, keyed `${key}:${repo}#${number}` — the button
+   * stays disabled until the host answers, so a double click cannot send twice. A
+   * key is NOT dropped on a successful merge: see the `deck:mergeDone` handler. */
+  const [merging, setMerging] = React.useState<Record<string, true>>({});
   /** run key → usage read on demand for its drawer, or null when unreadable.
    * A key absent from this map means "not asked yet or still waiting", which the
    * drawer renders differently from both a zero total and a failed read. */
@@ -433,8 +468,30 @@ export function DeckApp(): JSX.Element {
         // message posted before this build's host reloads has no such field.
         setAgentLabel(m.agentLabel ?? DEFAULT_AGENT_LABEL);
         setShowTokenTotal(m.showTokenTotal);
+        setMergeWrites(m.mergeWrites ?? false);
         setSyncedAt(Date.now());
         setHasLoaded(true);
+      } else if (m.type === "deck:mergeDone") {
+        // Deliberately asymmetric on `outcome`, and NOT to be tidied into matching
+        // `deck:reviewSubmitDone`'s release-on-any-outcome below. A review leaves
+        // the PR open, so its row must come back either way. A merge does not:
+        // on "ok" the PR is merged, but `r.prs` still holds the pre-merge OPEN
+        // facts until the next `deck:runs` — a poll window plus fetch latency —
+        // so releasing here re-renders the same "approved · green · no open
+        // threads" row with a live Merge button over a PR that is already gone.
+        // Clicking it passes the host's re-check (the success path stales the
+        // entry but leaves the facts saying OPEN) and fires a second merge that
+        // only the forge refuses. The host's staling is what resolves this: the
+        // next tick refetches, the refreshed facts say MERGED, and the row
+        // disappears — taking its disabled button with it.
+        if (m.outcome !== "ok") {
+          // Keyed, not a single slot: the reply can land after the board re-rendered.
+          setMerging((s) => {
+            const next = { ...s };
+            delete next[`${m.key}:${m.repo}#${m.number}`];
+            return next;
+          });
+        }
       } else if (m.type === "deck:usage") {
         // Keyed rather than a single "current drawer" slot: a reply can land after
         // the user has moved to another card, and dropping it would leave the new
@@ -646,6 +703,11 @@ export function DeckApp(): JSX.Element {
   // does, so a lane can never quietly grow its own kind of card.
   const card = (c: DeckCard): JSX.Element => (
     <Card key={c.id} r={c.status} agent={c.agent} column={c.column} sourceLabel={sourceLabel}
+      mergeWrites={mergeWrites} merging={merging}
+      onMerge={(t) => {
+        setMerging((s) => ({ ...s, [`${c.status.run.key}:${t.repo}#${t.number}`]: true }));
+        send({ type: "deck:mergePr", key: c.status.run.key, repo: t.repo, number: t.number });
+      }}
       selected={c.id === selId}
       onSelect={() => { setOpenFlowId(null); setSelId((cur) => (cur === c.id ? null : c.id)); }} />
   );

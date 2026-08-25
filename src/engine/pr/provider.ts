@@ -1,5 +1,5 @@
 import { execFile } from "child_process";
-import { PrFacts } from "../../types";
+import { MergeMethod, PrFacts } from "../../types";
 import { countUnresolved, GhPr, parseRepoFromUrl, pickPr, toPrFacts } from "./facts";
 import { resolveBin } from "./which";
 // `import type`, and it must stay that way: `../forge/types` type-imports
@@ -49,8 +49,40 @@ export const execRunner: Runner = (file, args, opts) =>
     });
   });
 
+/** Node's execFile error `.message` is always `Command failed: <file> <full argv
+ * joined>`, optionally followed by a `\n` and stderr's own text. Used only when a
+ * rejection carries no `stderr` of its own (a killed process, or a CLI failure
+ * that wrote nothing to stderr): keeps whatever follows the first newline, and
+ * falls back to a fixed, argv-free string when there is nothing there — never the
+ * reconstructed command.
+ *
+ * Lives here rather than in `../review/provider.ts`, which used to own it
+ * privately: `GhProvider.merge` needs the identical fallback, and two copies of
+ * the last line of defense against leaking an argv is one copy too many. The
+ * review path's own reason for needing it is stronger — its argv carries `--body
+ * <the whole review text>` — so do not weaken this while touching the merge path. */
+export function stripCommandLine(message: string): string {
+  const nl = message.indexOf("\n");
+  const rest = nl === -1 ? "" : message.slice(nl + 1).trim();
+  return rest || "gh failed without further detail — check the PR directly.";
+}
+
+/** The flags `gh pr merge` accepts, verified against gh 2.89.0 (`gh pr merge
+ * --help`): `-s/--squash`, `-m/--merge`, `-r/--rebase`. gh refuses to run
+ * non-interactively without one of them, which is why `agentFlow.mergeMethod`
+ * exists rather than a "let the forge decide" default. */
+const MERGE_FLAG: Record<MergeMethod, string> = {
+  squash: "--squash",
+  merge: "--merge",
+  rebase: "--rebase",
+};
+
 export interface PrProvider {
   fetch(repoPath: string, branch: string | null, key: string): Promise<FetchResult>;
+  /** Merge this repo's PR. The ONLY method on this seam that writes to the forge:
+   * the caller confirms with the user first, and this refuses only what the forge
+   * would refuse anyway, reporting the forge's own wording. */
+  merge(repoPath: string, number: number, method: MergeMethod): Promise<{ ok: true } | { ok: false; message: string }>;
 }
 
 /** Where `gh` is, injected — the fallback to the bare name keeps a platform
@@ -130,6 +162,50 @@ export class GhProvider implements PrProvider {
       return countUnresolved(JSON.parse(out));
     } catch {
       return null;
+    }
+  }
+
+  /** `cwd: repoPath` and no `--repo`, matching `fetch`: a card's PR is a local
+   * checkout, and gh resolves the repository from that directory's git remote —
+   * never from Agent Flow's name for the checkout, which routinely differs (this
+   * product's own worktrees are directories like `bite-me-3a`).
+   *
+   * `method` is not to be trusted just because the type says `MergeMethod`: it
+   * originates in `agentFlow.mergeMethod`, a settings.json string that can be
+   * anything, including a prototype key. `Object.hasOwn` — not
+   * `!MERGE_FLAG[method]`, which `"constructor"` sails through as truthy — fails
+   * closed before a single argv is built. The one command in this extension that
+   * merges to a default branch does not get to guess. */
+  async merge(
+    repoPath: string,
+    number: number,
+    method: MergeMethod,
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    if (!Object.hasOwn(MERGE_FLAG, method)) {
+      return { ok: false, message: `Unknown merge method: ${String(method)}` };
+    }
+    try {
+      await this.run(this.locate() ?? "gh", ["pr", "merge", String(number), MERGE_FLAG[method]], {
+        cwd: repoPath,
+        timeoutMs: GH_TIMEOUT_MS,
+      });
+      return { ok: true };
+    } catch (e) {
+      const err = e as { killed?: boolean; code?: unknown; stderr?: string };
+      // A killed-by-timeout rejection has the same shape as any other execFile
+      // failure and means something different: gh may well have reached GitHub
+      // before the clock ran out. A merge is not idempotent, so "GitHub refused"
+      // would be a lie about a write that could have landed — and would invite a
+      // retry that merges twice.
+      if (err.killed || err.code === "ETIMEDOUT") {
+        return {
+          ok: false,
+          message: `Timed out after ${GH_TIMEOUT_MS / 1000}s — the merge may already have gone through. Open the PR to check.`,
+        };
+      }
+      // stderr is GitHub's actual wording, attached by execRunner separately from
+      // `.message` — which is the reconstructed argv. Prefer it.
+      return { ok: false, message: err.stderr?.trim() || (e instanceof Error ? stripCommandLine(e.message) : String(e)) };
     }
   }
 }

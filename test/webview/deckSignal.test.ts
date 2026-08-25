@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { cardSignal, cardActions } from "../../src/webview/deckSignal";
+import { cardSignal, cardActions, cardMerge } from "../../src/webview/deckSignal";
 import type { CardAgent, PrEntryMap, PrFacts, RepoGit, RunStatus } from "../../src/types";
 
 const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -238,5 +238,32 @@ describe("cardActions", () => {
     expect(acts[0].reason).toBe("ci");
     // cardSignal leads with the same PR's number, so the two can never disagree.
     expect(bits[0]).toMatchObject({ text: "#2" });
+  });
+});
+
+describe("cardMerge", () => {
+  const green = () => facts({ number: 124, url: "https://gh/pr/124", review: "approved", unresolved: 0 });
+
+  it("names the PR when everything is green and readable", () => {
+    expect(cardMerge(status({ prs: pr(green()) }))).toEqual({
+      repo: "svc", number: 124, url: "https://gh/pr/124",
+    });
+  });
+
+  it("is null when there is no PR at all", () => {
+    expect(cardMerge(status())).toBeNull();
+  });
+
+  it("is null when the thread count is unreadable", () => {
+    expect(cardMerge(status({ prs: pr(facts({ review: "approved", unresolved: null })) }))).toBeNull();
+  });
+
+  // The two never appear together, and this is the assertion that pins it: a card
+  // showing both "Fix CI" and "Merge" would be the board's loudest contradiction.
+  it("never coexists with a problem row", () => {
+    const red = facts({ review: "approved", unresolved: 0, ci: { passing: 1, pending: 0, failing: [{ name: "lint", url: "" }] } });
+    const s = status({ prs: pr(red) });
+    expect(cardActions(s).length).toBeGreaterThan(0);
+    expect(cardMerge(s)).toBeNull();
   });
 });

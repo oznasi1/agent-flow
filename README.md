@@ -146,9 +146,11 @@ Agent Flow Deck talks to **your** Jira site, reads your **local** checkouts, and
 your forge through your **existing** `gh` (or `glab`) login — nothing about your tickets, code or repos
 goes anywhere that isn't already yours. Jira credentials live in VS Code
 **SecretStorage**, never in `settings.json`. Both are **read-only by default** — the only
-writes are ones you trigger yourself: a Jira status change from a card, or, with
+writes are ones you trigger yourself: a Jira status change from a card; with
 `agentFlow.reviewWrites` on (it ships off), a review submitted from the Deck behind a
-confirmation dialog. Briefs go in a git-excluded `.pick-task/`, so they never get committed.
+confirmation dialog; or, with `agentFlow.mergeWrites` on (off too), a provably green pull
+request merged from its card behind one. Briefs go in a git-excluded `.pick-task/`, so they
+never get committed.
 
 Full disclosure: [docs/PRIVACY.md](docs/PRIVACY.md). Anonymous usage telemetry is separate
 and described below.

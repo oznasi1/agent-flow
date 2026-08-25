@@ -154,6 +154,8 @@ export interface SettingsSnapshot {
   review_requests: boolean;
   open_agents: boolean;
   review_writes: boolean;
+  merge_writes: boolean;
+  merge_method: "squash" | "merge" | "rebase" | "invalid";
   orchestrator: boolean;
   child_worktrees: boolean;
   stamp_label_on_write: boolean;

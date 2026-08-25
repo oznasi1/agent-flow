@@ -1,7 +1,7 @@
 import * as os from "os";
 import { ReviewDetail, ReviewRequest, ReviewVerb } from "../../types";
 import { countUnresolved, mapRollup } from "../pr/facts";
-import { execRunner, GH_TIMEOUT_MS, Locate, Runner, THREADS_QUERY } from "../pr/provider";
+import { execRunner, GH_TIMEOUT_MS, Locate, Runner, stripCommandLine, THREADS_QUERY } from "../pr/provider";
 import { resolveBin } from "../pr/which";
 import { REVIEW_SEARCH_LIMIT, REVIEW_SEARCH_Q, REVIEW_SEARCH_QUERY, parseSearch } from "./search";
 
@@ -12,20 +12,6 @@ const VERB_FLAG: Record<ReviewVerb, string> = {
   comment: "--comment",
   "request-changes": "--request-changes",
 };
-
-/** Node's execFile error `.message` is always `Command failed: <file> <full
- * argv joined>`, optionally followed by a `\n` and stderr's own text — for a
- * review submission, that first line embeds the entire `--body <review
- * text>` verbatim. This is the last line of defense against ever returning
- * that: used only when a rejection carries no `stderr` of its own (a killed
- * process, or a `gh` failure that wrote nothing to stderr), it keeps
- * whatever follows the first newline and falls back to a fixed, argv-free
- * string when there is nothing there — never the reconstructed command. */
-function stripCommandLine(message: string): string {
-  const nl = message.indexOf("\n");
-  const rest = nl === -1 ? "" : message.slice(nl + 1).trim();
-  return rest || "gh failed without further detail — check the PR directly.";
-}
 
 export interface ReviewProvider {
   search(): Promise<{ issueCount: number; requests: ReviewRequest[] } | null>;
@@ -94,7 +80,8 @@ export class GhReviewProvider implements ReviewProvider {
     return { failing, unresolved };
   }
 
-  /** The only command in Agent Flow Deck that writes to GitHub. The caller confirms
+  /** One of the two commands in Agent Flow Deck that write to GitHub — the other is
+   * `PrProvider.merge`, behind `agentFlow.mergeWrites`. The caller confirms
    * first; this only refuses what GitHub would refuse anyway, and reports the
    * rejection — GitHub's own wording is more useful than ours.
    *

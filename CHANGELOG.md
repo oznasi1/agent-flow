@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Merge a green pull request from its card.** A card whose one pull request is
+  provably ready — approved, every check green, no unresolved review threads, and
+  mergeable cleanly — now offers a **Merge** button where its problem rows would
+  be. The Deck's Merge column already promoted such a card for being one click
+  from done; this is the click. Every merge asks for confirmation and names the
+  strategy first, and the host re-checks the pull request's facts against its own
+  store before writing, so a card that went stale refuses rather than merges.
+
+  Off by default, behind `agentFlow.mergeWrites` — the second setting that lets
+  Agent Flow Deck write to your forge, alongside `agentFlow.reviewWrites`.
+  `agentFlow.mergeMethod` picks the strategy (`squash` by default).
+
+  Two deliberate limits. The first: a card needs **one** pull request left to
+  merge and every other repo's already merged — two ready pull requests show no
+  button, and neither does a card whose sibling repo still has a pull request
+  that has not landed, because merging one half of a coupled pair on a single
+  click is not a decision to make for you. The second: an unreadable fact is not
+  a green one, so a pull request whose review-thread count could not be fetched
+  keeps its button withheld.
+
+  On GitLab, `squash` and `merge` both go through GitLab's own merge endpoint —
+  `PUT /projects/:id/merge_requests/:iid/merge`, issued through `glab api`, the
+  same REST passthrough every other GitLab call here uses — not the
+  `glab mr merge` porcelain. `squash` is the only strategy that endpoint accepts
+  per request, so `rebase` is refused with a message rather than substituted: a
+  project's own **Merge method** setting decides whether a non-squashed merge is
+  rebased or fast-forwarded. **The GitLab merge path has never been run against a
+  live `glab`.** It was built against GitLab's documented REST contract for that
+  endpoint and is covered by unit tests on the argv it produces and nothing more,
+  so a GitLab user's first press of **Merge** is also its first real execution;
+  what a refusal looks like coming back through `glab api` is what we are least
+  sure of. See [docs/FORGES.md](docs/FORGES.md).
+
 ## [0.42.0] — 2026-08-25
 
 ### Added

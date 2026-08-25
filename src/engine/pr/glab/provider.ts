@@ -19,7 +19,7 @@ import type { FetchResult, Locate, PrProvider, Runner } from "../provider";
 // edge to reach something that does not exist at runtime.
 import type { ForgeGap } from "../../forge/types";
 import { resolveBin } from "../which";
-import { PrFacts } from "../../../types";
+import { MergeMethod, PrFacts } from "../../../types";
 
 export const GLAB_TIMEOUT_MS = 10_000;
 
@@ -57,6 +57,10 @@ const approvalsPath = (iid: number): string =>
   `projects/:fullpath/merge_requests/${iid}/approvals`;
 const discussionsPath = (iid: number): string =>
   `projects/:fullpath/merge_requests/${iid}/discussions?per_page=100`;
+/** The one write route this provider has. `PUT …/merge` is the only endpoint that
+ * merges; `squash` is the only strategy it takes per request. */
+const mrMergePath = (iid: number): string =>
+  `projects/:fullpath/merge_requests/${iid}/merge`;
 
 /** Is `glab` installed and logged in? Probed once per Deck session; a gap turns
  * forge reads off with a footer note rather than an error. `ForgeGap` is the
@@ -191,6 +195,62 @@ export class GlabProvider implements PrProvider {
       return countUnresolvedDiscussions(JSON.parse(await this.api(repoPath, discussionsPath(mr.iid))));
     } catch {
       return null;
+    }
+  }
+
+  /** GitLab's merge API takes exactly one strategy override: `squash`. Whether a
+   * non-squashed merge is rebased, fast-forwarded, or gets a merge commit is the
+   * PROJECT's `merge_method` setting, not something a request can ask for — so
+   * `"rebase"` is refused in words. Substituting `squash=false` for it would merge
+   * a way the user did not choose, which is exactly the fake this seam forbids.
+   * See docs/FORGES.md.
+   *
+   * No `Object.hasOwn` map here, unlike the gh side: the two accepted values are
+   * compared literally, which is prototype-safe by construction — `"constructor"`
+   * matches neither branch and falls through to the refusal below. */
+  async merge(
+    repoPath: string,
+    number: number,
+    method: MergeMethod,
+  ): Promise<{ ok: true } | { ok: false; message: string }> {
+    if (method === "rebase") {
+      return {
+        ok: false,
+        message:
+          "GitLab has no per-request rebase merge — a project's own Merge method setting decides that. " +
+          "Set agentFlow.mergeMethod to squash or merge, or merge from GitLab.",
+      };
+    }
+    if (method !== "squash" && method !== "merge") {
+      return { ok: false, message: `Unknown merge method: ${String(method)}` };
+    }
+    try {
+      // `-F`, not GLAB_FIELD_FLAG (`-f`): this value must reach GitLab as a JSON
+      // boolean, not the string "true". `-F`'s leading-`@`-is-a-filename hazard,
+      // which is why the review body uses `-f`, cannot apply to a literal
+      // true/false that no user ever typed.
+      await this.run(
+        this.locate() ?? "glab",
+        ["api", mrMergePath(number), "--method", "PUT", "-F", `squash=${method === "squash"}`],
+        { cwd: repoPath, timeoutMs: GLAB_TIMEOUT_MS },
+      );
+      return { ok: true };
+    } catch (e) {
+      const err = e as { killed?: boolean; code?: unknown; stderr?: string };
+      // Same reasoning as the gh side: glab may have reached GitLab before the
+      // clock ran out, and a merge is not idempotent.
+      if (err.killed || err.code === "ETIMEDOUT") {
+        return {
+          ok: false,
+          message: `Timed out after ${GLAB_TIMEOUT_MS / 1000}s — the merge may already have gone through. Open the merge request to check.`,
+        };
+      }
+      // stderr is GitLab's actual wording. Never `.message`, which is the
+      // reconstructed argv — the same rule GlabReviewProvider.submit states.
+      return {
+        ok: false,
+        message: err.stderr?.trim() || "glab failed without further detail — check the merge request directly.",
+      };
     }
   }
 }
