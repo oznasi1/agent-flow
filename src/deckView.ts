@@ -2477,40 +2477,63 @@ export class DeckPanel {
    */
   private async mergePr(key: string, repo: string, number: number): Promise<void> {
     const cfg = getConfig();
+    // Every gate below refuses *this* message's own attempt, and every one of them
+    // releases the card's Merge button the same way a completed merge does. The
+    // webview sets its `merging` flag before sending and clears it only on a
+    // `deck:mergeDone` — nothing else does, `deck:runs` included — so a silent
+    // return here would leave that button disabled until the panel is reloaded.
+    // "cancelled" rather than "failed" because nothing was written and so there is
+    // nothing to warn about, only a disable to lift. This is exactly what
+    // submitReview's own pre-confirmation gates already do, for exactly this reason.
+    //
+    // The message's own `key`/`repo`/`number` throughout, never the re-checked
+    // target's: that triple is what the webview keyed its `merging` entry on, so it
+    // is the only one that will clear it. Past the re-check the two agree by
+    // definition, which is what makes using one spelling everywhere safe.
+    const release = (): void => {
+      this.post({ type: "deck:mergeDone", key, repo, number, outcome: "cancelled" });
+    };
     if (!cfg.mergeWrites) {
       this.log(`deck: mergePr ignored — agentFlow.mergeWrites is off`);
+      release();
       return;
     }
     const run = this.run(key);
     if (!run) {
       this.toast("error", `No run record for ${key}.`);
+      release();
       return;
     }
     // Same guard, same reason, as seedPrWork's: a local card's ticket is inferred
     // from a branch name that may belong to somebody else's ticket.
     if (runKind(run) === "local") {
       this.log(`deck: mergePr ignored for local card ${key}`);
+      release();
       return;
     }
     const target = mergeTarget(readPrEntries(defaultPrFactsDir(), key));
     if (!target || target.repo !== repo || target.number !== number) {
       this.log(`deck: mergePr refused — ${key}/${repo}#${number} is not this run's merge target`);
+      release();
       return;
     }
     const checkout = run.repos.find((r) => r.name === target.repo);
     if (!checkout) {
       this.log(`deck: mergePr refused — no checkout for ${target.repo} in ${key}`);
+      release();
       return;
     }
 
     const inflightKey = `${key}:${target.repo}#${target.number}`;
-    // Deliberately silent, exactly as the review-submit guard is: the genuine
-    // call still running owns posting the outcome, and a "cancelled" from this
-    // rejected duplicate would release the button mid-merge.
+    // The one gate that does NOT release the button, exactly as the review-submit
+    // guard is: the genuine call still running owns posting the outcome, and a
+    // "cancelled" from this rejected duplicate would release the button mid-merge —
+    // the opposite of what the guard exists for. Do not "fix" this to match the
+    // gates above.
     if (this.mergesInFlight.has(inflightKey)) return;
     this.mergesInFlight.add(inflightKey);
     try {
-      const label = MERGE_LABEL[cfg.mergeMethod] ?? MERGE_LABEL.squash;
+      const label = MERGE_LABEL[cfg.mergeMethod];
       const answer = await vscode.window.showWarningMessage(
         `${label} on ${target.repo}#${target.number}?`,
         { modal: true, detail: "Approved, every check green, and no unresolved review threads." },

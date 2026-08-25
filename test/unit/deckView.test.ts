@@ -4244,6 +4244,66 @@ describe("deck:mergePr", () => {
     expect(window.showWarningMessage).not.toHaveBeenCalled();
   });
 
+  // Every gate above refuses the message and has to release the card's Merge
+  // button as well, because the webview sets its `merging` flag before sending and
+  // clears it only on a `deck:mergeDone` — a `deck:runs` post does not clear it, so
+  // a silent return would strand that button disabled until the panel is reloaded.
+  // Split one test per gate, the way the review-submit block splits its own: the
+  // gates are independently removable, and one combined case would let four of them
+  // regress silently behind the fifth.
+  const CANCELLED = (over: { key?: string; number?: number } = {}) =>
+    ({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 124, outcome: "cancelled", ...over });
+
+  it("releases the button when mergeWrites is off", async () => {
+    h.mergeWrites = false;
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(posts(p)).toContainEqual(CANCELLED());
+  });
+
+  it("releases the button for a key with no run record", async () => {
+    h.mergeWrites = true;
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "NOPE-9", repo: "svc", number: 124 });
+    expect(posts(p)).toContainEqual(CANCELLED({ key: "NOPE-9" }));
+  });
+
+  it("releases the button for a local card", async () => {
+    h.mergeWrites = true;
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/svc", name: "svc-7e" })];
+    h.prEntries = { svc: { facts: greenFacts(), fetchedAt: Date.now() } };
+    show();
+    await settled();
+    const localKey = builtLocal().run.key;
+    const p = lastPanel();
+    await p._fire({ type: "deck:mergePr", key: localKey, repo: "svc", number: 124 });
+    expect(posts(p)).toContainEqual(CANCELLED({ key: localKey }));
+  });
+
+  // The wrong-number shape rather than the unmergeable-facts one, though both reach
+  // the same gate: it is the case that pins the outcome carrying the MESSAGE's own
+  // number (999) rather than the re-checked target's (124). The webview keyed its
+  // `merging` entry on what it sent, so only that triple clears it — a post built
+  // from the target would look right in every other test and release nothing here.
+  it("releases the button, on the message's own triple, when the re-check disagrees", async () => {
+    h.mergeWrites = true;
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 999 });
+    expect(posts(p)).toContainEqual(CANCELLED({ number: 999 }));
+  });
+
+  it("releases the button when the run has no checkout for the target repo", async () => {
+    h.mergeWrites = true;
+    h.runs = [mkRun({ repos: [{ name: "other", path: "/r/other", isGit: true, branch: "b" }] })];
+    h.prEntries = { svc: { facts: greenFacts(), fetchedAt: Date.now() } };
+    show();
+    await settled();
+    const p = lastPanel();
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(posts(p)).toContainEqual(CANCELLED());
+  });
+
   it("names the repo, number and strategy in the confirmation, and merges on confirm", async () => {
     h.mergeWrites = true;
     h.mergeMethod = "squash";
@@ -4348,9 +4408,13 @@ describe("deck:mergePr", () => {
     release();
     await first;
     expect(h.prMerge).toHaveBeenCalledTimes(1);
-    // Exactly one outcome, and it is the real call's — the rejected duplicate
-    // stayed silent rather than releasing the row while the merge was in the air.
+    // Exactly ONE outcome across both fires, and it is the real call's. This is the
+    // assertion that fails if someone "fixes" the in-flight guard's silence to match
+    // the five releasing gates above: a `cancelled` from the rejected duplicate
+    // would land here as a second message, releasing the button while the merge was
+    // still in the air.
     const dones = posts(p).filter((m) => m.type === "deck:mergeDone");
+    expect(dones).toHaveLength(1);
     expect(dones).toEqual([
       { type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 124, outcome: "ok" },
     ]);
