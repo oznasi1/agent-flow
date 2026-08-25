@@ -53,18 +53,26 @@ export const execRunner: Runner = (file, args, opts) =>
  * joined>`, optionally followed by a `\n` and stderr's own text. Used only when a
  * rejection carries no `stderr` of its own (a killed process, or a CLI failure
  * that wrote nothing to stderr): keeps whatever follows the first newline, and
- * falls back to a fixed, argv-free string when there is nothing there — never the
- * reconstructed command.
+ * falls back to `fallback` when there is nothing there — never the reconstructed
+ * command.
  *
  * Lives here rather than in `../review/provider.ts`, which used to own it
  * privately: `GhProvider.merge` needs the identical fallback, and two copies of
  * the last line of defense against leaking an argv is one copy too many. The
  * review path's own reason for needing it is stronger — its argv carries `--body
- * <the whole review text>` — so do not weaken this while touching the merge path. */
-export function stripCommandLine(message: string): string {
+ * <the whole review text>` — so do not weaken this while touching the merge path.
+ *
+ * `fallback` is optional, defaulting to the original gh wording, so every
+ * existing caller (this file's `GhProvider.merge`, and the review path) stays
+ * byte-identical. `BbProvider.merge` is the first non-gh caller — naming "gh" in
+ * a Bitbucket failure would blame the wrong tool, so it passes its own. */
+export function stripCommandLine(
+  message: string,
+  fallback = "gh failed without further detail — check the PR directly.",
+): string {
   const nl = message.indexOf("\n");
   const rest = nl === -1 ? "" : message.slice(nl + 1).trim();
-  return rest || "gh failed without further detail — check the PR directly.";
+  return rest || fallback;
 }
 
 /** The flags `gh pr merge` accepts, verified against gh 2.89.0 (`gh pr merge

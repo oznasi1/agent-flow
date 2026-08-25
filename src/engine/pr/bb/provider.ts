@@ -345,7 +345,17 @@ export class BbProvider implements PrProvider {
         };
       }
       // stderr is the CLI's own complaint; `.message` is the reconstructed argv.
-      return { ok: false, message: err.stderr?.trim() || (e instanceof Error ? stripCommandLine(e.message) : String(e)) };
+      // `stripCommandLine`'s own fallback names "gh" — pass Bitbucket's own
+      // wording, since this is that function's first non-gh caller and a bare
+      // Error with empty stderr and no `\n` would otherwise blame the wrong tool.
+      return {
+        ok: false,
+        message:
+          err.stderr?.trim() ||
+          (e instanceof Error
+            ? stripCommandLine(e.message, `${BB_BIN} failed without further detail — check the pull request directly.`)
+            : String(e)),
+      };
     }
   }
 }

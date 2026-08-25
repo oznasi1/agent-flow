@@ -264,14 +264,24 @@ describe("BbProvider.merge", () => {
   });
 
   it("fails closed on a method outside the union, prototype keys included", async () => {
+    // `calls.some(... includes("merge"))` is vacuous here: the passthrough merge
+    // URL is one long path string (`.../pullrequests/42/merge`), never a
+    // standalone "merge" token, so that assertion could not see a spawn that did
+    // happen. With the guard correctly `Object.hasOwn`, the check fires before
+    // `repoOf` is even reached, so zero spawns is the precise property — no argv
+    // reaches the runner at all.
     const { run, calls } = routed({ "remote.origin.url": REMOTE });
     await expect(provider(run, true).merge("/r", 42, "constructor" as never)).resolves.toMatchObject({ ok: false });
-    expect(calls.some((c) => c.args.includes("merge"))).toBe(false);
+    expect(calls.length).toBe(0);
   });
 
   it("fails when the checkout has no Bitbucket remote", async () => {
-    const { run } = routed({ "remote.origin.url": "https://github.com/acme/api-service.git" });
+    // A `repoOf` git spawn is expected here (reading `remote.origin.url`), so
+    // `calls.length === 0` would be wrong — the precise property is that no
+    // atlassian-cli ("bb") merge spawn happened.
+    const { run, calls } = routed({ "remote.origin.url": "https://github.com/acme/api-service.git" });
     await expect(provider(run, false).merge("/r", 42, "squash")).resolves.toMatchObject({ ok: false });
+    expect(calls.some((c) => c.args.includes("bb"))).toBe(false);
   });
 
   it("says the merge may already have landed when the CLI is killed", async () => {
@@ -294,5 +304,20 @@ describe("BbProvider.merge", () => {
     });
     const res = await provider(run, false).merge("/r", 42, "squash");
     expect((res as { message: string }).message).toBe("403 Forbidden: you do not have write access to this repository");
+  });
+
+  it("names Bitbucket, not gh, when the CLI leaves no stderr and its message has no newline", async () => {
+    // execFile produces a single-line `.message` with no `\n` when stderr is
+    // empty. `stripCommandLine`'s own default fallback is gh's wording — this
+    // provider is that function's first non-gh caller, so it must pass its own
+    // fallback rather than inherit gh's.
+    const { run } = routed({
+      "remote.origin.url": REMOTE,
+      "merge": new Error("Command failed: /opt/homebrew/bin/atlassian-cli bb pr merge api-service 42 --strategy squash"),
+    });
+    const res = await provider(run, false).merge("/r", 42, "squash");
+    const message = (res as { message: string }).message;
+    expect(message).not.toContain("gh");
+    expect(message).not.toContain("--strategy squash");
   });
 });
