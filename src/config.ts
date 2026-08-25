@@ -652,6 +652,9 @@ export function getConfig(): AgentFlowConfig {
   // independent `c.get("forge")` couldn't disagree with this one, but it would
   // be untidy, and untidy invites drift the next time either read changes.
   const forge = c.get<string>("forge") || "github";
+  // Hoisted so the membership check below and the resolved `mergeMethod` value
+  // read the same call instead of asking `c.get` for it twice.
+  const mergeMethodRaw = c.get<string>("mergeMethod");
   return {
     taskSource: c.get<string>("taskSource") || "jira",
     forge,
@@ -722,12 +725,13 @@ export function getConfig(): AgentFlowConfig {
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,
     mergeWrites: c.get<boolean>("mergeWrites") ?? false,
-    // `|| "squash"`, the same shape as `worktree` above: an empty or missing value
-    // takes the default. A hand-edited garbage value also lands on the default
-    // here, and each provider's own method guard refuses anything out-of-union
-    // besides — a merge strategy is not something to fail open on.
-    mergeMethod: MERGE_METHODS.includes(c.get<string>("mergeMethod") as MergeMethod)
-      ? (c.get<string>("mergeMethod") as MergeMethod)
+    // Unlike `worktree` above — whose `|| "ask"` fallback lets any hand-edited
+    // string through unchecked — this is a membership check against
+    // MERGE_METHODS, deliberately stricter: an unrecognised merge strategy must
+    // not be handed down. Each provider's own method guard refuses anything
+    // out-of-union besides — a merge strategy is not something to fail open on.
+    mergeMethod: MERGE_METHODS.includes(mergeMethodRaw as MergeMethod)
+      ? (mergeMethodRaw as MergeMethod)
       : "squash",
     orchestrator: c.get<boolean>("orchestrator") ?? false,
     reviewRequestModes: (() => {

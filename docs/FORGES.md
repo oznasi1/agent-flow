@@ -89,6 +89,7 @@ directory. Treat it as no safer to import from webview code than `github.ts` or
 | CI status on a card | in the PR query | not in the MR list | `prs.fetch` follows its list call with a single-MR read, because that is the only response carrying `head_pipeline` |
 | How many reviews are waiting in total? | `issueCount` | no total in the body | the count is however many rows came back, so a queue longer than 50 reads as complete rather than truncated |
 | Is a skipped required check green? | folded toward `SUCCESS` | `skipped` → `unknown` | GitLab is stricter; a skipped pipeline does not open a deploy gate |
+| Merge with a named strategy | `--squash` / `--merge` / `--rebase` on `gh pr merge` | `squash` is the only per-request override; the project's own **Merge method** setting decides whether a merge is rebased or fast-forwarded | `agentFlow.mergeMethod: rebase` is REFUSED with a message naming the setting, never silently merged another way — a substituted merge strategy is the one degradation a user cannot see afterwards |
 
 ### The MR list carries no pipeline data — verified, not assumed
 

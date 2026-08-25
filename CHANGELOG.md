@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Merge a green pull request from its card.** A card whose one pull request is
+  provably ready — approved, every check green, no unresolved review threads, and
+  mergeable cleanly — now offers a **Merge** button where its problem rows would
+  be. The Deck's Merge column already promoted such a card for being one click
+  from done; this is the click. Every merge asks for confirmation and names the
+  strategy first, and the host re-checks the pull request itself before writing,
+  so a card that went stale refuses rather than merges.
+
+  Off by default, behind `agentFlow.mergeWrites` — the second setting that lets
+  Agent Flow Deck write to your forge, alongside `agentFlow.reviewWrites`.
+  `agentFlow.mergeMethod` picks the strategy (`squash` by default).
+
+  Two deliberate limits: a card with **two** ready pull requests shows no button,
+  because merging one half of a coupled pair on a single click is not a decision
+  to make for you; and an unreadable fact is not a green one, so a pull request
+  whose review-thread count could not be fetched keeps its button withheld.
+
+  On GitLab, `squash` and `merge` work; `rebase` is refused with a message, since
+  GitLab's merge API takes no per-request rebase — a project's own **Merge
+  method** setting decides that. See [docs/FORGES.md](docs/FORGES.md).
+
 ## [0.41.1] — 2026-08-23
 
 ### Changed
