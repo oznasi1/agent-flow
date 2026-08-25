@@ -32,9 +32,21 @@ export interface OpenArgs {
 export const NO_IDENTITY_TOAST =
   "This window has no saved workspace file and no single folder, so it can't hold a session — opening a new window instead.";
 
+/** "Leave it where it already is" — the Deck's PR-work destination, meaningful only to
+ * a caller that acts on a run with windows of its own. Never a launch destination, so
+ * it stays out of `OpenTarget` and `targetToOpenArgs` never sees it. */
+export type StayTarget = { kind: "stay" };
+
+/** The lead item a caller with somewhere to stay supplies: only the words, because
+ * only the caller can name the run's own place. */
+export interface StayItem {
+  label: string;
+  detail: string;
+}
+
 /** What the `ask` picker offers before a target is resolved: `existing-pick` is an item,
  * not a destination — choosing it opens the workspace-file picker. */
-type PickTarget = OpenTarget | { kind: "existing-pick" };
+type PickTarget = OpenTarget | StayTarget | { kind: "existing-pick" };
 type TargetItem = { label: string; detail: string; target: PickTarget };
 
 export interface ChooseOpenTargetDeps {
@@ -58,21 +70,38 @@ export function liveWindowItems(records: readonly PresenceRecord[]): TargetItem[
   }));
 }
 
+interface ChooseOpenTargetConfig {
+  openIn: OpenInSetting;
+  trackOpenWindows: boolean;
+  title: string;
+  placeHolder: string;
+  /** What is being opened, as it reads mid-sentence in the item details: "the task"
+   *  for Take, "the review" for Review with agent. Take's own wording is the default,
+   *  so its rows stay byte-identical to what shipped. */
+  noun?: string;
+  /** Lead the picker with "leave it where it is" INSTEAD of "New window". Only a
+   *  caller whose subject already has windows can offer this — see `engine/prWork.ts`,
+   *  where a new window and the run's own window are the same act. */
+  stay?: StayItem;
+}
+
 /** Where to open this launch. Live windows appear only in the interactive `ask` flow —
- * a specific open window is inherently a per-launch choice, not a setting. */
+ * a specific open window is inherently a per-launch choice, not a setting.
+ *
+ * Overloaded on `stay` so the two existing callers, which never pass it, keep their
+ * narrower `OpenTarget` return and cannot be handed a `stay` they have no case for. */
 export async function chooseOpenTarget(
-  cfg: {
-    openIn: OpenInSetting;
-    trackOpenWindows: boolean;
-    title: string;
-    placeHolder: string;
-    /** What is being opened, as it reads mid-sentence in the item details: "the task"
-     *  for Take, "the review" for Review with agent. Take's own wording is the default,
-     *  so its rows stay byte-identical to what shipped. */
-    noun?: string;
-  },
+  cfg: ChooseOpenTargetConfig & { stay: StayItem },
   deps: ChooseOpenTargetDeps,
-): Promise<OpenTarget | undefined> {
+): Promise<OpenTarget | StayTarget | undefined>;
+export async function chooseOpenTarget(
+  cfg: ChooseOpenTargetConfig & { stay?: undefined },
+  deps: ChooseOpenTargetDeps,
+): Promise<OpenTarget | undefined>;
+export async function chooseOpenTarget(
+  cfg: ChooseOpenTargetConfig,
+  deps: ChooseOpenTargetDeps,
+): Promise<OpenTarget | StayTarget | undefined> {
   const noun = cfg.noun ?? "the task";
   // A window with no identity can't be named by a plan match, so it can't hold a
   // seeded session — "this window" is not offered, and the setting can't force it.
@@ -89,7 +118,11 @@ export async function chooseOpenTarget(
     ? [{ label: "$(window) This window", detail: "Start a session here — keeps this window's folders", target: { kind: "current" } }]
     : [];
   const base: TargetItem[] = [
-    { label: "$(empty-window) New window", detail: `Open ${noun} in a separate window`, target: { kind: "new" } },
+    // One or the other, never both: where the subject already has windows, "New window"
+    // opens nothing new — `openInEditor` focuses the one already holding that folder.
+    cfg.stay
+      ? { label: cfg.stay.label, detail: cfg.stay.detail, target: { kind: "stay" } }
+      : { label: "$(empty-window) New window", detail: `Open ${noun} in a separate window`, target: { kind: "new" } },
     ...thisWindow,
     { label: "$(folder-library) Existing workspace…", detail: `Open ${noun} into a .code-workspace you already have`, target: { kind: "existing-pick" } },
   ];

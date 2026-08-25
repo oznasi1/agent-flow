@@ -129,22 +129,31 @@ export function DeckDetail({ card, sourceLabel, usage, closing = false, onClose,
   return (
     <Drawer surface="dd" label={`Detail for ${key}`} closing={closing}>
       <div className="dd-hd">
-        {/* The card's own mark, at the card's own size: a selected card and its
-          * drawer are one object, and a smaller mark here would read as two. */}
-        <CardKindIcon kind={runKind(r.run)} provider={r.provider} />
-        {/* The label, not the raw key: a notepad key is ~64 mono characters — wider
-         * than the drawer itself, which as a nowrap flex item took the header (and
-         * with it the whole drawer) into horizontal scroll, pushing the summary to
-         * zero width and the close button off-screen. Same rule the card's own key
-         * chip uses, so the two name the same run the same way. The full key stays
-         * on the title, and Copy ticket key still copies it verbatim. */}
-        <span className="k" title={key}>{keyLabel(r.run)}</span>
-        <span className="t" title={r.run.summary}>{r.run.summary}</span>
-        {/* Moved verbatim off the card's old .c-foot — the design's own list of
-         * what relocates here names "the status pill" alongside the branch row,
-         * repo chips, PR blocks and agents fold. */}
-        {r.ticketStatus && <span className="pill" title={`${sourceLabel} status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
-        <button type="button" className="dd-x" aria-label="Close" onClick={onClose}>✕</button>
+        {/* Identity on one row, the title on the next. The title shared this row until
+         * a long one proved it could not: it and the status pill are both shrinkable,
+         * so at 460px they split the shortfall and neither came out readable. What
+         * names the run — mark, key, status — is short and bounded and belongs on a
+         * line together; the title is neither, and gets a line of its own below. */}
+        <div className="dd-id">
+          {/* The card's own mark, at the card's own size: a selected card and its
+            * drawer are one object, and a smaller mark here would read as two. */}
+          <CardKindIcon kind={runKind(r.run)} provider={r.provider} />
+          {/* The label, not the raw key: a notepad key is ~64 mono characters — wider
+           * than the drawer itself, which as a nowrap flex item took the header (and
+           * with it the whole drawer) into horizontal scroll, pushing the summary to
+           * zero width and the close button off-screen. Same rule the card's own key
+           * chip uses, so the two name the same run the same way. The full key stays
+           * on the title, and Copy ticket key still copies it verbatim. */}
+          <span className="k" title={key}>{keyLabel(r.run)}</span>
+          {/* Moved verbatim off the card's old .c-foot — the design's own list of
+           * what relocates here names "the status pill" alongside the branch row,
+           * repo chips, PR blocks and agents fold. */}
+          {r.ticketStatus && <span className="pill" title={`${sourceLabel} status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
+          <button type="button" className="dd-x" aria-label="Close" onClick={onClose}>✕</button>
+        </div>
+        {/* No `title`: it wraps to as many rows as it needs, so the text is already
+         * all there and a tooltip repeating it would be noise. */}
+        <span className="t">{r.run.summary}</span>
       </div>
 
       <div className="dd-sec">

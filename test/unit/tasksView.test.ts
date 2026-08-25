@@ -156,6 +156,8 @@ const CFG = {
   workspaceMode: "auto" as const,
   openIn: "new-window" as const,
   reviewOpenIn: "new-window" as const,
+  // The sidebar never seeds PR work; present only because AgentFlowConfig is total.
+  prWorkOpenIn: "ask" as const,
   taskMode: "plan",
   promptModes: [{ id: "plan", label: "Plan", prompt: "P {key}" }],
   exploreMode: "ask",

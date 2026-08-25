@@ -385,6 +385,12 @@ export interface AgentFlowConfig {
   // answers are rarely the same. Defaults to `new-window` — today's behaviour — so the
   // one-click launch a stock install has always had does not grow a picker on upgrade.
   reviewOpenIn: OpenInSetting;
+  // Where a card's **Fix CI** / **Resolve conflict** / **Address review** re-seeds. Its
+  // own two-value vocabulary rather than `OpenInSetting`: the run already HAS windows,
+  // so the only fixed answer worth pinning is "leave it where it is" — and `new-window`
+  // would be a second name for that, since `openInEditor` focuses the window already
+  // holding a folder. Defaults to `ask`.
+  prWorkOpenIn: "ask" | "its-window";
   taskMode: string; // "ask", or a PromptMode id
   promptModes: PromptMode[];
   exploreMode: string; // "ask", or an ExploreAction id
@@ -678,6 +684,7 @@ export function getConfig(): AgentFlowConfig {
     workspaceMode: (c.get<AgentFlowConfig["workspaceMode"]>("workspaceMode")) || "auto",
     openIn: (c.get<AgentFlowConfig["openIn"]>("openIn")) || "ask",
     reviewOpenIn: (c.get<OpenInSetting>("reviewOpenIn")) || "new-window",
+    prWorkOpenIn: (c.get<AgentFlowConfig["prWorkOpenIn"]>("prWorkOpenIn")) || "ask",
     taskMode: c.get<string>("taskMode") || "ask",
     promptModes: resolveModes(c, "promptModes", DEFAULT_PROMPT_MODES),
     exploreMode: c.get<string>("exploreMode") || "ask",
