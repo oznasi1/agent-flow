@@ -19,6 +19,10 @@ const section = (over: Partial<NotepadSectionView> = {}): NotepadSectionView => 
 
 beforeEach(() => sendSpy.mockClear());
 
+/** Open the toolbar's ⋯ actions menu — where Clear completed, Reset order and
+ * New section… live since the toolbar consolidation. */
+const openMenu = () => fireEvent.click(screen.getByRole("button", { name: "Notepad actions" }));
+
 describe("Notepad", () => {
   it("defaults the filter to Active", () => {
     render(<Notepad notes={[note({ id: "a", title: "open" }), note({ id: "b", title: "shut", done: true })]} ordered={false} />);
@@ -79,13 +83,31 @@ describe("Notepad", () => {
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:delete", id: "n1" });
   });
 
-  it("hides Clear completed until something is done", () => {
+  it("offers Clear completed in the actions menu only once something is done", () => {
     const { rerender } = render(<Notepad notes={[note()]} ordered={false} />);
-    expect(screen.queryByRole("button", { name: "Clear completed" })).toBeNull();
+    openMenu();
+    expect(screen.queryByRole("menuitem", { name: "Clear completed" })).toBeNull();
     rerender(<Notepad notes={[note({ done: true })]} ordered={false} />);
-    fireEvent.click(screen.getByRole("button", { name: "Done" }));
-    fireEvent.click(screen.getByRole("button", { name: "Clear completed" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Clear completed" }));
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:clearCompleted" });
+    // Acting puts the menu away — it is a command palette, not a panel.
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("toggles the actions menu from the kebab and closes it on Escape", () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    expect(screen.queryByRole("menu")).toBeNull();
+    openMenu();
+    expect(screen.getByRole("menu")).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    expect(screen.queryByRole("menu")).toBeNull();
+  });
+
+  it("closes the actions menu on a click outside it", () => {
+    render(<Notepad notes={[]} ordered={false} />);
+    openMenu();
+    fireEvent.mouseDown(document.body);
+    expect(screen.queryByRole("menu")).toBeNull();
   });
 
   it("renders each run status as its own badge and none when absent", () => {
@@ -329,35 +351,26 @@ describe("drag to reorder", () => {
     expect(items[1].className).not.toContain("drop-after");
   });
 
-  it("shows Reset order only once an order exists, and sends it", () => {
+  it("offers Reset order in the actions menu only once an order exists, and sends it", () => {
     const { rerender } = render(<Notepad ordered={false} notes={three()} />);
-    expect(screen.queryByRole("button", { name: "Reset order" })).toBeNull();
+    openMenu();
+    expect(screen.queryByRole("menuitem", { name: "Reset order" })).toBeNull();
     rerender(<Notepad ordered notes={three()} />);
-    fireEvent.click(screen.getByRole("button", { name: "Reset order" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Reset order" }));
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:resetOrder" });
   });
 
-  it("puts Clear completed and Reset order in the same content-width row, not two stacked bars", () => {
-    // jsdom does no layout, so it cannot see a button stretch to the panel's
-    // width — that part is verified by rendering the harness (see the fix
-    // report). What jsdom CAN pin is the DOM shape the CSS depends on: both
-    // controls must share one .lens (a flex row), not sit as .lenses's direct
-    // children (a flex column, which is what stretched each one full-width).
-    const { rerender } = render(
-      <Notepad ordered notes={[note({ id: "n1" }), note({ id: "n2", done: true })]} />,
-    );
-    const clear = screen.getByRole("button", { name: "Clear completed" });
-    const reset = screen.getByRole("button", { name: "Reset order" });
-    expect(clear.parentElement).toBe(reset.parentElement);
-    expect(clear.parentElement).toHaveClass("lens");
-
-    // With only one of the two visible, that lone button still sits inside a
-    // .lens rather than directly under .lenses — the case the finding named
-    // ("the layout must still be right when only one of them is visible").
-    rerender(<Notepad ordered={false} notes={[note({ id: "n1" }), note({ id: "n2", done: true })]} />);
-    const clearAlone = screen.getByRole("button", { name: "Clear completed" });
-    expect(clearAlone.parentElement).toHaveClass("lens");
+  it("keeps the housekeeping actions inside the menu, off the resting toolbar", () => {
+    // The resting toolbar is one row — the filter and the ⋯ trigger. Neither
+    // housekeeping action is a standalone button any more; both live behind
+    // the menu, which is what collapsed the old stacked control rows.
+    render(<Notepad ordered notes={[note({ id: "n1" }), note({ id: "n2", done: true })]} />);
+    expect(screen.queryByRole("button", { name: "Clear completed" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Reset order" })).toBeNull();
+    openMenu();
+    const menu = screen.getByRole("menu");
+    expect(within(menu).getByRole("menuitem", { name: "Clear completed" })).toBeInTheDocument();
+    expect(within(menu).getByRole("menuitem", { name: "Reset order" })).toBeInTheDocument();
   });
 
   it("does not offer a grip while a note is being edited", () => {
@@ -404,18 +417,45 @@ describe("sections", () => {
     expect(screen.getByRole("button", { name: "Expand Bugs" })).toBeInTheDocument();
   });
 
-  it("adds a section from the Add section control and clears the input", () => {
+  it("reveals the section form from the menu focused, adds, and puts the form away", () => {
     render(<Notepad ordered={false} notes={[]} sections={[]} />);
+    // No permanent chrome: the input exists only once asked for.
+    expect(screen.queryByPlaceholderText("New section name")).toBeNull();
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "New section…" }));
+    expect(screen.queryByRole("menu")).toBeNull();
     const input = screen.getByPlaceholderText("New section name");
+    expect(input).toHaveFocus();
     fireEvent.change(input, { target: { value: "Ideas" } });
     fireEvent.click(screen.getByRole("button", { name: "Add section" }));
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:addSection", name: "Ideas" });
-    expect((input as HTMLInputElement).value).toBe("");
+    expect(screen.queryByPlaceholderText("New section name")).toBeNull();
   });
 
   it("disables Add section until a name is typed", () => {
     render(<Notepad ordered={false} notes={[]} sections={[]} />);
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "New section…" }));
     expect(screen.getByRole("button", { name: "Add section" })).toBeDisabled();
+  });
+
+  it("adds a section on Enter and dismisses the form on Escape without sending", () => {
+    render(<Notepad ordered={false} notes={[]} sections={[]} />);
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "New section…" }));
+    const input = screen.getByPlaceholderText("New section name");
+    fireEvent.change(input, { target: { value: "Ideas" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:addSection", name: "Ideas" });
+    expect(screen.queryByPlaceholderText("New section name")).toBeNull();
+
+    openMenu();
+    fireEvent.click(screen.getByRole("menuitem", { name: "New section…" }));
+    const again = screen.getByPlaceholderText("New section name");
+    fireEvent.change(again, { target: { value: "half-typed" } });
+    fireEvent.keyDown(again, { key: "Escape" });
+    expect(screen.queryByPlaceholderText("New section name")).toBeNull();
+    expect(sendSpy).toHaveBeenCalledTimes(1);
   });
 
   it("renames a section from its header", () => {

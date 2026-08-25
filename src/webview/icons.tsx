@@ -25,6 +25,14 @@ export const TrashIcon = (): JSX.Element => (
   </svg>
 );
 
+// The overflow kebab — VS Code's own "More Actions…" glyph, so the Notepad's
+// menu trigger reads as the same control the view title bar already carries.
+export const DotsIcon = (): JSX.Element => (
+  <svg width="14" height="14" viewBox="0 0 16 16" aria-hidden="true">
+    <path fill="currentColor" d="M4 8a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm5 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0zm5 0a1 1 0 1 1-2 0 1 1 0 0 1 2 0z" />
+  </svg>
+);
+
 // A framed picture: a rectangle with a sun and a hill, the conventional shorthand
 // for "image" at this size — a camera reads as "take a photo", which is not what
 // the Attach button does.

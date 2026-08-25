@@ -88,6 +88,8 @@ describeWithHost("notepad", {}, (ctx) => {
 
     await pool.note("Check the telemetry feed").locator(".cb").click();
     await settle(pool);
+    // Clear completed moved behind the toolbar's ⋯ menu — open it first.
+    await pool.frame.locator(".np-menu-btn").click();
     await pool.frame.locator(".np-clear").click();
 
     await expect(pool.note("Check the telemetry feed")).toHaveCount(0);
