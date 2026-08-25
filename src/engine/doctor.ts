@@ -57,6 +57,15 @@ export type ProjectProbe =
   | { ok: true; name: string }
   | { ok: false; reason: "not-found" | "error"; message: string };
 
+/** The two Bitbucket modes, spelled out once so `doctorView.ts`'s `forgeMode`
+ *  probe and this module's own tests share one definition instead of retyping
+ *  the wording twice and risking drift. Named generically (not `BITBUCKET_*`)
+ *  in case a future multi-mode forge reuses one of them, but the parenthetical
+ *  in the "projected" string is Bitbucket/`atlassian-cli`-specific by design —
+ *  the whole reason this pair exists is that forge's two CLI command surfaces. */
+export const FORGE_MODE_PASSTHROUGH = "passthrough (full)";
+export const FORGE_MODE_PROJECTED = "projected (limited — upgrade atlassian-cli for full support)";
+
 /** Everything the caller probed. `undefined` on an optional member means the probe
  *  was deliberately not run, which becomes a `skip` rather than a silent pass. */
 export interface DoctorInputs {
@@ -90,10 +99,9 @@ export interface DoctorInputs {
     gap: { kind: "missing" | "signed-out"; detail: string } | null;
     foundAt: string | null;
     /** A human-readable mode, for a forge whose capability depends on which
-     *  build of its CLI is installed — `"passthrough (full)"` or
-     *  `"projected (limited — upgrade atlassian-cli for full support)"`. Null
-     *  (or omitted) for the forges that have exactly one mode, where a mode row
-     *  would be noise.
+     *  build of its CLI is installed — `FORGE_MODE_PASSTHROUGH` or
+     *  `FORGE_MODE_PROJECTED` above. Null (or omitted) for the forges that have
+     *  exactly one mode, where a mode row would be noise.
      *
      *  Structural rather than importing anything from `forge/`, matching how
      *  `gap` is already declared here. Optional so the existing constructions

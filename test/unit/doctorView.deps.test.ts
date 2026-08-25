@@ -25,7 +25,7 @@ import { resolveBin } from "../../src/engine/pr/which";
 import { readRuns } from "../../src/engine/runs";
 import { defaultDeps } from "../../src/doctorView";
 import type { TaskConnector } from "../../src/tasks/provider";
-import type { AuthProbe } from "../../src/engine/doctor";
+import { FORGE_MODE_PASSTHROUGH, FORGE_MODE_PROJECTED, type AuthProbe } from "../../src/engine/doctor";
 
 // The settings defaultDeps still reads off getConfig() directly — reposRoot,
 // workspaceDir, repoBlocklist, prFacts. The source-facing fields (label, scope,
@@ -136,6 +136,48 @@ describe("defaultDeps — delegation", () => {
     } as never);
     await expect(deps().forgeProbe()).resolves.toEqual({ kind: "signed-out", detail: "exit 1" });
     expect(probe).toHaveBeenCalled();
+  });
+
+  // This is the seam the plumbing-only tests in doctorView.test.ts cannot reach:
+  // those inject `forgeMode` as a literal and only prove collectInputs forwards
+  // whatever it returns. Nothing there calls the real `defaultDeps` closure, so a
+  // `forgeMode` that ignored `resolveCaps()` entirely and always answered `null`
+  // — reporting NO Bitbucket user's mode, ever — passed every other test in this
+  // plan undetected. These three prove `defaultDeps`'s own `forgeMode` actually
+  // calls `resolveCaps()` and maps its answer, not just that something is wired.
+  describe("forgeMode", () => {
+    it("maps changesRequested: true to the passthrough mode via the forge's own resolveCaps", async () => {
+      const resolveCaps = vi.fn(async () => ({ changesRequested: true, reviewSearch: false }));
+      vi.mocked(resolveForge).mockReturnValue({
+        label: "Bitbucket",
+        cli: { name: "atlassian-cli", installUrl: "https://atlassiancli.com/install/" },
+        resolveCaps,
+      } as never);
+      await expect(deps().forgeMode?.()).resolves.toBe(FORGE_MODE_PASSTHROUGH);
+      expect(resolveCaps).toHaveBeenCalled();
+    });
+
+    it("maps changesRequested: false to the projected mode via the forge's own resolveCaps", async () => {
+      vi.mocked(resolveForge).mockReturnValue({
+        label: "Bitbucket",
+        cli: { name: "atlassian-cli", installUrl: "https://atlassiancli.com/install/" },
+        resolveCaps: vi.fn(async () => ({ changesRequested: false, reviewSearch: false })),
+      } as never);
+      await expect(deps().forgeMode?.()).resolves.toBe(FORGE_MODE_PROJECTED);
+    });
+
+    it("reports no mode for a forge with no resolveCaps — it has exactly one mode", async () => {
+      // `clearMocks` (vitest.config.ts) only clears call history, not a prior
+      // test's `mockReturnValue` — so this sets its own GitHub-shaped forge
+      // rather than relying on the module-level default surviving the two
+      // Bitbucket-shaped `mockReturnValue` calls above.
+      vi.mocked(resolveForge).mockReturnValue({
+        label: "GitHub",
+        cli: { name: "gh", installUrl: "https://cli.github.com" },
+        probe: vi.fn(async () => null),
+      } as never);
+      await expect(deps().forgeMode?.()).resolves.toBeNull();
+    });
   });
 
   it("counts repos and git checkouts from discoverRepos, honouring the blocklist", () => {
