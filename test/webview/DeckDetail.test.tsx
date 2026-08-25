@@ -60,15 +60,49 @@ describe("DeckDetail", () => {
   it("opens with the same mark the card does, so the two read as one object", () => {
     render1(mkCard({ run: { ...mkCard().status.run, key: "explore-tenant-config", kind: "explore" } }));
     const hd = document.querySelector(".dd-hd")!;
-    // First child, same class as the card's own avatar: a selected card and its
-    // drawer must not look like two different objects.
-    expect(hd.firstElementChild!.className).toBe("av k-explore");
+    // First thing in the header, same class as the card's own avatar: a selected card
+    // and its drawer must not look like two different objects. Read through .dd-id —
+    // the header is two rows now (identity, then the title) and the mark leads the
+    // first — but it is still the first thing in the header, which is the point.
+    expect(hd.firstElementChild!.className).toBe("dd-id");
+    expect(hd.querySelector(".dd-id")!.firstElementChild!.className).toBe("av k-explore");
     expect(hd.querySelector(".av")!.getAttribute("aria-label")).toBe("Explore place");
   });
 
   it("opens the drawer with the same mark the card carries", () => {
     render1(mkCard({ provider: "claude-code" }));
     expect(document.querySelector(".dd-hd .pv.p-claude-code")).toBeTruthy();
+  });
+
+  // The reported bug: at 460px a long title shared the header row with the status
+  // pill, both shrank, and neither was readable. The title now owns the row below the
+  // identity — these assert the structure that makes that true, since jsdom does no
+  // layout and cannot see the widths themselves.
+  it("puts the title on its own row, below the identity", () => {
+    const long = "[spike] Plan the EDR asset type — map the classification pipeline end to end";
+    render1(mkCard({ run: { ...mkCard().status.run, summary: long }, ticketStatus: "Ready for Dev" }));
+    const hd = document.querySelector(".dd-hd")!;
+    // Two rows, in this order: everything that names the run, then the title.
+    expect([...hd.children].map((c) => c.className)).toEqual(["dd-id", "t"]);
+    // The key, the status and the close button share the first — not the title.
+    const id = hd.querySelector(".dd-id")!;
+    expect(id.querySelector(".k")).toBeTruthy();
+    expect(id.querySelector(".pill")!.textContent).toBe("Ready for Dev");
+    expect(id.querySelector(".dd-x")).toBeTruthy();
+    expect(id.querySelector(".t")).toBeNull();
+    // In full. A title is never shortened on the way into the DOM — the old header
+    // relied on CSS to cut it, and the whole point of the second row is that nothing
+    // has to.
+    expect(hd.querySelector(".t")!.textContent).toBe(long);
+  });
+
+  // The tooltip existed because the title was cut and hovering was the only way to
+  // read the rest. It wraps now, so a tooltip would just repeat text already on screen.
+  it("drops the title's tooltip, which the wrap makes redundant", () => {
+    render1(mkCard());
+    expect(document.querySelector(".dd-hd .t")!.hasAttribute("title")).toBe(false);
+    // The key keeps its own: that one IS still truncated, at 50% of the row.
+    expect(document.querySelector(".dd-hd .k")!.getAttribute("title")).toBe("ASM-1");
   });
 
   it("relocates the branch, launched time and repo chips", () => {
@@ -337,14 +371,52 @@ describe("DeckDetail CSS", () => {
     expect(dd).not.toMatch(/overflow:\s*auto\s*;/);
   });
 
-  // Bounded, not freely shrinkable: a nowrap flex item with no cap cannot shrink at
-  // all (its automatic minimum is its text width), and one that shrinks freely gets
-  // crushed by a long summary beside it — "notepad" rendered as "not…".
-  it("caps the header key rather than letting it shrink freely", () => {
+  // Still capped — a nowrap flex item with no cap cannot shrink at all, since its
+  // automatic minimum size is its own text width — but shrinkable past the cap now
+  // that the title has left this row. Both halves matter: the cap keeps the key from
+  // claiming more than half the row, and min-width:0 is what lets it give ground to
+  // the pill instead of overflowing.
+  it("caps the header key AND lets it shrink past the cap", () => {
     const k = block(".dd-hd .k");
     expect(k).toMatch(/max-width:\s*50%/);
     expect(k).toMatch(/text-overflow:\s*ellipsis/);
-    expect(k).not.toMatch(/min-width:\s*0/);
+    expect(k).toMatch(/min-width:\s*0/);
+  });
+
+  // The bug this pair was written for: the title and the pill were both shrinkable, so
+  // a long title split the row's shortfall between them and "Ready for Dev" came out
+  // as "Read…" while the title was cut anyway. The pill is now the row's rigid item
+  // and the key is the one that yields, so a status keeps its words whatever the key.
+  it("lets the status pill hold its text, so the key is what yields", () => {
+    const pill = block(".dd-hd .pill");
+    expect(pill).toMatch(/flex:\s*none/);
+    // Capped all the same: a pathological status must not squeeze the key to nothing.
+    expect(pill).toMatch(/max-width:/);
+  });
+
+  // The title takes a row of its own and wraps onto as many as it needs. Asserted as
+  // the absence of every truncating property, because that is the actual regression
+  // risk: one `text-overflow: ellipsis` copied back onto this rule brings the bug back.
+  it("wraps the title instead of ellipsizing it", () => {
+    const t = block(".dd-hd .t");
+    expect(t).toMatch(/white-space:\s*normal/);
+    // Unbroken slugs — a notepad title is one 60-character token — must break rather
+    // than run past 460px and be clipped by .dd's own overflow: hidden.
+    expect(t).toMatch(/overflow-wrap:\s*anywhere/);
+    expect(t).not.toMatch(/text-overflow/);
+    expect(t).not.toMatch(/white-space:\s*nowrap/);
+    expect(t).not.toMatch(/line-clamp/);
+  });
+
+  // A row that cannot break, and a title below it. Deliberately NOT flex-wrap on
+  // .dd-hd: flexbox breaks lines from the items' unshrunk sizes, so a long key beside
+  // a long status wrapped the pill and the close button onto a line of their own and
+  // pushed the title to a third.
+  it("keeps the identity row unwrappable", () => {
+    const id = block(".dd-id");
+    expect(id).toMatch(/display:\s*flex/);
+    expect(id).not.toMatch(/flex-wrap/);
+    expect(block(".dd-hd")).not.toMatch(/flex-wrap/);
   });
 
   // Same bug, same fix, on the child row: .k/.bn are flex:none (no shrink at
