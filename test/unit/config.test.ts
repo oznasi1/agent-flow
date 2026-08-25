@@ -805,6 +805,26 @@ describe("review-request settings", () => {
     expect(getConfig().reviewWrites).toBe(true);
   });
 
+  it("defaults mergeWrites off and mergeMethod to squash", () => {
+    const c = getConfig();
+    expect(c.mergeWrites).toBe(false);
+    expect(c.mergeMethod).toBe("squash");
+  });
+
+  it("honors explicit mergeWrites and mergeMethod overrides", () => {
+    setConfig({ mergeWrites: true, mergeMethod: "rebase" });
+    expect(getConfig().mergeWrites).toBe(true);
+    expect(getConfig().mergeMethod).toBe("rebase");
+  });
+
+  it("falls back to squash on a hand-edited mergeMethod", () => {
+    // settings.json is a text file. An unrecognised value must not reach argv as
+    // itself — the provider refuses it too, but the config layer should not hand
+    // one down in the first place.
+    setConfig({ mergeMethod: "fast-forward" as never });
+    expect(getConfig().mergeMethod).toBe("squash");
+  });
+
   it("defaults orchestrator to off", () => {
     expect(getConfig().orchestrator).toBe(false);
   });
@@ -1055,8 +1075,23 @@ describe("package.json ⇄ config constants", () => {
   // "default": true typo on agentFlow.reviewWrites in package.json — shipping
   // the one GitHub write path in this extension on by default — would leave
   // every one of getConfig()'s own tests green.
-  it("declares reviewWrites defaulting to false — the only setting that writes to GitHub", () => {
+  it("declares reviewWrites defaulting to false — one of the two settings that write to GitHub", () => {
     expect(props["agentFlow.reviewWrites"].default).toBe(false);
+  });
+
+  // Same reasoning as the reviewWrites default above: getConfig()'s own `?? false`
+  // only exercises the vscode mock's unset-key behaviour, never the manifest
+  // default a real VS Code install serves. A `"default": true` typo here would
+  // ship the only path in this extension that merges to a default branch switched
+  // on, and every getConfig() test would stay green.
+  it("declares mergeWrites defaulting to false — the only setting that merges", () => {
+    expect(props["agentFlow.mergeWrites"].default).toBe(false);
+  });
+
+  it("declares mergeMethod defaulting to squash, over exactly the three strategies", () => {
+    const m = props["agentFlow.mergeMethod"] as { default?: unknown; enum?: unknown };
+    expect(m.default).toBe("squash");
+    expect(m.enum).toEqual(["squash", "merge", "rebase"]);
   });
 
   it("declares orchestrator defaulting to false — the feature that will run agents on a timer", () => {

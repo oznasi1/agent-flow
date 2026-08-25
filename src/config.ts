@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";
-import { AgentProvider, FilterVisibility, FlowCommand, PromptMode } from "./types";
+import { AgentProvider, FilterVisibility, FlowCommand, MergeMethod, PromptMode } from "./types";
 // The destination vocabulary, defined beside the picker that reads it so the setting and
 // the code that acts on it cannot drift apart.
 import type { OpenInSetting } from "./engine/openTarget";
@@ -456,6 +456,15 @@ export interface AgentFlowConfig {
   // Allow submitting approve / comment / request-changes from the Deck. The only
   // setting in Agent Flow Deck that lets it write to GitHub.
   reviewWrites: boolean;
+  /** Allow merging a green PR from a Deck card. Off by default, for the same
+   * reason as `reviewWrites` and `orchestrator`: the feature writes on your
+   * behalf, so nothing about it appears until you ask for it. */
+  mergeWrites: boolean;
+  /** Which strategy a card's Merge button uses. Exists because `gh pr merge`
+   * refuses to run non-interactively without an explicit one — there is no
+   * "let the forge decide" to fall back on. The confirmation dialog names the
+   * resolved value, so this setting can never merge a way you did not see. */
+  mergeMethod: MergeMethod;
   /** Show the Deck's Orchestrator chip and drawer. Off by default, like
    * `reviewWrites`: a flow eventually launches agents on a timer, so the whole
    * feature stays invisible until you ask for it. */
@@ -615,6 +624,12 @@ function readCommands(c: vscode.WorkspaceConfiguration): FlowCommand[] {
   return out;
 }
 
+/** The three merge strategies, as a value so both `getConfig()`'s fallback and the
+ * telemetry snapshot's allowlist derive from one list. Here rather than beside
+ * `WORKTREE_MODES` in `telemetry/settingsSnapshot.ts` because that module already
+ * imports from this one — the reverse direction would be a cycle. */
+export const MERGE_METHODS = ["squash", "merge", "rebase"] as const satisfies readonly MergeMethod[];
+
 export function getConfig(): AgentFlowConfig {
   const c = vscode.workspace.getConfiguration("agentFlow");
   const slackRaw = c.get<Record<string, unknown>>("exploreSlackDm") ?? {};
@@ -641,6 +656,9 @@ export function getConfig(): AgentFlowConfig {
   // independent `c.get("forge")` couldn't disagree with this one, but it would
   // be untidy, and untidy invites drift the next time either read changes.
   const forge = c.get<string>("forge") || "github";
+  // Hoisted so the membership check below and the resolved `mergeMethod` value
+  // read the same call instead of asking `c.get` for it twice.
+  const mergeMethodRaw = c.get<string>("mergeMethod");
   return {
     taskSource: c.get<string>("taskSource") || "jira",
     forge,
@@ -711,6 +729,15 @@ export function getConfig(): AgentFlowConfig {
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,
+    mergeWrites: c.get<boolean>("mergeWrites") ?? false,
+    // Unlike `worktree` above — whose `|| "ask"` fallback lets any hand-edited
+    // string through unchecked — this is a membership check against
+    // MERGE_METHODS, deliberately stricter: an unrecognised merge strategy must
+    // not be handed down. Each provider's own method guard refuses anything
+    // out-of-union besides — a merge strategy is not something to fail open on.
+    mergeMethod: MERGE_METHODS.includes(mergeMethodRaw as MergeMethod)
+      ? (mergeMethodRaw as MergeMethod)
+      : "squash",
     orchestrator: c.get<boolean>("orchestrator") ?? false,
     reviewRequestModes: (() => {
       // An explicit modes list is a deliberate layer over the built-ins and wins

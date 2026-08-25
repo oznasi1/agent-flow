@@ -1,4 +1,4 @@
-import { AgentState, DeckColumn, DeckLane, PrEntryMap } from "../types";
+import { AgentState, DeckColumn, DeckLane, PrEntryMap, PrFacts } from "../types";
 
 /** Inputs to the column decision — every field observable, none required. */
 export interface BucketInput {
@@ -155,4 +155,79 @@ export function deriveLane(column: DeckColumn, s: PrSignals, agentState?: AgentS
   if (column === "review") return s.blocked ? "fixes" : "waiting";
   if (column === "merge") return s.merged ? "merged" : "ready";
   return null;
+}
+
+/** The one PR a card may merge, named for the host that will do the merging. */
+export interface MergeTarget {
+  repo: string; // the PrEntryMap key — how the host finds the checkout
+  number: number;
+  url: string; // for the failure toast's "Open PR" action
+}
+
+/** Is every fact standing between this PR and its base branch green AND readable?
+ *
+ * Deliberately stricter than `prSignals.ready`, in two ways that matter:
+ *
+ *  - `unresolved === 0`, so `null` — the GraphQL/discussions call failed or was
+ *    skipped — withholds the button. That is the exact case where "no comments
+ *    open" is unproven, and it is the fact `ready` does not read at all.
+ *  - No forgiveness for `ciAdvisory`. `prSignals.blocked` forgives a flaky
+ *    optional check because it is not worth pinning a card in Action required;
+ *    this cannot, because the button promises there is nothing left to look at.
+ *
+ * Every unknown fails, matching the rule `branchCi` already states for itself:
+ * "unknown" is NOT green. `review === "none"` fails too — on GitHub it covers
+ * both "no reviewers required" and "nobody has reviewed yet", and `PrFacts`
+ * cannot tell them apart, so treating it as approved would put a Merge button on
+ * an unreviewed PR.
+ */
+function isMergeReady(f: PrFacts): boolean {
+  return (
+    f.state === "OPEN" &&
+    !f.isDraft &&
+    f.ci.failing.length === 0 &&
+    f.ci.pending === 0 &&
+    f.review === "approved" &&
+    f.unresolved === 0 &&
+    f.mergeable === "clean"
+  );
+}
+
+/**
+ * The single PR this run can merge right now, or null.
+ *
+ * `prSignals.ready` is NOT reused: it drives column placement, so tightening it
+ * would move existing users' cards between columns on upgrade. The two are
+ * allowed to disagree — a card can sit in the Merge column's `ready` lane with
+ * no Merge button (unreadable review threads, say). That is the honest pair: the
+ * lane says "nothing looks wrong", the button says "I can prove nothing is wrong".
+ *
+ * Exactly ONE ready PR, and every other PR-bearing repo already merged. Not a
+ * "lead PR" like `cardActions` picks: that function's buttons only seed a
+ * session, so an arbitrary choice among several is harmless, whereas merging one
+ * half of a coupled pair of PRs on a single click is the specific mistake worth
+ * designing out. A card with two ready PRs therefore gets nothing.
+ *
+ * An entry whose last fetch failed (`error: true`) is refused outright, and on
+ * BOTH sides of the test: such an entry cannot be the candidate, and it cannot be
+ * one of the already-merged siblings either. Its facts are the PREVIOUS value
+ * carried forward, so a sibling whose fetches are failing can go on saying MERGED
+ * about a first PR while a second, coupled one sits open and unread — which is the
+ * exact pair this function exists to refuse. Stale facts do not authorize a write
+ * however green they look. Pure.
+ */
+export function mergeTarget(prs: PrEntryMap): MergeTarget | null {
+  const withFacts = Object.entries(prs)
+    .map(([repo, e]) => ({ repo, facts: e.facts, failed: e.error === true }))
+    .filter((x): x is { repo: string; facts: PrFacts; failed: boolean } => x.facts !== null);
+  const ready = withFacts.filter((x) => !x.failed && isMergeReady(x.facts));
+  // `!== 1` covers both "nothing to merge" and "two, and picking is not ours".
+  if (ready.length !== 1) return null;
+  const rest = withFacts.filter((x) => x.repo !== ready[0].repo);
+  // `!x.failed` here as well as in `ready` above: a sibling whose last fetch failed
+  // is carrying forward whatever it said before, and "it said MERGED an hour ago"
+  // is not "it is merged". Unreadable is not merged, the same way unreadable is not
+  // green in `isMergeReady`.
+  if (!rest.every((x) => !x.failed && x.facts.state === "MERGED")) return null;
+  return { repo: ready[0].repo, number: ready[0].facts.number, url: ready[0].facts.url };
 }

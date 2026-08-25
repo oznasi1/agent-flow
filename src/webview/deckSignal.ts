@@ -1,4 +1,5 @@
 import { CardAgent, PrFacts, PrWorkReason, RunStatus } from "../types";
+import { mergeTarget, type MergeTarget } from "../engine/bucket";
 
 /** One element of a card's signal line. `diff` is its own kind rather than a
  * formatted string because the two halves take different colors, and a card
@@ -143,4 +144,18 @@ export function cardActions(r: RunStatus): SignalAction[] {
     out.push({ tone: "warn", text: "changes requested", label: "Address review", reason: "review" });
   }
   return out;
+}
+
+/**
+ * The one PR this card can merge, or null.
+ *
+ * A thin wrapper over `mergeTarget` so `DeckApp` reads one vocabulary for both
+ * halves of a card's action area — the problem rows come from `cardActions`, the
+ * merge row from here, and neither reaches into the engine directly.
+ *
+ * `mergeTarget` is a pure leaf in `engine/bucket.ts` (which may import nothing but
+ * `../types`), so this stays inside the webview's Node-free budget.
+ */
+export function cardMerge(r: RunStatus): MergeTarget | null {
+  return mergeTarget(r.prs);
 }

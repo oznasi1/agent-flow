@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { GlabProvider, probeGlab, GLAB_TIMEOUT_MS } from "../../../../../src/engine/pr/glab/provider";
 import type { Runner } from "../../../../../src/engine/pr/provider";
+import type { MergeMethod } from "../../../../../src/types";
 
 /** An absolute path, as a real lookup returns: nothing here may depend on the bare
  * name `glab` being resolvable from the test process's own PATH. */
@@ -277,6 +278,98 @@ describe("GlabProvider.fetch — degradation", () => {
     expect(await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1")).toEqual({ ok: true, facts: expect.objectContaining({
       number: 12, title: "Fix export", ci: { passing: 0, pending: 0, failing: [] },
     }) });
+  });
+});
+
+describe("GlabProvider.merge", () => {
+  it("squashes through the merge endpoint, in the repo directory", async () => {
+    const { run, calls } = routed({ "merge_requests/4821/merge": "{}" });
+    const out = await provider(run).merge("/r/api", 4821, "squash");
+
+    expect(out).toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].cwd).toBe("/r/api");
+    // `projects/:fullpath` is glab's own placeholder, resolved from the git remote
+    // of the directory the call runs in — never from Agent Flow's name for the
+    // checkout. `-F` (not `-f`) so `true`/`false` reach GitLab as a JSON boolean
+    // rather than the string "true"; no user-authored text goes through this flag,
+    // so `-F`'s leading-`@`-is-a-filename behaviour cannot bite here.
+    expect(calls[0].args).toEqual([
+      "api", "projects/:fullpath/merge_requests/4821/merge", "--method", "PUT", "-F", "squash=true",
+    ]);
+  });
+
+  it("sends squash=false for a plain merge, leaving the commit shape to the project setting", async () => {
+    const { run, calls } = routed({ "merge_requests/4821/merge": "{}" });
+    const out = await provider(run).merge("/r/api", 4821, "merge");
+    expect(out).toEqual({ ok: true });
+    expect(calls[0].args).toEqual([
+      "api", "projects/:fullpath/merge_requests/4821/merge", "--method", "PUT", "-F", "squash=false",
+    ]);
+  });
+
+  it("threads the given number, not a hardcoded one", async () => {
+    const { run, calls } = routed({ "merge_requests/7/merge": "{}" });
+    await provider(run).merge("/r/web", 7, "squash");
+    expect(calls[0].args[1]).toBe("projects/:fullpath/merge_requests/7/merge");
+    expect(calls[0].cwd).toBe("/r/web");
+  });
+
+  it("refuses rebase in words rather than substituting another strategy, before spawning", async () => {
+    // GitLab's merge API has no per-request rebase: the project's Merge method
+    // setting decides. Silently sending squash=false here would merge a way the
+    // user did not choose — the worst possible degradation for this seam.
+    const { run, calls } = routed({ "merge_requests/4821/merge": "{}" });
+    const out = await provider(run).merge("/r/api", 4821, "rebase");
+    expect(out.ok).toBe(false);
+    if (!out.ok) {
+      expect(out.message).toContain("rebase");
+      expect(out.message).toContain("agentFlow.mergeMethod");
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it.each(["Squash", "constructor"] as const)("refuses an out-of-union method (%s) before spawning", async (method) => {
+    const { run, calls } = routed({ "merge_requests/4821/merge": "{}" });
+    const out = await provider(run).merge("/r/api", 4821, method as unknown as MergeMethod);
+    expect(out).toEqual({ ok: false, message: `Unknown merge method: ${method}` });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("prefers stderr — GitLab's own wording — over the reconstructed command line", async () => {
+    const err = Object.assign(
+      new Error("Command failed: glab api projects/:fullpath/merge_requests/4821/merge --method PUT -F squash=true\nPOST https://gitlab.com/api/v4/...: 405 {message: Method Not Allowed}"),
+      { stderr: "405 {message: Method Not Allowed}" },
+    );
+    const { run } = routed({ "merge_requests/4821/merge": err });
+    const out = await provider(run).merge("/r/api", 4821, "squash");
+    expect(out).toEqual({ ok: false, message: "405 {message: Method Not Allowed}" });
+    if (!out.ok) expect(out.message).not.toContain("Command failed");
+  });
+
+  it("never returns the raw command line when the rejection carries no stderr", async () => {
+    const { run } = routed({
+      "merge_requests/4821/merge": new Error("Command failed: glab api projects/:fullpath/merge_requests/4821/merge --method PUT"),
+    });
+    const out = await provider(run).merge("/r/api", 4821, "squash");
+    expect(out).toEqual({
+      ok: false,
+      message: "glab failed without further detail — check the merge request directly.",
+    });
+  });
+
+  it.each([
+    ["killed", { killed: true }],
+    ["code ETIMEDOUT", { code: "ETIMEDOUT" }],
+  ])("returns wording that does not claim GitLab refused, on a %s rejection", async (_label, shape) => {
+    const err = Object.assign(new Error("Command failed: glab api projects/:fullpath/merge_requests/4821/merge --method PUT"), shape);
+    const { run } = routed({ "merge_requests/4821/merge": err });
+    const out = await provider(run).merge("/r/api", 4821, "squash");
+    expect(out).toEqual({
+      ok: false,
+      message: `Timed out after ${GLAB_TIMEOUT_MS / 1000}s — the merge may already have gone through. Open the merge request to check.`,
+    });
+    if (!out.ok) expect(out.message).not.toMatch(/refused/i);
   });
 });
 

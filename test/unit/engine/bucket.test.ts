@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { deriveBucket, deriveLane, prSignals } from "../../../src/engine/bucket";
+import { deriveBucket, deriveLane, mergeTarget, prSignals } from "../../../src/engine/bucket";
 import { PrEntryMap, PrFacts } from "../../../src/types";
 
 const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -370,5 +370,103 @@ describe("a multi-repo merged run", () => {
     const half = prSignals(entries(prFacts({ state: "MERGED" }), prFacts({ state: "OPEN" })));
     expect(half.merged).toBe(false);
     expect(deriveBucket({ agentState: "idle", prOpen: half.open, prMerged: half.merged })).toBe("review");
+  });
+});
+
+describe("mergeTarget", () => {
+  const green = (over: Partial<PrFacts> = {}): PrFacts =>
+    prFacts({ number: 124, url: "https://github.com/o/r/pull/124", review: "approved", unresolved: 0, ...over });
+
+  it("names the one PR that is open, approved, green, thread-clear and clean", () => {
+    expect(mergeTarget(entries(green()))).toEqual({
+      repo: "repo0", number: 124, url: "https://github.com/o/r/pull/124",
+    });
+  });
+
+  it("returns null when there are no PRs at all", () => {
+    expect(mergeTarget({})).toBeNull();
+  });
+
+  it("returns null for a repo whose PR resolved to none", () => {
+    expect(mergeTarget(entries(null))).toBeNull();
+  });
+
+  // Each of these is the ONLY thing wrong. Table-driven so a predicate that
+  // forgets one clause fails on exactly that row.
+  it.each([
+    ["a closed PR", { state: "CLOSED" as const }],
+    ["a merged PR", { state: "MERGED" as const }],
+    ["a draft", { isDraft: true }],
+    ["a failing check", { ci: { passing: 1, pending: 0, failing: [{ name: "lint", url: "" }] } }],
+    ["a pending check", { ci: { passing: 1, pending: 1, failing: [] } }],
+    ["review still required", { review: "review_required" as const }],
+    ["changes requested", { review: "changes_requested" as const }],
+    ["no review decision at all", { review: "none" as const }],
+    ["an unresolved thread", { unresolved: 1 }],
+    ["an unreadable thread count", { unresolved: null }],
+    ["a conflicting merge state", { mergeable: "conflicting" as const }],
+    ["an unknown merge state", { mergeable: "unknown" as const }],
+    ["a blocked merge state", { mergeable: "blocked" as const }],
+    ["a behind merge state", { mergeable: "behind" as const }],
+  ])("withholds the target on %s", (_label, over) => {
+    expect(mergeTarget(entries(green(over)))).toBeNull();
+  });
+
+  // ciAdvisory means the REQUIRED checks passed and something optional did not.
+  // `prSignals.blocked` forgives that; this must not — the button promises
+  // there is nothing left to look at, and an optional red is something to look at.
+  it("withholds the target on an advisory failure, unlike prSignals.blocked", () => {
+    const advisory = green({ ci: { passing: 4, pending: 0, failing: [{ name: "flaky-e2e", url: "" }] }, ciAdvisory: true });
+    expect(prSignals(entries(advisory)).blocked).toBe(false);
+    expect(mergeTarget(entries(advisory))).toBeNull();
+  });
+
+  it("withholds the target when the entry's last fetch failed, however green the facts look", () => {
+    const stale: PrEntryMap = { svc: { facts: green(), fetchedAt: 0, error: true } };
+    expect(mergeTarget(stale)).toBeNull();
+  });
+
+  it("withholds the target when two repos are both ready — a write must not pick one", () => {
+    expect(mergeTarget(entries(green(), green({ number: 125 })))).toBeNull();
+  });
+
+  it("names the ready PR when every other PR-bearing repo has already merged", () => {
+    const map: PrEntryMap = {
+      api: { facts: green({ number: 900, url: "https://github.com/o/api/pull/900" }), fetchedAt: 1 },
+      web: { facts: prFacts({ number: 800, state: "MERGED" }), fetchedAt: 1 },
+    };
+    expect(mergeTarget(map)).toEqual({ repo: "api", number: 900, url: "https://github.com/o/api/pull/900" });
+  });
+
+  it("withholds the target when a sibling repo says MERGED but its last fetch failed", () => {
+    // The failure this pins: `withFacts` keeps `error: true` entries, and only the
+    // `ready` filter used to exclude them — so the sibling rule accepted a repo
+    // whose facts said MERGED from BEFORE the fetches started failing. A two-repo
+    // card where web merged its first PR and then opened the coupled second one,
+    // with web's reads now failing, would have offered api's Merge button while
+    // saying nothing about the sibling it could not read.
+    const map: PrEntryMap = {
+      api: { facts: green({ number: 900, url: "https://github.com/o/api/pull/900" }), fetchedAt: 1 },
+      web: { facts: prFacts({ number: 800, state: "MERGED" }), fetchedAt: 1, error: true },
+    };
+    expect(mergeTarget(map)).toBeNull();
+  });
+
+  it("withholds the target when another repo's PR is open but not ready", () => {
+    const map: PrEntryMap = {
+      api: { facts: green({ number: 900 }), fetchedAt: 1 },
+      web: { facts: prFacts({ number: 800, review: "review_required" }), fetchedAt: 1 },
+    };
+    expect(mergeTarget(map)).toBeNull();
+  });
+
+  it("reads the target's own repo key, number and url — not the first entry's", () => {
+    // Distinct values in a non-alphabetically-first repo: the only assertion that
+    // catches an implementation returning entries[0] or a hardcoded field.
+    const map: PrEntryMap = {
+      alpha: { facts: prFacts({ number: 1, state: "MERGED" }), fetchedAt: 1 },
+      zulu: { facts: green({ number: 4821, url: "https://github.com/acme/api/pull/4821" }), fetchedAt: 1 },
+    };
+    expect(mergeTarget(map)).toEqual({ repo: "zulu", number: 4821, url: "https://github.com/acme/api/pull/4821" });
   });
 });

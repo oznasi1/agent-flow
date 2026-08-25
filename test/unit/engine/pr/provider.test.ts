@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { GhProvider, probeGh, PR_JSON_FIELDS, GH_TIMEOUT_MS } from "../../../../src/engine/pr/provider";
 import type { Runner } from "../../../../src/engine/pr/provider";
+import type { MergeMethod } from "../../../../src/types";
 
 /** An absolute path, as a real lookup returns: nothing here may depend on the
  * bare name `gh` being resolvable from the test process's own PATH. */
@@ -205,5 +206,88 @@ describe("probeGh", () => {
     const { run, calls } = scripted("Logged in to github.com");
     expect(await probeGh(run, () => null)).toBeNull();
     expect(calls[0].file).toBe("gh");
+  });
+});
+
+describe("GhProvider.merge", () => {
+  it.each([
+    ["squash", "--squash"],
+    ["merge", "--merge"],
+    ["rebase", "--rebase"],
+  ] as const)("merges with %s in the repo directory", async (method, flag) => {
+    const { run, calls } = scripted("");
+    const out = await provider(run).merge("/r/api", 4821, method);
+
+    expect(out).toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0].file).toBe(GH);
+    // cwd, not --repo: a card's PR is a local checkout, exactly as fetch() treats it.
+    expect(calls[0].cwd).toBe("/r/api");
+    // Full argv, not toContain(flag): pinning it exactly is the only thing that
+    // catches a swapped strategy, and the wrong strategy rewrites someone's history.
+    expect(calls[0].args).toEqual(["pr", "merge", "4821", flag]);
+  });
+
+  it("threads the given number, not a hardcoded one", async () => {
+    // Every other test here uses 4821; a distinct number is the only assertion
+    // that catches an implementation ignoring its parameter.
+    const { run, calls } = scripted("");
+    await provider(run).merge("/r/web", 7, "squash");
+    expect(calls[0].args).toEqual(["pr", "merge", "7", "--squash"]);
+    expect(calls[0].cwd).toBe("/r/web");
+  });
+
+  it.each(["Squash", "constructor"] as const)("refuses an out-of-union method (%s) before spawning", async (method) => {
+    // "constructor" is the adversarial case: `!MERGE_FLAG[method]` would see
+    // Object.prototype.constructor as truthy and sail through into argv. Only
+    // Object.hasOwn refuses it. `agentFlow.mergeMethod` is a settings.json string,
+    // so this is a real input, not a hypothetical.
+    const { run, calls } = scripted("");
+    const out = await provider(run).merge("/r/api", 4821, method as unknown as MergeMethod);
+    expect(out).toEqual({ ok: false, message: `Unknown merge method: ${method}` });
+    expect(calls).toHaveLength(0);
+  });
+
+  it("prefers stderr — GitHub's own wording — over the reconstructed command line", async () => {
+    // The two fields carry DIVERGENT text on purpose: `stripCommandLine(message)`
+    // would return "gh: exit status 1", so only an implementation that actually
+    // prefers `stderr` can produce the expected message. A fixture whose stderr
+    // merely repeats message's trailing half passes either way, and proves only
+    // that the result is argv-free.
+    const err = Object.assign(
+      new Error("Command failed: gh pr merge 4821 --squash\ngh: exit status 1"),
+      { stderr: "Pull request is not mergeable: the merge commit cannot be cleanly created." },
+    );
+    const { run } = scripted(err);
+    const out = await provider(run).merge("/r/api", 4821, "squash");
+    expect(out).toEqual({
+      ok: false,
+      message: "Pull request is not mergeable: the merge commit cannot be cleanly created.",
+    });
+    if (!out.ok) expect(out.message).not.toContain("Command failed");
+  });
+
+  it("never returns the raw command line when the rejection carries no stderr", async () => {
+    const err = new Error("Command failed: gh pr merge 4821 --squash\n");
+    const { run } = scripted(err);
+    const out = await provider(run).merge("/r/api", 4821, "squash");
+    expect(out).toEqual({ ok: false, message: "gh failed without further detail — check the PR directly." });
+  });
+
+  it.each([
+    ["killed", { killed: true }],
+    ["code ETIMEDOUT", { code: "ETIMEDOUT" }],
+  ])("returns wording that does not claim GitHub refused, on a %s rejection", async (_label, shape) => {
+    // A merge is not idempotent and the 10s clock can expire AFTER GitHub
+    // committed. "GitHub refused" here would be a lie about a write that landed,
+    // and would invite a retry.
+    const err = Object.assign(new Error("Command failed: gh pr merge 4821 --squash"), shape);
+    const { run } = scripted(err);
+    const out = await provider(run).merge("/r/api", 4821, "squash");
+    expect(out).toEqual({
+      ok: false,
+      message: `Timed out after ${GH_TIMEOUT_MS / 1000}s — the merge may already have gone through. Open the PR to check.`,
+    });
+    if (!out.ok) expect(out.message).not.toMatch(/refused|failed to merge/i);
   });
 });

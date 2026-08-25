@@ -355,6 +355,10 @@ export type PrEntryMap = Record<string, PrEntry>;
 export type ReviewSize = "S" | "M" | "L";
 export type ReviewSort = "oldest" | "smallest";
 export type ReviewVerb = "approve" | "comment" | "request-changes";
+/** How a merge is performed. One spelling shared by the `agentFlow.mergeMethod`
+ * setting, the confirmation dialog, and each forge provider's flag map — a second
+ * spelling anywhere is a merge strategy the user did not choose. */
+export type MergeMethod = "squash" | "merge" | "rebase";
 
 /** One PR asking for your review — everything the strip renders unexpanded.
  * `localPath`, `runKey` and `draftPath` are observed locally on every refresh and
@@ -629,6 +633,11 @@ export type InboundMessage =
   | { type: "deck:reviewBatch"; ids: string[] }
   | { type: "deck:reviewLoadDraft"; id: string }
   | { type: "deck:reviewSubmit"; id: string; verb: ReviewVerb; body: string; fromDraft: boolean }
+  /** Merge the one PR this card can merge. `repo` and `number` are what the
+   * webview believed; the host re-derives them from its own PR store and refuses
+   * if they disagree — the webview is a renderer, never the authority for a
+   * write. */
+  | { type: "deck:mergePr"; key: string; repo: string; number: number }
   // ── Orchestrator flows ──────────────────────────────────────────────
   // `flow:save` carries the WHOLE flow rather than a patch: a graph is small
   // and the drawer is its only editor. The host still merges its own three
@@ -759,6 +768,13 @@ export type OutboundMessage =
        * flip mid-session, and the board re-posts often enough that this is the
        * whole of keeping it live — the same reasoning as `prReviewStatus`. */
       showTokenTotal: boolean;
+      /** `agentFlow.mergeWrites` — the card's Merge row renders only when true.
+       * Optional, and read as `?? false` in the webview: an in-flight message
+       * posted before this build's host reloads carries no such field, and the
+       * safe reading of "I do not know" for a write path is off. Same reasoning
+       * as `agentLabel`'s own runtime fallback. Optional also keeps every
+       * existing `deck:runs` fixture compiling untouched. */
+      mergeWrites?: boolean;
       // How many runs would retire right now if both retirement windows were
       // ignored. Drives the Clear stale button, which is hidden at zero.
       staleCount: number;
@@ -813,6 +829,16 @@ export type OutboundMessage =
   // still in flight — this is the only message the webview can trust to release
   // that row's disable, or to know a failure was *this* row's.
   | { type: "deck:reviewSubmitDone"; id: string; outcome: "ok" | "failed" | "cancelled" }
+  /** The explicit outcome of one deck:mergePr, posted at every exit that reached
+   * the confirmation. A duplicate message rejected by the in-flight guard
+   * deliberately gets NO outcome: the real call owns it.
+   *
+   * The webview releases the row's disable on "failed" and "cancelled" only. On
+   * "ok" the PR is merged but the board's own facts still say OPEN for up to a
+   * poll window, so the row keeps its disabled button until the refreshed facts
+   * retire it from the card — see the handler in DeckApp.tsx for why a symmetric
+   * release put a live Merge button on an already-merged PR. */
+  | { type: "deck:mergeDone"; key: string; repo: string; number: number; outcome: "ok" | "failed" | "cancelled" }
   // `enabled: false` still posts, with an empty list: the webview must be able
   // to tell "the setting is off" from "not loaded yet", and silence cannot.
   // `pendingResume` is the resume gate's own report — flows with rules already
