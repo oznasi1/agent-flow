@@ -17,6 +17,8 @@ export interface Forge {
   readonly cli: { name: string; installUrl: string };
   readonly caps: ForgeCaps;
   probe(): Promise<ForgeGap | null>;
+  accounts(): Promise<ForgeAccount[]>;
+  switchAccount(login: string): Promise<{ ok: true } | { ok: false; message: string }>;
   readonly prs: PrProvider;
   readonly reviews: ReviewProvider;
   branchCi(repoPath: string, branch: string): Promise<BranchCiStatus>;
@@ -24,8 +26,10 @@ export interface Forge {
 ```
 
 Declared in `src/engine/forge/types.ts`, alongside `ForgeCaps` (what a forge can
-answer — today, just `changesRequested`) and `ForgeGap` (why `probe()` came back
-unhappy: `missing` or `signed-out`). `prs` is a `PrProvider`, `reviews` a
+answer — `changesRequested`, and `accounts`: whether its CLI has a
+multi-account model it can report and change), `ForgeAccount` (one such account:
+`login`, `active`, `scopes`) and `ForgeGap` (why `probe()` came back unhappy:
+`missing` or `signed-out`). `prs` is a `PrProvider`, `reviews` a
 `ReviewProvider` — both declared in `src/engine/pr/provider.ts` and
 `src/engine/review/provider.ts`, and shared with the pre-seam `gh`-only code
 they replaced.
