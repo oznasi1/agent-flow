@@ -136,15 +136,17 @@ describe("BbReviewProvider.submit — refusals and failures", () => {
 });
 
 describe("BbReviewProvider.detail", () => {
-  it("fills size and CI in passthrough mode", async () => {
-    const run: Runner = async (_f, args) => {
-      if (args.some((a) => a.includes("/diffstat"))) {
-        return JSON.stringify({ values: [{ lines_added: 10, lines_removed: 3 }, { lines_added: 1, lines_removed: 0 }] });
-      }
-      return JSON.stringify({ values: [{ state: "FAILED", name: "Tests", url: "https://ci/3" }] });
-    };
-    await expect(provider(run, true).detail(REPO, 42)).resolves.toMatchObject({
+  it("fills failing checks from the statuses call, and nothing else, in passthrough mode", async () => {
+    const run: Runner = async () =>
+      JSON.stringify({ values: [{ state: "FAILED", name: "Tests", url: "https://ci/3" }] });
+    // `toEqual` against the complete `ReviewDetail`, not `toMatchObject`: this
+    // call never requests `/diffstat` and returns no `size`/`ci` at all, only
+    // `failing` and a fixed `unresolved: null` — a future task wiring up
+    // diffstat must find this test red, not green while asserting nothing about
+    // the fields it's supposed to add.
+    await expect(provider(run, true).detail(REPO, 42)).resolves.toEqual({
       failing: [{ name: "Tests", url: "https://ci/3" }],
+      unresolved: null,
     });
   });
 

@@ -109,7 +109,13 @@ const pipelineArgs = (repo: BbRepo, branch: string): string[] => [
 // site — `apiArgs(path)`, read-only — produces the exact argv it always did.
 // `-X`/`-d` are `bb api`'s own flags for an HTTP method and a JSON body (see
 // `ApiArgs` in the CLI's `crates/cli/src/commands/api.rs`).
-const apiArgs = (path: string, method?: string, body?: string): string[] => [
+//
+// Exported: `../../review/bb/provider.ts`'s write path builds the same `bb api`
+// argv for its own comment/approve/request-changes calls, and shares this
+// builder rather than keeping a second copy in sync by hand — only the two
+// callers' `cwd` differ (a repo checkout here, `os.homedir()` there, since a
+// review target may be a repo the user never cloned).
+export const apiArgs = (path: string, method?: string, body?: string): string[] => [
   "bb", "api", path,
   ...(method ? ["-X", method] : []),
   ...(body !== undefined ? ["-d", body] : []),

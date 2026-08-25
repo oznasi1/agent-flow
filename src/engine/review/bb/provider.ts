@@ -7,7 +7,7 @@
 // enabled. Its tests call it directly for the same reason.
 import * as os from "os";
 import { ReviewDetail, ReviewRequest, ReviewVerb } from "../../../types";
-import { BB_BIN, BB_TIMEOUT_MS, probeBbApi } from "../../pr/bb/provider";
+import { apiArgs, BB_BIN, BB_TIMEOUT_MS, probeBbApi } from "../../pr/bb/provider";
 import { execRunner, stripCommandLine } from "../../pr/provider";
 import type { Locate, Runner } from "../../pr/provider";
 import { mapBbStatuses } from "../../pr/bb/rest";
@@ -48,20 +48,11 @@ export class BbReviewProvider implements ReviewProvider {
   }
 
   /** `bb api <path>`, with `atlassian-cli`'s own flags for an HTTP method and a
-   * JSON body (`-X`, `-d`).
-   *
-   * This is a deliberate, narrow duplicate of `apiArgs` in
-   * `src/engine/pr/bb/provider.ts` — that helper is not exported, and this
-   * module is scoped to create only itself and its test, never to edit a file
-   * that write path doesn't own. Kept byte-for-byte in argument order and flag
-   * names with the original; a future task that needs both call sites should
-   * export the shared one instead of these two staying in sync by hand. */
+   * JSON body (`-X`, `-d`). The argv itself is `apiArgs`, shared with
+   * `BbProvider` in `src/engine/pr/bb/provider.ts` — only the `cwd` this runs in
+   * differs between the two write paths, which is what `exec()` carries. */
   private api(path: string, method?: string, body?: string): Promise<string> {
-    const args = ["bb", "api", path];
-    if (method) args.push("-X", method);
-    if (body !== undefined) args.push("-d", body);
-    args.push("--format", "json");
-    return this.exec(args);
+    return this.exec(apiArgs(path, method, body));
   }
 
   /** Null, permanently.
