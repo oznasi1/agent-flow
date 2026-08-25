@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.43.0] — 2026-08-25
+
 ### Added
 
 - **Merge a green pull request from its card.** A card whose one pull request is

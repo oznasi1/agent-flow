@@ -2,7 +2,7 @@
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
   "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a coding agent already briefed — Claude Code, GitHub Copilot, or Cursor.",
-  "version": "0.42.0",
+  "version": "0.43.0",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",
@@ -686,7 +686,11 @@
         },
         "agentFlow.mergeMethod": {
           "type": "string",
-          "enum": ["squash", "merge", "rebase"],
+          "enum": [
+            "squash",
+            "merge",
+            "rebase"
+          ],
           "default": "squash",
           "markdownDescription": "Which strategy a card's **Merge** button uses. Named in the confirmation dialog every time, so you always see it before the merge. Under `#agentFlow.forge#: gitlab` only `squash` and `merge` can be expressed per request — GitLab's own project **Merge method** setting decides whether a merge is rebased — so `rebase` is refused with a message rather than quietly merging another way. See docs/FORGES.md."
         },
