@@ -28,10 +28,15 @@ describe("resolveForge", () => {
     expect(f.caps.changesRequested).toBe(false);
   });
 
+  // This test previously used "bitbucket" as its example unknown id, and broke
+  // the day Bitbucket became a registered forge. A deliberately non-real string
+  // like "not-a-forge" protects the test from becoming stale if (when) forge #4
+  // arrives. Naming another plausible forge like "gitea" or "sourcehut" would
+  // just re-arm the same trap.
   it("falls back to github, and says so, for an unknown id", () => {
     const log = vi.fn();
-    expect(resolveForge("bitbucket", log, never).id).toBe("github");
-    expect(log).toHaveBeenCalledWith(expect.stringContaining("bitbucket"));
+    expect(resolveForge("not-a-forge", log, never).id).toBe("github");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("not-a-forge"));
   });
 
   // `agentFlow.forge` comes from settings.json and can be any string. A bare index
