@@ -1730,6 +1730,65 @@ export class DeckPanel {
     this.forgeAccounts = [];
   }
 
+  /**
+   * Change which account the forge's CLI acts as.
+   *
+   * `gh` holds one active account per host, so this is machine state, not
+   * workspace state: it changes every editor window, every terminal, and every
+   * other tool that shells out to the same CLI. That is why a modal sits in the
+   * middle of it — a footer link cannot carry the disclosure, and a user who
+   * flips identity without noticing gets a board full of unreadable PRs that
+   * look exactly like repos with no PR at all.
+   */
+  private async switchForgeAccount(): Promise<void> {
+    // Belt and braces: the legend hides the link for such a forge, so this
+    // message should be unreachable there. A host must not trust that.
+    if (!this.forge.caps.accounts) return;
+    const accounts = await this.forge.accounts();
+    const others = accounts.filter((a) => !a.active);
+    if (others.length === 0) {
+      this.toast("info", `${this.forge.cli.name} knows only one account — there is nothing to switch to.`);
+      return;
+    }
+    const pick = await vscode.window.showQuickPick(
+      // `detail` rather than `description`: scopes are long, and they are the
+      // only thing distinguishing two logins that look alike.
+      others.map((a) => ({ label: a.login, detail: a.scopes })),
+      { title: `Read ${this.forge.label} as…`, placeHolder: "Pick the account to make active" },
+    );
+    if (!pick) return;
+    const go = await vscode.window.showWarningMessage(
+      `Make ${pick.label} the active ${this.forge.cli.name} account?`,
+      {
+        modal: true,
+        detail:
+          `This changes ${this.forge.cli.name} for your whole machine — every editor window, every ` +
+          `terminal, and every other tool that uses it. Agent Flow will forget every PR it has ` +
+          `already read and ask again as ${pick.label}.`,
+      },
+      "Switch",
+    );
+    if (go !== "Switch") return;
+    const res = await this.forge.switchAccount(pick.label);
+    if (!res.ok) {
+      this.toast("error", `Could not switch ${this.forge.cli.name}: ${res.message}`);
+      return;
+    }
+    this.dropForgeCaches();
+    this.reprobeForge();
+    // The stored entries are the OLD identity's answers and cannot be
+    // re-validated — a `facts: null` written while signed in as an account that
+    // could not see the repo is indistinguishable from "there is no PR". Drop
+    // them so the next pass asks again, and bump each epoch so a fetch already
+    // in flight under the old account cannot write its answer after the switch.
+    for (const run of readRuns(defaultRunsDir())) {
+      removePrEntries(defaultPrFactsDir(), run.key);
+      this.prEpoch.set(run.key, (this.prEpoch.get(run.key) ?? 0) + 1);
+    }
+    this.toast("success", `${this.forge.cli.name} is now ${pick.label} — re-reading PR state.`);
+    await this.refreshBusy();
+  }
+
   /** Queue a stale repo's refresh. Deliberately not awaited by the caller: a
    * hanging forge call must never stall the git and transcript reads. The epoch is
    * captured at enqueue time so a fetch still in flight when the run is
@@ -3228,6 +3287,9 @@ export class DeckPanel {
         break;
       case "deck:clearStale":
         await this.clearStale();
+        break;
+      case "deck:switchAccount":
+        await this.switchForgeAccount();
         break;
       case "deck:setGrouping":
         // Persisted, so the lens survives a reload — but not refreshed: the
