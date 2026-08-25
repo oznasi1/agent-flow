@@ -929,5 +929,9 @@ export const DECK_CSS = `
     text-overflow: ellipsis; white-space: nowrap; }
   .c-row > .m { flex: none; font-family: var(--vscode-editor-font-family); }
   .c-row .bad, .c-row .warn { color: var(--c-attn); }
+  /* A state, not a brand accent — --c-done, never var(--brand): tokens.test.ts
+     asserts set equality of this sheet's --brand spenders, and a merge-ready card
+     is not a place to put the board's accent. */
+  .c-row .ok { color: var(--c-done); }
   .c-row .act { margin-left: auto; flex: none; height: 20px; padding: 0 7px; font-size: 11px; }
 `;

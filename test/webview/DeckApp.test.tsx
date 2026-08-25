@@ -41,13 +41,19 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
 // showTokenTotal defaults to false here, mirroring the shipped setting default, so
 // every pre-existing test renders a board with no header token tile — which is what
 // they were written against. A test that wants the tile passes it explicitly.
+//
+// Return type is the narrowed `deck:runs` member, not the full `OutboundMessage`
+// union — every existing call site still compiles untouched (it's a subtype), but
+// `{ ...runsMsg(...), mergeWrites: true }` now spreads a single known shape rather
+// than a ~24-member union, which is what let a call adding `mergeWrites` (absent
+// from every other member) satisfy tsc's excess-property check.
 const runsMsg = (
   runs: RunStatus[],
   prReviewStatus = "PR initiated",
   sourceLabel = "Jira",
   showTokenTotal = false,
   agentLabel = "Claude Code",
-): OutboundMessage =>
+): Extract<OutboundMessage, { type: "deck:runs" }> =>
   ({ type: "deck:runs", runs, ghNote: null, prReviewStatus, showTokenTotal, staleCount: 0, sourceLabel, agentLabel });
 
 const mkAgent = (name: string, state: AgentActivity["state"], lastActivityMs: number): CardAgent => ({
@@ -2996,5 +3002,73 @@ describe("the card detail's open and close animation", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+/** The card the Merge button exists for: approved, green, threads readable and clear. */
+const mergeablePr = (): PrFacts => ({
+  number: 2044, url: "https://gh/pr/2044", title: "t", state: "OPEN", isDraft: false,
+  ci: { passing: 8, pending: 0, failing: [] },
+  review: "approved", unresolved: 0, mergeable: "clean", ciAdvisory: false,
+});
+
+describe("the card's Merge row", () => {
+  it("is absent when mergeWrites is off, even on a fully green card", () => {
+    render(<DeckApp />);
+    host(runsMsg([withPr(mergeablePr())]));
+    expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+  });
+
+  it("renders on a green card once mergeWrites is on", async () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([withPr(mergeablePr())]), mergeWrites: true });
+    // waitFor, never a bare tick: an async read from an earlier test can land its
+    // postMessage in this one.
+    await waitFor(() => expect(screen.getByRole("button", { name: "Merge" })).toBeTruthy());
+  });
+
+  it("is absent when the thread count is unreadable — healthyPr's own case", () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([withPr(healthyPr())]), mergeWrites: true });
+    expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+  });
+
+  it("is absent on a card with a problem row, which wins", () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([withPr(failingPr())]), mergeWrites: true });
+    expect(screen.queryByRole("button", { name: "Merge" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Fix CI" })).toBeTruthy();
+  });
+
+  it("sends deck:mergePr with the run key, repo and number", async () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([withPr(mergeablePr())]), mergeWrites: true });
+    const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
+    fireEvent.click(btn);
+    expect(sent).toHaveBeenCalledWith({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 2044 });
+  });
+
+  it("disables the button until deck:mergeDone comes back", async () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([withPr(mergeablePr())]), mergeWrites: true });
+    const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
+    fireEvent.click(btn);
+    await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(true));
+    host({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 2044, outcome: "cancelled" });
+    await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("clicking Merge does not select the card", async () => {
+    // The problem rows already stopPropagation for this reason and the merge row
+    // shares their container; this pins that it kept the behaviour. Asserting on
+    // the `sel` class rather than on a message the click might not emit at all —
+    // an assertion about an absent message would pass either way.
+    render(<DeckApp />);
+    host({ ...runsMsg([withPr(mergeablePr())]), mergeWrites: true });
+    const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
+    const card = btn.closest(".card")!;
+    expect(card.className).not.toContain("sel");
+    fireEvent.click(btn);
+    expect(card.className).not.toContain("sel");
   });
 });
