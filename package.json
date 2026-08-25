@@ -2,7 +2,7 @@
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
   "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a coding agent already briefed — Claude Code, GitHub Copilot, or Cursor.",
-  "version": "0.43.1",
+  "version": "0.44.0",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",
@@ -760,6 +760,19 @@
           ],
           "default": "new-window",
           "markdownDescription": "Where **Review with …** opens: a new window on the review worktree (the default, and what every release so far did), this window, a `.code-workspace` you already have, or `ask` to choose each time — the same question `#agentFlow.openIn#` asks for a task you take, kept separate because a review is a shorter errand. The review always runs in its own git worktree whichever you pick; a destination other than a new window seeds a session that is told to work in that worktree by absolute path."
+        },
+        "agentFlow.prWorkOpenIn": {
+          "type": "string",
+          "enum": [
+            "ask",
+            "its-window"
+          ],
+          "enumDescriptions": [
+            "Ask each time you click Fix CI, Resolve conflict or Address review",
+            "Always re-seed the run's own window, with no question"
+          ],
+          "default": "ask",
+          "markdownDescription": "Where a Deck card's PR work opens when you click **Fix CI**, **Resolve conflict** or **Address review**: `ask` to choose each time between the run's own window, this window, a `.code-workspace` you have, or an Agent Flow window that is already open — or `its-window` for what every release before this did, re-seeding where the run already lives without asking. A destination other than the run's own window seeds one session for the whole run and points it at the brief by absolute path.\n\nOpen windows are only offered when `#agentFlow.trackOpenWindows#` is on."
         },
         "agentFlow.reviewRequestPrompt": {
           "type": "string",

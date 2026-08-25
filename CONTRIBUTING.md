@@ -187,6 +187,12 @@ on disk.
 Run `npm run typecheck` and `npm test`, and make sure `npm run build` succeeds. For any
 user-facing change, add an entry under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md).
 
+If `npm test` dies with **"Worker exited unexpectedly"** and a file count one short of the
+total, that is a heap OOM in one vitest worker, not a failing test —
+`test/unit/deckView.test.ts` peaks close to Node's default 4 GB ceiling. CI raises it
+(`NODE_OPTIONS=--max-old-space-size=6144`); do the same locally:
+`NODE_OPTIONS=--max-old-space-size=6144 npm test`.
+
 ## Publishing (maintainers)
 
 `package.json` carries the `publisher`, `repository`, `homepage`, and `bugs` metadata. Before
