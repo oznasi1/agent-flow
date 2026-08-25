@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect } from "vitest";
 import { resolveForge } from "../../../../src/engine/forge/registry";
 import type { Runner } from "../../../../src/engine/pr/provider";
 

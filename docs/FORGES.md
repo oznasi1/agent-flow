@@ -94,6 +94,18 @@ directory. Treat it as no safer to import from webview code than `github.ts` or
 | How many reviews are waiting in total? | `issueCount` | no total in the body | the count is however many rows came back, so a queue longer than 50 reads as complete rather than truncated |
 | Is a skipped required check green? | folded toward `SUCCESS` | `skipped` → `unknown` | GitLab is stricter; a skipped pipeline does not open a deploy gate |
 | Merge with a named strategy | `--squash` / `--merge` / `--rebase` on `gh pr merge` | `squash=true`/`false` on `PUT …/merge_requests/:iid/merge`, issued through `glab api` — the only per-request override there is; the project's own **Merge method** setting decides whether a merge is rebased or fast-forwarded | `agentFlow.mergeMethod: rebase` is REFUSED with a message naming the setting, never silently merged another way — a substituted merge strategy is the one degradation a user cannot see afterwards. **This whole row is untested against a live `glab`** — see below |
+| Which account is reading the board, and switching it | `gh auth status --json hosts` / `gh auth switch` | `glab` stores one token per host with no multi-account model and no `auth switch` equivalent | `caps.accounts: false`; the footer legend names no identity and offers no switch — today's behavior, unchanged, rather than a fabricated single-entry list |
+
+**Account enumeration is `github.com`-only.** `accounts()` reads a single fixed
+host (`GH_HOST` in `github.ts`) and ignores every other host in the same `gh`
+config, including a GitHub Enterprise instance. A user authenticated to both
+`github.com` and a GHE host, doing their real work against GHE repos, still gets
+a footer naming whichever `github.com` login is active and a switch that changes
+an identity that reads none of their repos — the legend and the switch both
+answer a question about a host the user may not be working against at all. Agent
+Flow has no per-repo or per-host forge concept today, so the real fix (binding an
+identity to the host a repo's remote actually points at) is out of scope here;
+this is a known limitation, not an oversight.
 
 ### GitLab merge is untested — stated, not verified
 

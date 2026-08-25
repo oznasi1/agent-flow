@@ -135,8 +135,9 @@ into the list.
 
 ### 3.2 `gitlab.ts`
 
-`caps.accounts: false`; `accounts()` resolves `[]`; `switchAccount()` resolves a
-`ForgeGap` refusing the operation.
+`caps.accounts: false`; `accounts()` resolves `[]`; `switchAccount()` resolves
+the `{ ok: false; message }` shape above — not a `ForgeGap`; see §3 for why —
+refusing the operation.
 
 `glab` stores one token per host in its config and has no `auth switch`
 equivalent. The seam states that rather than faking a single-entry list — the
@@ -220,8 +221,8 @@ Host-side sequence:
    active account **for the whole machine** — every editor window, every
    terminal, and every other tool that shells out to `gh`.
 3. `forge.switchAccount(login)`.
-4. On success, invalidate. On failure, toast the `ForgeGap` detail and change
-   nothing.
+4. On success, invalidate. On failure, toast the `{ ok: false; message }`
+   result's `message` and change nothing — not a `ForgeGap`; see §3.
 
 A QuickPick and a modal rather than a popover in the webview: this is a
 host-side, machine-global, mutating action. VS Code has the idiom, and the modal

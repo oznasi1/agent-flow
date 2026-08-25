@@ -1,7 +1,10 @@
-// GitHub as a Forge. Every provider here already existed and is wrapped
-// unchanged: this file adds a description and a branch-CI spawn, nothing else.
-// That is deliberate — it is what makes "GitHub still works" structural rather
-// than a promise backed by tests.
+// GitHub as a Forge. Every PR/review provider here already existed and is
+// wrapped unchanged; this file also owns a description, a branch-CI spawn, and
+// the two account-capability spawns (`accounts`, `switchAccount` — the latter
+// the one call in this seam that mutates machine state rather than reading it).
+// "GitHub still works" is structural for the wrapped providers rather than a
+// promise backed by tests; the account spawns are new code and are covered by
+// `test/unit/engine/forge/seam.test.ts` and `accounts.test.ts` instead.
 import { BRANCH_CI_ARGS, mapBranchStatus } from "../orchestrator/branchCi";
 import { execRunner, GH_TIMEOUT_MS, GhProvider, probeGh } from "../pr/provider";
 import type { Runner } from "../pr/provider";
@@ -42,7 +45,27 @@ export function makeGithubForge(run: Runner = execRunner): Forge {
         });
         return { ok: true };
       } catch (e) {
-        return { ok: false, message: e instanceof Error ? e.message : String(e) };
+        // execRunner attaches `stderr` — gh's own complaint — separately from
+        // `.message`, which for a real spawn failure is Node's reconstructed
+        // `Command failed: <file> <full argv joined>` (docs/FORGES.md §4): here
+        // that argv is the account name and hostname flags, which a toast must
+        // never echo back verbatim ahead of what gh actually said. Prefer
+        // stderr whenever gh wrote one. When it did not — a process that failed
+        // silently, or (never in production, but in a test double) a runner
+        // that isn't execRunner at all — fall back to `.message`, unless that
+        // message is itself the argv-shaped leak, in which case say something
+        // fixed and argv-free instead of the command line. Not `stripCommandLine`:
+        // that helper's fallback assumes an execFile-shaped message with a
+        // trailing `\n<stderr>`, which is PR-specific and wrong here.
+        const stderr = (e as { stderr?: string }).stderr?.trim();
+        if (stderr) return { ok: false, message: stderr };
+        const message = e instanceof Error ? e.message : String(e);
+        return {
+          ok: false,
+          message: message.startsWith("Command failed:")
+            ? "gh auth switch failed with no further detail — check gh directly."
+            : message,
+        };
       }
     },
     prs: new GhProvider(run),

@@ -46,9 +46,8 @@ import { providerPin, resolveBatchProvider } from "./agentPick";
 // documents: this module must add no runtime edge to the forge directory beyond
 // the registry call below.
 import { resolveForge } from "./engine/forge/registry";
-import type { Forge, ForgeGap } from "./engine/forge/types";
+import type { Forge, ForgeAccount, ForgeGap } from "./engine/forge/types";
 import { accountSlot } from "./engine/forge/accounts";
-import type { ForgeAccount } from "./engine/forge/types";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
 import { groupPlacesByWindow, inferTicket, localRunFor } from "./engine/localRuns";
@@ -1708,6 +1707,12 @@ export class DeckPanel {
         // same reason, as the forge probe above.
         if (this.accountsProbe !== p) return;
         this.forgeAccounts = list;
+        // `accounts()` is documented total: an empty list here is not an error the
+        // caller can see, only "we could not enumerate accounts" — a `gh` too old
+        // for `--json hosts`, or a probe-healthy identity that still can't answer
+        // this particular question. Log it for the same reason `forgeReady` logs a
+        // gap: only the log can say which CLI we tried and that it came back empty.
+        if (list.length === 0) this.log(`deck: ${this.forge.cli.name} accounts came back empty`);
       })
       // `accounts()` is documented total, so this should be unreachable. It is
       // here because an unhandled rejection inside a refresh is a silent, ugly
@@ -1781,9 +1786,17 @@ export class DeckPanel {
     // could not see the repo is indistinguishable from "there is no PR". Drop
     // them so the next pass asks again, and bump each epoch so a fetch already
     // in flight under the old account cannot write its answer after the switch.
-    for (const run of readRuns(defaultRunsDir())) {
-      removePrEntries(defaultPrFactsDir(), run.key);
-      this.prEpoch.set(run.key, (this.prEpoch.get(run.key) ?? 0) + 1);
+    //
+    // Tracked runs alone are not enough: a local (untracked) card has no record
+    // in `readRuns`, only in the in-memory `localRuns` map — but `buildAll` fetches
+    // PR facts for it exactly the same way (`sweepTargets` already unions the two
+    // for this reason, and `track()` sweeps a local key's facts as "orphaned" when
+    // it graduates). Skipping `localRuns` here would leave a local card's stale
+    // `error: true` entries behind, the exact bug this feature exists to kill,
+    // for a whole class of card.
+    for (const key of [...readRuns(defaultRunsDir()).map((r) => r.key), ...this.localRuns.keys()]) {
+      removePrEntries(defaultPrFactsDir(), key);
+      this.prEpoch.set(key, (this.prEpoch.get(key) ?? 0) + 1);
     }
     this.toast("success", `${this.forge.cli.name} is now ${pick.label} — re-reading PR state.`);
     await this.refreshBusy();
