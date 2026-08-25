@@ -2480,8 +2480,10 @@ export class DeckPanel {
     // Every gate below refuses *this* message's own attempt, and every one of them
     // releases the card's Merge button the same way a completed merge does. The
     // webview sets its `merging` flag before sending and clears it only on a
-    // `deck:mergeDone` — nothing else does, `deck:runs` included — so a silent
-    // return here would leave that button disabled until the panel is reloaded.
+    // `deck:mergeDone` whose outcome is not "ok" — nothing else clears it,
+    // `deck:runs` included — so a silent return here would leave that button
+    // disabled until the panel is reloaded. (An "ok" deliberately leaves the flag
+    // set; there the refreshed facts retire the whole row.)
     // "cancelled" rather than "failed" because nothing was written and so there is
     // nothing to warn about, only a disable to lift. This is exactly what
     // submitReview's own pre-confirmation gates already do, for exactly this reason.

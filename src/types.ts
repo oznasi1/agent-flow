@@ -830,9 +830,14 @@ export type OutboundMessage =
   // that row's disable, or to know a failure was *this* row's.
   | { type: "deck:reviewSubmitDone"; id: string; outcome: "ok" | "failed" | "cancelled" }
   /** The explicit outcome of one deck:mergePr, posted at every exit that reached
-   * the confirmation, so the row's disable is always released. A duplicate
-   * message rejected by the in-flight guard deliberately gets NO outcome: the
-   * real call owns it. */
+   * the confirmation. A duplicate message rejected by the in-flight guard
+   * deliberately gets NO outcome: the real call owns it.
+   *
+   * The webview releases the row's disable on "failed" and "cancelled" only. On
+   * "ok" the PR is merged but the board's own facts still say OPEN for up to a
+   * poll window, so the row keeps its disabled button until the refreshed facts
+   * retire it from the card — see the handler in DeckApp.tsx for why a symmetric
+   * release put a live Merge button on an already-merged PR. */
   | { type: "deck:mergeDone"; key: string; repo: string; number: number; outcome: "ok" | "failed" | "cancelled" }
   // `enabled: false` still posts, with an empty list: the webview must be able
   // to tell "the setting is off" from "not loaded yet", and silence cannot.

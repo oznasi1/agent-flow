@@ -384,7 +384,8 @@ export function DeckApp(): JSX.Element {
    * a write. Same shape as `agentLabel`'s fallback. */
   const [mergeWrites, setMergeWrites] = React.useState(false);
   /** PRs whose merge is in flight, keyed `${key}:${repo}#${number}` — the button
-   * stays disabled until the host answers, so a double click cannot send twice. */
+   * stays disabled until the host answers, so a double click cannot send twice. A
+   * key is NOT dropped on a successful merge: see the `deck:mergeDone` handler. */
   const [merging, setMerging] = React.useState<Record<string, true>>({});
   /** run key → usage read on demand for its drawer, or null when unreadable.
    * A key absent from this map means "not asked yet or still waiting", which the
