@@ -14,7 +14,7 @@ export function makeGithubForge(run: Runner = execRunner): Forge {
     id: "github",
     label: "GitHub",
     cli: { name: "gh", installUrl: "https://cli.github.com" },
-    caps: { changesRequested: true },
+    caps: { changesRequested: true, reviewSearch: true },
     probe: () => probeGh(run),
     prs: new GhProvider(run),
     reviews: new GhReviewProvider(run),

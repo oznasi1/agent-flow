@@ -15,7 +15,7 @@ export function makeGitlabForge(run: Runner = execRunner): Forge {
     // GitLab exposes no reviewer "changes requested" state we can read back.
     // `armability.ts` uses this to name the `changes-requested` rule as unfirable
     // rather than letting a flow wait on it forever.
-    caps: { changesRequested: false },
+    caps: { changesRequested: false, reviewSearch: true },
     probe: () => probeGlab(run),
     prs: new GlabProvider(run),
     reviews: new GlabReviewProvider(run),

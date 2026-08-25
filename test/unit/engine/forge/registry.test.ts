@@ -46,6 +46,16 @@ describe("resolveForge", () => {
   it("falls back to github for an empty id", () => {
     expect(resolveForge("", () => {}, never).id).toBe("github");
   });
+
+  it("both shipped forges can answer a review search, and neither needs a runtime probe", () => {
+    for (const id of ["github", "gitlab"]) {
+      const f = resolveForge(id, () => {});
+      expect(f.caps.reviewSearch).toBe(true);
+      // A forge whose caps are fully static omits resolveCaps, so deckView's
+      // fallback to the static record is what runs for both of these.
+      expect(f.resolveCaps).toBeUndefined();
+    }
+  });
 });
 
 describe("Forge.branchCi", () => {

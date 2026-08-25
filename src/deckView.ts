@@ -46,7 +46,7 @@ import { providerPin, resolveBatchProvider } from "./agentPick";
 // documents: this module must add no runtime edge to the forge directory beyond
 // the registry call below.
 import { resolveForge } from "./engine/forge/registry";
-import type { Forge, ForgeGap } from "./engine/forge/types";
+import type { Forge, ForgeCaps, ForgeGap } from "./engine/forge/types";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
 import { groupPlacesByWindow, inferTicket, localRunFor } from "./engine/localRuns";
@@ -338,6 +338,10 @@ export class DeckPanel {
   /** undefined until the probe resolves; null means the forge is usable, and a
    * gap disables PR facts with a footer note. */
   private forgeGap: ForgeGap | null | undefined;
+  /** The forge's caps once `resolveCaps()` has settled, or undefined while it is
+   *  in flight or for a forge that has none. `caps()` below falls back to the
+   *  static record, which is what every forge without a runtime probe uses. */
+  private forgeCaps: ForgeCaps | undefined;
   /** Bumped when a run is forgotten, so a fetch still in flight for the old
    * incarnation cannot recreate the cache file we just deleted. */
   private readonly prEpoch = new Map<string, number>();
@@ -1669,6 +1673,13 @@ export class DeckPanel {
         // "PR facts just don't work here".
         if (gap) this.log(`deck: ${this.forge.cli.name} unusable (${gap.kind}): ${gap.detail}`);
       });
+      // Resolved in the same block as the probe, and guarded by the same
+      // identity check: a caps read orphaned by a settings change must not
+      // clobber a fresh one, exactly as a stale gap must not.
+      void this.forge.resolveCaps?.().then((caps) => {
+        if (this.forgeProbe !== p) return;
+        this.forgeCaps = caps;
+      });
     }
     return this.forgeGap === null;
   }
@@ -1871,14 +1882,22 @@ export class DeckPanel {
     });
   }
 
-  /** Is the review strip live? Two gates, not three: the session's own Review
-   * queue flag (seeded from the persistent `reviewRequests` setting, then held
-   * until `onConfigChanged` re-seeds it — re-reading config here would stomp
-   * the flag on every poll tick), and `forgeReady()` — which already folds the
-   * session PR-facts flag and a usable forge together, so there is no condition
-   * here that varies independently of PR facts. */
+  /** Is the review strip live? Three gates: the session's own Review queue flag
+   * (seeded from the persistent `reviewRequests` setting, then held until
+   * `onConfigChanged` re-seeds it — re-reading config here would stomp the flag
+   * on every poll tick), `forgeReady()` — which already folds the session
+   * PR-facts flag and a usable forge together, so there is no condition here
+   * that varies independently of PR facts — and the forge's own
+   * `caps().reviewSearch`, for a forge that cannot answer the query at all. */
   private reviewsEnabled(): boolean {
-    return this.reviewQueue && this.forgeReady();
+    return this.reviewQueue && this.forgeReady() && this.caps().reviewSearch;
+  }
+
+  /** The forge's capabilities, preferring anything `resolveCaps()` has settled.
+   *  A forge without one — every forge but Bitbucket today — reads its static
+   *  record here, so this is a no-op for them. */
+  private caps(): ForgeCaps {
+    return this.forgeCaps ?? this.forge.caps;
   }
 
   /** Queue a search when the cache has aged out. Never awaited — a hanging forge
@@ -2389,7 +2408,7 @@ export class DeckPanel {
       // withdrawal of any standing approval. That is materially different from
       // GitHub's, and the person clicking deserves to know before they click.
       const detail =
-        verb === "request-changes" && !this.forge.caps.changesRequested
+        verb === "request-changes" && !this.caps().changesRequested
           ? `${this.forge.label} has no "request changes" review, so this posts your message as a comment and withdraws your approval if you had one.`
           : undefined;
       const answer = await vscode.window.showWarningMessage(
@@ -2991,6 +3010,7 @@ export class DeckPanel {
       if (cfg.prFacts) {
         this.forgeGap = undefined;
         this.forgeProbe = null;
+        this.forgeCaps = undefined;
       }
       touched = true;
     }
@@ -3186,12 +3206,12 @@ export class DeckPanel {
           // future toggle would want it back — but its "needs Live signal" branch is
           // unreachable from here today. See the note in the ledger: collapsing that
           // branch is a deliberate follow-up, not something to fold into a merge.
-          // `forge: this.forge.caps` is what makes the "forge-unsupported" branch
+          // `forge: this.caps()` is what makes the "forge-unsupported" branch
           // reachable at all: with no `forge` passed, `armability` assumes a fully
           // capable one (GitHub, the default), so a `changes-requested` rule only
           // ever reads as unfirable here once the panel actually knows its forge
           // cannot report that.
-          const dead = unfirableRules(flow, { liveSignal: true, prFacts: this.prFacts, forge: this.forge.caps });
+          const dead = unfirableRules(flow, { liveSignal: true, prFacts: this.prFacts, forge: this.caps() });
           if (dead.length > 0) {
             const live = dead.filter((d) => d.needs === "live-signal").length;
             const pr = dead.filter((d) => d.needs === "pr-facts").length;

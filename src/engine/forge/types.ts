@@ -38,6 +38,13 @@ export interface ForgeCaps {
    *  can never see fire. If such a forge ever appears, split this deliberately and
    *  give each half its own consumer, rather than letting the two drift apart. */
   changesRequested: boolean;
+  /** Can this forge answer "which pull requests are waiting on MY review"? A
+   *  forge with no cross-repo reviewer query cannot, and must not fake it:
+   *  `reviews.search()` returning `null` means THE ATTEMPT FAILED, so a forge
+   *  that answered that way would leave the strip permanently stale and log a
+   *  failure every TTL for a question that was never answerable. False hides
+   *  the strip instead, through `deckView`'s existing `reviewsEnabled()` gate. */
+  reviewSearch: boolean;
 }
 
 export interface Forge {
@@ -46,6 +53,15 @@ export interface Forge {
   readonly label: string;
   readonly cli: { name: string; installUrl: string };
   readonly caps: ForgeCaps;
+  /** Capabilities that cannot be known until the CLI has been probed — for a CLI
+   *  whose command surface differs by version, where the same forge id is more
+   *  capable on a newer build. Resolved once per Deck session, alongside
+   *  `probe()`, and reset with it when settings change.
+   *
+   *  Optional on purpose: a forge whose caps are fully static omits this, and
+   *  the static `caps` record above stands. That is what keeps this addition
+   *  inert for `github` and `gitlab`. */
+  resolveCaps?(): Promise<ForgeCaps>;
   /** Is the CLI installed and logged in? Probed once per Deck session. */
   probe(): Promise<ForgeGap | null>;
   readonly prs: PrProvider;
