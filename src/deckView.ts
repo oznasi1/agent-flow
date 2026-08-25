@@ -47,6 +47,8 @@ import { providerPin, resolveBatchProvider } from "./agentPick";
 // the registry call below.
 import { resolveForge } from "./engine/forge/registry";
 import type { Forge, ForgeGap } from "./engine/forge/types";
+import { accountSlot } from "./engine/forge/accounts";
+import type { ForgeAccount } from "./engine/forge/types";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
 import { groupPlacesByWindow, inferTicket, localRunFor } from "./engine/localRuns";
@@ -350,6 +352,9 @@ export class DeckPanel {
   /** undefined until the probe resolves; null means the forge is usable, and a
    * gap disables PR facts with a footer note. */
   private forgeGap: ForgeGap | null | undefined;
+  /** The forge's account list, last time it answered. `[]` until it does. */
+  private forgeAccounts: ForgeAccount[] = [];
+  private accountsProbe: Promise<ForgeAccount[]> | null = null;
   /** Bumped when a run is forgotten, so a fetch still in flight for the old
    * incarnation cannot recreate the cache file we just deleted. */
   private readonly prEpoch = new Map<string, number>();
@@ -1683,6 +1688,46 @@ export class DeckPanel {
       });
     }
     return this.forgeGap === null;
+  }
+
+  /** Start the account read if it has not run, and never wait for it.
+   *
+   * Memoized and fire-and-forget for the same reason `forgeReady`'s probe is: a
+   * CLI round trip must not sit in front of a paint. The first pass after the
+   * panel opens therefore posts no account slot and the next one does, which is
+   * the right trade — the slot is a label, not a blocker.
+   */
+  private startForgeAccountsRead(): void {
+    if (!this.prFacts || !this.forge.caps.accounts) return;
+    if (this.accountsProbe !== null) return;
+    const p = (this.accountsProbe = this.forge.accounts());
+    void p
+      .then((list) => {
+        // A read orphaned by a switch or a settings flip must not win if it
+        // resolves after the fresh one already has — the same guard, and the
+        // same reason, as the forge probe above.
+        if (this.accountsProbe !== p) return;
+        this.forgeAccounts = list;
+      })
+      // `accounts()` is documented total, so this should be unreachable. It is
+      // here because an unhandled rejection inside a refresh is a silent, ugly
+      // failure mode this file has been bitten by before.
+      .catch(() => { /* nothing to say */ });
+  }
+
+  /** Forget every derived forge verdict. Shared by the `agentFlow.prFacts`
+   * toggle and the account switch — two copies would drift. */
+  private dropForgeCaches(): void {
+    this.branchCi.clear();
+    this.branchCiAmbiguous.clear();
+  }
+
+  /** Ask the forge everything again from scratch: health, and who it acts as. */
+  private reprobeForge(): void {
+    this.forgeGap = undefined;
+    this.forgeProbe = null;
+    this.accountsProbe = null;
+    this.forgeAccounts = [];
   }
 
   /** Queue a stale repo's refresh. Deliberately not awaited by the caller: a
@@ -3064,6 +3109,7 @@ export class DeckPanel {
     try {
       const runs = await this.buildAll();
       if (seq !== this.refreshSeq) return; // a newer pass owns the board
+      this.startForgeAccountsRead();
       this.post({
         type: "deck:runs",
         runs,
@@ -3071,6 +3117,15 @@ export class DeckPanel {
         // it is a webview message key, and renaming it would need a matching
         // webview change for no user-visible gain.
         ghNote: this.prFacts && this.forgeGap ? FORGE_NOTES[this.forgeGap.kind](this.forge.cli.name) : null,
+        // `ghNote` and this are one slot in the legend: `accountSlot` returns
+        // null whenever a gap owns it, so the two can never both be set.
+        ghAccount: accountSlot({
+          accounts: this.forgeAccounts,
+          gap: this.forgeGap,
+          prFacts: this.prFacts,
+          capsAccounts: this.forge.caps.accounts,
+          cli: this.forge.cli.name,
+        }),
         // Read fresh on every post rather than cached in a field: it is a plain
         // string setting a user can edit mid-session, and the board re-posts often
         // enough that this is the whole of "keep it live".
@@ -3129,14 +3184,10 @@ export class DeckPanel {
       // from — `branchCiFor` already refuses to serve them, and forgetting them means
       // switching back on cannot re-serve a stamp from before the switch either. On:
       // a fresh start is the point, same as re-probing the forge below.
-      this.branchCi.clear();
-      this.branchCiAmbiguous.clear();
+      this.dropForgeCaches();
       // The user may have (re-)authenticated the forge's CLI since the last probe;
       // a stale gap would otherwise keep PR facts dark for the rest of the session.
-      if (cfg.prFacts) {
-        this.forgeGap = undefined;
-        this.forgeProbe = null;
-      }
+      if (cfg.prFacts) this.reprobeForge();
       touched = true;
     }
     if (e.affectsConfiguration("agentFlow.openAgents")) {
