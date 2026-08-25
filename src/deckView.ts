@@ -52,10 +52,11 @@ import { sortRequests } from "./engine/review/sort";
 import { groupPlacesByWindow, inferTicket, localRunFor } from "./engine/localRuns";
 import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
 import { readSessionActivity } from "./engine/transcript";
-import { canon } from "./engine/paths";
+import { canon, claudeProjectsRoot } from "./engine/paths";
 import { OwnedRun, resolveOwnership } from "./engine/ownership";
 import { JUST_LAUNCHED_MS, shelfFor } from "./engine/visibility";
 import { prSignals } from "./engine/bucket";
+import { AttentionCandidate, attentionLabel, ownsWorkToLose } from "./engine/attention";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
@@ -68,15 +69,6 @@ const TICKET_TTL_MS = 30_000;
  * transcripts is the one read here that scales with corpus size rather than
  * with board size, and `refresh()` must never block on it. */
 export const USAGE_POLL_MS = 60_000;
-
-/** ~/.claude/projects — where Claude Code keeps one directory of transcripts per
- * cwd. Hoisted from the inline const the status build used, so the usage sweep
- * and the activity read cannot drift onto two different roots. A function
- * rather than a module-level const because `os.homedir()` at import time is a
- * needless load-order dependency in a module the extension host loads early. */
-function claudeProjectsRoot(): string {
-  return path.join(os.homedir(), ".claude", "projects");
-}
 
 /** The footer note per reason PR facts are off, named with the configured
  * forge's own CLI (a function rather than a constant, now that the CLI is no
@@ -352,6 +344,9 @@ export class DeckPanel {
   /** How many run records `Clear stale` would take right now — the sweep's own
    * verdict with both time gates ignored. Recomputed on every `buildAll`. */
   private staleCount = 0;
+  /** The candidates the last `buildAll` pass built, for `latestCandidates()`.
+   * `null` before the first pass ever completes. */
+  private attentionCandidates: { candidates: AttentionCandidate[]; at: number } | null = null;
   /** Bumped when a refresh starts, so an older pass that finishes after a newer one
    * began does not post. Its snapshot predates whatever the newer pass read: a poll
    * that listed the runs directory before `deck:forget` removed a file would
@@ -391,6 +386,14 @@ export class DeckPanel {
    * either because the user approved a hold, or because that first evaluation
    * found nothing ready to hold. Once set, a flow's own passes fire normally. */
   private readonly resumeCleared = new Set<string>();
+
+  /** The candidates this panel built on its last pass, for the extension host's
+   * attention tick. Reading them rather than re-gathering means the badge cannot
+   * disagree with the column beside it, and costs the tick no I/O at all while
+   * the Deck is open. `null` when no panel is open. */
+  static latestCandidates(): { candidates: AttentionCandidate[]; at: number } | null {
+    return DeckPanel.current?.attentionCandidates ?? null;
+  }
 
   static show(context: vscode.ExtensionContext, connector: TaskConnector, log: (m: string) => void): void {
     if (DeckPanel.current) {
@@ -2614,6 +2617,15 @@ export class DeckPanel {
       all.map((run) => (authed && isTicketRun(run) ? this.ticketStatus(ticketKeyFor(run, this.connector)) : null)),
     );
     const out: RunStatus[] = [];
+    // Built alongside `out`, from the same values as the shelf/shelfFor call
+    // below, and published at the end of this pass — see `latestCandidates()`.
+    // A run this pass retires (see `applyVerdict` below) is excluded exactly as
+    // `out` excludes it, so what gets published matches what a fresh
+    // `gatherAttention()` would see once the retirement is on disk.
+    // Named `attentionCandidates`, not `candidates` — this function already has
+    // an unrelated block-scoped `candidates` (the ticket-inference root list, a
+    // few lines up) with no relation to this one.
+    const attentionCandidates: AttentionCandidate[] = [];
     let stale = 0;
     for (const [i, run] of all.entries()) {
       const ticket = tickets[i];
@@ -2666,6 +2678,10 @@ export class DeckPanel {
         agents: agentsByKey.get(run.key) ?? [],
         activityRoots: activeRoots,
       });
+      // Read once per run and shared below by both the shelf and the candidate
+      // built from it, rather than called again at each use — this is the same
+      // single call the shelf ternary always made, just named.
+      const showAll = getConfig().inflightShowAll;
       // A local card has no record on disk — `removeRun` would be a no-op but
       // `writeRun` would *create* one, promoting a card the user never tracked.
       if (runKind(run) === "local") {
@@ -2678,6 +2694,26 @@ export class DeckPanel {
         out.push(run.url
           ? { ...status, shelf: "board" as const, inferredTicketKey: ticketKeyFor(run, this.connector), usage: this.usageByRun.get(run.key) }
           : { ...status, shelf: "board" as const, usage: this.usageByRun.get(run.key) });
+        // Included for the same reason the card is on the board unconditionally:
+        // a live session, by construction. The badge's "local/untracked session
+        // cards included" requirement (design doc) means a local card stalled or
+        // needing you must count exactly as it draws in the column beside it.
+        attentionCandidates.push({
+          key: run.key,
+          // The key here is `localKey`'s `local-<slug>-<sha1>`, which is an
+          // identity and not a name — the toast reads `label ?? key`, so without
+          // this the notification announced the hash. `attentionLabel` picks the
+          // inferred ticket key when the card has one and the card's own name
+          // (workspace or folder) when it does not.
+          label: attentionLabel(run, ticketKeyFor(run, this.connector)),
+          agentState: status.agent.state,
+          prs: status.prs,
+          ticketStatus: status.ticketStatus,
+          hasLiveSession: true,
+          justLaunched: false,
+          hasWorkToLose: false,
+          showAll,
+        });
         continue;
       }
       // Which shelf this run sits on. `hasLiveSession` comes from `ownership`
@@ -2686,21 +2722,21 @@ export class DeckPanel {
       // Computed before the sweep, not after: rule 2b reads the shelf off the
       // status it is handed, so the verdict has to see the shelved one.
       const ownsPath = (p: string) => ownership.pathOwner.get(canon(p)) === run.key;
-      // An in-place run — Explore or Notepad — opened your checkout rather than
-      // creating a worktree, so its dirty/ahead state is not evidence about this
-      // run. It is your own work in progress far more often than the session's,
-      // and ownership hands it to whichever record happens to be newest, which is
-      // arbitrary. Counting it pinned a sole-holder Explore card to the board for
-      // as long as the checkout stayed dirty — which, for a repo you work in, is
-      // forever. Ticketless on purpose: a task run launched in place
-      // (`agentFlow.worktree: "never"`) does own its branch, and keeps the veto.
-      const inPlace = (runKind(run) === "explore" || runKind(run) === "notepad") && !isTicketRun(run);
-      const shelf = getConfig().inflightShowAll ? "board" : shelfFor({
-        hasLiveSession: ownership.runsWithSession.has(run.key),
+      const hasLiveSession = ownership.runsWithSession.has(run.key);
+      const justLaunched = now - run.createdAt < JUST_LAUNCHED_MS;
+      // `ownsWorkToLose` (engine/attention.ts) carries the rationale: an in-place
+      // Explore or Notepad run opened your checkout rather than creating a
+      // worktree, so its dirty/ahead state is your own work far more often than
+      // the session's, and counting it would pin a sole-holder card to the board
+      // for as long as the checkout stayed dirty. Ticketless on purpose — a task
+      // run launched in place still owns its branch and keeps the veto.
+      const hasWorkToLose = ownsWorkToLose(run) && status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0));
+      const shelf = showAll ? "board" : shelfFor({
+        hasLiveSession,
         prOpen: Object.values(status.prs).some((e) => e.facts?.state === "OPEN"),
         merged: prSignals(status.prs).merged,
-        justLaunched: now - run.createdAt < JUST_LAUNCHED_MS,
-        hasWorkToLose: !inPlace && status.repos.some((r) => ownsPath(r.path) && (r.dirty || r.ahead > 0)),
+        justLaunched,
+        hasWorkToLose,
       });
       const shelved = { ...status, shelf, usage: this.usageByRun.get(run.key) };
       if (this.applyVerdict(run, this.verdictFor(shelved, livePlaces, now))) continue;
@@ -2709,9 +2745,33 @@ export class DeckPanel {
       // `applyVerdict` ever writes.
       if (this.verdictFor(shelved, livePlaces, now, true).action === "retire") stale++;
       out.push(shelved);
+      attentionCandidates.push({
+        key: run.key,
+        // A task run's key IS its ticket key, so this resolves to the same string
+        // and the toast wording is unchanged. It differs for the two records whose
+        // key is generated rather than named — an Explore or Notepad slug — and
+        // for a Track it card, whose key stayed a place hash.
+        label: attentionLabel(run, ticketKeyFor(run, this.connector)),
+        agentState: status.agent.state,
+        prs: status.prs,
+        ticketStatus: status.ticketStatus,
+        hasLiveSession,
+        justLaunched,
+        hasWorkToLose,
+        showAll,
+      });
     }
     this.sweepReviewRuns(livePlaces, now, false, () => stale++);
     this.staleCount = stale;
+    // Guarded against an older overlapping pass finishing last: `buildAll` can
+    // race itself (see `refresh`'s own `refreshSeq` guard on `out`), and an
+    // older pass publishing after a newer one would hand the extension host's
+    // attention tick a backwards `at` — which its own `now - fresh.at < 2 *
+    // POLL_MS` freshness check would then wrongly reject as stale on some
+    // later tick. Only ever move `at` forward.
+    if (!this.attentionCandidates || now >= this.attentionCandidates.at) {
+      this.attentionCandidates = { candidates: attentionCandidates, at: now };
+    }
     return out;
   }
 

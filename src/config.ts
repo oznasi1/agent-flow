@@ -444,6 +444,10 @@ export interface AgentFlowConfig {
   retireInPlaceAfterHours: number;
   // Show every run record on the board, pre-strip behaviour. The escape hatch.
   inflightShowAll: boolean;
+  /** Raise a notification when a run enters Action required. Off by default: the
+   * badge is ambient, but a toast interrupts, and this ships to installs that did
+   * not ask for one. */
+  notifyOnActionRequired: boolean;
   // Show the Deck's review-requests strip: open PRs that ask for your review.
   reviewRequests: boolean;
   // How stale the cached review queue may be before a refetch. Floored at 60s —
@@ -703,6 +707,7 @@ export function getConfig(): AgentFlowConfig {
     retireClosedAfterHours: Math.max(0, c.get<number>("retireClosedAfterHours") ?? 24),
     retireInPlaceAfterHours: Math.max(0, c.get<number>("retireInPlaceAfterHours") ?? 0),
     inflightShowAll: c.get<boolean>("inflightShowAll") ?? false,
+    notifyOnActionRequired: c.get<boolean>("notifyOnActionRequired") ?? false,
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,

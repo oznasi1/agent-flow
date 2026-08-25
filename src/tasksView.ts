@@ -196,6 +196,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "agentFlow.tasks";
   private view?: vscode.WebviewView;
   private lastFilter: Filter = "unassigned";
+  /** The last attention count, held so a tick that fires before VS Code has
+   * resolved this view is not simply lost — see `setAttention`. */
+  private attention = 0;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -214,10 +217,53 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     };
     view.webview.html = this.html(view.webview);
     view.webview.onDidReceiveMessage((m: InboundMessage) => this.onMessage(m));
+    // VS Code disposes a WebviewView when the sidebar is hidden, and writing
+    // `.badge` on a disposed view throws. The attention pass swallows that throw
+    // (best-effort by design), so the badge would silently stop updating for the
+    // rest of the window's life — until the view happened to resolve again. The
+    // count itself survives in `this.attention`, so a later resolve replays it.
+    // Guarded on identity: a dispose arriving after a NEWER view resolved must
+    // not clear the live one.
+    view.onDidDispose(() => {
+      if (this.view === view) this.view = undefined;
+    });
+    this.applyAttention();
   }
 
   private post(msg: OutboundMessage): void {
     this.view?.webview.postMessage(msg);
+  }
+
+  /**
+   * Badge the view with how many sessions are waiting on you. Driven by the
+   * attention job in extension.ts, which outlives the Deck panel — the whole
+   * point of the badge is that it is there when the Deck is not.
+   *
+   * `undefined` rather than `{ value: 0 }` for an empty count: VS Code renders a
+   * zero badge, and "0" on the activity bar reads as a broken feature.
+   *
+   * The value is held in a field as well as applied, because VS Code resolves a
+   * webview view lazily — a window whose sidebar has not been opened has no
+   * `this.view` to badge, and the first ticks of every window land there.
+   * `resolveWebviewView` replays it. A sidebar never opened at all in a window
+   * still gets no badge; that is a VS Code constraint, not something to work
+   * around here.
+   *
+   * "sessions", not "agents": a session is one run of a coding tool, which is
+   * what this counts. test/unit/vocabulary.test.ts enforces the distinction.
+   */
+  public setAttention(keys: readonly string[]): void {
+    this.attention = keys.length;
+    this.applyAttention();
+  }
+
+  private applyAttention(): void {
+    if (!this.view) return;
+    const n = this.attention;
+    this.view.badge =
+      n === 0
+        ? undefined
+        : { value: n, tooltip: `${n} session${n === 1 ? " is" : "s are"} waiting on you — open the Deck` };
   }
 
   /** Post the panel's `state`, folding in the config-derived fields the webview needs

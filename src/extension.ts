@@ -1,8 +1,11 @@
 import * as vscode from "vscode";
 import { resolveConnector } from "./tasks/registry";
 import { TasksViewProvider } from "./tasksView";
-import { DeckPanel } from "./deckView";
+import { DeckPanel, POLL_MS as DECK_POLL_MS } from "./deckView";
 import { MarketplacePanel } from "./marketplaceView";
+import { runAttentionPass } from "./attentionJob";
+import { gatherAttention, defaultAttentionDeps } from "./engine/attentionFs";
+import { defaultAttentionFile } from "./engine/attentionStore";
 import { maybeSeedAgent, watchPlansAndSeed } from "./engine/workspace";
 import { BASE_SCHEME, TaskBaseContentProvider } from "./engine/diffView";
 import { windowIdentity, writePresence, removePresence, defaultWindowsDir } from "./engine/presence";
@@ -138,11 +141,18 @@ export function activate(context: vscode.ExtensionContext): void {
     registerTracked("agentFlow.doctor", () => showDoctor(defaultDeps(connector, log))),
   );
 
-  // Same cadence as the Deck's own poll: a badge that says "running" after the agent
-  // closed is worse than no badge, and the two directory reads are cheap enough to
-  // repeat (and are skipped entirely when no note has ever been launched).
-  const notepadPoll = setInterval(() => provider.postNotepad(), 6000);
-  context.subscriptions.push({ dispose: () => clearInterval(notepadPoll) });
+  // The notepad badge and the attention badge share one timer, deliberately: both
+  // must outlive every panel, and a second interval doing the same directory reads
+  // would be pure duplication.
+  //
+  // Attention runs every OTHER tick. Transcript reads are its recurring cost, and
+  // nobody needs sub-10-second latency on an activity-bar badge.
+  let ticks = 0;
+  const poll = setInterval(() => {
+    provider.postNotepad();
+    if (++ticks % 2 === 0) attentionPass(provider, log);
+  }, 6000);
+  context.subscriptions.push({ dispose: () => clearInterval(poll) });
 
   // Best-effort niceties, all of them optional. A failure here must NEVER propagate out
   // of activate() — an uncaught throw makes VS Code dispose every registration above
@@ -206,6 +216,45 @@ export function activate(context: vscode.ExtensionContext): void {
     void maybeShowModesNotice(context, { setupRunning: isFirstEver });
   } catch (e) {
     log(`activation: optional step failed (extension still active): ${e instanceof Error ? e.message : String(e)}`);
+  }
+}
+
+/** Build one attention pass's inputs and run it.
+ *
+ * Prefers the open Deck's own candidates when a panel built some within two of its
+ * poll intervals: same reduction, so the badge cannot contradict the column beside
+ * it, and while the Deck is open the pass costs no I/O at all. Falls back to its
+ * own cheap gather — transcripts always, git and the PR cache only for a run
+ * already waiting, and never a forge call.
+ *
+ * Exported (not module-local) so extension.test.ts can call it directly: the
+ * interval callback above is never driven by that file's real timers, and an
+ * unexported function's body would otherwise be unreachable from any test. */
+export function attentionPass(provider: TasksViewProvider, log: (m: string) => void): void {
+  // Everything in this body runs before runAttentionPass's own try/catch even
+  // starts — getConfig(), DeckPanel.latestCandidates(), window.state, and
+  // defaultAttentionFile()'s os.homedir() call are all synchronous reads that
+  // could throw. Caught right here so a failure in any of them can never
+  // escape the shared interval callback, matching the poll's own posture
+  // (nothing pushed onto it may take the notepad badge down with it).
+  try {
+    const cfg = getConfig();
+    const now = Date.now();
+    const fresh = DeckPanel.latestCandidates();
+    const usable = fresh && now - fresh.at < 2 * DECK_POLL_MS ? fresh.candidates : null;
+    runAttentionPass({
+      candidates: () => usable ?? gatherAttention(defaultAttentionDeps({
+        nowMs: now, showAll: cfg.inflightShowAll, openAgents: cfg.openAgents, prFacts: cfg.prFacts,
+      })),
+      setAttention: (keys) => provider.setAttention(keys),
+      notify: cfg.notifyOnActionRequired,
+      focused: vscode.window.state.focused,
+      latchFile: defaultAttentionFile(),
+      nowMs: now,
+      log,
+    });
+  } catch (e) {
+    log(`attention: pass setup failed: ${e instanceof Error ? e.message : String(e)}`);
   }
 }
 

@@ -652,6 +652,11 @@
           "default": false,
           "markdownDescription": "Show **every** run record on the In-flight board, the way Agent Flow Deck did before the Recently closed strip existed — nothing is moved off the board and nothing is retired for being closed. Leave this off unless you used stale cards as a to-do list."
         },
+        "agentFlow.notifyOnActionRequired": {
+          "type": "boolean",
+          "default": false,
+          "markdownDescription": "Show a notification when a run enters **Action required** — a session has stopped and is waiting on you. Announced once when a run parks, in whichever window is focused at the time, and not repeated until that run is answered and parks again. The activity-bar badge tracks the count whether this is on or off."
+        },
         "agentFlow.prFactsTtlSeconds": {
           "type": "number",
           "default": 120,

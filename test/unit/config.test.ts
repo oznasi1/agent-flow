@@ -1086,6 +1086,14 @@ describe("package.json ⇄ config constants", () => {
     expect(closed.minimum).toBe(0);
   });
 
+  it("ships a manifest default of false for notifyOnActionRequired, so the toast reaches nobody who did not opt in", () => {
+    // The reader's `?? false` is not enough on its own: it only fires when the
+    // setting is absent. A manifest default of true would opt every install in
+    // without touching a line of TypeScript, and the mock-based test above
+    // cannot see package.json at all.
+    expect(props["agentFlow.notifyOnActionRequired"].default).toBe(false);
+  });
+
   it("declares reviewRequests defaulting to true — the review strip is on unless turned off", () => {
     expect(props["agentFlow.reviewRequests"].default).toBe(true);
   });
@@ -1165,6 +1173,17 @@ describe("forge", () => {
   it("ships a manifest default of github, so an existing install is unaffected", () => {
     const props = pkg.contributes.configuration.properties as Record<string, { default?: unknown }>;
     expect(props["agentFlow.forge"].default).toBe("github");
+  });
+});
+
+describe("getConfig — attention notifications", () => {
+  it("defaults notifyOnActionRequired off — a toast interrupts, so it ships inert", () => {
+    expect(getConfig().notifyOnActionRequired).toBe(false);
+  });
+
+  it("reads notifyOnActionRequired when the user turns it on", () => {
+    setConfig({ notifyOnActionRequired: true });
+    expect(getConfig().notifyOnActionRequired).toBe(true);
   });
 });
 
