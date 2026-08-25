@@ -208,9 +208,13 @@ function isMergeReady(f: PrFacts): boolean {
  * half of a coupled pair of PRs on a single click is the specific mistake worth
  * designing out. A card with two ready PRs therefore gets nothing.
  *
- * An entry whose last fetch failed (`error: true`) is refused outright: those
- * facts are the PREVIOUS value carried forward, and stale facts do not authorize
- * a write however green they look. Pure.
+ * An entry whose last fetch failed (`error: true`) is refused outright, and on
+ * BOTH sides of the test: such an entry cannot be the candidate, and it cannot be
+ * one of the already-merged siblings either. Its facts are the PREVIOUS value
+ * carried forward, so a sibling whose fetches are failing can go on saying MERGED
+ * about a first PR while a second, coupled one sits open and unread — which is the
+ * exact pair this function exists to refuse. Stale facts do not authorize a write
+ * however green they look. Pure.
  */
 export function mergeTarget(prs: PrEntryMap): MergeTarget | null {
   const withFacts = Object.entries(prs)
@@ -220,6 +224,10 @@ export function mergeTarget(prs: PrEntryMap): MergeTarget | null {
   // `!== 1` covers both "nothing to merge" and "two, and picking is not ours".
   if (ready.length !== 1) return null;
   const rest = withFacts.filter((x) => x.repo !== ready[0].repo);
-  if (!rest.every((x) => x.facts.state === "MERGED")) return null;
+  // `!x.failed` here as well as in `ready` above: a sibling whose last fetch failed
+  // is carrying forward whatever it said before, and "it said MERGED an hour ago"
+  // is not "it is merged". Unreadable is not merged, the same way unreadable is not
+  // green in `isMergeReady`.
+  if (!rest.every((x) => !x.failed && x.facts.state === "MERGED")) return null;
   return { repo: ready[0].repo, number: ready[0].facts.number, url: ready[0].facts.url };
 }

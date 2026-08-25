@@ -438,6 +438,20 @@ describe("mergeTarget", () => {
     expect(mergeTarget(map)).toEqual({ repo: "api", number: 900, url: "https://github.com/o/api/pull/900" });
   });
 
+  it("withholds the target when a sibling repo says MERGED but its last fetch failed", () => {
+    // The failure this pins: `withFacts` keeps `error: true` entries, and only the
+    // `ready` filter used to exclude them — so the sibling rule accepted a repo
+    // whose facts said MERGED from BEFORE the fetches started failing. A two-repo
+    // card where web merged its first PR and then opened the coupled second one,
+    // with web's reads now failing, would have offered api's Merge button while
+    // saying nothing about the sibling it could not read.
+    const map: PrEntryMap = {
+      api: { facts: green({ number: 900, url: "https://github.com/o/api/pull/900" }), fetchedAt: 1 },
+      web: { facts: prFacts({ number: 800, state: "MERGED" }), fetchedAt: 1, error: true },
+    };
+    expect(mergeTarget(map)).toBeNull();
+  });
+
   it("withholds the target when another repo's PR is open but not ready", () => {
     const map: PrEntryMap = {
       api: { facts: green({ number: 900 }), fetchedAt: 1 },
