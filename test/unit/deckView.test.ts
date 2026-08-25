@@ -81,6 +81,17 @@ const h = vi.hoisted(() => ({
   seedAgent: true as boolean,
   agentProvider: "claude-code" as AgentProviderSetting,
   reviewSubmit: vi.fn(async (_repo: string, _number: number, _verb: ReviewVerb, _body: string): Promise<{ ok: true } | { ok: false; message: string }> => ({ ok: true })),
+  // The merge path (Task 5): the one setting that lets the Deck merge anything, the
+  // strategy it merges with, and the forge call itself. Steered exactly the way
+  // `reviewWrites`/`reviewSubmit` above are — a merge test flips the setting the way
+  // a user would rather than reaching past getConfig().
+  mergeWrites: false as boolean,
+  mergeMethod: "squash" as "squash" | "merge" | "rebase",
+  // Typed as the real union rather than narrowed by inference, for the same reason
+  // `reviewSubmit` is: a test that resolves `{ ok: false, message }` must not need a
+  // cast, or "the forge's own wording reaches the toast" and "a message this file
+  // made up reaches it" become indistinguishable.
+  prMerge: vi.fn(async (_p: string, _n: number, _m: string) => ({ ok: true }) as { ok: true } | { ok: false; message: string }),
   repos: [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }] as ServiceRef[],
   reviewRequests: true as boolean,
   // Every Claude Code session open on this machine (Task 8) — the registry
@@ -353,7 +364,10 @@ vi.mock("../../src/engine/pr/provider", async (importActual) => {
   return {
     ...actual,
     probeGh: h.probeGh,
-    GhProvider: class { fetch = h.prFetch; },
+    // `merge` alongside `fetch`: it is the second member of the real PrProvider,
+    // and without it `forge.prs.merge` resolves to `undefined` and the merge
+    // handler calls it.
+    GhProvider: class { fetch = h.prFetch; merge = h.prMerge; },
     execRunner: (file: string, args: string[], opts: { cwd: string; timeoutMs: number }) => h.ghRun(file, args, opts),
   };
 });
@@ -454,6 +468,9 @@ vi.mock("../../src/config", async (importActual) => {
       openAgents: h.openAgents,
       reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: ["vendored"],
       reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
+      // Steered per test the way reviewWrites is: the merge path's own gate, and the
+      // strategy the confirmation names and the forge is asked for.
+      mergeWrites: h.mergeWrites, mergeMethod: h.mergeMethod,
       prReviewPrompt: h.prReviewPrompt, prReviewAutoFix: h.prReviewAutoFix, seedAgent: h.seedAgent,
       agentProvider: h.agentProvider,
       prReviewStatus: "PR initiated",
@@ -699,6 +716,9 @@ beforeEach(() => {
   h.stampLabelOnWrite = true;
   h.agentProvider = "claude-code";
   h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
+  h.mergeWrites = false;
+  h.mergeMethod = "squash";
+  h.prMerge.mockClear().mockResolvedValue({ ok: true });
   h.branch = "ASM-5641-team-table";
   h.flows = [];
   h.idSeq = 0;
@@ -4125,6 +4145,230 @@ describe("DeckPanel review submit", () => {
     const dones = posts(p).filter((m) => m.type === "deck:reviewSubmitDone");
     expect(dones.length).toBe(before + 1);
     expect(dones.at(-1)).toEqual({ type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled" });
+  });
+});
+
+describe("deck:mergePr", () => {
+  /** A run with one repo whose PR is green by every clause mergeTarget checks. */
+  const greenFacts = (): PrFacts => ({
+    number: 124, url: "https://github.com/o/svc/pull/124", title: "t", state: "OPEN",
+    isDraft: false, ci: { passing: 6, pending: 0, failing: [] }, review: "approved",
+    unresolved: 0, mergeable: "clean", ciAdvisory: false,
+  });
+
+  /** One tracked run — `mkRun()`'s ASM-1, whose single repo `svc` is checked out at
+   * /r/svc — with `facts` cached against it. `readPrEntries` is mocked to ignore its
+   * arguments and hand back `h.prEntries`, so seeding the store IS assigning that
+   * field; there is no temp directory in this suite.
+   *
+   * `show()` rather than `showAndWarm()`: mergePr never consults the gh probe (its
+   * facts come from the store, not a fetch), so the extra warmed tick would only add
+   * runtime to every case here. */
+  const openWith = async (facts: PrFacts | null): Promise<ReturnType<typeof lastPanel>> => {
+    h.runs = [mkRun()];
+    h.prEntries = facts ? { svc: { facts, fetchedAt: Date.now() } } : {};
+    show();
+    await settled();
+    return lastPanel();
+  };
+
+  it("does nothing when mergeWrites is off, however green the PR", async () => {
+    h.mergeWrites = false;
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(h.prMerge).not.toHaveBeenCalled();
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("does nothing for a key with no run record", async () => {
+    h.mergeWrites = true;
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "NOPE-9", repo: "svc", number: 124 });
+    expect(h.prMerge).not.toHaveBeenCalled();
+  });
+
+  it("does nothing for a local card, whose ticket is only inferred from a branch name", async () => {
+    // Same guard, same reason, as seedPrWork's: a local card's key came from a
+    // branch that may name someone else's ticket. Merging off that inference on
+    // one click is what this must never do — and the host enforces it rather
+    // than trusting the webview's own local check.
+    //
+    // The session's cwd is /r/svc on purpose, so the local card's one repo is
+    // `svc` at /r/svc — exactly the checkout the green facts below name. Every
+    // later gate therefore PASSES for this message, which is what makes the test
+    // fail if the local guard is removed rather than being caught downstream by a
+    // checkout lookup that happens not to resolve.
+    h.mergeWrites = true;
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/svc", name: "svc-7e" })];
+    h.prEntries = { svc: { facts: greenFacts(), fetchedAt: Date.now() } };
+    show();
+    await settled();
+    const localKey = builtLocal().run.key;
+    const p = lastPanel();
+    await p._fire({ type: "deck:mergePr", key: localKey, repo: "svc", number: 124 });
+    expect(h.prMerge).not.toHaveBeenCalled();
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("refuses when its own re-check disagrees with the message", async () => {
+    // The webview is a renderer, never the authority for a write. Facts on disk
+    // say review_required; a hand-crafted (or merely stale) message says merge.
+    h.mergeWrites = true;
+    const p = await openWith({ ...greenFacts(), review: "review_required" });
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(h.prMerge).not.toHaveBeenCalled();
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("refuses when the message names a different repo or number than the re-check found", async () => {
+    h.mergeWrites = true;
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 999 });
+    expect(h.prMerge).not.toHaveBeenCalled();
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  // Beyond the brief's own list: the fourth gate — the target repo has to be one of
+  // THIS run's checkouts, since `merge` is spawned in that directory. A run whose
+  // PR store names a repo it does not have checked out is the shape a renamed or
+  // re-scoped run leaves behind, and there is nowhere to run `gh` for it.
+  it("refuses when the run has no checkout for the repo its own re-check named", async () => {
+    h.mergeWrites = true;
+    h.runs = [mkRun({ repos: [{ name: "other", path: "/r/other", isGit: true, branch: "b" }] })];
+    h.prEntries = { svc: { facts: greenFacts(), fetchedAt: Date.now() } };
+    show();
+    await settled();
+    await lastPanel()._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(h.prMerge).not.toHaveBeenCalled();
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("names the repo, number and strategy in the confirmation, and merges on confirm", async () => {
+    h.mergeWrites = true;
+    h.mergeMethod = "squash";
+    vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+
+    const [message, opts] = vi.mocked(window.showWarningMessage).mock.calls[0] as [string, unknown];
+    expect(message).toContain("svc#124");
+    expect(message).toContain("Squash and merge");
+    expect(opts).toMatchObject({ modal: true });
+    expect(h.prMerge).toHaveBeenCalledWith("/r/svc", 124, "squash");
+  });
+
+  it("passes the configured strategy through, not a hardcoded squash", async () => {
+    h.mergeWrites = true;
+    h.mergeMethod = "rebase";
+    vi.mocked(window.showWarningMessage).mockResolvedValue("Rebase and merge");
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(h.prMerge).toHaveBeenCalledWith("/r/svc", 124, "rebase");
+  });
+
+  it("does not merge when the confirmation is declined, and releases the button", async () => {
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockResolvedValue(undefined);
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(h.prMerge).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 124, outcome: "cancelled" }),
+    );
+  });
+
+  it("toasts the forge's own wording with an Open PR action on failure", async () => {
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
+    h.prMerge.mockResolvedValue({ ok: false, message: "Pull request is not mergeable" });
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({
+        type: "toast", level: "error",
+        message: expect.stringContaining("Pull request is not mergeable"),
+        action: { label: "Open PR", url: "https://github.com/o/svc/pull/124" },
+      }),
+    );
+    expect(posts(p)).toContainEqual(expect.objectContaining({ type: "deck:mergeDone", outcome: "failed" }));
+  });
+
+  it("stales the merged repo's cache entry on success, so the card stops offering a merged PR", async () => {
+    // Without this the card keeps its Merge button for up to
+    // prFactsTtlSeconds (default 120s) after the PR has merged.
+    //
+    // Asserted on the write rather than on a read back: `readPrEntries` is mocked
+    // to ignore its arguments and return `h.prEntries`, so a re-read here would
+    // only show the fixture this test seeded. One assertion covers both halves —
+    // `fetchedAt: 0` (so the next tick refetches) and the facts surviving (so the
+    // card does not blink to "no PR" before the refetch lands).
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(h.writePrEntry).toHaveBeenCalledWith(
+      "/prfacts", "ASM-1", "svc",
+      { facts: expect.objectContaining({ number: 124 }), fetchedAt: 0 },
+    );
+    expect(posts(p)).toContainEqual(expect.objectContaining({ type: "deck:mergeDone", outcome: "ok" }));
+  });
+
+  // Beyond the brief's own list, and the same reasoning submitReview's own
+  // threw-after-starting case has: a throw anywhere past the confirmation must
+  // still release the row, because nothing else is ever going to post an outcome
+  // for it. The cache-staling write is the one step after a completed merge that
+  // touches the filesystem, so it is where the throw is injected.
+  it("still releases the button when the post-merge bookkeeping throws", async () => {
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
+    h.writePrEntry.mockImplementationOnce(() => {
+      throw new Error("prfacts is read-only");
+    });
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    expect(h.prMerge).toHaveBeenCalledTimes(1);
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 124, outcome: "failed" }),
+    );
+  });
+
+  it("ignores a second message for the same PR while the first is still in flight", async () => {
+    // Deliberately posts NO outcome for the duplicate: the real call owns the
+    // outcome, and a "cancelled" here would re-enable the button mid-merge —
+    // the opposite of what the guard exists for. Same shape as
+    // reviewSubmitsInFlight.
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
+    let release!: () => void;
+    h.prMerge.mockImplementation(() => new Promise((res) => { release = () => res({ ok: true }); }));
+    const p = await openWith(greenFacts());
+    const first = p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    release();
+    await first;
+    expect(h.prMerge).toHaveBeenCalledTimes(1);
+    // Exactly one outcome, and it is the real call's — the rejected duplicate
+    // stayed silent rather than releasing the row while the merge was in the air.
+    const dones = posts(p).filter((m) => m.type === "deck:mergeDone");
+    expect(dones).toEqual([
+      { type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 124, outcome: "ok" },
+    ]);
+  });
+
+  it("carries mergeWrites on deck:runs so the card can render the row", async () => {
+    h.mergeWrites = true;
+    await openWith(greenFacts());
+    expect(lastRunsPost()).toMatchObject({ mergeWrites: true });
+  });
+
+  // The other half, so the field is threaded from the setting rather than posted
+  // as a constant: off is the shipped default, and the card's Merge row is
+  // supposed to be invisible there.
+  it("carries mergeWrites off when the setting is off", async () => {
+    h.mergeWrites = false;
+    await openWith(greenFacts());
+    expect(lastRunsPost().mergeWrites).toBe(false);
   });
 });
 

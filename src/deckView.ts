@@ -55,11 +55,11 @@ import { readSessionActivity } from "./engine/transcript";
 import { canon } from "./engine/paths";
 import { OwnedRun, resolveOwnership } from "./engine/ownership";
 import { JUST_LAUNCHED_MS, shelfFor } from "./engine/visibility";
-import { prSignals } from "./engine/bucket";
+import { mergeTarget, prSignals } from "./engine/bucket";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
-import { CardAgent, FlowPromptMode, InboundMessage, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, PrWorkReason, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, ServiceRef, isTicketRun, runKind, ticketKeyFor } from "./types";
+import { CardAgent, FlowPromptMode, InboundMessage, MergeMethod, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, PrWorkReason, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, ServiceRef, isTicketRun, runKind, ticketKeyFor } from "./types";
 
 export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
@@ -114,6 +114,15 @@ const VERB_LABEL: Record<ReviewVerb, string> = {
   approve: "Approve",
   comment: "Comment",
   "request-changes": "Request changes",
+};
+
+/** What the confirmation dialog calls each strategy. The dialog names the
+ * resolved `agentFlow.mergeMethod` every time, so the setting can never merge a
+ * way the user did not see. */
+const MERGE_LABEL: Record<MergeMethod, string> = {
+  squash: "Squash and merge",
+  merge: "Merge",
+  rebase: "Rebase and merge",
 };
 
 /** The next unused `n<N>` node id, scanning past whatever is already taken rather
@@ -342,6 +351,9 @@ export class DeckPanel {
    * Neither shipped forge deduplicates one: GitHub keeps both reviews, and
    * GitLab's own path posts a second note. */
   private readonly reviewSubmitsInFlight = new Set<string>();
+  /** Keyed `${key}:${repo}#${number}` — a card can only merge one PR, but the key
+   * says exactly which write is in flight rather than which card is busy. */
+  private readonly mergesInFlight = new Set<string>();
   private forgeProbe: Promise<ForgeGap | null> | null = null;
   /** undefined until the probe resolves; null means the forge is usable, and a
    * gap disables PR facts with a footer note. */
@@ -2453,6 +2465,96 @@ export class DeckPanel {
     }
   }
 
+  /**
+   * Merge one card's PR. The only path in this extension that merges anything.
+   *
+   * Every gate the webview already applied is applied AGAIN here, and that is the
+   * point: a webview message is untyped at runtime and a renderer is not the
+   * authority for a write. In particular `mergeTarget` is re-run against the
+   * host's own PR store and must name the same repo and number the message did —
+   * so a stale card, a hand-crafted message, or a PR that went red between render
+   * and click all refuse instead of merging.
+   */
+  private async mergePr(key: string, repo: string, number: number): Promise<void> {
+    const cfg = getConfig();
+    if (!cfg.mergeWrites) {
+      this.log(`deck: mergePr ignored — agentFlow.mergeWrites is off`);
+      return;
+    }
+    const run = this.run(key);
+    if (!run) {
+      this.toast("error", `No run record for ${key}.`);
+      return;
+    }
+    // Same guard, same reason, as seedPrWork's: a local card's ticket is inferred
+    // from a branch name that may belong to somebody else's ticket.
+    if (runKind(run) === "local") {
+      this.log(`deck: mergePr ignored for local card ${key}`);
+      return;
+    }
+    const target = mergeTarget(readPrEntries(defaultPrFactsDir(), key));
+    if (!target || target.repo !== repo || target.number !== number) {
+      this.log(`deck: mergePr refused — ${key}/${repo}#${number} is not this run's merge target`);
+      return;
+    }
+    const checkout = run.repos.find((r) => r.name === target.repo);
+    if (!checkout) {
+      this.log(`deck: mergePr refused — no checkout for ${target.repo} in ${key}`);
+      return;
+    }
+
+    const inflightKey = `${key}:${target.repo}#${target.number}`;
+    // Deliberately silent, exactly as the review-submit guard is: the genuine
+    // call still running owns posting the outcome, and a "cancelled" from this
+    // rejected duplicate would release the button mid-merge.
+    if (this.mergesInFlight.has(inflightKey)) return;
+    this.mergesInFlight.add(inflightKey);
+    try {
+      const label = MERGE_LABEL[cfg.mergeMethod] ?? MERGE_LABEL.squash;
+      const answer = await vscode.window.showWarningMessage(
+        `${label} on ${target.repo}#${target.number}?`,
+        { modal: true, detail: "Approved, every check green, and no unresolved review threads." },
+        label,
+      );
+      if (answer !== label) {
+        // Distinct from a failure: nothing was attempted, so there is nothing to
+        // warn about — just release the row's disable.
+        this.post({ type: "deck:mergeDone", key, repo: target.repo, number: target.number, outcome: "cancelled" });
+        return;
+      }
+      this.log(`deck: merging ${target.repo}#${target.number} with ${cfg.mergeMethod}`);
+      const res = await this.forge.prs.merge(checkout.path, target.number, cfg.mergeMethod);
+      if (!res.ok) {
+        this.log(`deck: merge failed: ${res.message}`);
+        // Neutral prefix, for the same reason submitReview's is: the timeout
+        // wording says the write MAY have gone through, and any prefix asserting
+        // an outcome would contradict the message it is prefixing.
+        this.post({
+          type: "toast",
+          level: "error",
+          message: `Merge: ${res.message}`,
+          action: { label: "Open PR", url: target.url },
+        });
+        this.post({ type: "deck:mergeDone", key, repo: target.repo, number: target.number, outcome: "failed" });
+        return;
+      }
+      this.toast("success", `${target.repo}#${target.number} merged.`);
+      // Stale the entry rather than deleting the run's whole file: the next tick
+      // refetches (isStale is true at fetchedAt 0) while the facts stay on the
+      // card, so it does not blink to "no PR" before the truth lands.
+      const stored = readPrEntries(defaultPrFactsDir(), key)[target.repo];
+      if (stored) writePrEntry(defaultPrFactsDir(), key, target.repo, { ...stored, fetchedAt: 0 });
+      this.post({ type: "deck:mergeDone", key, repo: target.repo, number: target.number, outcome: "ok" });
+    } catch (e) {
+      // A throw anywhere above (a disposed panel's post, a rejected modal) must
+      // still release the button — otherwise the row stays disabled forever.
+      this.log(`deck: mergePr threw: ${e instanceof Error ? e.message : String(e)}`);
+      this.post({ type: "deck:mergeDone", key, repo, number, outcome: "failed" });
+    } finally {
+      this.mergesInFlight.delete(inflightKey);
+    }
+  }
+
   private async ticketStatus(key: string): Promise<{ status: string | null; category: string | null } | null> {
     const hit = this.ticketCache.get(key);
     if (hit && Date.now() - hit.at < TICKET_TTL_MS) return { status: hit.status, category: hit.category };
@@ -2876,6 +2978,9 @@ export class DeckPanel {
         // Same reasoning as prReviewStatus above: a plain setting the user can
         // flip mid-session, read fresh on every post.
         showTokenTotal: getConfig().showTokenTotal,
+        // Same reasoning as showTokenTotal above: a plain boolean setting the user
+        // can flip mid-session, read fresh on every post.
+        mergeWrites: getConfig().mergeWrites,
         staleCount: this.staleCount,
         sourceLabel: this.connector.info().label,
         // Read fresh on every post, like sourceLabel and showTokenTotal above:
@@ -3025,6 +3130,9 @@ export class DeckPanel {
         break;
       case "deck:seedPrWork":
         await this.seedPrWork(m.key, m.reason, m.detail);
+        break;
+      case "deck:mergePr":
+        await this.mergePr(m.key, m.repo, m.number);
         break;
       case "deck:usageFor":
         this.usageFor(m.key);
