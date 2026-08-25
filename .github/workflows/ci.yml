@@ -16,7 +16,14 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run typecheck
+      # The suite's heaviest file, test/unit/deckView.test.ts, peaks a single vitest
+      # worker just under Node's default 4 GB old-space ceiling, so adding tests to it
+      # kills the worker with a heap OOM rather than a failure — "Worker exited
+      # unexpectedly", one file short of the count. A ceiling with headroom is a cheaper
+      # gate than a size limit on that file; the real fix is for it to retain less.
       - run: npm test
+        env:
+          NODE_OPTIONS: --max-old-space-size=6144
       - name: Cache Playwright browsers
         uses: actions/cache@v4
         with:

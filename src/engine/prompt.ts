@@ -145,3 +145,24 @@ export function prWorkClause(reason: PrWorkReason, detail?: string): string {
       return "";
   }
 }
+
+/**
+ * The verb on the card's button — and the same verb in the destination picker's title
+ * when that click asks where to open.
+ *
+ * One definition, because the two are read seconds apart: the button says "Resolve
+ * conflict", and the picker it raises has to say "Resolve conflict for ASM-1 — open
+ * where?" rather than a second wording of the same job. Lives here, beside the clause
+ * that seeds the prompt, so a new `PrWorkReason` cannot be given a clause and left
+ * without a verb.
+ */
+export function prWorkLabel(reason: PrWorkReason): string {
+  switch (reason) {
+    case "ci":
+      return "Fix CI";
+    case "conflict":
+      return "Resolve conflict";
+    case "review":
+      return "Address review";
+  }
+}

@@ -523,6 +523,10 @@ vi.mock("../../src/config", async (importActual) => {
       // the shipped default (`new-window`: no picker at all) is what a test that never
       // mentions them exercises.
       reviewOpenIn: actual.getConfig().reviewOpenIn,
+      // Where a card's PR work opens. From the real getConfig() for the same reason
+      // reviewOpenIn is: a test steers it with setConfig, and the shipped default
+      // (`ask`: the destination picker) is what a test that never mentions it gets.
+      prWorkOpenIn: actual.getConfig().prWorkOpenIn,
       // What a review BATCH reads on top: how big a batch confirms first.
       batchLaunchConfirmThreshold: actual.getConfig().batchLaunchConfirmThreshold,
       trackOpenWindows: actual.getConfig().trackOpenWindows,
@@ -4543,6 +4547,13 @@ describe("deck:mergePr", () => {
 });
 
 describe("DeckPanel — Address PR", () => {
+  // Every case here predates the destination question and asserts the destination it
+  // has always had: the run's own window. `its-window` is that answer as a setting, so
+  // these keep proving the same behaviour instead of proving the picker's default.
+  // Where the picker itself is covered — including that it can answer this — see
+  // "DeckPanel — PR-work destination" below.
+  beforeEach(() => setConfig({ prWorkOpenIn: "its-window" }));
+
   it("writes one plan matching the repo window for a per-window run", async () => {
     h.runs = [mkRun()];
     show();
@@ -4735,6 +4746,10 @@ describe("DeckPanel — Address PR", () => {
 // reads `m.reason`/`m.detail` off the wire and carries them into the seeded
 // prompt, rather than ignoring them the way `deck:addressPr` always has.
 describe("DeckPanel — seedPrWork", () => {
+  // Same pin, same reason, as the Address PR block above: these are about the
+  // seeded PROMPT, and the destination they assert is the run's own window.
+  beforeEach(() => setConfig({ prWorkOpenIn: "its-window" }));
+
   it("carries the CI clause and check names from reason: \"ci\" into the seeded prompt", async () => {
     h.runs = [mkRun()];
     show();
@@ -4766,6 +4781,137 @@ describe("DeckPanel — seedPrWork", () => {
     expect(plan.matches[0].prompt).toContain(
       "This PR conflicts with its base branch. Rebase it onto the base and resolve the conflicts.",
     );
+  });
+});
+
+// ── where PR work opens (agentFlow.prWorkOpenIn) ──────────────────────────────
+// The buttons on a card — Fix CI, Resolve conflict, Address review — used to re-seed
+// the run's own window with no question. They now ask, unless the setting pins the
+// old answer. The blocks above are the no-regression guard for that pinned answer;
+// these cover the picker itself.
+describe("DeckPanel — PR-work destination", () => {
+  const HERE = { identity: "/repos/bite-me", kind: "folder" as const, roots: [{ path: "/repos/bite-me" }] };
+  const plan = () => h.writePlanFile.mock.calls.at(-1)?.[0] as { matches: { matchPath: string; prompt: string }[] } | undefined;
+  const fire = async (reason = "conflict") => {
+    h.runs = [mkRun({ briefPaths: ["/r/svc/.pick-task/TASK.md"] })];
+    show();
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason });
+    return lastPanel();
+  };
+
+  it("asks where to open, in the button's own words", async () => {
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "stay" } });
+    await fire();
+    expect(window.showQuickPick).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ title: "Resolve conflict for ASM-1 — open where?" }),
+    );
+  });
+
+  it("leads with the run's own window, named by the repo it holds", async () => {
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "stay" } });
+    await fire("ci");
+    const items = window.showQuickPick.mock.calls[0][0] as { label: string; detail: string }[];
+    expect(items[0]).toMatchObject({ label: "$(window) Its own window", detail: "svc" });
+    // Never both: for a run that already has windows, "New window" would be a second
+    // name for the row above it.
+    expect(items.some((i) => i.label.includes("New window"))).toBe(false);
+  });
+
+  it("re-seeds the run's own window when that is what was picked", async () => {
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "stay" } });
+    await fire();
+    expect(plan()!.matches).toEqual([{ matchPath: "/r/svc", prompt: expect.stringContaining("brief=(relative)") }]);
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
+  });
+
+  it("seeds a live window instead, against the run's brief by absolute path", async () => {
+    // The relative .pick-task/TASK.md is nothing in a folder that is not the repo, so
+    // a destination the user picked has to carry the brief's real location.
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/bite-me" } });
+    await fire();
+    expect(plan()!.matches).toEqual([{
+      matchPath: "/repos/bite-me",
+      prompt: expect.stringContaining("brief=/r/svc/.pick-task/TASK.md"),
+    }]);
+    expect(h.openInEditor).toHaveBeenCalledWith("/repos/bite-me");
+    expect(h.openInEditor).not.toHaveBeenCalledWith("/r/svc");
+  });
+
+  it("seeds this window in place, opening nothing, and says so", async () => {
+    h.currentWindow = HERE;
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "current" } });
+    const p = await fire();
+    expect(plan()!.matches).toEqual([{ matchPath: "/repos/bite-me", prompt: expect.any(String) }]);
+    expect(h.openInEditor).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual(expect.objectContaining({
+      type: "toast", message: "Resolve conflict for ASM-1 — seeded in this window.",
+    }));
+  });
+
+  it("refuses this window when it has no identity between the pick and the seed", async () => {
+    h.currentWindow = undefined;
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "current" } });
+    const p = await fire();
+    expect(h.writePlanFile).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual(expect.objectContaining({
+      type: "toast", level: "error", message: expect.stringContaining("no workspace file"),
+    }));
+  });
+
+  // The plan file is the durable half of this click: written after the question, never
+  // before, so an Escape cannot leave one on disk for a window to act on later.
+  it("writes nothing and opens nothing when the picker is dismissed", async () => {
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    const p = await fire();
+    expect(h.writePlanFile).not.toHaveBeenCalled();
+    expect(h.openInEditor).not.toHaveBeenCalled();
+    expect(posts(p).some((m) => m.type === "toast")).toBe(false);
+  });
+
+  it("asks nothing at all when the setting pins the run's own window", async () => {
+    setConfig({ prWorkOpenIn: "its-window" });
+    await fire();
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
+  });
+
+  it("names one window per repo on a multi-repo run", async () => {
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "stay" } });
+    h.runs = [mkRun({ repos: [
+      { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
+      { name: "web", path: "/r/web", isGit: true, branch: "b" },
+    ] })];
+    show();
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    const items = window.showQuickPick.mock.calls[0][0] as { detail: string }[];
+    expect(items[0].detail).toBe("svc, web — one window each");
+    expect(plan()!.matches.map((m) => m.matchPath)).toEqual(["/r/svc", "/r/web"]);
+  });
+
+  it("collapses a multi-repo run onto the one window it was sent to", async () => {
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "existing", file: "/ws/team.code-workspace" } });
+    h.runs = [mkRun({ briefPaths: ["/r/svc/.pick-task/TASK.md"], repos: [
+      { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
+      { name: "web", path: "/r/web", isGit: true, branch: "b" },
+    ] })];
+    show();
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    expect(plan()!.matches).toEqual([{
+      matchPath: "/ws/team.code-workspace",
+      prompt: expect.stringContaining("brief=/r/svc/.pick-task/TASK.md"),
+    }]);
+  });
+
+  it("asks nothing for a run with nowhere to open", async () => {
+    h.runs = [mkRun({ repos: [] })];
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual(expect.objectContaining({
+      type: "toast", level: "error", message: "Nothing to open for ASM-1.",
+    }));
   });
 });
 

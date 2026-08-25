@@ -756,23 +756,58 @@ export const DECK_CSS = `
      failed to shrink (a long mono key did exactly that), and it takes the close
      button off-screen with it. Vertical scroll is the only axis it needs. */
   .dd { width: 460px; overflow: hidden auto; }
-  .dd-hd { display: flex; align-items: center; gap: 8px; padding: 9px 12px;
-    border-bottom: 1px solid var(--hair); }
+  /* Two rows, and the header is the block that stacks them: \`.dd-id\` carries the
+     identity (mark, key, tracker status, close) and the title takes the next row
+     whole.
+
+     The title used to sit inline between the key and the status pill, and at 460px
+     that made every long one unreadable — the title and the pill are both shrinkable,
+     so the row's shortfall was split between them, and a long title turned "Ready for
+     Dev" into "Read…" while still being cut itself. Neither survived. A row of its own
+     is the only arrangement in which the whole title fits, which is the point: the
+     title is what the drawer is about, and the reader should not have to hover it.
+
+     A real inner element rather than \`flex-wrap\` on \`.dd-hd\` itself, and measured:
+     wrapping puts the break wherever the line runs out, and flexbox breaks lines from
+     the items' *unshrunk* sizes, so a long key next to a long status wrapped the PILL
+     and the close button onto a line of their own and pushed the title to a third.
+     One row that cannot break, plus a block below it, has no such degree of freedom. */
+  .dd-hd { padding: 9px 12px; border-bottom: 1px solid var(--hair); }
+  .dd-id { display: flex; align-items: center; gap: 8px; }
   /* \`max-width\` is load-bearing: a nowrap flex item's automatic minimum size is its
      full text width, so an unbounded key could not shrink and any key wider than the
-     drawer pushed the row past 460px instead of ellipsizing. Capping it — rather than
-     letting it shrink with \`min-width: 0\` — is what keeps a short key whole: under
-     free shrinking, "notepad" beside a long summary came out as "not…". Half the
-     header is the widest a key can be before it stops being context for the summary
-     and starts replacing it. \`flex: none\` so it is the cap, not the summary, that
-     decides: the summary ellipsizes first, and the key only past 50%. */
+     drawer pushed the row past 460px instead of ellipsizing. Half the header is the
+     widest a key can be before it stops being context and starts replacing the rest
+     of the row.
+
+     Shrinkable past that cap (\`min-width: 0\`, not \`flex: none\`) so the key — not the
+     pill — is what gives ground when the two together still overflow. That priority is
+     the reverse of what it was while the title shared this row, and it is only safe now
+     the title has left: the pill is the row's one other flexible item and its width is
+     small and bounded, so a short key never shrinks at all. Where something must, a
+     truncated key costs least — the title below already says what the task is, and for
+     a notepad run the key is derived from that title anyway. The full key stays on the
+     \`title\` attribute, and Copy ticket key still copies it verbatim. */
   .dd-hd .k { font-family: var(--vscode-editor-font-family); font-size: 12px; white-space: nowrap;
-    flex: none; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
+    flex: 0 1 auto; min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; }
   /* The drawer opens with the card's own mark, at the card's own size — a smaller
      one here would read as a different object. */
   .dd-hd .av { flex: none; }
-  .dd-hd .t { font-size: var(--t-body); color: var(--dim);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The whole title, wrapped onto as many rows as it takes — never ellipsized, which
+     is the whole point of the second row. \`overflow-wrap: anywhere\` is for the titles
+     that are one unbroken token: a 60-character notepad slug has no space to break at,
+     and without it the word would run past 460px and be clipped by \`.dd\`'s own
+     \`overflow: hidden\`. Full foreground weight, unlike the dim inline version it
+     replaces — on a row of its own it reads as the drawer's title rather than as a
+     gloss on the key. */
+  .dd-hd .t { display: block; margin-top: 2px; font-size: var(--t-body);
+    color: var(--vscode-foreground); white-space: normal; overflow-wrap: anywhere; }
+  /* Holds its text: \`flex: none\`, so the key beside it is what shrinks. It is two or
+     three words of tracker vocabulary — "Ready for Dev", "In Progress" — and a first
+     letter plus an ellipsis is not a shorter way of saying them, it is a different and
+     useless thing. Capped all the same, so a pathological status cannot squeeze the
+     key to nothing. */
+  .dd-hd .pill { flex: none; max-width: 50%; }
   .dd-x { margin-left: auto; background: none; border: none; cursor: pointer;
     color: var(--dim); font-size: 13px; padding: 2px 5px; }
   .dd-x:hover { color: var(--vscode-foreground); }

@@ -158,6 +158,46 @@ describe("chooseOpenTarget", () => {
       expect(d.pickExistingWorkspace).not.toHaveBeenCalled();
     });
   });
+
+  // The Deck's PR-work buttons act on a run that already HAS windows, so their picker
+  // leads with "leave it where it is" instead of "New window" — for PR work those two
+  // are the same act, since `openInEditor` focuses the window already holding a folder
+  // rather than opening a second one.
+  describe("the stay item", () => {
+    const STAY = { label: "$(window) Its own window", detail: "Where ASM-1 already lives" };
+
+    it("replaces New window, and leaves the rest of the picker in order", async () => {
+      const d = deps({ liveWindows: vi.fn(() => [rec()]) });
+      await chooseOpenTarget({ openIn: "ask", trackOpenWindows: true, ...COPY, stay: STAY }, d);
+      const items = d.pick.mock.calls[0][0] as { label: string; detail: string }[];
+      expect(items.map((i) => i.label)).toEqual([
+        "$(window) Its own window",
+        "$(window) This window",
+        "$(folder-library) Existing workspace…",
+        "$(window) bite-me",
+      ]);
+      expect(items[0].detail).toBe("Where ASM-1 already lives");
+    });
+
+    it("answers { kind: 'stay' } when it is picked", async () => {
+      const d = deps();
+      d.pick.mockResolvedValueOnce({ target: { kind: "stay" } });
+      expect(await chooseOpenTarget({ openIn: "ask", trackOpenWindows: false, ...COPY, stay: STAY }, d)).toEqual({ kind: "stay" });
+    });
+
+    it("still routes the other items to their own targets", async () => {
+      const d = deps();
+      d.pick.mockResolvedValueOnce({ target: { kind: "current" } });
+      expect(await chooseOpenTarget({ openIn: "ask", trackOpenWindows: false, ...COPY, stay: STAY }, d)).toEqual({ kind: "current" });
+    });
+
+    it("is offered beside Existing workspace… in a window that cannot hold a session", async () => {
+      const d = deps({ currentWindow: vi.fn(() => undefined) });
+      await chooseOpenTarget({ openIn: "ask", trackOpenWindows: false, ...COPY, stay: STAY }, d);
+      const items = d.pick.mock.calls[0][0] as { label: string }[];
+      expect(items.map((i) => i.label)).toEqual(["$(window) Its own window", "$(folder-library) Existing workspace…"]);
+    });
+  });
 });
 
 describe("liveWindowItems", () => {

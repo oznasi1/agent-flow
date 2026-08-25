@@ -23,6 +23,7 @@ import { readLiveWindows, defaultWindowsDir, currentWindow } from "./engine/pres
 // The destination question, shared with Take in the sidebar so **Review with agent**
 // asks it in the same words with the same pickers.
 import { chooseOpenTarget, targetToOpenArgs } from "./engine/openTarget";
+import { prWorkPlan, type PrWorkTarget } from "./engine/prWork";
 import { openTargetDeps } from "./openTargetHost";
 import { agentPrompt, openInEditor, openWorkspace, writePlanFile, BRIEF_DIR } from "./engine/workspace";
 import { createWorktrees, repoRootOfWorktree } from "./engine/worktree";
@@ -34,7 +35,7 @@ import { defaultPrFactsDir, isStale, readPrEntries, removePrEntries, writePrEntr
 import { FetchResult } from "./engine/pr/provider";
 import { RefreshQueue } from "./engine/pr/queue";
 import { discoverRepos } from "./engine/repos";
-import { composeAgentPrompt, hasNote, prReviewTemplate, prWorkClause } from "./engine/prompt";
+import { composeAgentPrompt, hasNote, prReviewTemplate, prWorkClause, prWorkLabel } from "./engine/prompt";
 import { launchReview, resolveReviewMode, reviewRunKey } from "./engine/review/launch";
 import { batchReviewModes, needsWorktrees, planReviewBatch, toBatchTask, type ReviewBatchItem } from "./engine/review/batch";
 import { openSharedWorkspace } from "./engine/batchWorkspace";
@@ -3873,21 +3874,28 @@ export class DeckPanel {
     // so it uses the same derivation rather than a second, disagreeing one.
     const ticketKey = ticketKeyFor(run, this.connector);
     const ticket = { key: ticketKey, summary: run.summary, url: run.url };
-    // Mirror the shape this run was launched in — that is what its windows are. A
-    // multiroot run is one window on the workspace file, rendered against the absolute
-    // brief the launch wrote; a per-window run is one window per repo, where the
-    // relative .pick-task/TASK.md resolves inside each. Same split openWorkspace makes,
-    // and it keeps every window of a multi-repo run seeded rather than just the first.
-    // Keyed on workspaceFile's presence, not mode, the way inspect() already does it.
-    // mentions is empty: file hints come from the ticket description, and re-fetching
-    // Jira is exactly what this path exists to avoid.
-    const matches = run.workspaceFile
-      ? [{ matchPath: run.workspaceFile, prompt: agentPrompt(ticket, [], template, run.briefPaths[0]) }]
-      : run.repos.map((r) => ({ matchPath: r.path, prompt: agentPrompt(ticket, [], template) }));
-    if (matches.length === 0) {
+    // A run with nowhere to open is refused before the destination question, not after:
+    // asking where to put work that has no window to go in wastes the only interaction
+    // this path has.
+    if (!run.workspaceFile && run.repos.length === 0) {
       this.toast("error", `Nothing to open for ${key}.`);
       return;
     }
+    // Where — asked BEFORE anything is written, so an Escape leaves no plan file behind
+    // for some window to act on later. Same ordering, same reason, as launchReviewFor's.
+    const target = await this.prWorkTarget(cfg, run, key, reason);
+    if (!target) return; // dismissed — nothing written, nothing opened, no toast
+    // Which windows that destination means, and which brief each renders against.
+    // mentions is empty: file hints come from the ticket description, and re-fetching
+    // Jira is exactly what this path exists to avoid.
+    const plan = prWorkPlan(run, target, currentWindow());
+    if (!plan) {
+      // `current` in a window that lost its identity between the pick and here — the one
+      // case prWorkPlan refuses, and the same one targetToOpenArgs refuses.
+      this.toast("error", `Couldn't seed ${key} here — this window has no workspace file and no single folder.`);
+      return;
+    }
+    const matches = plan.seats.map((s) => ({ matchPath: s.matchPath, prompt: agentPrompt(ticket, [], template, s.briefPath) }));
     // Honor seedAgent the way every other launch does: with it off, nothing seeds
     // anywhere, and writing a plan file no window will act on would just litter.
     if (cfg.seedAgent) {
@@ -3897,16 +3905,25 @@ export class DeckPanel {
     // two dead windows would otherwise show the identical "Couldn't open ASM-1."
     // twice, telling the user nothing about which repo actually failed.
     const failedRepos: string[] = [];
-    for (const m of matches) {
-      if (await openInEditor(m.matchPath)) continue;
-      failedRepos.push(run.repos.find((r) => r.path === m.matchPath)?.name ?? m.matchPath);
+    for (const p of plan.toOpen) {
+      if (await openInEditor(p)) continue;
+      failedRepos.push(run.repos.find((r) => r.path === p)?.name ?? p);
     }
-    if (failedRepos.length === 1 && matches.length === 1) {
+    if (failedRepos.length === 1 && plan.toOpen.length === 1) {
       // The common case (one repo, or the single multiroot workspace file) keeps
       // the plain message — naming the sole repo would just repeat the key.
       this.toast("error", `Couldn't open ${key}.`);
     } else if (failedRepos.length > 0) {
       this.toast("error", `Couldn't open ${key} (${failedRepos.join(", ")}).`);
+    } else if (plan.toOpen.length === 0) {
+      // This window: nothing opened, nothing focused, so silence here would be
+      // indistinguishable from a click that did nothing at all.
+      this.toast(
+        cfg.seedAgent ? "success" : "info",
+        cfg.seedAgent
+          ? `${prWorkLabel(reason)} for ${key} — seeded in this window.`
+          : `Nothing seeded for ${key} — agentFlow.seedAgent is off.`,
+      );
     } else if (!cfg.seedAgent) {
       // Address PR with seedAgent off is otherwise silently indistinguishable
       // from plain Open — nothing seeded, no toast, no way to tell the two
@@ -3914,6 +3931,44 @@ export class DeckPanel {
       // open: a failure already got its own explanation above.
       this.toast("info", `Opened ${key}'s window — nothing seeded, agentFlow.seedAgent is off.`);
     }
+  }
+
+  /**
+   * Where this card's PR work should open.
+   *
+   * `its-window` answers without asking, and is what every release before this question
+   * existed did. `ask` raises the picker Take and **Review with …** raise — the same
+   * words, the same rows, the same live windows — with one row changed: it leads with
+   * the run's own window instead of "New window". For a run that already has windows
+   * those two are the same act, because `openInEditor` shells `open -a`, which focuses
+   * the window holding a folder rather than opening a second one.
+   */
+  private prWorkTarget(
+    cfg: AgentFlowConfig,
+    run: Run,
+    key: string,
+    reason: PrWorkReason,
+  ): Promise<PrWorkTarget | undefined> {
+    if (cfg.prWorkOpenIn !== "ask") return Promise.resolve({ kind: "stay" });
+    // What the run's own window IS, in the user's own terms: the workspace file it was
+    // launched on, or the repos it holds — the vocabulary reposToDiff already picks in.
+    const where = run.workspaceFile
+      ? workspaceLabel(run.workspaceFile) ?? "its workspace"
+      : run.repos.map((r) => r.name).join(", ");
+    return chooseOpenTarget(
+      {
+        openIn: "ask",
+        trackOpenWindows: cfg.trackOpenWindows,
+        title: `${prWorkLabel(reason)} for ${key} — open where?`,
+        placeHolder: "Its own window, this window, a saved workspace, or a window you have open",
+        noun: "this work",
+        stay: {
+          label: "$(window) Its own window",
+          detail: !run.workspaceFile && run.repos.length > 1 ? `${where} — one window each` : where,
+        },
+      },
+      openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
+    );
   }
 
   private dispose(): void {

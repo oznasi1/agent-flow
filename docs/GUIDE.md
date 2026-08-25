@@ -28,7 +28,9 @@
   on a Deck card it means the review column's waiting lane, with an actual open PR behind it —
   the two surfaces gate on different things. From the sidebar's task card the button kicks off
   a session **in a fresh worktree**; from a Deck card it re-seeds the workspace that run already
-  has instead, asking nothing, since the run was launched with one. Either way the session finds
+  has — and asks where to put it: the run's own window, this window, a `.code-workspace` you
+  have, or an Agent Flow window that is already open (`agentFlow.prWorkOpenIn`, set it to
+  `its-window` to be asked nothing). Either way the session finds
   the task's GitHub PR by its Jira key, checks out its branch, and assesses whether it's ready
   for your fixes — then, by default, starts implementing the requested changes (toggle with
   `agentFlow.prReviewAutoFix`).

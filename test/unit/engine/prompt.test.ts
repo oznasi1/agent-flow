@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, applyExploreVars, prReviewTemplate, PR_REVIEW_AUTOFIX_CLAUSE, composeAgentPrompt, prWorkClause, type PromptVars } from "../../../src/engine/prompt";
+import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, applyExploreVars, prReviewTemplate, PR_REVIEW_AUTOFIX_CLAUSE, composeAgentPrompt, prWorkClause, prWorkLabel, type PromptVars } from "../../../src/engine/prompt";
 
 const V: PromptVars = {
   key: "ASM-5412",
@@ -202,5 +202,16 @@ describe("prWorkClause", () => {
   it("never interpolates a detail into a regex replacement position", () => {
     // Detail is derived from check names, which are user-controlled on GitHub.
     expect(prWorkClause("ci", "$& $1 $'")).toContain("$& $1 $'");
+  });
+});
+
+describe("prWorkLabel", () => {
+  // The card's own buttons, and the words the destination picker's title repeats.
+  // Asserted against the literals the webview rendered before this was extracted, so
+  // moving the wording here cannot quietly rename a button.
+  it("names each reason with the verb its button already used", () => {
+    expect(prWorkLabel("ci")).toBe("Fix CI");
+    expect(prWorkLabel("conflict")).toBe("Resolve conflict");
+    expect(prWorkLabel("review")).toBe("Address review");
   });
 });

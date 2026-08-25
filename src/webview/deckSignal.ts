@@ -1,5 +1,8 @@
 import { CardAgent, PrFacts, PrWorkReason, RunStatus } from "../types";
 import { mergeTarget, type MergeTarget } from "../engine/bucket";
+// Pure — a type import and string work, nothing that reaches Node. Imported rather
+// than restated so the button and the destination picker it raises say one verb.
+import { prWorkLabel } from "../engine/prompt";
 
 /** One element of a card's signal line. `diff` is its own kind rather than a
  * formatted string because the two halves take different colors, and a card
@@ -135,13 +138,13 @@ export function cardActions(r: RunStatus): SignalAction[] {
   // block the merge must not put a button on the card.
   if (f.ci.failing.length > 0 && !f.ciAdvisory) {
     const names = f.ci.failing.map((c) => c.name).join(", ");
-    out.push({ tone: "bad", text: `✗ ${names}`, label: "Fix CI", reason: "ci", detail: names });
+    out.push({ tone: "bad", text: `✗ ${names}`, label: prWorkLabel("ci"), reason: "ci", detail: names });
   }
   if (f.mergeable === "conflicting") {
-    out.push({ tone: "warn", text: "conflicts with main", label: "Resolve conflict", reason: "conflict" });
+    out.push({ tone: "warn", text: "conflicts with main", label: prWorkLabel("conflict"), reason: "conflict" });
   }
   if (f.review === "changes_requested") {
-    out.push({ tone: "warn", text: "changes requested", label: "Address review", reason: "review" });
+    out.push({ tone: "warn", text: "changes requested", label: prWorkLabel("review"), reason: "review" });
   }
   return out;
 }

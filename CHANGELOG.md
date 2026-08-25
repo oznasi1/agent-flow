@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.44.0] — 2026-08-25
+
+### Added
+
+- **A Deck card's PR work asks where to open.** **Fix CI**, **Resolve conflict** and
+  **Address review** used to re-seed the run's own window without asking. They now
+  raise the same destination question Take and **Review with …** already ask, with
+  one row changed: it leads with **Its own window** — where the run already lives —
+  instead of *New window*, which for a run that is already open would be the same
+  act. This window, a `.code-workspace` you have, and any Agent Flow window that is
+  open are the other answers. Dismissing the picker writes nothing and opens
+  nothing.
+
+  A destination that is not the run's own repo seeds one session for the whole run
+  and points it at the run's brief by absolute path, since the relative
+  `.pick-task/TASK.md` only resolves in the repo itself.
+
+### Changed
+
+- **Those three buttons now ask by default.** `agentFlow.prWorkOpenIn` ships as
+  `ask`; set it to `its-window` for the one-click behaviour every earlier release
+  had. Nothing else about the seeded prompt or the plan file changed.
+
+## [0.43.1] — 2026-08-25
+
+### Fixed
+
+- **A long task title is readable in the Deck's detail drawer.** The title shared the header
+  row with the tracker-status pill, and at the drawer's width both of them shrank — a long
+  title turned "Ready for Dev" into "Read…" and was still cut off itself, so neither could be
+  read. The title now takes the row below, wrapping onto as many lines as it needs rather
+  than ellipsizing, and the status keeps its words.
+
+## [0.43.0] — 2026-08-25
+
 ### Added
 
 - **Merge a green pull request from its card.** A card whose one pull request is
