@@ -39,6 +39,28 @@ const READ_ONLY_GITLAB_PROMPT =
   "Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, " +
   "each with the file and line it refers to. Do not post anything to GitLab; the human submits the review.{files}";
 
+/** The Bitbucket wording: substitution-only, same relationship to
+ *  `READ_ONLY_GITHUB_PROMPT` as `READ_ONLY_GITLAB_PROMPT` has. Bitbucket's own
+ *  nouns: "pull request" (not "merge request"), and "destination branch" (not
+ *  "base branch" or "target branch"). */
+const READ_ONLY_BITBUCKET_PROMPT =
+  'Review pull request {url} — {repo}#{number}, "{summary}", by {author}. ' +
+  "Do NOT check the branch out — this repo may be someone's live checkout, and other reviews may be running beside you. " +
+  "Fetch the pull request's own commit instead: `git fetch origin refs/pull-requests/{number}/head` gives you FETCH_HEAD, and " +
+  "`git merge-base HEAD FETCH_HEAD` gives you its destination branch point. Read the diff with `git diff <destination>...FETCH_HEAD`, and read any " +
+  "file at the pull request's own revision with `git show FETCH_HEAD:<path>` — never from the working tree, which is on a different commit. " +
+  "Assess correctness, edge cases, tests, and anything that would break in production. " +
+  "Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, " +
+  "each with the file and line it refers to. Do not post anything to Bitbucket; the human submits the review.{files}";
+
+/** A lookup rather than a chain of ternaries now that there are three forges. The
+ *  fallback is the GitHub wording, agreeing with `shippedPrReviewPrompt`'s
+ *  fallback for the same unregistered-id reason. */
+const READ_ONLY_PROMPT: Record<string, string> = {
+  gitlab: READ_ONLY_GITLAB_PROMPT,
+  bitbucket: READ_ONLY_BITBUCKET_PROMPT,
+};
+
 /** The read-only mode this forge SHIPS. Forge-flavoured for one reason only: the ref
  *  a request lives on is spelled differently. Same shape as
  *  `shippedReviewRequestModes`, and never added to it. */
@@ -47,7 +69,7 @@ export function readOnlyReviewMode(forge: string): PromptMode {
     id: READ_ONLY_REVIEW_MODE_ID,
     label: "Read-only review",
     detail: "Reads the PR without checking it out — several can share one window. Can't run tests.",
-    prompt: forge === "gitlab" ? READ_ONLY_GITLAB_PROMPT : READ_ONLY_GITHUB_PROMPT,
+    prompt: Object.hasOwn(READ_ONLY_PROMPT, forge) ? READ_ONLY_PROMPT[forge] : READ_ONLY_GITHUB_PROMPT,
   };
 }
 

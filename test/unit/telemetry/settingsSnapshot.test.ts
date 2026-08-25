@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { AgentFlowConfig, DEFAULT_PROMPT_MODES, DEFAULT_REVIEW_REQUEST_MODES, MERGE_METHODS, getConfig } from "../../../src/config";
+import {
+  AgentFlowConfig, BITBUCKET_PR_REVIEW_PROMPT, DEFAULT_PROMPT_MODES, DEFAULT_REVIEW_REQUEST_MODES, MERGE_METHODS, getConfig,
+} from "../../../src/config";
 import {
   AGENT_PROVIDERS, AGENT_SURFACES, DEFAULT_FILTER_VALUES, EXPLORE_MODES, OPEN_IN_MODES, REMOTE_CONTROL_MODES,
   settingsSnapshot, WORKSPACE_MODES, WORKTREE_MODES,
@@ -240,6 +242,36 @@ describe("settingsSnapshot", () => {
   it("still reports a customized prompt and mode on gitlab", () => {
     setConfig({
       forge: "gitlab",
+      prReviewPrompt: "my own words",
+      reviewRequestModes: [{ id: "full", prompt: "my own review words" }],
+    });
+    const s = settingsSnapshot(getConfig());
+    expect(s.pr_review_prompt_customized).toBe(true);
+    expect(s.review_modes_overridden).toBe(1);
+  });
+
+  it("reports a stock Bitbucket install as uncustomized", () => {
+    // Comparing a Bitbucket install against the GitHub default would report a
+    // customized prompt for every stock install — the direction that destroys the
+    // metric, since it makes "the user wrote their own words" indistinguishable
+    // from "the user picked a forge".
+    setConfig({ forge: "bitbucket" });
+    const cfg = getConfig();
+    // Pinned against the raw exported constant, not just against whatever
+    // `shippedPrReviewPrompt` currently returns: comparing a value only against
+    // the same function that produced it can stay green even if that function's
+    // bitbucket case quietly regresses to the GitHub default, since both the seed
+    // and the comparison would be wrong together.
+    expect(cfg.prReviewPrompt).toBe(BITBUCKET_PR_REVIEW_PROMPT);
+    const s = settingsSnapshot(cfg);
+    expect(s.forge).toBe("bitbucket");
+    expect(s.pr_review_prompt_customized).toBe(false);
+    expect(s.review_modes_overridden).toBe(0);
+  });
+
+  it("still reports a customized prompt and mode on bitbucket", () => {
+    setConfig({
+      forge: "bitbucket",
       prReviewPrompt: "my own words",
       reviewRequestModes: [{ id: "full", prompt: "my own review words" }],
     });

@@ -33,6 +33,15 @@ describe("readOnlyReviewMode", () => {
     expect(m.prompt).not.toContain("pull request");
   });
 
+  it("names Bitbucket's own ref and vocabulary under the bitbucket forge", () => {
+    const m = readOnlyReviewMode("bitbucket");
+    expect(m.prompt).toContain("refs/pull-requests/{number}/head");
+    expect(m.prompt).toContain("pull request");
+    expect(m.prompt).toContain("destination branch");
+    expect(m.prompt).not.toContain("merge request");
+    expect(m.prompt).toContain("Do not post anything to Bitbucket");
+  });
+
   it("is not one of the shipped review modes", () => {
     // A second built-in would raise a QuickPick on every stock single-row launch —
     // see test/unit/deckView.test.ts "does not ask which mode to use…".

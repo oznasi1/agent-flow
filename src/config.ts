@@ -283,6 +283,19 @@ export const GITLAB_PR_REVIEW_PROMPT =
   "into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested " +
   "changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}";
 
+/** The Bitbucket wording of DEFAULT_PR_REVIEW_PROMPT, seeded instead when
+ * `agentFlow.forge` is "bitbucket" and the user hasn't customized
+ * `prReviewPrompt`. Substitution-only, exactly the relationship
+ * GITLAB_PR_REVIEW_PROMPT has with its GitHub twin — with one difference that
+ * is not cosmetic: there is NO `bb pr checkout`. `atlassian-cli` has no checkout
+ * subcommand at all, so this names plain git instead of inventing a command the
+ * session would fail to run. */
+export const BITBUCKET_PR_REVIEW_PROMPT =
+  'Jira {key} ({url}): "{summary}". This task has an open Bitbucket pull request — all our PRs carry the Jira key in their title and branch. ' +
+  "Using `atlassian-cli` (or the Bitbucket tools available to you): find the PR for {key}, then " +
+  "`git fetch && git checkout <its source branch>` to bring it into the working tree, " +
+  "and assess whether it is ready to merge.{brief}{files}";
+
 /** Seed for reviewing a teammate's PR from the Deck's review strip. Distinct from
  * DEFAULT_PR_REVIEW_PROMPT, which addresses feedback on *your own* PR. The agent
  * writes its findings to a file; the human submits the review. Placeholders:
@@ -312,6 +325,16 @@ export const GITLAB_REVIEW_REQUEST_PROMPT =
   "Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, " +
   "each with the file and line it refers to. Do not post anything to GitLab; the human submits the review.{files}";
 
+/** The Bitbucket wording of DEFAULT_REVIEW_REQUEST_PROMPT, substituted into the
+ * first stock review mode when `agentFlow.forge` is "bitbucket". Same
+ * relationship as BITBUCKET_PR_REVIEW_PROMPT above, and the same checkout
+ * caveat. */
+export const BITBUCKET_REVIEW_REQUEST_PROMPT =
+  'Review Bitbucket pull request {repo}#{number} by {author}: "{summary}" ({url}). ' +
+  "Check it out with `git fetch && git checkout <its source branch>`, then read the full diff against its destination branch. " +
+  "Report what you find as a review: a short overall assessment, then specific comments, " +
+  "each with the file and line it refers to. Do not post anything to Bitbucket; the human submits the review.{files}";
+
 /** The stock review modes offered by **Review with agent**, in picker order.
  * One entry by default: a single mode short-circuits the picker, so a fresh
  * install keeps today's one-click launch. Keep this array identical to the
@@ -337,30 +360,47 @@ export const DEFAULT_REVIEW_REQUEST_MODES: PromptMode[] = [
  * destroys the metric, since it makes "the user wrote their own words" (what
  * docs/TELEMETRY.md says the field means) indistinguishable from "the user
  * picked a forge". */
+/** A lookup rather than a chain of ternaries now that there are three forges. The
+ * fallback is the GitHub default and must stay that way: `resolveForge` falls
+ * back to github for an unregistered id, so an unknown forge here has to agree
+ * with it, or a typo'd setting yields a prompt and a forge that name different
+ * tools. */
+const SHIPPED_PR_REVIEW_PROMPT: Record<string, string> = {
+  gitlab: GITLAB_PR_REVIEW_PROMPT,
+  bitbucket: BITBUCKET_PR_REVIEW_PROMPT,
+};
+
 export function shippedPrReviewPrompt(forge: string): string {
-  return forge === "gitlab" ? GITLAB_PR_REVIEW_PROMPT : DEFAULT_PR_REVIEW_PROMPT;
+  return Object.hasOwn(SHIPPED_PR_REVIEW_PROMPT, forge) ? SHIPPED_PR_REVIEW_PROMPT[forge] : DEFAULT_PR_REVIEW_PROMPT;
 }
+
+const SHIPPED_REVIEW_REQUEST_PROMPT: Record<string, string> = {
+  gitlab: GITLAB_REVIEW_REQUEST_PROMPT,
+  bitbucket: BITBUCKET_REVIEW_REQUEST_PROMPT,
+};
 
 /** The review modes this forge SHIPS — `DEFAULT_REVIEW_REQUEST_MODES` with only
  * the first stock mode's prompt forge-flavoured. Exported for the same reason
  * `shippedPrReviewPrompt` is: `settingsSnapshot`'s `modeCounts` diffs the
  * resolved list against these built-ins, and diffing a GitLab install against
  * the GitHub wording reported `review_modes_overridden: 1` for every stock
- * GitLab install. The github arm returns `DEFAULT_REVIEW_REQUEST_MODES` itself,
- * exactly as the inline ternary this replaced did. */
+ * GitLab install. The github/unknown arm returns `DEFAULT_REVIEW_REQUEST_MODES`
+ * itself (identity, not a copy) — `settingsSnapshot`'s `modeCounts` diffs against
+ * identity, exactly as the inline ternary this replaced did. */
 export function shippedReviewRequestModes(forge: string): PromptMode[] {
-  return forge === "gitlab"
-    ? DEFAULT_REVIEW_REQUEST_MODES.map((m, i) => (i === 0 ? { ...m, prompt: GITLAB_REVIEW_REQUEST_PROMPT } : m))
-    : DEFAULT_REVIEW_REQUEST_MODES;
+  if (!Object.hasOwn(SHIPPED_REVIEW_REQUEST_PROMPT, forge)) return DEFAULT_REVIEW_REQUEST_MODES;
+  const prompt = SHIPPED_REVIEW_REQUEST_PROMPT[forge];
+  return DEFAULT_REVIEW_REQUEST_MODES.map((m, i) => (i === 0 ? { ...m, prompt } : m));
 }
 
 export interface AgentFlowConfig {
   // Which task source to read from — an id in src/tasks/registry.ts. An
   // unregistered value resolves to Jira with a log line, never an empty board.
   taskSource: string;
-  // Which forge holds our pull/merge requests: "github" (via `gh`) or "gitlab"
-  // (via `glab`). Validated by `resolveForge`, not here — an unknown value falls
-  // back to github with a log line rather than being silently rewritten.
+  // Which forge holds our pull/merge requests: "github" (via `gh`), "gitlab"
+  // (via `glab`), or "bitbucket" (via `atlassian-cli`). Validated by
+  // `resolveForge`, not here — an unknown value falls back to github with a log
+  // line rather than being silently rewritten.
   forge: string;
   baseUrl: string;
   project: string;

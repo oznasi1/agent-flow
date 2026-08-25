@@ -151,11 +151,13 @@
           "type": "string",
           "enum": [
             "github",
-            "gitlab"
+            "gitlab",
+            "bitbucket"
           ],
           "enumDescriptions": [
             "GitHub, through the `gh` CLI.",
-            "GitLab, through the `glab` CLI."
+            "GitLab, through the `glab` CLI.",
+            "Bitbucket Cloud, through the `atlassian-cli` CLI. Full support needs a build with `bb api`; without it, cards show branch CI only. Bitbucket has no review-requests queue in either case. Run Doctor to see which mode you are in."
           ],
           "default": "github",
           "description": "Which forge Agent Flow Deck reads pull/merge requests, CI, and review requests from. Each forge needs its own CLI installed and signed in — run Doctor to check. Requires a window reload."
