@@ -34,6 +34,36 @@ describe("BbReviewProvider.submit — projected mode", () => {
     ]);
   });
 
+  // An approval carrying a review body used to take the `approve` branch and drop
+  // the text on the floor, returning `ok: true` — so the Deck toasted success over
+  // words the user wrote and Bitbucket never saw. The comment goes first here for
+  // the same reason the passthrough path posts it first: a note with no state
+  // change beats a state change with no explanation.
+  it("posts an approval's body as a comment rather than discarding it", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      return "";
+    };
+    await expect(provider(run, false).submit(REPO, 42, "approve", BODY)).resolves.toEqual({ ok: true });
+    expect(calls).toEqual([
+      ["--workspace", "acme", "bb", "pr", "comment", "api-service", "42", "--text", BODY, "--format", "json"],
+      ["--workspace", "acme", "bb", "pr", "approve", "api-service", "42", "--format", "json"],
+    ]);
+  });
+
+  it("still approves with no extra call when there is no body", async () => {
+    // The empty-body approval must not gain a pointless empty comment.
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      return "";
+    };
+    await expect(provider(run, false).submit(REPO, 42, "approve", "   ")).resolves.toEqual({ ok: true });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain("approve");
+  });
+
   it("refuses request-changes without spawning anything", async () => {
     const run = vi.fn<Runner>(async () => "");
     const res = await provider(run, false).submit(REPO, 42, "request-changes", BODY);

@@ -80,8 +80,13 @@ export class BbReviewProvider implements ReviewProvider {
     } catch {
       return null;
     }
-    // Bitbucket has no thread-resolution count on a route this cheap; the size
-    // chip is what this call is really for.
+    // The failing-checks list is what this call is really for. `unresolved` is
+    // null because Bitbucket has no thread-resolution count on a route this
+    // cheap, and `size` is omitted entirely: diff size is a fact about a review
+    // QUEUE ROW, and Bitbucket has no review queue in either mode, so there is
+    // no row for a `/diffstat` call to fill. docs/FORGES.md's mode table says
+    // n/a on that row for exactly this reason — do not add the call without the
+    // queue that would show it.
     return { failing, unresolved: null };
   }
 
@@ -146,11 +151,15 @@ export class BbReviewProvider implements ReviewProvider {
     if (!passthrough) {
       const head = ["--workspace", r.workspace, "bb", "pr"];
       const tail = ["--format", "json"];
-      if (verb === "approve") {
-        await this.exec([...head, "approve", r.slug, String(number), ...tail]);
-        return;
-      }
-      await this.exec([...head, "comment", r.slug, String(number), "--text", text, ...tail]);
+      // The comment goes FIRST for anything carrying text, exactly as the
+      // passthrough path below does — and for a second reason here. An approval
+      // with a body used to take the `approve` branch and DROP the text, then
+      // return `ok: true`, so the Deck toasted success over a review the user
+      // wrote and Bitbucket never received. A user's words are the one thing a
+      // success toast must never quietly discard; `bb pr comment` exists in this
+      // mode, so there is nothing to degrade to.
+      if (text) await this.exec([...head, "comment", r.slug, String(number), "--text", text, ...tail]);
+      if (verb === "approve") await this.exec([...head, "approve", r.slug, String(number), ...tail]);
       return;
     }
     const base = `/2.0/repositories/${r.workspace}/${r.slug}/pullrequests/${number}`;
