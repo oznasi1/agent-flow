@@ -4,7 +4,7 @@ import { DEFAULT_COMMANDS, DEFAULT_PROMPT_MODES } from "../../src/config";
 import { composeAgentPrompt } from "../../src/engine/prompt";
 import { fakeContext } from "../_helpers/factories";
 import type { ChangedFile } from "../../src/engine/git";
-import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef, Task } from "../../src/types";
+import type { AgentActivity, CardAgent, OpenSession, PrEntryMap, PrFacts, RepoGit, ReviewDetail, ReviewRequest, ReviewVerb, Run, RunStatus, ServiceRef, Task } from "../../src/types";
 import type { FetchResult } from "../../src/engine/pr/provider";
 import type { ForgeGap } from "../../src/engine/forge/types";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
@@ -13,6 +13,7 @@ import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branc
 import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
 import type { AgentProvider, AgentProviderSetting } from "../../src/config";
 import type { FlowCommand } from "../../src/types";
+import { attentionKeys } from "../../src/engine/attention";
 
 /** The shape `child_process.exec`'s callback is invoked with, narrowed to the four
  * fields `shellCommandRunner` actually branches on. A real `ExecException` carries
@@ -9384,5 +9385,204 @@ describe("DeckPanel review destination", () => {
     await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
     const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
     expect(toast.message).not.toContain("in this window");
+  });
+});
+
+describe("latestCandidates", () => {
+  it("publishes its attention candidates for the host's badge tick", async () => {
+    // The tick prefers these over gathering its own, so the badge and the column
+    // are the same reduction over the same inputs rather than two guesses.
+    show(true);
+    await settled();
+    const published = DeckPanel.latestCandidates();
+    expect(published).not.toBeNull();
+    expect(published!.at).toBeGreaterThan(0);
+    expect(Array.isArray(published!.candidates)).toBe(true);
+  });
+
+  it("is null when no panel is open", () => {
+    // Not "before any panel has ever run" — the top-level afterEach disposes
+    // whatever panel a previous test opened, which is what actually makes this
+    // pass. It would also catch a module-level cache that outlived its panel.
+    expect(DeckPanel.latestCandidates()).toBeNull();
+  });
+
+  it("counts a local card in Action required, not just tracked runs", async () => {
+    // Distinguishes the local-candidate push from its own absence: deleting it
+    // leaves `published.candidates` a valid (empty) array, which the two tests
+    // above cannot tell apart from this. A local card has no run record to
+    // hold a mocked status by key, so the stub keys off `run.kind` instead.
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.buildRunStatus.mockReset().mockImplementation(
+      (i: { run: Run; ticket: { category: string | null } | null }) =>
+        i.run.kind === "local"
+          ? { ...statusFor(i.run, i.ticket?.category ?? null), agent: { state: "needs-you" as const, lastActivityMs: null, slug: null } }
+          : statusFor(i.run, i.ticket?.category ?? null),
+    );
+    show(true);
+    await settled();
+    const published = DeckPanel.latestCandidates();
+    expect(published?.candidates.length).toBe(1);
+    const [local] = published!.candidates;
+    expect(local.hasLiveSession).toBe(true);
+    expect(local.agentState).toBe("needs-you");
+    expect(attentionKeys(published!.candidates)).toEqual([local.key]);
+  });
+
+  it("does not count a local card whose PR already merged, even though its agent state alone would need you", async () => {
+    // Pins the direction of the sibling fix in attentionFs.ts's gatherer: a
+    // local candidate has to carry its own real `prs`, not an empty map — an
+    // empty map would hide the merge veto here exactly as it did there, and
+    // this test would then wrongly see the key counted.
+    const facts: PrFacts = {
+      number: 1, url: "https://github.com/o/r/pull/1", title: "t", state: "MERGED", isDraft: false,
+      ci: { passing: 1, pending: 0, failing: [] }, review: "none", unresolved: null,
+      mergeable: "clean", ciAdvisory: false,
+    };
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.buildRunStatus.mockReset().mockImplementation(
+      (i: { run: Run; ticket: { category: string | null } | null }) =>
+        i.run.kind === "local"
+          ? {
+              ...statusFor(i.run, i.ticket?.category ?? null),
+              agent: { state: "needs-you" as const, lastActivityMs: null, slug: null },
+              prs: { centaur: { facts, fetchedAt: Date.now() } },
+            }
+          : statusFor(i.run, i.ticket?.category ?? null),
+    );
+    show(true);
+    await settled();
+    const published = DeckPanel.latestCandidates();
+    expect(published?.candidates.length).toBe(1);
+    const [local] = published!.candidates;
+    expect(local.prs.centaur?.facts?.state).toBe("MERGED");
+    expect(attentionKeys(published!.candidates)).toEqual([]);
+  });
+});
+
+describe("latestCandidates: the tracked half", () => {
+  // Every test in the suite above survives DELETING the tracked
+  // `attentionCandidates.push` in buildAll: two assert only the published
+  // shape, two clear `h.runs` so a local card is the only candidate there is.
+  // What would ship is this feature's signature failure — with the Deck OPEN
+  // the badge counts local cards only, and the number jumps the moment the
+  // panel closes, because the host's own gatherer does count tracked runs.
+  // Nothing pinned the pushed field VALUES either, so inverting hasWorkToLose
+  // or justLaunched in that literal was invisible.
+  const dirtyRepo = (over: Partial<RepoGit> = {}): RepoGit => ({
+    name: "svc", path: "/r/svc", branch: "b", dirty: true, ahead: 0,
+    added: 1, removed: 0, files: 1, ...over,
+  });
+  /** buildRunStatus, answering `needs-you` with the repos a test hands it. */
+  const needsYou = (repos: RepoGit[]) =>
+    h.buildRunStatus.mockReset().mockImplementation(
+      (i: { run: Run; ticket: { category: string | null } | null }) => ({
+        ...statusFor(i.run, i.ticket?.category ?? null),
+        agent: { state: "needs-you" as const, lastActivityMs: null, slug: null },
+        repos,
+      }),
+    );
+
+  it("counts a tracked run that needs you, with the fields the shelf beside it was given", async () => {
+    // showAll off and no session, no PR, and not just launched: `hasWorkToLose`
+    // is the ONLY thing boarding this card, so `hasWorkToLose: false` in the
+    // literal drops the key from attentionKeys as well as failing the field
+    // assertion.
+    h.inflightShowAll = false;
+    h.runs = [mkRun({ key: "ASM-7", createdAt: Date.now() - 60 * 60_000 })];
+    h.openSessions = [];
+    needsYou([dirtyRepo()]);
+    show(true);
+    await settled();
+    const published = DeckPanel.latestCandidates();
+    expect(published!.candidates.map((c) => c.key)).toContain("ASM-7");
+    expect(attentionKeys(published!.candidates)).toContain("ASM-7");
+    const c = published!.candidates.find((x) => x.key === "ASM-7")!;
+    expect({ hasWorkToLose: c.hasWorkToLose, justLaunched: c.justLaunched, showAll: c.showAll })
+      .toEqual({ hasWorkToLose: true, justLaunched: false, showAll: false });
+    expect(c.agentState).toBe("needs-you");
+  });
+
+  it("marks a run launched moments ago as just launched, with nothing on disk to lose", async () => {
+    // The other direction of the same pair: a clean, brand-new run is on the
+    // board on the strength of `justLaunched` alone.
+    h.inflightShowAll = false;
+    h.runs = [mkRun({ key: "ASM-8", createdAt: Date.now() })];
+    h.openSessions = [];
+    needsYou([dirtyRepo({ dirty: false, added: 0, files: 0 })]);
+    show(true);
+    await settled();
+    const c = DeckPanel.latestCandidates()!.candidates.find((x) => x.key === "ASM-8")!;
+    expect({ hasWorkToLose: c.hasWorkToLose, justLaunched: c.justLaunched })
+      .toEqual({ hasWorkToLose: false, justLaunched: true });
+    expect(attentionKeys([c])).toEqual(["ASM-8"]);
+  });
+
+  it("passes agentFlow.inflightShowAll through to the tracked candidate", async () => {
+    // `h.inflightShowAll`, not setConfig: this suite's getConfig mock reads the
+    // flag off the harness (see its `inflightShowAll: h.inflightShowAll`).
+    h.inflightShowAll = true;
+    h.runs = [mkRun({ key: "ASM-9", createdAt: Date.now() - 60 * 60_000 })];
+    h.openSessions = [];
+    needsYou([dirtyRepo({ dirty: false, added: 0, files: 0 })]);
+    show(true);
+    await settled();
+    expect(DeckPanel.latestCandidates()!.candidates.find((x) => x.key === "ASM-9")!.showAll).toBe(true);
+  });
+
+  it("labels a tracked run with its ticket key, which is what the toast says", async () => {
+    // `label ?? key` in attentionJob.ts: a task run's key IS its ticket key, so
+    // this label leaves the released wording ("ASM-7 is waiting on you")
+    // untouched — the field exists for the keys that are hashes.
+    h.runs = [mkRun({ key: "ASM-7", summary: "isolate the renew queue", createdAt: Date.now() - 60 * 60_000 })];
+    h.openSessions = [];
+    needsYou([dirtyRepo()]);
+    show(true);
+    await settled();
+    expect(DeckPanel.latestCandidates()!.candidates.find((x) => x.key === "ASM-7")!.label).toBe("ASM-7");
+  });
+
+  it("labels a local card with a name, never with localKey's hash", async () => {
+    // The toast a first-time user of the setting actually sees. Without the
+    // label it read "local-centaur-<sha1> is waiting on you". This fixture's
+    // place is on a branch the fake connector infers a ticket from, so the name
+    // is that ticket key — the same rule the tracked half follows. A place whose
+    // branch names no ticket falls back to the card's own summary, which is what
+    // the gatherer's local candidates always use (attentionFs.test.ts).
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.buildRunStatus.mockReset().mockImplementation(
+      (i: { run: Run; ticket: { category: string | null } | null }) =>
+        i.run.kind === "local"
+          ? { ...statusFor(i.run, i.ticket?.category ?? null), agent: { state: "needs-you" as const, lastActivityMs: null, slug: null } }
+          : statusFor(i.run, i.ticket?.category ?? null),
+    );
+    show(true);
+    await settled();
+    const [local] = DeckPanel.latestCandidates()!.candidates;
+    expect(local.key).toContain("local-");
+    expect(local.label).toBe("ASM-5641");
+    expect(local.label).not.toBe(local.key);
+  });
+
+  it("labels a local card whose branch names no ticket with the card's own name", async () => {
+    // The exact toast the finding named: a session in an unclaimed place on an
+    // ordinary branch, whose key is `local-<slug>-<sha1>`.
+    h.branch = "main";
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.buildRunStatus.mockReset().mockImplementation(
+      (i: { run: Run; ticket: { category: string | null } | null }) =>
+        i.run.kind === "local"
+          ? { ...statusFor(i.run, i.ticket?.category ?? null), agent: { state: "needs-you" as const, lastActivityMs: null, slug: null } }
+          : statusFor(i.run, i.ticket?.category ?? null),
+    );
+    show(true);
+    await settled();
+    const [local] = DeckPanel.latestCandidates()!.candidates;
+    expect(local.key).toMatch(/^local-centaur-[0-9a-f]{8}$/);
+    expect(local.label).toBe("centaur");
   });
 });

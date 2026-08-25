@@ -141,6 +141,7 @@ export const window = {
   showTextDocument: vi.fn(async (_doc: unknown, _opts?: unknown): Promise<any> => undefined),
   showOpenDialog: vi.fn(async (_opts?: unknown): Promise<any[] | undefined> => undefined),
   onDidChangeWindowState: vi.fn((_cb: (e: unknown) => void) => ({ dispose: vi.fn() })),
+  state: { focused: true, active: true },
 };
 
 export const ViewColumn = { Active: -1, Beside: -2, One: 1 } as const;
@@ -324,6 +325,7 @@ export function resetVscodeMocks(): void {
   window.showTextDocument.mockReset().mockResolvedValue(undefined);
   window.showOpenDialog.mockReset().mockResolvedValue(undefined);
   window.onDidChangeWindowState.mockReset().mockImplementation(() => ({ dispose: vi.fn() }));
+  window.state.focused = true;
 
   commands.executeCommand.mockReset().mockResolvedValue(undefined);
   commands.getCommands.mockReset().mockResolvedValue([]);

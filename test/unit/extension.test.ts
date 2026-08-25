@@ -35,6 +35,7 @@ const providerStub = {
   takeTask: vi.fn(async () => undefined),
   postNotepad: vi.fn(() => undefined),
   sweepNotepadImages: vi.fn(() => undefined),
+  setAttention: vi.fn(),
 };
 
 const trackSpy = vi.fn();
@@ -70,7 +71,21 @@ vi.mock("../../src/marketplaceView", () => ({
   MarketplacePanel: { show: vi.fn() },
 }));
 vi.mock("../../src/deckView", () => ({
-  DeckPanel: { show: vi.fn() },
+  DeckPanel: { show: vi.fn(), latestCandidates: vi.fn(() => null) },
+  POLL_MS: 6000,
+}));
+// The gather half of the attention pass — mocked so the "no fresh Deck
+// candidates" tests never touch this machine's real ~/.agentflow or
+// ~/.claude/projects (and never spawn a real `git` process for a run record
+// that happens to live there). `defaultAttentionDeps` is asserted against
+// directly (it echoes its input back) rather than left to build real reader
+// closures nothing here would exercise.
+vi.mock("../../src/engine/attentionFs", () => ({
+  gatherAttention: vi.fn(() => [{
+    key: "GATHERED-1", agentState: "needs-you", prs: {}, ticketStatus: null,
+    hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false,
+  }]),
+  defaultAttentionDeps: vi.fn((o: unknown) => o),
 }));
 vi.mock("../../src/doctorView", () => ({
   showDoctor: vi.fn(async () => undefined),
@@ -82,11 +97,13 @@ vi.mock("../../src/telemetry/telemetry", () => ({
   disposeTelemetry: (...a: unknown[]) => disposeSpy(...a),
 }));
 
-import { activate, deactivate } from "../../src/extension";
+import { activate, deactivate, attentionPass } from "../../src/extension";
 import { maybeSeedAgent, watchPlansAndSeed } from "../../src/engine/workspace";
 import { maybeRunSetup, runSetup } from "../../src/setup";
 import { windowIdentity, writePresence, removePresence } from "../../src/engine/presence";
 import { MarketplacePanel } from "../../src/marketplaceView";
+import { DeckPanel } from "../../src/deckView";
+import { gatherAttention, defaultAttentionDeps } from "../../src/engine/attentionFs";
 import { BASE_SCHEME } from "../../src/engine/diffView";
 import { resolveConnector } from "../../src/tasks/registry";
 
@@ -161,6 +178,29 @@ describe("activate", () => {
     expect(watchPlansAndSeed).toHaveBeenCalledTimes(1);
     expect(watchPlansAndSeed).toHaveBeenCalledWith(context, expect.any(Function));
     expect(context.subscriptions.length).toBeGreaterThan(0);
+  });
+
+  it("runs the attention pass on every other tick, and the notepad poll on every one", () => {
+    // The one place this file drives the shared interval itself, rather than
+    // calling attentionPass() directly — proving the wiring (the modulo, and
+    // that the call is actually there) rather than just the pass's own logic.
+    // DeckPanel.latestCandidates is the first thing attentionPass touches, so
+    // its call count is a sound proxy for "did the pass run this tick".
+    vi.useFakeTimers();
+    try {
+      const { context } = fakeContext();
+      activate(context);
+      vi.advanceTimersByTime(6000);
+      expect(providerStub.postNotepad).toHaveBeenCalledTimes(1);
+      expect(DeckPanel.latestCandidates).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(6000);
+      expect(providerStub.postNotepad).toHaveBeenCalledTimes(2);
+      expect(DeckPanel.latestCandidates).toHaveBeenCalledTimes(1);
+    } finally {
+      // The rest of this file (and its afterEach's context.dispose() calls)
+      // depends on real timers — this must run even if an assertion above throws.
+      vi.useRealTimers();
+    }
   });
 
   it("survives a live-seeding failure — activate does not throw and commands stay registered", () => {
@@ -627,5 +667,88 @@ describe("deactivate", () => {
     });
     expect(() => deactivate()).not.toThrow();
     expect(removePresence).toHaveBeenCalled();
+  });
+});
+
+describe("attentionPass", () => {
+  it("prefers the open Deck's candidates over gathering its own", () => {
+    // Same reduction over the same inputs is what keeps the badge from
+    // contradicting the column beside it.
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue({
+      candidates: [{ key: "BITE-9", agentState: "needs-you", prs: {}, ticketStatus: null,
+        hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false }],
+      at: Date.now(),
+    });
+    attentionPass(providerStub as never, () => {});
+    expect(providerStub.setAttention).toHaveBeenCalledWith(["BITE-9"]);
+    // "While the Deck is open the pass costs no I/O at all" — the whole point
+    // of preferring the panel's own candidates.
+    expect(gatherAttention).not.toHaveBeenCalled();
+  });
+
+  it("gathers its own candidates when the Deck's are stale (older than 2 * POLL_MS)", () => {
+    // Same shape as the "prefers" test above, but `at` is just past the freshness
+    // window — proves the gate actually reads `at`, not just presence/absence of
+    // a panel. Without this, deleting the freshness check entirely (always trust
+    // whatever the Deck last built) would pass every other test in this file.
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue({
+      candidates: [{ key: "STALE-1", agentState: "needs-you", prs: {}, ticketStatus: null,
+        hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false }],
+      at: Date.now() - 2 * 6000 - 1,
+    });
+    attentionPass(providerStub as never, () => {});
+    expect(providerStub.setAttention).not.toHaveBeenCalledWith(["STALE-1"]);
+    expect(providerStub.setAttention).toHaveBeenCalledWith(["GATHERED-1"]);
+  });
+
+  it("gathers its own candidates when no Deck panel is open", () => {
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue(null);
+    attentionPass(providerStub as never, () => {});
+    // Pins that the gather's own result is what reaches the badge — not just
+    // that setAttention was called at all, which runAttentionPass does
+    // unconditionally regardless of what candidates() returns.
+    expect(providerStub.setAttention).toHaveBeenCalledWith(["GATHERED-1"]);
+  });
+
+  it("maps config fields to defaultAttentionDeps by name, not by position", () => {
+    // All three booleans distinguishable from one another (not the symmetric
+    // openAgents: true, prFacts: true this test originally shipped with) —
+    // swapping openAgents/prFacts in the mapping must actually change the
+    // call-args object, or the swap is invisible to this assertion.
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue(null);
+    setConfig({ inflightShowAll: true, openAgents: false, prFacts: true });
+    attentionPass(providerStub as never, () => {});
+    expect(defaultAttentionDeps).toHaveBeenCalledWith({
+      nowMs: expect.any(Number),
+      showAll: true,
+      openAgents: false,
+      prFacts: true,
+    });
+  });
+
+  it("does not announce when the window is unfocused, even with notifications on", () => {
+    setConfig({ notifyOnActionRequired: true });
+    window.state.focused = false;
+    vi.mocked(DeckPanel.latestCandidates).mockReturnValue({
+      candidates: [{ key: "BITE-9", agentState: "needs-you", prs: {}, ticketStatus: null,
+        hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false }],
+      at: Date.now(),
+    });
+    attentionPass(providerStub as never, () => {});
+    expect(providerStub.setAttention).toHaveBeenCalledWith(["BITE-9"]);
+    expect(window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it("never lets a synchronous read (getConfig, latestCandidates, window.state, the latch path) escape activate()'s interval", () => {
+    // attentionPass's own eager reads run before runAttentionPass's internal
+    // try/catch. A throw here must be caught right here, matching this file's
+    // stated posture (see the comment above the shared poll in extension.ts)
+    // that nothing may propagate out of the interval callback.
+    vi.mocked(DeckPanel.latestCandidates).mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    const log = vi.fn();
+    expect(() => attentionPass(providerStub as never, log)).not.toThrow();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("attention:"));
   });
 });
