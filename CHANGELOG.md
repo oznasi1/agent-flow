@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Bitbucket Cloud as a third forge.** Set `agentFlow.forge` to `bitbucket` to
+  read pull requests and CI through the `atlassian-cli` CLI. Support depends on
+  which build you have: one with a `bb api` passthrough gives cards their review
+  state, draft flag, mergeability and per-check CI — and lets **Merge** use any
+  of the three `agentFlow.mergeMethod` strategies, rebase included — while one
+  without shows branch CI only and refuses a rebase merge rather than
+  substituting another strategy. Doctor reports which mode you are in. Bitbucket
+  Cloud offers no cross-repo "waiting on my review" query, so the
+  review-requests strip is hidden on this forge in both modes. GitHub remains
+  the default and is unchanged. See [docs/FORGES.md](docs/FORGES.md).
+
 ## [0.44.0] — 2026-08-25
 
 ### Added
@@ -76,17 +89,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   so a GitLab user's first press of **Merge** is also its first real execution;
   what a refusal looks like coming back through `glab api` is what we are least
   sure of. See [docs/FORGES.md](docs/FORGES.md).
-
-- **Bitbucket Cloud as a third forge.** Set `agentFlow.forge` to `bitbucket` to
-  read pull requests and CI through the `atlassian-cli` CLI. Support depends on
-  which build you have: one with a `bb api` passthrough gives cards their review
-  state, draft flag, mergeability and per-check CI — and lets **Merge** use any
-  of the three `agentFlow.mergeMethod` strategies, rebase included — while one
-  without shows branch CI only and refuses a rebase merge rather than
-  substituting another strategy. Doctor reports which mode you are in. Bitbucket
-  Cloud offers no cross-repo "waiting on my review" query, so the
-  review-requests strip is hidden on this forge in both modes. GitHub remains
-  the default and is unchanged. See [docs/FORGES.md](docs/FORGES.md).
 
 ## [0.42.0] — 2026-08-25
 
