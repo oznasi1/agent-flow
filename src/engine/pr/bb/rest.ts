@@ -15,8 +15,14 @@ interface BbRestParticipant {
   state?: unknown;
 }
 
-/** One PR as the single-PR route sends it. Every field `unknown` or narrowly
- * shaped: nothing has validated it, and each reader below checks what it uses. */
+/** One PR as the SINGLE-PR route sends it. Every field `unknown` or narrowly
+ * shaped: nothing has validated it, and each reader below checks what it uses.
+ *
+ * `participants` and `draft` belong to this route alone. Bitbucket Cloud answers
+ * `…/pullrequests?q=…` with its PARTIAL representation, which carries neither —
+ * so `toRestFacts` must never be handed a list row, or every card reports
+ * `review: "none"` and `isDraft: false` no matter the truth. `BbProvider.show`
+ * is the read that makes those two fields real; see its comment. */
 export interface BbRestPr {
   id?: unknown;
   title?: unknown;

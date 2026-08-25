@@ -13,7 +13,7 @@ import type { ForgeGap } from "../../forge/types";
 import { execRunner, stripCommandLine } from "../provider";
 import type { FetchResult, Locate, PrProvider, Runner } from "../provider";
 import { resolveBin } from "../which";
-import { MergeMethod, PrFacts } from "../../../types";
+import { MergeMethod } from "../../../types";
 import { BbRepo, parseBitbucketRemote, pickBbPr } from "./pr";
 import { BbProjectedPr, projectedBranchStatus, projectedCi, toProjectedFacts } from "./projected";
 import {
@@ -144,6 +144,12 @@ const prSearchPath = (repo: BbRepo, q: string): string =>
 const prSubPath = (repo: BbRepo, id: number, leaf: string): string =>
   `/2.0/repositories/${repo.workspace}/${repo.slug}/pullrequests/${id}${leaf}`;
 
+/** One PR, in full. Not a nicety: the `?q=…` LIST route above answers with
+ * Bitbucket Cloud's PARTIAL representation of a pull request, which carries
+ * neither `participants` nor `draft` — so the review verdict and the draft flag
+ * exist only on this route. See `BbRestPr` in `./rest.ts`. */
+const prShowPath = (repo: BbRepo, id: number): string => prSubPath(repo, id, "");
+
 const pipelinesPath = (repo: BbRepo, branch: string): string =>
   `/2.0/repositories/${repo.workspace}/${repo.slug}/pipelines?target.ref_name=${encodeURIComponent(branch)}` +
   `&sort=-created_on&pagelen=1`;
@@ -272,9 +278,24 @@ export class BbProvider implements PrProvider {
     if (!found) return { ok: true, facts: null };
     const id = found.id as number; // `pickBbPr` only ever returns a row whose id is a number.
 
+    // The list row is NOT the whole PR. Bitbucket Cloud answers `?q=…` with its
+    // partial representation of a pull request — no `participants`, no `draft` —
+    // so the review verdict and the draft flag arrive solely from this per-PR
+    // read. Exactly the discipline `GlabProvider.fetch` follows for GitLab's
+    // `head_pipeline`, and for the same reason: docs/FORGES.md records this
+    // project shipping this precise bug once, where every card silently showed
+    // no CI because the fixtures were written from the docs.
+    //
+    // `?? found` is what keeps a failed read a DEGRADATION rather than a loss:
+    // identity, url, title and state are all already correct in the list row, so
+    // falling back to it costs the review verdict and the draft flag, and nothing
+    // else. Losing one optional round trip must never make a PR the user has open
+    // vanish from the card.
+    const pr = (await this.show(repoPath, repo, id)) ?? found;
+
     return {
       ok: true,
-      facts: toRestFacts(found, {
+      facts: toRestFacts(pr, {
         ci: mapBbStatuses(await this.sub(repoPath, repo, id, "/statuses")),
         mergeable: mapBbMergeable(await this.sub(repoPath, repo, id, "/conflicts")),
         unresolved: countBbUnresolved(await this.sub(repoPath, repo, id, "/comments?pagelen=100")),
@@ -287,6 +308,32 @@ export class BbProvider implements PrProvider {
     const values = (parsed as { values?: unknown } | null)?.values;
     if (!Array.isArray(values)) throw new Error(`${BB_BIN} api: expected a paginated body`);
     return values as BbRestPr[];
+  }
+
+  /** One PR in full, or null when we cannot get one. The list row this follows up
+   * on is missing exactly the two things `toRestFacts` cannot compute from
+   * anything else — `participants` (the review verdict) and `draft` — which
+   * Bitbucket sends on this route and on no other, so this call is what makes a
+   * Bitbucket card's review state and draft flag possible at all.
+   *
+   * Null on anything that is not recognisably a PR, error objects included
+   * (`{"type":"error","error":{"message":"…"}}` parses fine and would otherwise
+   * reach `toRestFacts` as a record with no identity, turning a found PR into "no
+   * PR"). The caller reads null as "keep the list row", never as a failed fetch. */
+  private async show(repoPath: string, repo: BbRepo, id: number): Promise<BbRestPr | null> {
+    try {
+      const parsed =
+        JSON.parse(await exec(this.run, this.locate, repoPath, apiArgs(prShowPath(repo, id)))) as BbRestPr | null;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+      // A NON-EMPTY html href, not merely a string one: `toRestFacts` rejects on
+      // `!href`, so anything this lets through that it then rejects yields
+      // `facts: null` — "there is genuinely no pull request" — which is the exact
+      // outcome this guard exists to prevent.
+      const href = parsed.links?.html?.href;
+      return typeof parsed.id === "number" && typeof href === "string" && href !== "" ? parsed : null;
+    } catch {
+      return null;
+    }
   }
 
   /** One sub-resource, or null when we cannot read it. Each mapper reads null as

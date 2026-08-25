@@ -10,7 +10,12 @@ const REMOTE = "https://bitbucket.org/acme/api-service.git";
 /** A Runner that replies by matching an argv fragment, so a test states what each
  * call returns instead of depending on call order. An unmatched call throws,
  * which is what the real CLI does for a bad route. More specific fragments must
- * be listed before less specific ones — lookup is by insertion order. */
+ * be listed before less specific ones — lookup is by insertion order.
+ *
+ * In particular: the sub-resource paths ("…/pullrequests/42/statuses",
+ * "/conflicts", "/comments") all contain "pullrequests/42", so a test routing the
+ * single-PR read must list those fragments BEFORE the bare "pullrequests/42" key
+ * or they will match the wrong route. */
 function routed(routes: Record<string, string | Error>): {
   run: Runner;
   calls: { args: string[]; cwd: string }[];
@@ -39,11 +44,38 @@ const PROJECTED_ROW = {
   id: 42, title: "ASM-1 add export", state: "OPEN",
   author: "Ada", source: "feat/ASM-1", destination: "main",
 };
-const REST_PR = {
-  id: 42, title: "ASM-1 add export", state: "OPEN", draft: false,
+
+/** A second projected row that matches the KEY selector but not the BRANCH one,
+ * and carries a HIGHER id than `PROJECTED_ROW`. Both halves are load-bearing:
+ * `pickBbPr` breaks a tie by newest id, so two rows sharing an id would leave the
+ * branch and key selectors indistinguishable to any assertion — which is exactly
+ * how the branch matcher every projected user gets today shipped unpinned. */
+const PROJECTED_OTHER_BRANCH = { ...PROJECTED_ROW, id: 99, source: "other" };
+
+/** One row of a `…/pullrequests?q=…` LIST response, as Bitbucket Cloud actually
+ * sends it: its PARTIAL representation of a pull request — **no `participants`,
+ * and no `draft`.** Verified against the `pullrequest` schema's partial form. Do
+ * not add either back "for completeness": a list fixture that carries them is
+ * what let this provider ship reading the review verdict and the draft flag off a
+ * row that never has them, with every passthrough card reporting `review: "none"`
+ * and `isDraft: false` no matter the truth. Both belong in `shown()` below, which
+ * is the only response that has them. */
+const LIST_ROW = {
+  id: 42, title: "ASM-1 add export", state: "OPEN",
   links: { html: { href: "https://bitbucket.org/acme/api-service/pull-requests/42" } },
-  participants: [{ role: "REVIEWER", approved: true, state: "approved" }],
+  source: { branch: { name: "feat/ASM-1" } },
+  destination: { branch: { name: "main" } },
 };
+
+/** The same PR as the SINGLE-PR endpoint sends it: everything the list row has,
+ * plus the `participants` and `draft` that only this route carries. */
+const shown = (over: Record<string, unknown> = {}): string =>
+  JSON.stringify({
+    ...LIST_ROW,
+    draft: false,
+    participants: [{ role: "REVIEWER", approved: true, state: "approved" }],
+    ...over,
+  });
 
 describe("probeBbApi", () => {
   it("is true when `bb api --help` exits zero and false when it does not", async () => {
@@ -79,10 +111,16 @@ describe("BbProvider.fetch — projected mode", () => {
     const { run, calls } = routed({
       "remote.origin.url": REMOTE,
       "pipeline": JSON.stringify([{ build_number: 7, state: "SUCCESSFUL" }]),
-      "pr": JSON.stringify([{ ...PROJECTED_ROW, source: "other" }, PROJECTED_ROW]),
+      "pr": JSON.stringify([PROJECTED_OTHER_BRANCH, PROJECTED_ROW]),
     });
     const res = await provider(run, false).fetch("/repos/api-service", "feat/ASM-1", "ASM-1");
+    // #42 is the BRANCH match; #99 shares the task key in its title and would win
+    // the key selector outright, since `pickBbPr` breaks a tie by newest id. So
+    // this number is the branch matcher's own signature — neuter that filter and
+    // the fetch returns 99 instead of failing to find anything, which is how it
+    // stayed unpinned before. This matcher is what EVERY projected user gets.
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 42, state: "OPEN" }) });
+    expect(PROJECTED_OTHER_BRANCH.id).toBeGreaterThan(PROJECTED_ROW.id); // the premise, pinned
 
     // Argv is what actually reached the CLI — the honest thing to pin. An
     // exported path helper would only let this test agree with itself about a
@@ -98,7 +136,12 @@ describe("BbProvider.fetch — projected mode", () => {
     const { run } = routed({
       "remote.origin.url": REMOTE,
       "pipeline": JSON.stringify([]),
-      "pr": JSON.stringify([PROJECTED_ROW]),
+      // The decoy carries the higher id and no task key, so a key selector that
+      // matched everything would pick 99 rather than 42.
+      "pr": JSON.stringify([
+        { ...PROJECTED_ROW, id: 99, title: "unrelated work", source: "other" },
+        PROJECTED_ROW,
+      ]),
     });
     const res = await provider(run, false).fetch("/repos/api-service", "some/other-branch", "ASM-1");
     expect(res).toMatchObject({ ok: true, facts: { number: 42 } });
@@ -117,7 +160,8 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "/statuses": JSON.stringify({ values: [{ state: "SUCCESSFUL", name: "Pipeline" }] }),
       "/conflicts": JSON.stringify({ values: [] }),
       "/comments": JSON.stringify({ values: [] }),
-      "source.branch.name": JSON.stringify({ values: [REST_PR] }),
+      "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
+      "pullrequests/42": shown(),
     });
     const res = await provider(run, true).fetch("/repos/api-service", "feat/ASM-1", "ASM-1");
     expect(res).toMatchObject({
@@ -146,10 +190,81 @@ describe("BbProvider.fetch — passthrough mode", () => {
     // interpolation and this must go red.
     const { run, calls } = routed({
       "remote.origin.url": REMOTE,
-      "source.branch.name": JSON.stringify({ values: [REST_PR] }),
+      "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
+      "pullrequests/42": shown(),
     });
     await provider(run, true).fetch("/repos/api-service", "feat/a&b", "ASM-1");
     expect(calls[1].args[2]).toContain('q=source.branch.name="feat%2Fa%26b"&state=OPEN&pagelen=10');
+  });
+
+  // The KEY clause, which no test routed before: with the branch search empty,
+  // the fallback must actually be issued, and ruling G's value-encoding applies to
+  // its interpolated key exactly as it does to the branch clause above. Deleting
+  // the fallback entirely used to leave all 24 tests green.
+  it("falls back to a server-side `title~` search, with the key encoded as a value", async () => {
+    const { run, calls } = routed({
+      "remote.origin.url": REMOTE,
+      "/statuses": JSON.stringify({ values: [] }),
+      "/conflicts": JSON.stringify({ values: [] }),
+      "/comments": JSON.stringify({ values: [] }),
+      "source.branch.name": JSON.stringify({ values: [] }),
+      "title~": JSON.stringify({ values: [LIST_ROW] }),
+      "pullrequests/42": shown(),
+    });
+    const res = await provider(run, true).fetch("/repos/api-service", "feat/ASM-1", "ASM-1&2");
+
+    expect(res).toMatchObject({ ok: true, facts: { number: 42 } });
+    const search = calls.find((c) => c.args.some((a) => a.includes("title~")))!;
+    // Unescaped, the key's `&` would inject a bogus query param and truncate
+    // `&state=OPEN&pagelen=10` off the end — the search would then return PRs of
+    // ANY state. The filter's own `=`, `~` and `"` stay literal.
+    expect(search.args[2]).toContain('q=title~"ASM-1%262"&state=OPEN&pagelen=10');
+  });
+
+  it("does not run the key search at all when the branch search already found the PR", async () => {
+    const { run, calls } = routed({
+      "remote.origin.url": REMOTE,
+      "/statuses": JSON.stringify({ values: [] }),
+      "/conflicts": JSON.stringify({ values: [] }),
+      "/comments": JSON.stringify({ values: [] }),
+      "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
+      "pullrequests/42": shown(),
+    });
+    await provider(run, true).fetch("/repos/api-service", "feat/ASM-1", "ASM-1");
+    expect(calls.some((c) => c.args.some((a) => a.includes("title~")))).toBe(false);
+  });
+
+  // THE regression test for the bug this file's fixtures hid: Bitbucket's list
+  // response is a PARTIAL representation carrying neither `participants` nor
+  // `draft`, so a provider that maps from the list row reports `review: "none"`
+  // and `isDraft: false` on every card forever — and, through
+  // `makeBitbucketForge.resolveCaps`, leaves an armed `changes-requested` rule
+  // waiting on a state it can never see. Both facts reach us only through the
+  // single-PR read. Delete that `show` call and this goes red.
+  it("reads review and draft from the single-PR route, because the list row carries neither", async () => {
+    const { run, calls } = routed({
+      "remote.origin.url": REMOTE,
+      "/statuses": JSON.stringify({ values: [] }),
+      "/conflicts": JSON.stringify({ values: [] }),
+      "/comments": JSON.stringify({ values: [] }),
+      "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
+      "pullrequests/42": shown({
+        draft: true,
+        participants: [
+          { role: "REVIEWER", state: "approved", approved: true },
+          { role: "REVIEWER", state: "changes_requested" },
+        ],
+      }),
+    });
+    const res = await provider(run, true).fetch("/repos/api-service", "feat/ASM-1", "ASM-1");
+
+    // The premise, pinned: neither field is on a list row, ever.
+    expect(LIST_ROW).not.toHaveProperty("participants");
+    expect(LIST_ROW).not.toHaveProperty("draft");
+    const show = calls.find((c) =>
+      c.args.some((a) => a.endsWith("/2.0/repositories/acme/api-service/pullrequests/42")))!;
+    expect(show.args.slice(0, 2)).toEqual(["bb", "api"]);
+    expect(res).toMatchObject({ ok: true, facts: { number: 42, review: "changes_requested", isDraft: true } });
   });
 
   it("keeps the PR when a detail call fails, losing only that detail", async () => {
@@ -158,11 +273,70 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "/statuses": new Error("500"),
       "/conflicts": new Error("500"),
       "/comments": new Error("500"),
-      "source.branch.name": JSON.stringify({ values: [REST_PR] }),
+      "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
+      "pullrequests/42": shown(),
     });
     await expect(provider(run, true).fetch("/r", "feat/ASM-1", "ASM-1")).resolves.toMatchObject({
       ok: true,
       facts: { number: 42, mergeable: "unknown", unresolved: null, ci: { passing: 0, pending: 0, failing: [] } },
+    });
+  });
+
+  // The single-PR read is a detail like any other: it exists to add the review
+  // verdict and the draft flag, so losing it must cost those two and nothing else.
+  // Drop the `?? found` fallback and this returns `{ ok: false }` instead — the PR
+  // the user has open vanishes from the card because one optional round trip
+  // failed. Asserted whole, not with objectContaining, so the fallback is pinned to
+  // preserve every fact the list row already had right.
+  it("still returns the list row's facts when the single-PR read fails", async () => {
+    const { run } = routed({
+      "remote.origin.url": REMOTE,
+      "/statuses": JSON.stringify({ values: [] }),
+      "/conflicts": JSON.stringify({ values: [] }),
+      "/comments": JSON.stringify({ values: [] }),
+      "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
+      "pullrequests/42": new Error("500"),
+    });
+    await expect(provider(run, true).fetch("/r", "feat/ASM-1", "ASM-1")).resolves.toEqual({
+      ok: true,
+      facts: {
+        number: 42,
+        url: "https://bitbucket.org/acme/api-service/pull-requests/42",
+        title: "ASM-1 add export",
+        state: "OPEN",
+        isDraft: false,
+        ci: { passing: 0, pending: 0, failing: [] },
+        review: "none",
+        unresolved: 0,
+        mergeable: "clean",
+        ciAdvisory: false,
+      },
+    });
+  });
+
+  // An error body parses fine and is not a PR. Handing one to `toRestFacts` would
+  // yield `facts: null` — "there is genuinely no pull request" — for a PR the list
+  // just found, so anything without an identity falls back to the list row instead.
+  it.each([
+    ["an error object", '{"type":"error","error":{"message":"Not found"}}'],
+    ["a null body", "null"],
+    ["an array", "[]"],
+    ["a record with no identity", '{"title":"ASM-1 add export"}'],
+    // An empty href is no url: `toRestFacts` rejects on `!href`, so a guard that
+    // accepted any string here would hand it a record it then turns into null.
+    ["a record whose html href is empty", '{"id":42,"links":{"html":{"href":""}}}'],
+  ])("falls back to the list row when the single-PR read answers with %s", async (_what, body) => {
+    const { run } = routed({
+      "remote.origin.url": REMOTE,
+      "/statuses": JSON.stringify({ values: [] }),
+      "/conflicts": JSON.stringify({ values: [] }),
+      "/comments": JSON.stringify({ values: [] }),
+      "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
+      "pullrequests/42": body,
+    });
+    await expect(provider(run, true).fetch("/r", "feat/ASM-1", "ASM-1")).resolves.toMatchObject({
+      ok: true,
+      facts: { number: 42, title: "ASM-1 add export", url: "https://bitbucket.org/acme/api-service/pull-requests/42" },
     });
   });
 });
