@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { defaultPrFactsDir, readPrEntries, writePrEntry, removePrEntries, isStale } from "../../../../src/engine/pr/store";
+import { defaultPrFactsDir, readPrEntries, writePrEntry, removePrEntries, isStale, summarisePrReads } from "../../../../src/engine/pr/store";
 import type { PrEntry, PrFacts } from "../../../../src/types";
 
 const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -167,5 +167,61 @@ describe("isStale", () => {
 
   it("ages an errored entry like any other, so a broken gh is not retried every tick", () => {
     expect(isStale({ facts: null, fetchedAt: 4500, error: true }, 1000, 5000)).toBe(false);
+  });
+});
+
+describe("summarisePrReads", () => {
+  const write = (key: string, repo: string, entry: PrEntry) => writePrEntry(dir, key, repo, entry);
+
+  it("reports nothing for a directory that does not exist", () => {
+    // Doctor runs before the Deck has ever been opened on a fresh machine.
+    expect(summarisePrReads(path.join(dir, "nope"))).toEqual({ runs: 0, repos: [] });
+  });
+
+  it("reports nothing when every entry read cleanly", () => {
+    write("ASM-1", "api", { facts: facts(), fetchedAt: 1 });
+    write("ASM-2", "web", { facts: null, fetchedAt: 1 });
+    expect(summarisePrReads(dir)).toEqual({ runs: 0, repos: [] });
+  });
+
+  it("counts RUNS, not repos — the unit the footer note uses", () => {
+    // One run with three broken repos is one run on the board, and the card names
+    // the repos itself. Counting repos here would print a number nothing shows.
+    write("ASM-1", "api", { facts: null, fetchedAt: 1, error: true });
+    write("ASM-1", "web", { facts: null, fetchedAt: 1, error: true });
+    write("ASM-1", "ops", { facts: null, fetchedAt: 1, error: true });
+    expect(summarisePrReads(dir).runs).toBe(1);
+  });
+
+  it("counts a run whose entries are a MIX of clean and failed", () => {
+    // The half-broken run is still a run whose PR story cannot be trusted.
+    write("ASM-1", "api", { facts: facts(), fetchedAt: 1 });
+    write("ASM-1", "web", { facts: null, fetchedAt: 1, error: true });
+    expect(summarisePrReads(dir).runs).toBe(1);
+  });
+
+  it("gathers the failing repo names across runs, deduped and sorted", () => {
+    write("ASM-1", "centaur", { facts: null, fetchedAt: 1, error: true });
+    write("ASM-2", "centaur", { facts: null, fetchedAt: 1, error: true });
+    write("ASM-2", "aws-ops", { facts: null, fetchedAt: 1, error: true });
+    write("ASM-3", "hermes", { facts: facts(), fetchedAt: 1 });
+    const got = summarisePrReads(dir);
+    expect(got.runs).toBe(2);
+    expect(got.repos).toEqual(["aws-ops", "centaur"]);
+  });
+
+  it("counts a run carrying STALE facts forward, not just an empty one", () => {
+    // The entry has facts and looks perfectly healthy to every other reader.
+    write("ASM-1", "centaur", { facts: facts({ state: "OPEN" }), fetchedAt: 1, error: true });
+    expect(summarisePrReads(dir)).toEqual({ runs: 1, repos: ["centaur"] });
+  });
+
+  it("ignores files that are not run records", () => {
+    // writePrEntry's own temp files start with a dot and are renamed away, but a
+    // crashed write can leave one behind.
+    fs.writeFileSync(path.join(dir, "notes.txt"), "hello");
+    fs.writeFileSync(path.join(dir, ".ASM-9.123.tmp"), "{}");
+    write("ASM-1", "api", { facts: null, fetchedAt: 1, error: true });
+    expect(summarisePrReads(dir)).toEqual({ runs: 1, repos: ["api"] });
   });
 });

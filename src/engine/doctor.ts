@@ -90,6 +90,12 @@ export interface DoctorInputs {
     gap: { kind: "missing" | "signed-out"; detail: string } | null;
     foundAt: string | null;
   };
+  /** How the last round of PR reads went, from the Deck's own fact cache.
+   *  Optional: absent means nothing to report, which is what a caller that
+   *  predates this row passes and what a machine with no cache yet looks like.
+   *  `runs` counts runs, not repos — the note and the board agree on that unit —
+   *  and `repos` names the ones that failed, for the detail line. */
+  prReads?: { runs: number; repos: string[] };
   claudeCode: { installed: boolean; version: string | null };
   claudeProjectsReadable: boolean;
   runs: number;
@@ -247,6 +253,34 @@ function localChecks(i: DoctorInputs): Check[] {
   return out;
 }
 
+/** The row for reads that failed while the CLI itself is healthy, or nothing.
+ *
+ *  Only ever called from the no-gap arm of `forgeChecks`: a missing or signed-out
+ *  CLI makes every read fail by construction, so a row here would report a
+ *  consequence as if it were a cause, next to the failing row that already names
+ *  the real one.
+ *
+ *  `warn`, not `fail`. The failure is real, but its cause is not always
+ *  persistent — a network blip during one pass leaves the same trace as an
+ *  account that can never see the repo — and the CLI row beside it is honestly
+ *  green. What the row has to do is stop the report reading as an unqualified
+ *  all-clear; painting it red would overstate a blip. */
+function prReadChecks(i: DoctorInputs): Check[] {
+  const pr = i.prReads;
+  if (!pr || pr.runs === 0) return [];
+  const shown = pr.repos.slice(0, 3).join(", ");
+  const rest = pr.repos.length - 3;
+  const names = rest > 0 ? `${shown} and ${rest} more` : shown;
+  return [
+    {
+      group: i.forge.label,
+      label: "PR reads",
+      status: "warn",
+      detail: `last read failed for ${pr.runs} run${pr.runs === 1 ? "" : "s"} — ${names}`,
+    },
+  ];
+}
+
 function forgeChecks(i: DoctorInputs): Check[] {
   const f = i.forge;
   // The skip row still carries the forge's own group and label: a row that named
@@ -260,7 +294,14 @@ function forgeChecks(i: DoctorInputs): Check[] {
   // a signed-in user, as the Deck simply being broken.
   const where = f.foundAt ?? f.cli;
   if (!f.gap) {
-    return [{ group: f.label, label: f.cli, status: "ok", detail: `signed in — ${where}` }];
+    // Two rows, deliberately, and they can disagree: the CLI really is installed
+    // and signed in, AND every read it makes can still fail. `auth status` asks a
+    // GLOBAL question and cannot see a per-repo answer — an account signed in
+    // fine but unable to resolve a private repo passes the probe and fails every
+    // `pr list`. That combination reported a clean bill of health while the board
+    // silently read every run as having no PR, which is how a landed run sat in
+    // Action required with nothing anywhere to explain it.
+    return [{ group: f.label, label: f.cli, status: "ok", detail: `signed in — ${where}` }, ...prReadChecks(i)];
   }
   return [
     {

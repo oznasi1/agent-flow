@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A pull request the Deck could not read no longer passes for one that does not
+  exist.** When a `gh`/`glab` call failed — the signed-in account cannot see a
+  private repository, the network dropped — the board kept the previous facts (or
+  none) and said nothing, which reads exactly like a run with no pull request. A
+  run that had since merged therefore never reached the Merge column, and one
+  whose session had ended asking a question stayed pinned in **Action required**
+  with nothing on the card to explain it. Three things now state the gap instead
+  of hiding it: the card leads its signal line with **⚠ PR unread**, naming the
+  repositories in its tooltip; the board's footer says how many runs are affected;
+  and Doctor gains a **PR reads** row under its forge group. The row is separate
+  from the CLI row on purpose — `auth status` asks a global question and passes
+  even when every per-repository read fails, so the two are allowed to disagree.
+
+
 ## [0.43.0] — 2026-08-25
 
 ### Added

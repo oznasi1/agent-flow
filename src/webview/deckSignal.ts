@@ -1,5 +1,5 @@
 import { CardAgent, PrFacts, PrWorkReason, RunStatus } from "../types";
-import { mergeTarget, type MergeTarget } from "../engine/bucket";
+import { mergeTarget, unreadRepos, type MergeTarget } from "../engine/bucket";
 
 /** One element of a card's signal line. `diff` is its own kind rather than a
  * formatted string because the two halves take different colors, and a card
@@ -42,6 +42,21 @@ function leadPr(r: RunStatus): PrFacts | null {
 export function cardSignal(r: RunStatus, agent: CardAgent | null): SignalBit[] {
   const bits: SignalBit[] = [];
   const f = leadPr(r);
+
+  // Ahead of everything, in BOTH branches below. A repo whose last fetch failed
+  // makes this card's PR story unreliable, and that outranks every fact the
+  // story is made of — including the facts themselves, which are the previous
+  // value carried forward and may describe a PR that has since merged. Leading
+  // is also what makes it survive the three-bit cap: the slice drops from the
+  // end, so anywhere else and a busy card would silently lose the warning.
+  //
+  // Without it a failed read is drawn exactly like a run with no PR, which is
+  // how a landed run sat in Action required with nothing on the card to say the
+  // board had never managed to ask.
+  const unread = unreadRepos(r.prs);
+  if (unread.length > 0) {
+    bits.push({ kind: "text", text: "\u26a0 PR unread", tone: "warn", title: `could not read: ${unread.join(", ")}` });
+  }
 
   if (f) {
     bits.push({ kind: "text", text: `#${f.number}`, mono: true });

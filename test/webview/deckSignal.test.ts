@@ -267,3 +267,62 @@ describe("cardMerge", () => {
     expect(cardMerge(s)).toBeNull();
   });
 });
+
+describe("cardSignal — an unread PR", () => {
+  const unread = (f: PrFacts | null): PrEntryMap =>
+    ({ svc: { facts: f, fetchedAt: 1, error: true } }) as PrEntryMap;
+
+  it("leads with the warning when the fetch failed and there is nothing to fall back on", () => {
+    // Without this the card draws its branch and diff and says nothing at all —
+    // exactly what a run with no PR looks like.
+    const bits = cardSignal(status({ prs: unread(null) }), null);
+    expect(bits[0]).toEqual({
+      kind: "text", text: "⚠ PR unread", tone: "warn", title: "could not read: svc",
+    });
+  });
+
+  it("leads with the warning ahead of STALE facts, which are the ones that mislead", () => {
+    // #863 approved and green may have merged an hour ago. The warning has to
+    // outrank the facts it is casting doubt on, or the reader believes them.
+    const bits = cardSignal(status({
+      prs: unread(facts({ number: 863, review: "approved" })),
+    }), null);
+    expect(bits[0]).toEqual({
+      kind: "text", text: "⚠ PR unread", tone: "warn", title: "could not read: svc",
+    });
+    expect(bits[1]).toEqual({ kind: "text", text: "#863", mono: true });
+  });
+
+  it("still caps at three bits, and the warning is one of the three it keeps", () => {
+    // Length alone would pass without the bit ever being pushed. The point is
+    // that the warning SURVIVES the slice — it is the fact that must not be the
+    // one dropped, so it goes in front and the least decisive bit falls off.
+    const bits = cardSignal(status({
+      prs: unread(facts({ number: 42, ci: { passing: 0, pending: 0, failing: [{ name: "e2e", url: "" }] },
+        mergeable: "conflicting" })),
+    }), null);
+    expect(bits).toHaveLength(3);
+    expect(bits[0]).toMatchObject({ text: "\u26a0 PR unread" });
+    // "conflicts" was the third bit before the warning arrived; it is the one
+    // the cap now costs.
+    expect(bits.some((b) => b.kind === "text" && b.text === "conflicts")).toBe(false);
+  });
+
+  it("names every unread repo in the tooltip, so the reader knows which to chase", () => {
+    const bits = cardSignal(status({
+      prs: {
+        web: { facts: null, fetchedAt: 1, error: true },
+        api: { facts: null, fetchedAt: 1, error: true },
+      } as PrEntryMap,
+    }), null);
+    expect(bits[0]).toEqual({
+      kind: "text", text: "⚠ PR unread", tone: "warn", title: "could not read: api, web",
+    });
+  });
+
+  it("says nothing when the fetch succeeded and the run simply has no PR", () => {
+    // The mark must be about the READ failing, never about the absence of a PR.
+    const bits = cardSignal(status({ prs: { svc: { facts: null, fetchedAt: 1 } } as PrEntryMap }), null);
+    expect(bits.some((b) => b.kind === "text" && b.text.startsWith("⚠"))).toBe(false);
+  });
+});
