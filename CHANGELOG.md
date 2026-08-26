@@ -16,6 +16,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Enter or Esc), and the two housekeeping actions appear in the menu under the same
   conditions that used to show their buttons.
 
+## [0.45.0] — 2026-08-26
+
+### Added
+
+- The Deck's footer now names which account your forge's CLI is reading as, when
+  you have more than one — `gh as oznasi1` — with a **switch** link beside it.
+  Switching is machine-wide, so it confirms first, and it forgets every PR it
+  has already read so the board is answered by the account you just chose. A
+  wrong active account used to be invisible: every read failed, and a failed
+  read looks exactly like a repo with no PR. GitLab has no multi-account model,
+  so nothing appears there.
+
 ## [0.44.1] — 2026-08-25
 
 ### Changed
