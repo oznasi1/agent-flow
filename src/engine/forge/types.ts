@@ -17,6 +17,15 @@ import type { ReviewProvider } from "../review/provider";
  * could not validate. `detail` is for the log; the Deck shows only the kind. */
 export type ForgeGap = { kind: "missing" | "signed-out"; detail: string };
 
+/** One account the forge's CLI holds credentials for. `scopes` is display-only —
+ *  it goes in the QuickPick's detail line so a user with two similar logins can
+ *  tell them apart, and nothing branches on it. */
+export interface ForgeAccount {
+  login: string;
+  active: boolean;
+  scopes: string;
+}
+
 /** What a forge can answer, for the questions where they genuinely differ. Held
  * as data rather than probed, because the consumers are pure modules that must
  * not import this directory. */
@@ -38,6 +47,11 @@ export interface ForgeCaps {
    *  can never see fire. If such a forge ever appears, split this deliberately and
    *  give each half its own consumer, rather than letting the two drift apart. */
   changesRequested: boolean;
+  /** Can this forge report which account its CLI acts as, and be told to change
+   *  it? Both directions, one flag, for the same reason `changesRequested` is
+   *  one flag: a CLI with no multi-account model can neither be asked nor told.
+   *  `gh` can do both; `glab` holds one token per host and can do neither. */
+  accounts: boolean;
 }
 
 export interface Forge {
@@ -48,6 +62,17 @@ export interface Forge {
   readonly caps: ForgeCaps;
   /** Is the CLI installed and logged in? Probed once per Deck session. */
   probe(): Promise<ForgeGap | null>;
+  /** Every account the CLI holds credentials for, the active one included.
+   *  Resolves `[]` when the forge cannot answer — never a fabricated single
+   *  entry, which would be indistinguishable from a user who genuinely has one
+   *  account. Must not reject: callers treat it as total. */
+  accounts(): Promise<ForgeAccount[]>;
+  /** Make `login` the active account, machine-wide. A result object rather than
+   *  a `ForgeGap`: a refused switch is not a gap in the forge's health —
+   *  `probe()` owns that — and a third `ForgeGap` kind would oblige
+   *  `FORGE_NOTES` to carry a footer string for a state no user can reach. The
+   *  `{ ok }` shape mirrors `FetchResult` in `../pr/provider`. */
+  switchAccount(login: string): Promise<{ ok: true } | { ok: false; message: string }>;
   readonly prs: PrProvider;
   readonly reviews: ReviewProvider;
   /** Is this branch green? `"unknown"` for every unreadable fact — a failed call,
