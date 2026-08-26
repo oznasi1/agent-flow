@@ -350,6 +350,13 @@ export interface PrEntry {
 /** Repo name → its PR entry, as stored per run and rendered per card. */
 export type PrEntryMap = Record<string, PrEntry>;
 
+/** The footer legend's account entry: which CLI, acting as whom. */
+export interface AccountSlot {
+  cli: string;
+  login: string;
+  canSwitch: boolean;
+}
+
 // ── Review requests: PRs waiting on you ─────────────────────────────────────
 
 export type ReviewSize = "S" | "M" | "L";
@@ -611,6 +618,7 @@ export type InboundMessage =
   | { type: "deck:refresh" }
   | { type: "deck:setGrouping"; grouping: "agents" | "workspaces" }
   | { type: "deck:clearStale" }
+  | { type: "deck:switchAccount" }
   | { type: "deck:inspect"; key: string; action: "open" | "diff"; repo?: string }
   | { type: "deck:forget"; key: string }
   | { type: "deck:track"; key: string }
@@ -787,7 +795,16 @@ export type OutboundMessage =
        * "Copilot" — so no Deck string has to hardcode which tool is driving.
        * Same field, same intent as `sourceLabel` above: the Deck is a separate
        * panel with its own outbound message, so it carries its own copy. */
-      agentLabel: string }
+      agentLabel: string;
+      /** Which account the forge's CLI is reading as, when that is worth saying.
+       *
+       * OPTIONAL, and it must stay optional. `test/webview/DeckApp.test.tsx`'s
+       * `runsMsg` helper builds this message as an object literal typed
+       * `Extract<OutboundMessage, { type: "deck:runs" }>`; a required member stops
+       * it compiling, and editing an existing test to go green is the signal to
+       * stop. It is also what `agentLabel` already does, so that a message posted
+       * before the host reloads carries no such field. */
+      ghAccount?: AccountSlot | null }
   | { type: "deck:loading"; loading: boolean }
   | {
       type: "deck:reviews";

@@ -20,6 +20,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   review-requests strip is hidden on this forge in both modes. GitHub remains
   the default and is unchanged. See [docs/FORGES.md](docs/FORGES.md).
 
+## [0.45.0] — 2026-08-26
+
+### Added
+
+- The Deck's footer now names which account your forge's CLI is reading as, when
+  you have more than one — `gh as oznasi1` — with a **switch** link beside it.
+  Switching is machine-wide, so it confirms first, and it forgets every PR it
+  has already read so the board is answered by the account you just chose. A
+  wrong active account used to be invisible: every read failed, and a failed
+  read looks exactly like a repo with no PR. GitLab has no multi-account model,
+  so nothing appears there.
+
+## [0.44.1] — 2026-08-25
+
+### Changed
+
+- **The README and guide screenshots match the released UI again.** All five —
+  the Tasks sidebar, the Notepad, the Deck, and both Marketplace shots — are
+  reshot from the current bundles; the oldest had lagged the UI by three weeks.
+
 ## [0.44.0] — 2026-08-25
 
 ### Added

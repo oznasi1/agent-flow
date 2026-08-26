@@ -9835,3 +9835,182 @@ describe("latestCandidates: the tracked half", () => {
     expect(local.label).toBe("centaur");
   });
 });
+
+describe("switching the forge account", () => {
+  const TWO = JSON.stringify({ hosts: { "github.com": [
+    { state: "success", active: true, login: "oznasi1", scopes: "repo, workflow" },
+    { state: "success", active: false, login: "OznasiAb", scopes: "repo" },
+  ] } });
+  const ONE = JSON.stringify({ hosts: { "github.com": [
+    { state: "success", active: true, login: "solo", scopes: "repo" },
+  ] } });
+
+  /** Answer the account calls; leave every other gh spawn as the file's default. */
+  const ghAccounts = (json: string, onSwitch: () => string = () => "") => {
+    h.ghRun.mockImplementation(async (_f: string, args: string[]) => {
+      if (args[0] === "auth" && args[1] === "status") return json;
+      if (args[0] === "auth" && args[1] === "switch") return onSwitch();
+      return "[]";
+    });
+  };
+
+  const switched = () =>
+    h.ghRun.mock.calls.filter((c) => c[1][0] === "auth" && c[1][1] === "switch");
+
+  it("offers only the accounts that are not already active", async () => {
+    ghAccounts(TWO);
+    const p = await showAndWarm();
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    await p._fire({ type: "deck:switchAccount" });
+    const items = window.showQuickPick.mock.calls[0][0] as { label: string; detail: string }[];
+    expect(items.map((i) => i.label)).toEqual(["OznasiAb"]);
+    expect(items[0].detail).toBe("repo");
+  });
+
+  // Machine-wide is the whole reason the modal exists.
+  it("confirms with a modal that discloses the machine-wide effect", async () => {
+    ghAccounts(TWO);
+    const p = await showAndWarm();
+    window.showQuickPick.mockResolvedValueOnce({ label: "OznasiAb" });
+    window.showWarningMessage.mockResolvedValueOnce(undefined);
+    await p._fire({ type: "deck:switchAccount" });
+    const opts = window.showWarningMessage.mock.calls[0][1] as { modal?: boolean; detail?: string };
+    expect(opts.modal).toBe(true);
+    expect(opts.detail).toMatch(/whole machine/i);
+  });
+
+  it("switches nothing when the modal is declined", async () => {
+    ghAccounts(TWO);
+    const p = await showAndWarm();
+    window.showQuickPick.mockResolvedValueOnce({ label: "OznasiAb" });
+    window.showWarningMessage.mockResolvedValueOnce(undefined);
+    await p._fire({ type: "deck:switchAccount" });
+    expect(switched()).toHaveLength(0);
+    expect(h.removePrEntries).not.toHaveBeenCalled();
+  });
+
+  it("switches nothing when the picker is dismissed", async () => {
+    ghAccounts(TWO);
+    const p = await showAndWarm();
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    await p._fire({ type: "deck:switchAccount" });
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(switched()).toHaveLength(0);
+  });
+
+  it("spawns the switch with the account the user picked", async () => {
+    ghAccounts(TWO);
+    const p = await showAndWarm();
+    window.showQuickPick.mockResolvedValueOnce({ label: "OznasiAb" });
+    window.showWarningMessage.mockResolvedValueOnce("Switch");
+    await p._fire({ type: "deck:switchAccount" });
+    expect(switched()[0][1]).toEqual(["auth", "switch", "--hostname", "github.com", "--user", "OznasiAb"]);
+  });
+
+  // Without this the switch appears inert: every error entry survives, the board
+  // re-renders identically, and the user concludes the feature is broken.
+  it("forgets every run's stored PR entries, because they are the old identity's answers", async () => {
+    h.runs = [mkRun({ key: "ASM-1" }), mkRun({ key: "ASM-2" })];
+    ghAccounts(TWO);
+    const p = await showAndWarm();
+    h.removePrEntries.mockClear();
+    window.showQuickPick.mockResolvedValueOnce({ label: "OznasiAb" });
+    window.showWarningMessage.mockResolvedValueOnce("Switch");
+    await p._fire({ type: "deck:switchAccount" });
+    expect(h.removePrEntries.mock.calls.map((c) => c[1])).toEqual(["ASM-1", "ASM-2"]);
+  });
+
+  // Fix wave, IMPORTANT 1: a local (untracked) card has no record in
+  // `readRuns` — only in the in-memory `localRuns` map — but `buildAll` fetches
+  // PR facts for it the same way it does for a tracked run (`sweepTargets`
+  // already unions the two for this reason). Before this fix the switch's
+  // invalidation loop only walked `readRuns`, so a local card's stale
+  // `error: true` entries survived a switch and the success toast lied to it.
+  it("forgets a local card's stored PR entries too, since it has no record in readRuns", async () => {
+    h.runs = [];
+    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    ghAccounts(TWO);
+    const p = await showAndWarm();
+    const localKey = builtLocal().run.key;
+    expect(localKey).toMatch(/^local-/);
+    h.removePrEntries.mockClear();
+    window.showQuickPick.mockResolvedValueOnce({ label: "OznasiAb" });
+    window.showWarningMessage.mockResolvedValueOnce("Switch");
+    await p._fire({ type: "deck:switchAccount" });
+    expect(h.removePrEntries.mock.calls.map((c) => c[1])).toContain(localKey);
+  });
+
+  it("leaves the stored entries alone when the switch fails, and says why", async () => {
+    h.runs = [mkRun({ key: "ASM-1" })];
+    ghAccounts(TWO, () => { throw new Error("no such account"); });
+    const p = await showAndWarm();
+    h.removePrEntries.mockClear();
+    window.showQuickPick.mockResolvedValueOnce({ label: "OznasiAb" });
+    window.showWarningMessage.mockResolvedValueOnce("Switch");
+    await p._fire({ type: "deck:switchAccount" });
+    expect(h.removePrEntries).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: expect.stringContaining("no such account") }),
+    );
+  });
+
+  it("says so rather than opening an empty picker when there is only one account", async () => {
+    ghAccounts(ONE);
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:switchAccount" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(posts(p)).toContainEqual(expect.objectContaining({ type: "toast", level: "info" }));
+  });
+
+  // The legend hides the link on such a forge, so this should be unreachable —
+  // which is exactly why the host must not depend on it being unreachable.
+  it("refuses outright on a forge that cannot switch accounts", async () => {
+    setConfig({ forge: "gitlab" });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:switchAccount" });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(switched()).toHaveLength(0);
+  });
+
+  // Fix wave, IMPORTANT 2a (spec §8: "An in-flight fetch that lands after the
+  // switch is discarded"). Deleting the `this.prEpoch.set(...)` line from the
+  // switch passes the whole suite, because line coverage there is already
+  // satisfied by the sibling `removePrEntries` assertion in the same loop body
+  // — this test fails on that mutant, because without the epoch bump the stale
+  // fetch below would write its answer instead of being silently dropped.
+  it("discards a fetch that was already in flight under the old account when it lands after the switch", async () => {
+    const releases: Array<() => void> = [];
+    h.runs = [mkRun({ key: "ASM-1" })];
+    h.prFetch.mockImplementation(() => new Promise((res) => { releases.push(() => res({ ok: true, facts: null })); }));
+    ghAccounts(TWO);
+    show();
+    await settled(); // warms the gh probe and the accounts read; no fetch yet
+    const p = lastPanel();
+    await p._fire({ type: "deck:refresh" }); // the OLD-account fetch is now in flight, unresolved
+    expect(releases).toHaveLength(1);
+    window.showQuickPick.mockResolvedValueOnce({ label: "OznasiAb" });
+    window.showWarningMessage.mockResolvedValueOnce("Switch");
+    await p._fire({ type: "deck:switchAccount" }); // bumps ASM-1's epoch and re-enqueues a fresh fetch
+    h.writePrEntry.mockClear();
+    releases[0](); // the pre-switch fetch lands now, epoch mismatched
+    await settled();
+    expect(h.writePrEntry).not.toHaveBeenCalled();
+  });
+
+  // Fix wave, IMPORTANT 2b: nothing anywhere asserted that a posted `deck:runs`
+  // ever carries a non-null `ghAccount` — `accountSlot` was tested on hand-built
+  // inputs, and `startForgeAccountsRead` → `this.forgeAccounts` had no seam test
+  // of its own. Deleting the `startForgeAccountsRead()` call from `refresh()`
+  // passes the whole suite; this test fails on that mutant, because
+  // `this.forgeAccounts` then never leaves its initial `[]` and `accountSlot`
+  // stays null forever.
+  //
+  // The read is fire-and-forget (see `startForgeAccountsRead`'s own comment): the
+  // pass that starts it posts before the promise resolves, so `showAndWarm`'s two
+  // passes — one to start it, one after it has resolved — are both required.
+  it("posts a deck:runs whose ghAccount names the active login once the accounts read resolves", async () => {
+    ghAccounts(TWO);
+    const p = await showAndWarm();
+    expect(lastRunsPost().ghAccount).toEqual({ cli: "gh", login: "oznasi1", canSwitch: true });
+  });
+});

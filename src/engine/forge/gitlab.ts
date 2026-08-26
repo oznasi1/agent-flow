@@ -15,8 +15,18 @@ export function makeGitlabForge(run: Runner = execRunner): Forge {
     // GitLab exposes no reviewer "changes requested" state we can read back.
     // `armability.ts` uses this to name the `changes-requested` rule as unfirable
     // rather than letting a flow wait on it forever.
-    caps: { changesRequested: false, reviewSearch: true },
+    caps: { changesRequested: false, reviewSearch: true, accounts: false },
     probe: () => probeGlab(run),
+    // glab stores one token per host in its config and has no `auth switch`.
+    // Both members answer from here rather than spawning: there is nothing to
+    // ask, and a fabricated single-entry list would be indistinguishable from a
+    // user who genuinely has one account.
+    async accounts() {
+      return [];
+    },
+    async switchAccount() {
+      return { ok: false, message: "glab holds one token per host and cannot switch accounts" };
+    },
     prs: new GlabProvider(run),
     reviews: new GlabReviewProvider(run),
     async branchCi(repoPath, branch) {

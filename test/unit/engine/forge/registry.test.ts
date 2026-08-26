@@ -85,7 +85,7 @@ describe("resolveForge", () => {
     // Static caps are what a forge claims before any probe. Claiming
     // changesRequested here would let armability promise a rule that a projected
     // build can never fire.
-    expect(f.caps).toEqual({ changesRequested: false, reviewSearch: false });
+    expect(f.caps).toEqual({ changesRequested: false, reviewSearch: false, accounts: false });
     expect(typeof f.resolveCaps).toBe("function");
   });
 
@@ -99,7 +99,7 @@ describe("resolveForge", () => {
       return "";
     };
     const f = makeBitbucketForge(run);
-    await expect(f.resolveCaps?.()).resolves.toEqual({ changesRequested: true, reviewSearch: false });
+    await expect(f.resolveCaps?.()).resolves.toEqual({ changesRequested: true, reviewSearch: false, accounts: false });
     await f.resolveCaps?.();
     // Memoized on the forge, so the PR provider, the review provider and this all
     // share one answer — a per-call probe would spawn on every card, every tick.
