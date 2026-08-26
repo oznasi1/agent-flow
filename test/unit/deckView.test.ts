@@ -80,7 +80,7 @@ const h = vi.hoisted(() => ({
   // GitHub — one of the two write settings, alongside `mergeWrites` below — the
   // Jira-provenance toggle reused for a review body, and the submit call itself.
   reviewWrites: false as boolean,
-  reviewRequestsAlwaysVisible: false as boolean,
+  reviewRequestsAlwaysVisible: true as boolean,
   stampLabelOnWrite: true as boolean,
   seedAgent: true as boolean,
   agentProvider: "claude-code" as AgentProviderSetting,
@@ -729,7 +729,7 @@ beforeEach(() => {
     name, path, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0,
   }));
   h.reviewWrites = false;
-  h.reviewRequestsAlwaysVisible = false;
+  h.reviewRequestsAlwaysVisible = true;
   h.stampLabelOnWrite = true;
   h.agentProvider = "claude-code";
   h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
@@ -2849,12 +2849,12 @@ describe("DeckPanel review strip", () => {
     expect(posts(p).find((m) => m.type === "deck:reviews").reviewWrites).toBe(true);
   });
 
-  it("carries alwaysVisible off by default and on when the setting is on", async () => {
+  it("carries alwaysVisible on by default and off when the setting is switched off", async () => {
     let p = await showAndWarm();
-    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1).alwaysVisible).toBe(false);
-    h.reviewRequestsAlwaysVisible = true;
-    p = await showAndWarm();
     expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1).alwaysVisible).toBe(true);
+    h.reviewRequestsAlwaysVisible = false;
+    p = await showAndWarm();
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1).alwaysVisible).toBe(false);
   });
 
   // The disabled post must not carry the setting through: an "always visible"

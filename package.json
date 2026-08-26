@@ -672,8 +672,8 @@
         },
         "agentFlow.reviewRequestsAlwaysVisible": {
           "type": "boolean",
-          "default": false,
-          "markdownDescription": "Keep the review-requests strip visible when no PRs are waiting on your review, instead of hiding it. Only applies while the strip itself is on (`#agentFlow.reviewRequests#`)."
+          "default": true,
+          "markdownDescription": "Keep the review-requests strip visible when no PRs are waiting on your review. Set to false to hide the strip while it is empty. Only applies while the strip itself is on (`#agentFlow.reviewRequests#`)."
         },
         "agentFlow.reviewRequestsTtlSeconds": {
           "type": "number",
