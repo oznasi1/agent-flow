@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.48.0] — 2026-08-26
+
 ### Added
 
 - **The review-requests strip can hold its place on an empty queue.** Set
