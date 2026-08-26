@@ -525,3 +525,65 @@ describe("runChecks — a GitLab forge", () => {
     expect(groups.has("GitHub")).toBe(false);
   });
 });
+
+describe("runChecks — PR reads that fail while the CLI looks fine", () => {
+  const PR_ROW = "PR reads";
+
+  it("adds no row at all when the last reads all succeeded", () => {
+    // The healthy fixture omits `prReads` entirely, which is also what an older
+    // caller passes — absent must mean "nothing to report", never a warning.
+    expect(runChecks(healthy()).find((c) => c.label === PR_ROW)).toBeUndefined();
+    expect(runChecks({ ...healthy(), prReads: { runs: 0, repos: [] } }).find((c) => c.label === PR_ROW))
+      .toBeUndefined();
+  });
+
+  it("warns when reads are failing even though the CLI is signed in", () => {
+    // The exact state that reported GitHub ✓ OK while every fetch failed: the
+    // probe asks a global question ("are you signed in?") and cannot see a
+    // per-repo answer ("this account cannot resolve that repository").
+    const c = find({ ...healthy(), prReads: { runs: 6, repos: ["automation_e2e", "centaur"] } }, PR_ROW);
+    expect(c.status).toBe("warn");
+    expect(c.group).toBe("GitHub");
+    expect(c.detail).toContain("6 runs");
+    expect(c.detail).toContain("centaur");
+  });
+
+  it("keeps the CLI row itself OK — the binary really is fine", () => {
+    // Two rows saying different things is the point: the CLI is healthy AND the
+    // reads are failing, and collapsing them would hide which half to fix.
+    const inputs = { ...healthy(), prReads: { runs: 6, repos: ["centaur"] } };
+    expect(find(inputs, "gh").status).toBe("ok");
+  });
+
+  it("stays quiet when the CLI is the gap, which already has its own failing row", () => {
+    // A missing CLI makes every read fail by construction. A second row would be
+    // a consequence reported as a cause.
+    const inputs: DoctorInputs = {
+      ...healthy(),
+      forge: { ...healthy().forge, gap: { kind: "missing", detail: "spawn ENOENT" }, foundAt: null },
+      prReads: { runs: 6, repos: ["centaur"] },
+    };
+    expect(runChecks(inputs).find((c) => c.label === PR_ROW)).toBeUndefined();
+  });
+
+  it("stays quiet when PR facts are off, since nothing was ever read", () => {
+    const inputs = { ...healthy(), prFacts: false, prReads: { runs: 6, repos: ["centaur"] } };
+    expect(runChecks(inputs).find((c) => c.label === PR_ROW)).toBeUndefined();
+  });
+
+  it("names the forge's own group, not a hardcoded GitHub", () => {
+    const gitlab = { label: "GitLab", cli: "glab", installUrl: "https://gitlab.com/cli", gap: null, foundAt: "/usr/bin/glab" };
+    const c = find({ ...healthy(), forge: gitlab, prReads: { runs: 2, repos: ["infra"] } }, PR_ROW);
+    expect(c.group).toBe("GitLab");
+  });
+
+  it("caps the repo list so one bad account does not print forty names", () => {
+    // Real names, not single letters: "and 3 more" contains a bare "d", so a
+    // one-letter fixture makes the not-listed assertion fail on the prose.
+    const repos = ["centaur", "hermes", "aws-ops", "device-manager", "synqly-fetcher", "notification-service"];
+    const c = find({ ...healthy(), prReads: { runs: 9, repos } }, PR_ROW);
+    expect(c.detail).toContain("centaur, hermes, aws-ops");
+    expect(c.detail).not.toContain("device-manager");
+    expect(c.detail).toContain("and 3 more");
+  });
+});

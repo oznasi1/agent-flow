@@ -7,6 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **A pull request the Deck could not read no longer passes for one that does not
+  exist.** When a `gh`/`glab` call failed — the signed-in account cannot see a
+  private repository, the network dropped — the board kept the previous facts (or
+  none) and said nothing, which reads exactly like a run with no pull request. A
+  run that had since merged therefore never reached the Merge column, and one
+  whose session had ended asking a question stayed pinned in **Action required**
+  with nothing on the card to explain it. Three things now state the gap instead
+  of hiding it: the card leads its signal line with **⚠ PR unread**, naming the
+  repositories in its tooltip; the board's footer says how many runs are affected;
+  and Doctor gains a **PR reads** row under its forge group. The row is separate
+  from the CLI row on purpose — `auth status` asks a global question and passes
+  even when every per-repository read fails, so the two are allowed to disagree.
+- **A card no longer offers to fix a problem it could not re-read.** The
+  **Fix CI**, **Resolve conflict** and **Address review** rows keyed off whatever
+  the last successful fetch had said, so a failed read left a card naming — and
+  offering to seed a session against — a conflict that may have been resolved an
+  hour earlier. They now withhold on an unreadable pull request, the same rule the
+  **Merge** button already followed. This is also what lets the new warning reach
+  the card: those rows are drawn *instead of* the signal line, so the card most in
+  need of the warning was the one that could not show it.
+- **The legend's account row says when reads are failing.** `agentFlow`'s forge
+  account row and the unread-pull-request count share one slot, so the count now
+  rides on the account row whenever it is showing — `gh · oznasi1 · 6 runs
+  unread` — rather than displacing it. The account named there is the thing you
+  would change to fix the reads, so the fact and its remedy sit on one row; the
+  standalone note still appears when there is no account row to carry it.
+
 ## [0.46.0] — 2026-08-26
 
 ### Changed

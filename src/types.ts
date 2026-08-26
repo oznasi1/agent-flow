@@ -355,6 +355,11 @@ export interface AccountSlot {
   cli: string;
   login: string;
   canSwitch: boolean;
+  /** How many runs the forge could not read a PR for, 0 when every read
+   *  succeeded. Rides on this slot rather than taking a second line: the account
+   *  named here is the thing a reader would change to fix it, so the fact and its
+   *  remedy belong on one row. `forgeNote` stands down whenever this is showing. */
+  unreadRuns?: number;
 }
 
 // ── Review requests: PRs waiting on you ─────────────────────────────────────

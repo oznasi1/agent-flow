@@ -956,6 +956,15 @@ export function DeckApp(): JSX.Element {
               <span className="note acct">
                 {`${ghAccount.cli} as `}
                 <span className="who">{ghAccount.login}</span>
+                {/* The count sits between the identity and the switch link on
+                    purpose: it is the reason to press switch, so it reads as
+                    "gh as oznasi1 · 6 runs unread · switch" — the fact, then the
+                    remedy. Absent whenever every read succeeded. */}
+                {!!ghAccount.unreadRuns && (
+                  <span className="unread" title="The forge could not read these runs' pull requests — the cards say which repos">
+                    {` · ${ghAccount.unreadRuns} run${ghAccount.unreadRuns === 1 ? "" : "s"} unread`}
+                  </span>
+                )}
                 {ghAccount.canSwitch && (
                   <>
                     {" · "}

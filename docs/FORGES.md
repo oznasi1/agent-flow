@@ -179,6 +179,16 @@ write fixtures from what came back, not from what the docs list.
   which re-arms that repo's fetch on every tick, forever.
 - **`branchCi` answers `"unknown"` rather than throwing**, and `"unknown"` is not
   green.
+- **`probe()` passing does not promise the reads will work.** It asks a global
+  question — is the CLI here, is it signed in — and cannot see a per-repository
+  answer, so an account signed in fine but unable to resolve a private repository
+  returns `null` from `probe()` and `{ ok: false }` from every `fetch`. That
+  combination is surfaced rather than hidden: the entry keeps `error: true`, the
+  card leads with `⚠ PR unread`, the board's footer counts the affected runs, and
+  Doctor's `PR reads` row sits beside a CLI row that is honestly green. Nothing
+  that acts on a pull request — the Merge button, a card's problem rows — may read
+  an `error: true` entry's facts, because they are the previous value carried
+  forward. Unreadable is not merged, and it is not green.
 - **A review body must never reach an error message.** Prefer a rejection's
   `stderr` over its `.message`, which is `Command failed: <file> <argv joined>`
   and embeds the body. Keep the timeout branch's distinct wording: a killed

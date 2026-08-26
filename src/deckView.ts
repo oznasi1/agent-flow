@@ -57,7 +57,7 @@ import { readSessionActivity } from "./engine/transcript";
 import { canon, claudeProjectsRoot } from "./engine/paths";
 import { OwnedRun, resolveOwnership } from "./engine/ownership";
 import { JUST_LAUNCHED_MS, shelfFor } from "./engine/visibility";
-import { mergeTarget, prSignals } from "./engine/bucket";
+import { mergeTarget, prSignals, unreadRepos } from "./engine/bucket";
 import { AttentionCandidate, attentionLabel, ownsWorkToLose } from "./engine/attention";
 // The scope picker the modes-notice hide-write already uses: a settings write must
 // land where the user's value already lives. Saving a command is the same problem.
@@ -81,6 +81,42 @@ const FORGE_NOTES: Record<ForgeGap["kind"], (cli: string) => string> = {
   missing: (cli) => `${cli} CLI not found — PR facts off. Run Doctor`,
   "signed-out": (cli) => `${cli} is not signed in — PR facts off. Run Doctor`,
 };
+
+/**
+ * The board's one footer note about the forge, or null when there is nothing to
+ * say. Pure, so the precedence below is testable without a running panel.
+ *
+ * Three states, in order:
+ *
+ *  - PR facts off — nothing was attempted, so there is no gap. A note here would
+ *    read as a failure to someone who turned the feature off deliberately.
+ *  - A `ForgeGap` — the CLI is missing or signed out. This wins over the count
+ *    below even though both are true during an outage: a failed probe means every
+ *    fetch fails too, and the gap is the half that names a cause you can act on.
+ *  - Reads failing with no gap — `<cli> auth status` passes but `pr list` does
+ *    not. This is the state that had NO note at all: the probe is a global
+ *    question ("are you signed in?") and cannot see a per-repo answer ("this
+ *    account cannot resolve that repository"), so a board where every single
+ *    fetch failed looked perfectly healthy and a landed run sat in Action
+ *    required with nothing anywhere to say why.
+ */
+export function forgeNote(i: {
+  prFacts: boolean;
+  gap: ForgeGap | null;
+  cli: string;
+  unreadRuns: number;
+  /** Is the account row showing? It carries the count when it is, and the legend
+   *  holds one slot — so this note must stand down rather than restate it. */
+  accountSlotShowing?: boolean;
+}): string | null {
+  if (!i.prFacts) return null;
+  if (i.gap) return FORGE_NOTES[i.gap.kind](i.cli);
+  if (i.unreadRuns === 0) return null;
+  // The account row is showing and already names the count. Saying it twice in
+  // one legend is worse than saying it once beside the thing that fixes it.
+  if (i.accountSlotShowing) return null;
+  return `${i.cli} could not read the PR state for ${i.unreadRuns} run${i.unreadRuns === 1 ? "" : "s"}. Run Doctor`;
+}
 
 /** Appended to a review body the agent drafted, when provenance stamping is on.
  * Posting an agent's words as unmarked human review is the kind of thing worth
@@ -3183,22 +3219,38 @@ export class DeckPanel {
       const runs = await this.buildAll();
       if (seq !== this.refreshSeq) return; // a newer pass owns the board
       this.startForgeAccountsRead();
+      // Counted off the very runs being posted, so neither slot can claim a
+      // number the board does not show. A run counts once however many of its
+      // repos failed — the count is about runs, and the card names the repos.
+      const unreadRuns = runs.filter((r) => unreadRepos(r.prs).length > 0).length;
+      // Resolved before the post so `forgeNote` can see whether this slot is
+      // taking the count: the account row carries it when it shows, and a note
+      // repeating it would say the same thing twice in one legend.
+      const ghAccount = accountSlot({
+        accounts: this.forgeAccounts,
+        gap: this.forgeGap,
+        prFacts: this.prFacts,
+        capsAccounts: this.forge.caps.accounts,
+        cli: this.forge.cli.name,
+        unreadRuns,
+      });
       this.post({
         type: "deck:runs",
         runs,
         // Wire field name kept as `ghNote` even though the text is now forge-aware:
         // it is a webview message key, and renaming it would need a matching
         // webview change for no user-visible gain.
-        ghNote: this.prFacts && this.forgeGap ? FORGE_NOTES[this.forgeGap.kind](this.forge.cli.name) : null,
-        // `ghNote` and this are one slot in the legend: `accountSlot` returns
-        // null whenever a gap owns it, so the two can never both be set.
-        ghAccount: accountSlot({
-          accounts: this.forgeAccounts,
-          gap: this.forgeGap,
+        ghNote: forgeNote({
           prFacts: this.prFacts,
-          capsAccounts: this.forge.caps.accounts,
+          gap: this.forgeGap ?? null,
           cli: this.forge.cli.name,
+          unreadRuns,
+          accountSlotShowing: ghAccount !== null,
         }),
+        // `ghNote` and this are one slot in the legend: `accountSlot` returns
+        // null whenever a gap owns it, so the two can never both be set. The
+        // unread count rides on whichever of the two is showing.
+        ghAccount,
         // Read fresh on every post rather than cached in a field: it is a plain
         // string setting a user can edit mid-session, and the board re-posts often
         // enough that this is the whole of "keep it live".

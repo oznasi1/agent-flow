@@ -14,6 +14,7 @@ import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
 import type { AgentProvider, AgentProviderSetting } from "../../src/config";
 import type { FlowCommand } from "../../src/types";
 import { attentionKeys } from "../../src/engine/attention";
+import { forgeNote } from "../../src/deckView";
 
 /** The shape `child_process.exec`'s callback is invoked with, narrowed to the four
  * fields `shellCommandRunner` actually branches on. A real `ExecException` carries
@@ -9730,6 +9731,75 @@ describe("latestCandidates: the tracked half", () => {
     const [local] = DeckPanel.latestCandidates()!.candidates;
     expect(local.key).toMatch(/^local-centaur-[0-9a-f]{8}$/);
     expect(local.label).toBe("centaur");
+  });
+});
+
+describe("forgeNote", () => {
+  const gh = "gh";
+
+  it("says nothing when PR facts are switched off entirely", () => {
+    // Nothing was attempted, so there is no gap to report — a note here would
+    // read as a failure to a user who turned the feature off on purpose.
+    expect(forgeNote({ prFacts: false, gap: null, cli: gh, unreadRuns: 4 })).toBeNull();
+  });
+
+  it("says nothing when every read succeeded", () => {
+    expect(forgeNote({ prFacts: true, gap: null, cli: gh, unreadRuns: 0 })).toBeNull();
+  });
+
+  it("keeps the released wording when the CLI itself is the gap", () => {
+    // The existing two notes must survive verbatim: they name a cause a user can
+    // act on, which "could not read 4 runs" does not.
+    expect(forgeNote({ prFacts: true, gap: { kind: "missing", detail: "" }, cli: gh, unreadRuns: 0 }))
+      .toBe("gh CLI not found — PR facts off. Run Doctor");
+    expect(forgeNote({ prFacts: true, gap: { kind: "signed-out", detail: "" }, cli: gh, unreadRuns: 0 }))
+      .toBe("gh is not signed in — PR facts off. Run Doctor");
+  });
+
+  it("lets a real gap outrank the count, because it names the actual cause", () => {
+    // Both are true during an outage — the probe failing means every fetch fails
+    // too. The gap is the more useful of the two, so it wins.
+    expect(forgeNote({ prFacts: true, gap: { kind: "missing", detail: "" }, cli: gh, unreadRuns: 9 }))
+      .toBe("gh CLI not found — PR facts off. Run Doctor");
+  });
+
+  it("reports the count when the CLI is fine but the reads are not", () => {
+    // The case that has no note today: `gh auth status` passes, so `forgeGap` is
+    // null, while every `pr list` fails because the signed-in account cannot see
+    // the repo. The board looked healthy and said nothing.
+    expect(forgeNote({ prFacts: true, gap: null, cli: gh, unreadRuns: 6 }))
+      .toBe("gh could not read the PR state for 6 runs. Run Doctor");
+  });
+
+  it("says run, not runs, for one", () => {
+    expect(forgeNote({ prFacts: true, gap: null, cli: gh, unreadRuns: 1 }))
+      .toBe("gh could not read the PR state for 1 run. Run Doctor");
+  });
+
+  it("names the configured forge's own CLI, never a hardcoded gh", () => {
+    expect(forgeNote({ prFacts: true, gap: null, cli: "glab", unreadRuns: 2 }))
+      .toBe("glab could not read the PR state for 2 runs. Run Doctor");
+  });
+
+  it("stands down when the account row is showing, which already names the count", () => {
+    // One slot in the legend. The account row carries the count when it shows,
+    // and a note repeating it would say the same thing twice in one line.
+    expect(forgeNote({ prFacts: true, gap: null, cli: gh, unreadRuns: 6, accountSlotShowing: true }))
+      .toBeNull();
+  });
+
+  it("still reports the count when there is no account row to carry it", () => {
+    // A single-account user gets no account row at all, so the note is the only
+    // thing that can say the reads are failing.
+    expect(forgeNote({ prFacts: true, gap: null, cli: gh, unreadRuns: 6, accountSlotShowing: false }))
+      .toBe("gh could not read the PR state for 6 runs. Run Doctor");
+  });
+
+  it("lets a real gap outrank the account row too", () => {
+    // The gap owns the slot outright: accountSlot returns null on a gap, so the
+    // note must not stand down for a row that is not there.
+    expect(forgeNote({ prFacts: true, gap: { kind: "missing", detail: "" }, cli: gh, unreadRuns: 6, accountSlotShowing: true }))
+      .toBe("gh CLI not found — PR facts off. Run Doctor");
   });
 });
 

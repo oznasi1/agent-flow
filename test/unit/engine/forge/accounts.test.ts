@@ -113,4 +113,32 @@ describe("accountSlot", () => {
   it("carries the forge's own CLI name rather than assuming gh", () => {
     expect(accountSlot({ ...base, cli: "hgcli" })?.cli).toBe("hgcli");
   });
+  // ── the unread count rides on this row ────────────────────────────────────
+  it("omits the count entirely when every read succeeded", () => {
+    // Absent, not zero: the released shape is what the other tests here assert
+    // with toEqual, and a consumer reading "no field" needs no zero case.
+    expect(accountSlot({ ...base, unreadRuns: 0 })).not.toHaveProperty("unreadRuns");
+    expect(accountSlot({ ...base })).not.toHaveProperty("unreadRuns");
+  });
+
+  it("carries the count when reads are failing, beside the account that fixes it", () => {
+    expect(accountSlot({ ...base, unreadRuns: 6 })?.unreadRuns).toBe(6);
+  });
+
+  it("still names the account when reads are failing, rather than standing down", () => {
+    // The whole point: the account named here is what a reader would switch to
+    // fix the very failure the count reports. Hiding the row would hide the fix.
+    const slot = accountSlot({ ...base, unreadRuns: 6 });
+    expect(slot?.login).toBe(base.accounts.find((a) => a.active)!.login);
+    expect(slot?.canSwitch).toBe(true);
+  });
+
+  it("keeps every silence rule even with a count to report", () => {
+    // A count must not resurrect a row that some other rule already suppressed:
+    // one account is still not a choice, and a gap still owns the slot.
+    expect(accountSlot({ ...base, accounts: [acct("a", true)], unreadRuns: 6 })).toBeNull();
+    expect(accountSlot({ ...base, gap: { kind: "missing", detail: "" }, unreadRuns: 6 })).toBeNull();
+    expect(accountSlot({ ...base, prFacts: false, unreadRuns: 6 })).toBeNull();
+    expect(accountSlot({ ...base, capsAccounts: false, unreadRuns: 6 })).toBeNull();
+  });
 });

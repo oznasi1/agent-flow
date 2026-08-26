@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
-import { deriveBucket, deriveLane, mergeTarget, prSignals } from "../../../src/engine/bucket";
+import { deriveBucket, deriveLane, mergeTarget, prSignals, unreadRepos } from "../../../src/engine/bucket";
 import { PrEntryMap, PrFacts } from "../../../src/types";
 
 const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -468,5 +468,42 @@ describe("mergeTarget", () => {
       zulu: { facts: green({ number: 4821, url: "https://github.com/acme/api/pull/4821" }), fetchedAt: 1 },
     };
     expect(mergeTarget(map)).toEqual({ repo: "zulu", number: 4821, url: "https://github.com/acme/api/pull/4821" });
+  });
+});
+
+describe("unreadRepos", () => {
+  it("names no repo when every entry's last fetch succeeded", () => {
+    expect(unreadRepos(entries(prFacts(), null))).toEqual([]);
+  });
+
+  it("names a repo whose fetch failed with nothing to fall back on", () => {
+    // The silent case the board used to read as "this run has no PR": facts null
+    // AND error set are indistinguishable from a genuine no-PR entry to every
+    // reduction except this one.
+    expect(unreadRepos({ api: { facts: null, fetchedAt: 1, error: true } })).toEqual(["api"]);
+  });
+
+  it("names a repo carrying STALE facts forward, which is the case that misleads", () => {
+    // The entry has facts, so prSignals reads them and the card draws them — but
+    // they are the previous value, and the PR may have merged since. `mergeTarget`
+    // already refuses this entry; the card has to say so too.
+    const map: PrEntryMap = { api: { facts: prFacts({ state: "OPEN" }), fetchedAt: 1, error: true } };
+    expect(unreadRepos(map)).toEqual(["api"]);
+  });
+
+  it("sorts, so a card's tooltip lists the same repos in the same order every render", () => {
+    // Object.entries follows insertion order, which the host does not promise.
+    const map: PrEntryMap = {
+      zulu: { facts: null, fetchedAt: 1, error: true },
+      alpha: { facts: null, fetchedAt: 1, error: true },
+      mid: { facts: prFacts(), fetchedAt: 1 },
+    };
+    expect(unreadRepos(map)).toEqual(["alpha", "zulu"]);
+  });
+
+  it("treats a missing `error` as a clean read, never as unread", () => {
+    // `error` is optional on PrEntry, so undefined must mean "fetched fine" —
+    // reading it as falsy-therefore-suspect would mark every healthy card.
+    expect(unreadRepos({ api: { facts: prFacts(), fetchedAt: 1 } })).toEqual([]);
   });
 });

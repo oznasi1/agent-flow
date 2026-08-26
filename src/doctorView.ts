@@ -9,6 +9,7 @@ import { resolveForge } from "./engine/forge/registry";
 import type { Forge } from "./engine/forge/types";
 import { resolveBin } from "./engine/pr/which";
 import { defaultRunsDir, readRuns } from "./engine/runs";
+import { defaultPrFactsDir, summarisePrReads } from "./engine/pr/store";
 import {
   runChecks,
   summarize,
@@ -54,6 +55,12 @@ export interface DoctorDeps {
    *  `collectInputs` gates the call on `prFacts`. */
   forge: () => { label: string; cli: string; installUrl: string };
   forgeProbe: () => Promise<{ kind: "missing" | "signed-out"; detail: string } | null>;
+  /** How the last round of PR reads went, read off the Deck's fact cache.
+   *  Optional so a caller that predates the row — every existing test among them
+   *  — keeps working and simply reports nothing, which is the honest answer when
+   *  nobody is looking at the cache. Gated on `prFacts` at the call site: with
+   *  the feature off there are no reads to have failed. */
+  prReads?: () => { runs: number; repos: string[] };
   statDir: (p: string) => { exists: boolean; writable: boolean };
   repos: () => { repos: number; gitRepos: number };
   claudeExtension: () => { installed: boolean; version: string | null };
@@ -85,6 +92,9 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
   // an `auth status` call.
   const f = d.forge();
   const forge = { ...f, gap: cfg.prFacts ? await d.forgeProbe() : null, foundAt: d.which(f.cli) };
+  // Same gate as the probe above, for the same reason: PR facts off means nothing
+  // was ever read, so there is no failure to report and no cache worth walking.
+  const prReads = cfg.prFacts ? d.prReads?.() : undefined;
   return {
     sourceLabel: cfg.sourceLabel,
     scopeNoun: cfg.scopeNoun,
@@ -101,6 +111,7 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
     workspaceDir: { path: cfg.workspaceDir, ...d.statDir(cfg.workspaceDir) },
     prFacts: cfg.prFacts,
     forge,
+    prReads,
     claudeCode: d.claudeExtension(),
     claudeProjectsReadable: d.claudeProjectsReadable(),
     runs: d.runs(),
@@ -274,6 +285,7 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
       }
     },
     runs: () => readRuns(defaultRunsDir()).length,
+    prReads: () => summarisePrReads(defaultPrFactsDir()),
     log,
   };
 }

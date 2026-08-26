@@ -64,6 +64,45 @@ export function writePrEntry(dir: string, key: string, repo: string, entry: PrEn
   }
 }
 
+/**
+ * How the last round of PR reads went, across every run in the cache — the input
+ * Doctor's "PR reads" row and the board's footer note both need.
+ *
+ * The `*Fs` half of the pure `unreadRepos` rule in `engine/bucket.ts`: the rule
+ * (an entry with `error: true` cannot be trusted, whether it carries stale facts
+ * or none) lives there so the webview can apply it to the runs it already has;
+ * this reads the same rule off disk for a caller that has no board — Doctor runs
+ * whether or not the Deck was ever opened.
+ *
+ * Counts RUNS, not repos, because that is the unit the note speaks in and the
+ * unit a card maps to. `repos` is the deduped, sorted set of the ones that failed,
+ * for the detail line that tells you which to go and try by hand.
+ *
+ * Best-effort throughout: a cache is a convenience, and a Doctor row must never
+ * be the thing that throws.
+ */
+export function summarisePrReads(dir: string): { runs: number; repos: string[] } {
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return { runs: 0, repos: [] };
+  }
+  const repos = new Set<string>();
+  let runs = 0;
+  for (const name of names) {
+    // `.tmp` files are writePrEntry's own, left behind only by a crashed write;
+    // anything not `.json` was never one of ours.
+    if (name.startsWith(".") || !name.endsWith(".json")) continue;
+    const entries = readPrEntries(dir, name.slice(0, -".json".length));
+    const failed = Object.entries(entries).filter(([, e]) => e.error === true);
+    if (failed.length === 0) continue;
+    runs++;
+    for (const [repo] of failed) repos.add(repo);
+  }
+  return { runs, repos: [...repos].sort((a, b) => a.localeCompare(b)) };
+}
+
 /** Forget a run's PR facts (called alongside `removeRun`). */
 export function removePrEntries(dir: string, key: string): void {
   try {

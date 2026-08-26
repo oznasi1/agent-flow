@@ -131,6 +131,37 @@ export function prSignals(prs: PrEntryMap): PrSignals {
 }
 
 /**
+ * The repos whose PR state this run could not read, sorted.
+ *
+ * `PrEntry.error` means the last fetch attempt failed — the CLI is missing, the
+ * account cannot see the repo, the network was down. `facts` is then the PREVIOUS
+ * value carried forward, or null when there never was one, and BOTH shapes lie to
+ * a reader that does not check `error`:
+ *
+ *  - `facts: null` is indistinguishable from a repo that genuinely has no PR, so
+ *    every reduction here reads it as "nothing open" — which is how a landed run
+ *    stayed pinned in Action required, `prSignals.merged` never able to go true.
+ *  - stale facts are worse than absent ones: the card draws `#863 ✓ ci approved`
+ *    about a PR that may have merged an hour ago.
+ *
+ * So both count as unread. `mergeTarget` already refuses such an entry on the
+ * same reasoning — unreadable is not merged, and stale facts do not authorize a
+ * write however green they look. This is that rule pointed at what the card SAYS
+ * rather than what it lets you press.
+ *
+ * Sorted because `Object.entries` follows insertion order, which the host does
+ * not promise: an unsorted list would reshuffle a card's tooltip between renders.
+ * Deliberately NOT a field on `PrSignals` — that reduction drops null-facts
+ * entries before it counts anything, and those are half the cases here. Pure.
+ */
+export function unreadRepos(prs: PrEntryMap): string[] {
+  return Object.entries(prs)
+    .filter(([, e]) => e.error === true)
+    .map(([repo]) => repo)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+/**
  * Which band inside `column` a run belongs to, or null on `needs`, the column
  * that means one thing. Reads the same signals the column itself was derived
  * from, so a lane can never contradict the column above it.

@@ -63,6 +63,8 @@ export interface AccountSlotInput {
   capsAccounts: boolean;
   /** The forge's own CLI name, never a literal — see `FORGE_NOTES`. */
   cli: string;
+  /** Runs whose PR state could not be read this pass. Zero when all is well. */
+  unreadRuns?: number;
 }
 
 /**
@@ -91,5 +93,17 @@ export function accountSlot(i: AccountSlotInput): AccountSlot | null {
   // A list with no active entry names no identity. Saying nothing beats guessing
   // at the first entry and labelling the board with an account it is not using.
   if (!active) return null;
-  return { cli: i.cli, login: active.login, canSwitch: true };
+  // The count rides along rather than suppressing the row: an account that
+  // cannot read half the board is exactly the account worth naming, and the
+  // switch link beside it is the remedy. `forgeNote` stands down when this shows.
+  // Present only when there is something to say. A healthy board's slot keeps the
+  // exact shape it shipped with, which is what lets the released tests for this
+  // function pass untouched — and an absent field reads as "nothing wrong" at
+  // every consumer without one of them having to know the zero case.
+  return {
+    cli: i.cli,
+    login: active.login,
+    canSwitch: true,
+    ...(i.unreadRuns ? { unreadRuns: i.unreadRuns } : {}),
+  };
 }
