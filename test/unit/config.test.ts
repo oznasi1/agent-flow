@@ -804,10 +804,10 @@ describe("review-request settings", () => {
     expect(getConfig().reviewRequests).toBe(false);
   });
 
-  it("defaults reviewRequestsAlwaysVisible off and honors an override", () => {
-    expect(getConfig().reviewRequestsAlwaysVisible).toBe(false);
-    setConfig({ reviewRequestsAlwaysVisible: true });
+  it("defaults reviewRequestsAlwaysVisible on and honors switching it off", () => {
     expect(getConfig().reviewRequestsAlwaysVisible).toBe(true);
+    setConfig({ reviewRequestsAlwaysVisible: false });
+    expect(getConfig().reviewRequestsAlwaysVisible).toBe(false);
   });
 
   it("honors an explicit reviewWrites override", () => {
