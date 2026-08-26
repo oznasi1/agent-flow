@@ -428,6 +428,10 @@ export const DECK_CSS = `
      path follow. No colour: nothing here is wrong. */
   .legend .note.acct .who { font-family: var(--mono); font-size: var(--t-data);
     color: var(--vscode-foreground); }
+  /* This one IS wrong, so it takes the attention colour the board uses for a
+     card that needs you — the count is the reason the switch link beside it is
+     worth pressing. */
+  .legend .note.acct .unread { color: var(--c-attn); }
   .legend .lnk { background: none; border: 0; padding: 0; font: inherit; color: inherit;
     text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
   .legend .lnk:hover { color: var(--vscode-foreground); }

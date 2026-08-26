@@ -1,5 +1,5 @@
 import { CardAgent, PrFacts, PrWorkReason, RunStatus } from "../types";
-import { mergeTarget, type MergeTarget } from "../engine/bucket";
+import { mergeTarget, unreadRepos, type MergeTarget } from "../engine/bucket";
 // Pure — a type import and string work, nothing that reaches Node. Imported rather
 // than restated so the button and the destination picker it raises say one verb.
 import { prWorkLabel } from "../engine/prompt";
@@ -26,13 +26,18 @@ const REVIEW_TEXT: Record<PrFacts["review"], string> = {
  * one it must pick the same one every render: the first failing PR by repo name,
  * else the first PR by repo name. Sorting is what makes it deterministic —
  * `Object.entries` order follows insertion, which the host does not promise. */
-function leadPr(r: RunStatus): PrFacts | null {
+function leadPrEntry(r: RunStatus): { facts: PrFacts; failed: boolean } | null {
   const withFacts = Object.entries(r.prs)
-    .map(([repo, e]) => [repo, e.facts] as const)
-    .filter((x): x is readonly [string, PrFacts] => x[1] !== null)
+    .map(([repo, e]) => [repo, e.facts, e.error === true] as const)
+    .filter((x): x is readonly [string, PrFacts, boolean] => x[1] !== null)
     .sort((a, b) => a[0].localeCompare(b[0]));
   if (withFacts.length === 0) return null;
-  return (withFacts.find(([, f]) => f.ci.failing.length > 0) ?? withFacts[0])[1];
+  const [, facts, failed] = withFacts.find(([, f]) => f.ci.failing.length > 0) ?? withFacts[0];
+  return { facts, failed };
+}
+
+function leadPr(r: RunStatus): PrFacts | null {
+  return leadPrEntry(r)?.facts ?? null;
 }
 
 /**
@@ -45,6 +50,21 @@ function leadPr(r: RunStatus): PrFacts | null {
 export function cardSignal(r: RunStatus, agent: CardAgent | null): SignalBit[] {
   const bits: SignalBit[] = [];
   const f = leadPr(r);
+
+  // Ahead of everything, in BOTH branches below. A repo whose last fetch failed
+  // makes this card's PR story unreliable, and that outranks every fact the
+  // story is made of — including the facts themselves, which are the previous
+  // value carried forward and may describe a PR that has since merged. Leading
+  // is also what makes it survive the three-bit cap: the slice drops from the
+  // end, so anywhere else and a busy card would silently lose the warning.
+  //
+  // Without it a failed read is drawn exactly like a run with no PR, which is
+  // how a landed run sat in Action required with nothing on the card to say the
+  // board had never managed to ask.
+  const unread = unreadRepos(r.prs);
+  if (unread.length > 0) {
+    bits.push({ kind: "text", text: "\u26a0 PR unread", tone: "warn", title: `could not read: ${unread.join(", ")}` });
+  }
 
   if (f) {
     bits.push({ kind: "text", text: `#${f.number}`, mono: true });
@@ -127,7 +147,18 @@ export interface SignalAction {
  * contradict the bits they replace.
  */
 export function cardActions(r: RunStatus): SignalAction[] {
-  const f = leadPr(r);
+  const lead = leadPrEntry(r);
+  // An entry whose last fetch failed authorizes nothing, on the same reasoning
+  // `mergeTarget` states for the Merge button: its facts are the PREVIOUS value
+  // carried forward, and "it conflicted an hour ago" is not "it conflicts". A row
+  // here is a smaller commitment than a merge but the same kind of claim — it
+  // names THE problem and seeds a session to go and fix it.
+  //
+  // This also un-hides the warning. DeckApp draws these rows INSTEAD of the
+  // signal line, so while an unread PR still produced rows, `cardSignal`'s
+  // "⚠ PR unread" never reached the card that most needed it.
+  if (lead?.failed) return [];
+  const f = lead?.facts ?? null;
   // Nothing to act on unless a PR is open and out of draft: GitHub stops
   // computing mergeability once a PR closes, so a merged PR's `conflicting` is
   // stale, and a draft is not asking for anything yet.

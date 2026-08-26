@@ -631,7 +631,9 @@ describe("notepad message routing", () => {
       sections: [],
     });
     expect(screen.getByText("Buy milk")).toBeInTheDocument();
-    expect(screen.getByText("Reset order")).toBeInTheDocument();
+    // Reset order lives behind the Notepad toolbar's ⋯ menu.
+    fireEvent.click(screen.getByRole("button", { name: "Notepad actions" }));
+    expect(screen.getByRole("menuitem", { name: "Reset order" })).toBeInTheDocument();
   });
 
   // Drives the flag through both directions rather than asserting against
@@ -650,14 +652,17 @@ describe("notepad message routing", () => {
       ordered: true,
       sections: [],
     });
-    expect(screen.getByText("Reset order")).toBeInTheDocument();
+    // The menu stays open across the host update — Notepad is not remounted —
+    // so the item's disappearance is the flag flipping, nothing else.
+    fireEvent.click(screen.getByRole("button", { name: "Notepad actions" }));
+    expect(screen.getByRole("menuitem", { name: "Reset order" })).toBeInTheDocument();
     host({
       type: "notepad:notes",
       notes: [{ id: "n1", title: "Buy milk", body: "", done: false, createdAt: 1 }],
       ordered: false,
       sections: [],
     });
-    expect(screen.queryByText("Reset order")).not.toBeInTheDocument();
+    expect(screen.queryByRole("menuitem", { name: "Reset order" })).not.toBeInTheDocument();
   });
 });
 

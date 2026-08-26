@@ -88,6 +88,8 @@ describeWithHost("notepad", {}, (ctx) => {
 
     await pool.note("Check the telemetry feed").locator(".cb").click();
     await settle(pool);
+    // Clear completed moved behind the toolbar's ⋯ menu — open it first.
+    await pool.frame.locator(".np-menu-btn").click();
     await pool.frame.locator(".np-clear").click();
 
     await expect(pool.note("Check the telemetry feed")).toHaveCount(0);
@@ -246,6 +248,11 @@ describeWithHost("notepad", {}, (ctx) => {
     const pool = await Pool.open(ctx.page(), 2);
     await pool.openNotepad();
 
+    // The section input is no longer standing chrome — it is summoned from
+    // the toolbar's ⋯ menu, so the menu must be opened and "New section…"
+    // chosen before there is anything to fill.
+    await pool.frame.locator(".np-menu-btn").click();
+    await pool.frame.getByRole("menuitem", { name: "New section…" }).click();
     // ".np-section-add-btn" is disabled until the input holds text
     // (Notepad.tsx: `disabled={!sectionName.trim()}`), so it must be filled
     // before the button is clickable — fill, then press Enter, which the
