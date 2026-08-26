@@ -338,9 +338,22 @@ export const CSS = `
     opacity: 0; left: 0; top: 0; }
   .np-empty { padding: 14px 2px; color: var(--dim); font-size: var(--t-body); }
 
-  /* The "Add section" control sits right below the filter row, matching where
-     "Add note" sits above it — both are the one-line entry point for the thing
-     the list below is made of. */
+  /* The toolbar's ⋯ menu. Anchored to the row's right edge; the popover
+     language (border, radius, shadow, background fallbacks) is .repo-pop's,
+     so the panel's two floating surfaces read as one family. */
+  .np-menu-wrap { position: relative; }
+  .np-menu { position: absolute; z-index: 10; top: calc(100% + 4px); right: 0; min-width: 168px;
+    border: 1px solid var(--vscode-panel-border); border-radius: 8px; padding: 4px;
+    background: var(--vscode-dropdown-background, var(--vscode-editorWidget-background, var(--vscode-editor-background)));
+    box-shadow: 0 6px 20px rgba(0,0,0,.35); animation: repo-in .12s ease; }
+  .np-menu button { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left;
+    background: none; border: none; padding: 5px 8px; border-radius: 5px; cursor: pointer;
+    color: var(--vscode-foreground); font-size: var(--t-body); font-family: inherit; }
+  .np-menu button:hover { background: var(--vscode-list-hoverBackground); }
+  .np-menu-sep { height: 1px; background: var(--hair); margin: 4px 6px; }
+
+  /* The section form appears only when summoned from the ⋯ menu — a one-shot
+     row, not standing chrome; Enter or its own Add put it away again. */
   .np-add-section { display: flex; gap: 6px; margin-bottom: 10px; }
   .np-section-input { flex: 1; padding: 5px 7px;
     background: var(--vscode-input-background); color: var(--vscode-input-foreground);

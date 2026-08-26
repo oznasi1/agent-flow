@@ -1,7 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { NotepadImage, NotepadItemView, NotepadRunStatus, NotepadSectionView } from "../types";
-import { ImageIcon, PenIcon, PlayIcon, TrashIcon } from "./icons";
+import { DotsIcon, ImageIcon, PenIcon, PlayIcon, TrashIcon } from "./icons";
 import { moveKey } from "./helpers";
 
 /** Which notes the list shows. Local state, defaulting to Active on every mount:
@@ -97,6 +97,12 @@ export function Notepad({ notes, ordered, sections = [] }: {
   const [editing, setEditing] = React.useState<string | null>(null);
   const [sectionName, setSectionName] = React.useState("");
   const [editingSection, setEditingSection] = React.useState<string | null>(null);
+  // The toolbar's ⋯ menu and the transient section form it can summon. Both are
+  // closed on every mount for the same reason the filter resets to Active: a
+  // remembered open menu would greet the user with chrome they never asked for.
+  const [menuOpen, setMenuOpen] = React.useState(false);
+  const [sectionFormOpen, setSectionFormOpen] = React.useState(false);
+  const menuRef = React.useRef<HTMLDivElement>(null);
   const [dragId, setDragId] = React.useState<string | null>(null);
   const [dropTarget, setDropTarget] = React.useState<{ id: string; pos: "before" | "after" } | null>(null);
   // The id also lives in a ref: onDrop fires in the same tick as the state update
@@ -137,7 +143,22 @@ export function Notepad({ notes, ordered, sections = [] }: {
     if (!sectionName.trim()) return;
     send({ type: "notepad:addSection", name: sectionName });
     setSectionName("");
+    // The form is a one-shot summoned from the menu, not standing chrome —
+    // adding puts it away again; the new section's header is the confirmation.
+    setSectionFormOpen(false);
   };
+
+  // Click-outside-to-close, same idiom as useComboFilter's (combo.tsx). Not the
+  // hook itself: this menu has no query/active-row state to share, and taking
+  // the hook for two of its nine returns would be scaffolding without a shape.
+  React.useEffect(() => {
+    if (!menuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [menuOpen]);
 
   const endDrag = () => { dragIdRef.current = null; setDragId(null); setDropTarget(null); };
   const beginDrag = (id: string) => { dragIdRef.current = id; setDragId(id); };
@@ -260,6 +281,10 @@ export function Notepad({ notes, ordered, sections = [] }: {
         </div>
       </div>
 
+      {/* One toolbar row: the filter, and everything rarer behind ⋯. Clear
+          completed and Reset order keep their old visibility conditions as menu
+          items; New section… is always there, so the menu is never empty and the
+          kebab never has to blink in and out with the list's state. */}
       <div className="lenses">
         <div className="lens">
           <div className="seg" role="group" aria-label="Note filter">
@@ -269,40 +294,75 @@ export function Notepad({ notes, ordered, sections = [] }: {
               </button>
             ))}
           </div>
-        </div>
-        {/* Wrapped in its own .lens (a flex row, content-width) rather than left as
-            direct children of .lenses (a flex COLUMN): unwrapped, each button
-            stretched to the panel's full width and stacked, one bar per button,
-            instead of sitting beside "Clear completed" the way the spec asks. The
-            wrapper itself is conditional so an all-false case adds no empty row. */}
-        {(anyDone || ordered) && (
-          <div className="lens">
-            {anyDone && (
-              <button className="quiet dim np-clear" onClick={() => send({ type: "notepad:clearCompleted" })}>
-                Clear completed
-              </button>
-            )}
-            {ordered && (
-              <button className="quiet dim np-clear" onClick={() => send({ type: "notepad:resetOrder" })}>
-                Reset order
-              </button>
+          <span className="spacer" />
+          <div
+            className="np-menu-wrap"
+            ref={menuRef}
+            onKeyDown={(e) => { if (e.key === "Escape") setMenuOpen(false); }}
+          >
+            <button
+              className="quiet icon-only dim np-menu-btn"
+              aria-label="Notepad actions"
+              title="Notepad actions"
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              onClick={() => setMenuOpen((o) => !o)}
+            >
+              <DotsIcon />
+            </button>
+            {menuOpen && (
+              <div className="np-menu" role="menu" aria-label="Notepad actions">
+                <button
+                  role="menuitem"
+                  onClick={() => { setSectionFormOpen(true); setMenuOpen(false); }}
+                >
+                  New section…
+                </button>
+                {(anyDone || ordered) && <div className="np-menu-sep" />}
+                {anyDone && (
+                  <button
+                    role="menuitem"
+                    className="np-clear"
+                    onClick={() => { send({ type: "notepad:clearCompleted" }); setMenuOpen(false); }}
+                  >
+                    Clear completed
+                  </button>
+                )}
+                {ordered && (
+                  <button
+                    role="menuitem"
+                    onClick={() => { send({ type: "notepad:resetOrder" }); setMenuOpen(false); }}
+                  >
+                    Reset order
+                  </button>
+                )}
+              </div>
             )}
           </div>
-        )}
+        </div>
       </div>
 
-      <div className="np-add-section">
-        <input
-          className="np-section-input"
-          placeholder="New section name"
-          value={sectionName}
-          onChange={(e) => setSectionName(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); addSection(); } }}
-        />
-        <button className="quiet np-section-add-btn" disabled={!sectionName.trim()} onClick={addSection}>
-          Add section
-        </button>
-      </div>
+      {sectionFormOpen && (
+        <div className="np-add-section">
+          <input
+            className="np-section-input"
+            placeholder="New section name"
+            value={sectionName}
+            // Summoned by an explicit menu choice, so focus follows the intent;
+            // the field did not exist a render ago, making this the rare
+            // autoFocus that cannot steal from anything.
+            autoFocus
+            onChange={(e) => setSectionName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { e.preventDefault(); addSection(); }
+              else if (e.key === "Escape") { e.preventDefault(); setSectionName(""); setSectionFormOpen(false); }
+            }}
+          />
+          <button className="quiet np-section-add-btn" disabled={!sectionName.trim()} onClick={addSection}>
+            Add section
+          </button>
+        </div>
+      )}
 
       {shown.length === 0 && sections.length === 0 ? (
         <div className="np-empty">{EMPTY[filter]}</div>

@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The Notepad's toolbar collapsed into one row.** *Clear completed*, *Reset order*
+  and the always-visible *New section name* input used to stack three control rows
+  between the add form and the list. They now live behind a single **⋯** menu beside
+  the filter: *New section…* summons the input on demand (focused, dismissed by
+  Enter or Esc), and the two housekeeping actions appear in the menu under the same
+  conditions that used to show their buttons.
+
 ### Fixed
 
 - **A pull request the Deck could not read no longer passes for one that does not
