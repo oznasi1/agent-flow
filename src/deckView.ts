@@ -47,7 +47,7 @@ import { providerPin, resolveBatchProvider } from "./agentPick";
 // documents: this module must add no runtime edge to the forge directory beyond
 // the registry call below.
 import { resolveForge } from "./engine/forge/registry";
-import type { Forge, ForgeAccount, ForgeGap } from "./engine/forge/types";
+import type { Forge, ForgeAccount, ForgeCaps, ForgeGap } from "./engine/forge/types";
 import { accountSlot } from "./engine/forge/accounts";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
@@ -145,6 +145,35 @@ const VERB_LABEL: Record<ReviewVerb, string> = {
   comment: "Comment",
   "request-changes": "Request changes",
 };
+
+/** What "request changes" actually does on a forge that has no such review state,
+ *  keyed by forge id — because the two forges in that position differ
+ *  MATERIALLY, not cosmetically.
+ *
+ *  GitLab DEGRADES: `GlabReviewProvider.submit` really does post the note and
+ *  withdraw any standing approval, which is what the default wording below
+ *  describes. A projected `atlassian-cli` REFUSES: `BbReviewProvider.submit`
+ *  returns `ok: false` before it builds a single argv, because that build has no
+ *  way to request changes at all. Telling a Bitbucket user we will post their
+ *  message as a comment would be a confirmation dialog describing a write that
+ *  never happens — and they would press it, see an error toast, and have no idea
+ *  which of the two statements was true.
+ *
+ *  Keyed lookup rather than a ternary for the same reason `READ_ONLY_PROMPT` is
+ *  one: a fourth forge with no changes-requested state gets the honest generic
+ *  wording until someone writes its own. */
+const NO_CHANGES_REQUESTED_DETAIL: Record<string, string> = {
+  bitbucket:
+    "This build of atlassian-cli has no way to request changes, so this will be refused — " +
+    "upgrade to one with `bb api`, or use the pull request in your browser.",
+};
+
+export function noChangesRequestedDetail(forge: { id: string; label: string }): string {
+  return Object.hasOwn(NO_CHANGES_REQUESTED_DETAIL, forge.id)
+    ? NO_CHANGES_REQUESTED_DETAIL[forge.id]
+    : `${forge.label} has no "request changes" review, so this posts your message as a comment ` +
+      "and withdraws your approval if you had one.";
+}
 
 /** What the confirmation dialog calls each strategy. The dialog names the
  * resolved `agentFlow.mergeMethod` every time, so the setting can never merge a
@@ -388,6 +417,10 @@ export class DeckPanel {
   /** undefined until the probe resolves; null means the forge is usable, and a
    * gap disables PR facts with a footer note. */
   private forgeGap: ForgeGap | null | undefined;
+  /** The forge's caps once `resolveCaps()` has settled, or undefined while it is
+   *  in flight or for a forge that has none. `caps()` below falls back to the
+   *  static record, which is what every forge without a runtime probe uses. */
+  private forgeCaps: ForgeCaps | undefined;
   /** The forge's account list, last time it answered. `[]` until it does. */
   private forgeAccounts: ForgeAccount[] = [];
   private accountsProbe: Promise<ForgeAccount[]> | null = null;
@@ -1722,6 +1755,13 @@ export class DeckPanel {
         // "PR facts just don't work here".
         if (gap) this.log(`deck: ${this.forge.cli.name} unusable (${gap.kind}): ${gap.detail}`);
       });
+      // Resolved in the same block as the probe, and guarded by the same
+      // identity check: a caps read orphaned by a settings change must not
+      // clobber a fresh one, exactly as a stale gap must not.
+      void this.forge.resolveCaps?.().then((caps) => {
+        if (this.forgeProbe !== p) return;
+        this.forgeCaps = caps;
+      });
     }
     return this.forgeGap === null;
   }
@@ -1770,6 +1810,10 @@ export class DeckPanel {
     this.forgeProbe = null;
     this.accountsProbe = null;
     this.forgeAccounts = [];
+    // Resolved caps are probed alongside the gap and must be re-read with it: a
+    // user who upgraded `atlassian-cli` mid-session is exactly who re-probing is
+    // for, and a stale `projected` would keep the richer mode off until reload.
+    this.forgeCaps = undefined;
   }
 
   /**
@@ -2037,14 +2081,22 @@ export class DeckPanel {
     });
   }
 
-  /** Is the review strip live? Two gates, not three: the session's own Review
-   * queue flag (seeded from the persistent `reviewRequests` setting, then held
-   * until `onConfigChanged` re-seeds it — re-reading config here would stomp
-   * the flag on every poll tick), and `forgeReady()` — which already folds the
-   * session PR-facts flag and a usable forge together, so there is no condition
-   * here that varies independently of PR facts. */
+  /** Is the review strip live? Three gates: the session's own Review queue flag
+   * (seeded from the persistent `reviewRequests` setting, then held until
+   * `onConfigChanged` re-seeds it — re-reading config here would stomp the flag
+   * on every poll tick), `forgeReady()` — which already folds the session
+   * PR-facts flag and a usable forge together, so there is no condition here
+   * that varies independently of PR facts — and the forge's own
+   * `caps().reviewSearch`, for a forge that cannot answer the query at all. */
   private reviewsEnabled(): boolean {
-    return this.reviewQueue && this.forgeReady();
+    return this.reviewQueue && this.forgeReady() && this.caps().reviewSearch;
+  }
+
+  /** The forge's capabilities, preferring anything `resolveCaps()` has settled.
+   *  A forge without one — every forge but Bitbucket today — reads its static
+   *  record here, so this is a no-op for them. */
+  private caps(): ForgeCaps {
+    return this.forgeCaps ?? this.forge.caps;
   }
 
   /** Queue a search when the cache has aged out. Never awaited — a hanging forge
@@ -2551,12 +2603,13 @@ export class DeckPanel {
     this.reviewSubmitsInFlight.add(id);
     try {
       const label = VERB_LABEL[verb];
-      // GitLab has no stable "request changes" verb, so ours is a note plus a
-      // withdrawal of any standing approval. That is materially different from
-      // GitHub's, and the person clicking deserves to know before they click.
+      // A forge with no "request changes" review does something else instead, and
+      // the person clicking deserves to know WHICH something before they click:
+      // GitLab degrades to a note plus a withdrawn approval, a projected
+      // atlassian-cli refuses outright. See `noChangesRequestedDetail`.
       const detail =
-        verb === "request-changes" && !this.forge.caps.changesRequested
-          ? `${this.forge.label} has no "request changes" review, so this posts your message as a comment and withdraws your approval if you had one.`
+        verb === "request-changes" && !this.caps().changesRequested
+          ? noChangesRequestedDetail(this.forge)
           : undefined;
       const answer = await vscode.window.showWarningMessage(
         `${label} on ${req.repo}#${req.number}?`,
@@ -3513,12 +3566,12 @@ export class DeckPanel {
           // future toggle would want it back — but its "needs Live signal" branch is
           // unreachable from here today. See the note in the ledger: collapsing that
           // branch is a deliberate follow-up, not something to fold into a merge.
-          // `forge: this.forge.caps` is what makes the "forge-unsupported" branch
+          // `forge: this.caps()` is what makes the "forge-unsupported" branch
           // reachable at all: with no `forge` passed, `armability` assumes a fully
           // capable one (GitHub, the default), so a `changes-requested` rule only
           // ever reads as unfirable here once the panel actually knows its forge
           // cannot report that.
-          const dead = unfirableRules(flow, { liveSignal: true, prFacts: this.prFacts, forge: this.forge.caps });
+          const dead = unfirableRules(flow, { liveSignal: true, prFacts: this.prFacts, forge: this.caps() });
           if (dead.length > 0) {
             const live = dead.filter((d) => d.needs === "live-signal").length;
             const pr = dead.filter((d) => d.needs === "pr-facts").length;

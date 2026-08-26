@@ -75,3 +75,25 @@ describe("the GitLab forge's account capability", () => {
     expect(res.ok === false && res.message).toMatch(/one token per host/i);
   });
 });
+
+describe("the Bitbucket forge's account capability", () => {
+  const never: Runner = async () => { throw new Error("no call expected"); };
+
+  // atlassian-cli DOES have named profiles, unlike glab — but its AuthCommand
+  // surface has no switch verb, so it cannot be told even though it can list.
+  // accounts is one flag for both directions, so this asymmetry still answers
+  // false.
+  it("declares that it cannot", () => {
+    expect(resolveForge("bitbucket", () => {}, never).caps.accounts).toBe(false);
+  });
+
+  it("enumerates nothing, without spawning atlassian-cli", async () => {
+    expect(await resolveForge("bitbucket", () => {}, never).accounts()).toEqual([]);
+  });
+
+  it("refuses to switch, and names the missing verb, without spawning atlassian-cli", async () => {
+    const res = await resolveForge("bitbucket", () => {}, never).switchAccount("anyone");
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.message).toMatch(/switch/i);
+  });
+});

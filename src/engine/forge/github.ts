@@ -22,7 +22,7 @@ export function makeGithubForge(run: Runner = execRunner): Forge {
     id: "github",
     label: "GitHub",
     cli: { name: "gh", installUrl: "https://cli.github.com" },
-    caps: { changesRequested: true, accounts: true },
+    caps: { changesRequested: true, reviewSearch: true, accounts: true },
     probe: () => probeGh(run),
     async accounts() {
       try {

@@ -17,11 +17,15 @@ import {
   DEFAULT_EXPLORE_VERIFY_PROMPT,
   DEFAULT_PR_REVIEW_PROMPT,
   GITLAB_PR_REVIEW_PROMPT,
+  BITBUCKET_PR_REVIEW_PROMPT,
   DEFAULT_REVIEW_REQUEST_PROMPT,
   GITLAB_REVIEW_REQUEST_PROMPT,
+  BITBUCKET_REVIEW_REQUEST_PROMPT,
   DEFAULT_REVIEW_REQUEST_MODES,
   DEFAULT_ENVIRONMENTS,
   DEFAULT_COMMANDS,
+  shippedPrReviewPrompt,
+  shippedReviewRequestModes,
 } from "../../src/config";
 import { env, setConfig, setDefaultConfig } from "../_mocks/vscode";
 import pkg from "../../package.json";
@@ -1244,6 +1248,16 @@ describe("forge-flavoured prompts", () => {
     expect(p).toContain("merge request");
   });
 
+  it("seeds the Bitbucket wording on bitbucket", () => {
+    setConfig({ forge: "bitbucket" });
+    const p = getConfig().prReviewPrompt;
+    expect(p).toBe(BITBUCKET_PR_REVIEW_PROMPT);
+    expect(p).not.toContain("gh pr checkout");
+    expect(p).not.toContain("pr checkout");
+    expect(p).toContain("git checkout");
+    expect(p).toContain("Bitbucket");
+  });
+
   // A user who wrote their own prompt keeps it on either forge: we do not know
   // better than they do what their prompt should say.
   it("never clobbers a customized prompt", () => {
@@ -1263,6 +1277,7 @@ describe("forge-flavoured prompts", () => {
   it.each([
     ["github", DEFAULT_PR_REVIEW_PROMPT],
     ["gitlab", GITLAB_PR_REVIEW_PROMPT],
+    ["bitbucket", BITBUCKET_PR_REVIEW_PROMPT],
   ])("falls back to the %s default when the setting is explicitly blank", (forge, expected) => {
     setConfig({ forge, prReviewPrompt: "" });
     expect(getConfig().prReviewPrompt).toBe(expected);
@@ -1295,11 +1310,47 @@ describe("forge-flavoured prompts", () => {
     }
   });
 
+  it("swaps the first review mode's prompt to Bitbucket wording too", () => {
+    setConfig({ forge: "bitbucket" });
+    const first = getConfig().reviewRequestModes[0].prompt;
+    expect(first).toBe(BITBUCKET_REVIEW_REQUEST_PROMPT);
+    expect(first).not.toContain("pr checkout");
+    expect(first).toContain("destination branch");
+  });
+
   // The legacy reviewRequestPrompt migration path is untouched by forge: a user
   // who customized it keeps their exact words on gitlab too, same as the
   // never-clobbers-a-customized-prompt guarantee above for prReviewPrompt.
   it("keeps a legacy customized reviewRequestPrompt verbatim on gitlab too", () => {
     setConfig({ forge: "gitlab", reviewRequestPrompt: "my legacy words" });
     expect(getConfig().reviewRequestModes[0].prompt).toBe("my legacy words");
+  });
+});
+
+describe("forge-flavoured shipped prompts", () => {
+  it("ships Bitbucket wording for a Bitbucket install", () => {
+    const prompt = shippedPrReviewPrompt("bitbucket");
+    expect(prompt).toContain("Bitbucket");
+    expect(prompt).not.toContain("GitHub");
+    expect(prompt).not.toContain("GitLab");
+    // `atlassian-cli` has NO checkout subcommand — `gh pr checkout` has no
+    // equivalent here, and naming one would send the session to a command that
+    // does not exist.
+    expect(prompt).not.toContain("pr checkout");
+    expect(prompt).toContain("git checkout");
+  });
+
+  it("gives the first stock review mode the Bitbucket wording", () => {
+    const modes = shippedReviewRequestModes("bitbucket");
+    expect(modes[0].prompt).toContain("Bitbucket");
+    expect(modes.slice(1)).toEqual(DEFAULT_REVIEW_REQUEST_MODES.slice(1));
+  });
+
+  it("still falls back to the GitHub baseline for an unknown forge", () => {
+    // `resolveForge` falls back to github for an unregistered id, so the shipped
+    // prompt must agree — otherwise a typo'd setting yields a card whose prompt
+    // and whose forge disagree about which tool the session should reach for.
+    expect(shippedPrReviewPrompt("wat")).toBe(DEFAULT_PR_REVIEW_PROMPT);
+    expect(shippedReviewRequestModes("wat")).toBe(DEFAULT_REVIEW_REQUEST_MODES);
   });
 });

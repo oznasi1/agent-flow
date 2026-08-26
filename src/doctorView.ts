@@ -14,6 +14,8 @@ import {
   runChecks,
   summarize,
   formatReport,
+  FORGE_MODE_PASSTHROUGH,
+  FORGE_MODE_PROJECTED,
   type AuthProbe,
   type Check,
   type DoctorAction,
@@ -55,6 +57,20 @@ export interface DoctorDeps {
    *  `collectInputs` gates the call on `prFacts`. */
   forge: () => { label: string; cli: string; installUrl: string };
   forgeProbe: () => Promise<{ kind: "missing" | "signed-out"; detail: string } | null>;
+  /** Which mode the forge's CLI is in, for a forge whose capability depends on
+   *  which build is installed (Bitbucket's `atlassian-cli`). This is its own
+   *  member rather than a field `forge()` fills in, for the same reason
+   *  `forgeProbe` is separate from `forge()` above: describing the forge is
+   *  cheap, a config read plus a registry lookup, so `forge()` stays
+   *  synchronous and is always called. Resolving the mode means awaiting
+   *  `resolveCaps()`, which for Bitbucket spawns `bb api --help` — a probe, not
+   *  a description — so it gets the same treatment as `forgeProbe`: its own
+   *  async member, gated on `prFacts` by `collectInputs` rather than run on
+   *  every cheap describe. Optional so a `DoctorDeps` built without it (every
+   *  test double predating this member) still type-checks, and `collectInputs`
+   *  reads the absence as "no mode to report" — the same answer a forge with
+   *  exactly one mode gives. */
+  forgeMode?: () => Promise<string | null>;
   /** How the last round of PR reads went, read off the Deck's fact cache.
    *  Optional so a caller that predates the row — every existing test among them
    *  — keeps working and simply reports nothing, which is the honest answer when
@@ -91,7 +107,14 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
   // itself stays gated on `prFacts` so a Deck with PR facts off does not pay for
   // an `auth status` call.
   const f = d.forge();
-  const forge = { ...f, gap: cfg.prFacts ? await d.forgeProbe() : null, foundAt: d.which(f.cli) };
+  // Gated on `prFacts` exactly like `gap` above — and, separately, left
+  // `undefined` rather than forced to `null` when `forgeMode` isn't supplied at
+  // all (every `DoctorDeps` test double predating this member), so a forge with
+  // no mode to report and a forge nobody asked about read identically to
+  // `DoctorInputs.forge`'s optional `mode` field and to `toEqual` callers that
+  // built their expectation before this member existed.
+  const mode = cfg.prFacts && d.forgeMode ? await d.forgeMode() : undefined;
+  const forge = { ...f, gap: cfg.prFacts ? await d.forgeProbe() : null, foundAt: d.which(f.cli), mode };
   // Same gate as the probe above, for the same reason: PR facts off means nothing
   // was ever read, so there is no failure to report and no cache worth walking.
   const prReads = cfg.prFacts ? d.prReads?.() : undefined;
@@ -268,6 +291,14 @@ export function defaultDeps(connector: TaskConnector, log: (message: string) => 
       return { label, cli: cli.name, installUrl: cli.installUrl };
     },
     forgeProbe: () => resolved().probe(),
+    // `resolved()` again, matching `forgeProbe` above: a fresh `Forge` per call
+    // rather than a shared one, so this doesn't need to coordinate with either.
+    // A forge with no `resolveCaps` (GitHub, GitLab) has exactly one mode, and
+    // `null` is that "nothing to report" answer — not a failure.
+    forgeMode: async () => {
+      const caps = await resolved().resolveCaps?.();
+      return caps ? (caps.changesRequested ? FORGE_MODE_PASSTHROUGH : FORGE_MODE_PROJECTED) : null;
+    },
     statDir,
     repos: () => {
       const c = cfg();

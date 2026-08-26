@@ -57,6 +57,15 @@ export type ProjectProbe =
   | { ok: true; name: string }
   | { ok: false; reason: "not-found" | "error"; message: string };
 
+/** The two Bitbucket modes, spelled out once so `doctorView.ts`'s `forgeMode`
+ *  probe and this module's own tests share one definition instead of retyping
+ *  the wording twice and risking drift. Named generically (not `BITBUCKET_*`)
+ *  in case a future multi-mode forge reuses one of them, but the parenthetical
+ *  in the "projected" string is Bitbucket/`atlassian-cli`-specific by design —
+ *  the whole reason this pair exists is that forge's two CLI command surfaces. */
+export const FORGE_MODE_PASSTHROUGH = "passthrough (full)";
+export const FORGE_MODE_PROJECTED = "projected (limited — upgrade atlassian-cli for full support)";
+
 /** Everything the caller probed. `undefined` on an optional member means the probe
  *  was deliberately not run, which becomes a `skip` rather than a silent pass. */
 export interface DoctorInputs {
@@ -89,6 +98,15 @@ export interface DoctorInputs {
     installUrl: string;
     gap: { kind: "missing" | "signed-out"; detail: string } | null;
     foundAt: string | null;
+    /** A human-readable mode, for a forge whose capability depends on which
+     *  build of its CLI is installed — `FORGE_MODE_PASSTHROUGH` or
+     *  `FORGE_MODE_PROJECTED` above. Null (or omitted) for the forges that have
+     *  exactly one mode, where a mode row would be noise.
+     *
+     *  Structural rather than importing anything from `forge/`, matching how
+     *  `gap` is already declared here. Optional so the existing constructions
+     *  of this object elsewhere keep compiling untouched. */
+    mode?: string | null;
   };
   /** How the last round of PR reads went, from the Deck's own fact cache.
    *  Optional: absent means nothing to report, which is what a caller that
@@ -294,6 +312,10 @@ function forgeChecks(i: DoctorInputs): Check[] {
   // a signed-in user, as the Deck simply being broken.
   const where = f.foundAt ?? f.cli;
   if (!f.gap) {
+    // Only a forge whose capability depends on the installed CLI build has a
+    // mode worth naming — GitHub and GitLab have exactly one, so `f.mode` is
+    // null there and this stays silent, matching the passing test's own row.
+    const mode = f.mode ? ` — ${f.mode}` : "";
     // Two rows, deliberately, and they can disagree: the CLI really is installed
     // and signed in, AND every read it makes can still fail. `auth status` asks a
     // GLOBAL question and cannot see a per-repo answer — an account signed in
@@ -301,7 +323,10 @@ function forgeChecks(i: DoctorInputs): Check[] {
     // `pr list`. That combination reported a clean bill of health while the board
     // silently read every run as having no PR, which is how a landed run sat in
     // Action required with nothing anywhere to explain it.
-    return [{ group: f.label, label: f.cli, status: "ok", detail: `signed in — ${where}` }, ...prReadChecks(i)];
+    return [
+      { group: f.label, label: f.cli, status: "ok", detail: `signed in — ${where}${mode}` },
+      ...prReadChecks(i),
+    ];
   }
   return [
     {

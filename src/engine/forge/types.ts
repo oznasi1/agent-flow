@@ -47,10 +47,18 @@ export interface ForgeCaps {
    *  can never see fire. If such a forge ever appears, split this deliberately and
    *  give each half its own consumer, rather than letting the two drift apart. */
   changesRequested: boolean;
+  /** Can this forge answer "which pull requests are waiting on MY review"? A
+   *  forge with no cross-repo reviewer query cannot, and must not fake it:
+   *  `reviews.search()` returning `null` means THE ATTEMPT FAILED, so a forge
+   *  that answered that way would leave the strip permanently stale and log a
+   *  failure every TTL for a question that was never answerable. False hides
+   *  the strip instead, through `deckView`'s existing `reviewsEnabled()` gate. */
+  reviewSearch: boolean;
   /** Can this forge report which account its CLI acts as, and be told to change
    *  it? Both directions, one flag, for the same reason `changesRequested` is
    *  one flag: a CLI with no multi-account model can neither be asked nor told.
-   *  `gh` can do both; `glab` holds one token per host and can do neither. */
+   *  `gh` can do both; `glab` holds one token per host and can do neither, and
+   *  `atlassian-cli` has named profiles it can list but no verb to switch one. */
   accounts: boolean;
 }
 
@@ -60,6 +68,31 @@ export interface Forge {
   readonly label: string;
   readonly cli: { name: string; installUrl: string };
   readonly caps: ForgeCaps;
+  /** Capabilities that cannot be known until the CLI has been probed — for a CLI
+   *  whose command surface differs by version, where the same forge id is more
+   *  capable on a newer build. Resolved once per Deck session, alongside
+   *  `probe()`, and re-resolved with it when settings change.
+   *
+   *  Re-resolved, but not necessarily re-PROBED: `deckView` clears its memo and
+   *  calls this again, while the `Forge` object itself is built once in the
+   *  panel's constructor, so an implementation that memoizes its probe (see
+   *  `makeBitbucketForge`'s `once`) answers the second call from the first
+   *  probe's result. The mode a Bitbucket install is in therefore lasts the
+   *  panel's life, and installing a newer CLI mid-session needs the Deck
+   *  reopened.
+   *
+   *  Optional on purpose: a forge whose caps are fully static omits this, and
+   *  the static `caps` record above stands. That is what keeps this addition
+   *  inert for `github` and `gitlab`.
+   *
+   *  **This MUST NEVER REJECT.** `deckView.forgeReady()` calls it as
+   *  `void this.forge.resolveCaps?.().then(...)` with no `.catch()`, so a
+   *  rejection here is an unhandled promise rejection on a background tick — not
+   *  a caught degradation. An implementation that probes (Bitbucket spawns
+   *  `bb api --help`) owns that probe's failure itself and answers with the
+   *  CONSERVATIVE caps, which is the same thing `caps` above already claims. A
+   *  cap this cannot establish is false, never a throw. */
+  resolveCaps?(): Promise<ForgeCaps>;
   /** Is the CLI installed and logged in? Probed once per Deck session. */
   probe(): Promise<ForgeGap | null>;
   /** Every account the CLI holds credentials for, the active one included.
