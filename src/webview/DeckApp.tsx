@@ -1,6 +1,7 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
 import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
+import type { AccountSlot } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
 import { DeckCard, laneOf, projectCards } from "./deckCards";
@@ -358,6 +359,7 @@ function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, se
 export function DeckApp(): JSX.Element {
   const [runs, setRuns] = React.useState<RunStatus[]>([]);
   const [ghNote, setGhNote] = React.useState<string | null>(null);
+  const [ghAccount, setGhAccount] = React.useState<AccountSlot | null>(null);
   const [syncedAt, setSyncedAt] = React.useState<number | null>(null);
   const [, forceTick] = React.useState(0);
   const [toasts, setToasts] = React.useState<{ id: number; level: string; message: string; action?: { label: string; url: string } }[]>([]);
@@ -463,6 +465,9 @@ export function DeckApp(): JSX.Element {
         setRuns(m.runs);
         setStaleCount(m.staleCount);
         setGhNote(m.ghNote);
+        // `?? null` for the same reason `agentLabel` has a fallback: an in-flight
+        // message posted before this build's host reloads carries no such field.
+        setGhAccount(m.ghAccount ?? null);
         setSourceLabel(m.sourceLabel);
         // The `?? DEFAULT_AGENT_LABEL` is required, not defensive: an in-flight
         // message posted before this build's host reloads has no such field.
@@ -940,7 +945,36 @@ export function DeckApp(): JSX.Element {
         {COLUMNS.map((c) => (
           <span className="lg" key={c.id}><span className="dot" style={{ background: `var(${c.varName})` }} />{c.label}</span>
         ))}
-        {ghNote && <span className="note warn">{ghNote}</span>}
+        {/* One slot. `accountSlot` already returns null whenever a gap owns it,
+            so this ternary is belt-and-braces rather than the rule — but a
+            legend showing "gh is not signed in" beside "gh as oznasi1" would be
+            self-contradicting, and this is the cheapest place to make that
+            impossible. */}
+        {ghNote
+          ? <span className="note warn">{ghNote}</span>
+          : ghAccount && (
+              <span className="note acct">
+                {`${ghAccount.cli} as `}
+                <span className="who">{ghAccount.login}</span>
+                {/* The count sits between the identity and the switch link on
+                    purpose: it is the reason to press switch, so it reads as
+                    "gh as oznasi1 · 6 runs unread · switch" — the fact, then the
+                    remedy. Absent whenever every read succeeded. */}
+                {!!ghAccount.unreadRuns && (
+                  <span className="unread" title="The forge could not read these runs' pull requests — the cards say which repos">
+                    {` · ${ghAccount.unreadRuns} run${ghAccount.unreadRuns === 1 ? "" : "s"} unread`}
+                  </span>
+                )}
+                {ghAccount.canSwitch && (
+                  <>
+                    {" · "}
+                    <button type="button" className="lnk" onClick={() => send({ type: "deck:switchAccount" })}>
+                      switch
+                    </button>
+                  </>
+                )}
+              </span>
+            )}
         <span className="note">{`git + ${sourceLabel} backbone · best-effort live from `}<span className="path">~/.claude/projects</span></span>
       </div>
 

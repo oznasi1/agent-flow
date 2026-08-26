@@ -29,6 +29,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   **Merge** button already followed. This is also what lets the new warning reach
   the card: those rows are drawn *instead of* the signal line, so the card most in
   need of the warning was the one that could not show it.
+- **The legend's account row says when reads are failing.** `agentFlow`'s forge
+  account row and the unread-pull-request count share one slot, so the count now
+  rides on the account row whenever it is showing — `gh · oznasi1 · 6 runs
+  unread` — rather than displacing it. The account named there is the thing you
+  would change to fix the reads, so the fact and its remedy sit on one row; the
+  standalone note still appears when there is no account row to carry it.
+
+## [0.45.0] — 2026-08-26
+
+### Added
+
+- The Deck's footer now names which account your forge's CLI is reading as, when
+  you have more than one — `gh as oznasi1` — with a **switch** link beside it.
+  Switching is machine-wide, so it confirms first, and it forgets every PR it
+  has already read so the board is answered by the account you just chose. A
+  wrong active account used to be invisible: every read failed, and a failed
+  read looks exactly like a repo with no PR. GitLab has no multi-account model,
+  so nothing appears there.
+
 ## [0.44.1] — 2026-08-25
 
 ### Changed

@@ -3129,3 +3129,55 @@ describe("the card's Merge row", () => {
     expect(card.className).not.toContain("sel");
   });
 });
+
+describe("the forge account in the legend", () => {
+  const slot = { cli: "gh", login: "oznasi1", canSwitch: true };
+
+  it("names the CLI and the account it is reading as", () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([mkStatus()]), ghAccount: slot });
+    expect(screen.getByText("oznasi1")).toBeTruthy();
+    expect(screen.getByText(/gh as/)).toBeTruthy();
+  });
+
+  it("asks the host to switch when the link is pressed", () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([mkStatus()]), ghAccount: slot });
+    fireEvent.click(screen.getByRole("button", { name: "switch" }));
+    expect(sent).toHaveBeenCalledWith({ type: "deck:switchAccount" });
+  });
+
+  it("shows no switch link when there is nothing to switch to", () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([mkStatus()]), ghAccount: { ...slot, canSwitch: false } });
+    expect(screen.getByText("oznasi1")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "switch" })).toBeNull();
+  });
+
+  // One slot, and the warning owns it: "gh is not signed in" and "gh as X" are
+  // mutually exclusive by construction, but the webview must not render both
+  // even if a future host sends both.
+  it("yields the slot to the forge warning", () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([mkStatus()]), ghNote: "gh is not signed in — PR facts off. Run Doctor", ghAccount: slot });
+    expect(screen.getByText(/not signed in/)).toBeTruthy();
+    expect(screen.queryByText("oznasi1")).toBeNull();
+  });
+
+  // The field is optional on the wire, so a host that never sends it — an older
+  // build, mid-reload — must render exactly today's legend.
+  it("renders nothing when the host says nothing", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus()]));
+    expect(screen.queryByRole("button", { name: "switch" })).toBeNull();
+    expect(screen.queryByText(/ as /)).toBeNull();
+  });
+
+  it("clears the account when a later post drops it", () => {
+    render(<DeckApp />);
+    host({ ...runsMsg([mkStatus()]), ghAccount: slot });
+    expect(screen.getByText("oznasi1")).toBeTruthy();
+    host({ ...runsMsg([mkStatus()]), ghAccount: null });
+    expect(screen.queryByText("oznasi1")).toBeNull();
+  });
+});

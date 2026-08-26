@@ -421,6 +421,20 @@ export const DECK_CSS = `
   /* A path, so mono; the prose around it is not. */
   .legend .note .path { font-family: var(--mono); font-size: var(--t-data); }
   .legend .note.warn { color: var(--c-attn); margin-left: 0; }
+  /* Sits with the other notes, not pushed right: it is a statement of fact
+     about the board, the same class of thing as the warn note it replaces. */
+  .legend .note.acct { margin-left: 0; }
+  /* An identifier, so mono — the same rule the branch chip and the ~/.claude
+     path follow. No colour: nothing here is wrong. */
+  .legend .note.acct .who { font-family: var(--mono); font-size: var(--t-data);
+    color: var(--vscode-foreground); }
+  /* This one IS wrong, so it takes the attention colour the board uses for a
+     card that needs you — the count is the reason the switch link beside it is
+     worth pressing. */
+  .legend .note.acct .unread { color: var(--c-attn); }
+  .legend .lnk { background: none; border: 0; padding: 0; font: inherit; color: inherit;
+    text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+  .legend .lnk:hover { color: var(--vscode-foreground); }
 
   .toasts { position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 6px; z-index: 50; }
   .toast { display: flex; align-items: center; gap: 10px; font-size: 12px; padding: 8px 14px; border-radius: 7px;
