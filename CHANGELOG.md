@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-08-26
+
 ### Changed
 
 - **The Notepad's toolbar collapsed into one row.** *Clear completed*, *Reset order*
