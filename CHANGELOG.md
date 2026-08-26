@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.46.1] — 2026-08-26
+
 ### Fixed
 
 - **A pull request the Deck could not read no longer passes for one that does not
