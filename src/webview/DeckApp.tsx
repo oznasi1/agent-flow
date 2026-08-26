@@ -393,8 +393,8 @@ export function DeckApp(): JSX.Element {
    * A key absent from this map means "not asked yet or still waiting", which the
    * drawer renders differently from both a zero total and a failed read. */
   const [lazyUsage, setLazyUsage] = React.useState<Record<string, UsageTotals | null>>({});
-  const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean; loading: boolean }>(
-    { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false },
+  const [reviews, setReviews] = React.useState<{ requests: ReviewRequest[]; issueCount: number; sort: ReviewSort; stale: boolean; reviewWrites: boolean; loading: boolean; alwaysVisible: boolean }>(
+    { requests: [], issueCount: 0, sort: "oldest", stale: false, reviewWrites: false, loading: false, alwaysVisible: false },
   );
   const [reviewsCollapsed, setReviewsCollapsed] = React.useState(false);
   /** The review strip's selection, for a batch launch. Opt-in and short-lived: it
@@ -515,7 +515,9 @@ export function DeckApp(): JSX.Element {
         // own scroller, so the board keeps its share of the window without the queue
         // ever being hidden — which also means the collapse state is purely the user's,
         // with no seeded-once ref and no setState nested inside another's updater.
-        setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites, loading: m.loading });
+        // `?? false` because an older host's post has no alwaysVisible field at
+        // all, and absent must read as the released hidden-when-empty behavior.
+        setReviews({ requests: m.requests, issueCount: m.issueCount, sort: m.sort, stale: m.stale, reviewWrites: m.reviewWrites, loading: m.loading, alwaysVisible: m.alwaysVisible ?? false });
         // A merged PR leaves the queue on the next poll. Keeping its id selected would
         // let the launch ask the host to review a row that no longer exists — and the
         // host would silently drop it, so the count and the outcome would disagree.
@@ -802,6 +804,7 @@ export function DeckApp(): JSX.Element {
         sort={reviews.sort}
         stale={reviews.stale}
         loading={reviews.loading}
+        showWhenEmpty={reviews.alwaysVisible}
         collapsed={reviewsCollapsed}
         expanded={expanded}
         details={details}

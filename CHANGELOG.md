@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The review-requests strip can hold its place on an empty queue.** Set
+  `agentFlow.reviewRequestsAlwaysVisible` to keep the strip's header — "0 PRs
+  waiting on your review" — on the board instead of the strip vanishing when
+  nothing is waiting. Off by default, so an empty board looks exactly as it
+  always has. The strip still leaves the board entirely whenever it is switched
+  off (`agentFlow.reviewRequests`, PR facts, or the forge not supporting a
+  review search).
+
 ## [0.47.0] — 2026-08-26
 
 ### Added

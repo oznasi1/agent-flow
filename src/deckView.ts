@@ -2202,6 +2202,9 @@ export class DeckPanel {
       this.post({
         type: "deck:reviews", requests: [], issueCount: 0, sort: this.reviewSort,
         stale: false, reviewWrites: getConfig().reviewWrites, enabled: false, loading: false,
+        // Never the setting itself: an "always visible" strip that has been
+        // switched off must still leave the board, or off stops meaning off.
+        alwaysVisible: false,
       });
       return;
     }
@@ -2218,6 +2221,7 @@ export class DeckPanel {
         type: "deck:reviews", requests: [], issueCount: 0, sort: this.reviewSort,
         stale: this.reviewStale, reviewWrites: getConfig().reviewWrites,
         enabled: true, loading: !this.reviewStale,
+        alwaysVisible: getConfig().reviewRequestsAlwaysVisible,
       });
       return;
     }
@@ -2230,6 +2234,7 @@ export class DeckPanel {
       reviewWrites: getConfig().reviewWrites,
       enabled: true,
       loading: false,
+      alwaysVisible: getConfig().reviewRequestsAlwaysVisible,
     });
   }
 

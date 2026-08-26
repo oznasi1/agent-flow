@@ -34,6 +34,10 @@ export interface ReviewStripProps {
    * header plus skeleton rows instead of the queue — see the strip's own doc
    * comment for why it renders at all with zero requests. */
   loading: boolean;
+  /** agentFlow.reviewRequestsAlwaysVisible: keep the header on an empty,
+   *  resolved queue instead of rendering nothing. Optional so every existing
+   *  host renders byte-identically without passing it. */
+  showWhenEmpty?: boolean;
   collapsed: boolean;
   expanded: string | null;
   // Absent: never fetched (or not yet expanded). `null`: the host tried and the
@@ -295,7 +299,7 @@ function Skeleton(): JSX.Element {
  * cached behind it) and `stale` (a search failed with nothing cached, so "0"
  * would be a lie). */
 export function ReviewStrip(p: ReviewStripProps): JSX.Element | null {
-  if (p.requests.length === 0 && !p.loading && !p.stale) return null;
+  if (p.requests.length === 0 && !p.loading && !p.stale && !p.showWhenEmpty) return null;
   const shown = p.requests.length;
   const selecting = !!p.selecting;
   const picked = new Set(p.selected ?? []);

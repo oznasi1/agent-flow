@@ -496,6 +496,9 @@ export interface AgentFlowConfig {
   notifyOnActionRequired: boolean;
   // Show the Deck's review-requests strip: open PRs that ask for your review.
   reviewRequests: boolean;
+  // Keep the strip's header on the board when the queue is empty, instead of the
+  // strip vanishing. Off by default — an empty board stays as clean as it always was.
+  reviewRequestsAlwaysVisible: boolean;
   // How stale the cached review queue may be before a refetch. Floored at 60s —
   // review requests move on a human timescale, not a CI one.
   reviewRequestsTtlSeconds: number;
@@ -774,6 +777,7 @@ export function getConfig(): AgentFlowConfig {
     inflightShowAll: c.get<boolean>("inflightShowAll") ?? false,
     notifyOnActionRequired: c.get<boolean>("notifyOnActionRequired") ?? false,
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
+    reviewRequestsAlwaysVisible: c.get<boolean>("reviewRequestsAlwaysVisible") ?? false,
     reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,
     mergeWrites: c.get<boolean>("mergeWrites") ?? false,

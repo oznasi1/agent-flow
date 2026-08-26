@@ -809,8 +809,8 @@ describe("DeckApp PR-facts chrome", () => {
   });
 });
 
-const reviewsMsg = (requests: ReviewRequest[], issueCount = requests.length): OutboundMessage =>
-  ({ type: "deck:reviews", requests, issueCount, sort: "oldest", stale: false, reviewWrites: false, enabled: true, loading: false });
+const reviewsMsg = (requests: ReviewRequest[], issueCount = requests.length, over: Partial<Extract<OutboundMessage, { type: "deck:reviews" }>> = {}): OutboundMessage =>
+  ({ type: "deck:reviews", requests, issueCount, sort: "oldest", stale: false, reviewWrites: false, enabled: true, loading: false, ...over });
 
 const mkReview = (over: Partial<ReviewRequest> = {}): ReviewRequest => ({
   id: "o/r#1", repo: "o/r", repoName: "r", number: 1, title: "a small fix", url: "https://gh/o/r/pull/1",
@@ -835,6 +835,15 @@ describe("DeckApp review strip", () => {
     render(<DeckApp />);
     host(reviewsMsg([mkReview()]));
     expect(screen.getByText("a small fix")).toBeInTheDocument();
+  });
+
+  // agentFlow.reviewRequestsAlwaysVisible rides the deck:reviews message as
+  // `alwaysVisible`: an empty, resolved queue keeps its header instead of the
+  // strip vanishing from the board.
+  it("keeps the strip header on an empty queue when the host says always visible", () => {
+    render(<DeckApp />);
+    host(reviewsMsg([], 0, { alwaysVisible: true }));
+    expect(screen.getByText(/0 PRs waiting on your review/i)).toBeInTheDocument();
   });
 
   // An in-flight deck:runs posted by an older host build has no agentLabel field

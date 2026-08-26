@@ -30,6 +30,14 @@ describe("ReviewStrip", () => {
     expect(container).toBeEmptyDOMElement();
   });
 
+  // agentFlow.reviewRequestsAlwaysVisible: the host says the strip should hold
+  // its ground on an empty queue instead of vanishing, so an empty board still
+  // shows where reviews will appear.
+  it("keeps the header up on an empty queue when showWhenEmpty is set", () => {
+    render(<ReviewStrip {...props({ requests: [], issueCount: 0, showWhenEmpty: true })} />);
+    expect(screen.getByText(/0 PRs waiting on your review/i)).toBeInTheDocument();
+  });
+
   it("heads the strip with the count", () => {
     render(<ReviewStrip {...props()} />);
     expect(screen.getByText(/1 PR waiting on your review/i)).toBeInTheDocument();

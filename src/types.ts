@@ -835,6 +835,13 @@ export type OutboundMessage =
       // on a cold start: a machine with a cache on disk posts that instead, from
       // `deck:ready`, before the board build has even begun.
       loading: boolean;
+      // agentFlow.reviewRequestsAlwaysVisible: keep the strip's header on an
+      // empty, resolved queue instead of the strip leaving the board. Posted as
+      // false whenever `enabled` is false — an "always visible" strip that has
+      // been switched off must still disappear, or the off switch stops meaning
+      // off. Optional so a webview served by an older host reads it as absent
+      // (hidden-when-empty, the released behavior) rather than crashing.
+      alwaysVisible?: boolean;
     }
   // `detail: null` means the per-PR detail call itself failed (not "no failing
   // checks and unknown thread count", which is what an empty-but-successful
