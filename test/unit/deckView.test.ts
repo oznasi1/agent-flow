@@ -80,6 +80,7 @@ const h = vi.hoisted(() => ({
   // GitHub — one of the two write settings, alongside `mergeWrites` below — the
   // Jira-provenance toggle reused for a review body, and the submit call itself.
   reviewWrites: false as boolean,
+  reviewRequestsAlwaysVisible: false as boolean,
   stampLabelOnWrite: true as boolean,
   seedAgent: true as boolean,
   agentProvider: "claude-code" as AgentProviderSetting,
@@ -470,6 +471,7 @@ vi.mock("../../src/config", async (importActual) => {
       baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
       openAgents: h.openAgents,
       reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: ["vendored"],
+      reviewRequestsAlwaysVisible: h.reviewRequestsAlwaysVisible,
       reviewWrites: h.reviewWrites, stampLabelOnWrite: h.stampLabelOnWrite,
       // Steered per test the way reviewWrites is: the merge path's own gate, and the
       // strategy the confirmation names and the forge is asked for.
@@ -727,6 +729,7 @@ beforeEach(() => {
     name, path, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0,
   }));
   h.reviewWrites = false;
+  h.reviewRequestsAlwaysVisible = false;
   h.stampLabelOnWrite = true;
   h.agentProvider = "claude-code";
   h.reviewSubmit.mockClear().mockResolvedValue({ ok: true });
@@ -2844,6 +2847,26 @@ describe("DeckPanel review strip", () => {
     h.reviewWrites = true;
     const p = await showAndWarm();
     expect(posts(p).find((m) => m.type === "deck:reviews").reviewWrites).toBe(true);
+  });
+
+  it("carries alwaysVisible off by default and on when the setting is on", async () => {
+    let p = await showAndWarm();
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1).alwaysVisible).toBe(false);
+    h.reviewRequestsAlwaysVisible = true;
+    p = await showAndWarm();
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1).alwaysVisible).toBe(true);
+  });
+
+  // The disabled post must not carry the setting through: an "always visible"
+  // strip that has been switched off (reviewRequests, PR facts, the forge CLI)
+  // must still leave the board, or the off switch stops meaning off.
+  it("posts alwaysVisible false when the strip is off, even with the setting on", async () => {
+    h.reviewRequestsAlwaysVisible = true;
+    h.reviewRequests = false;
+    const p = await showAndWarm();
+    expect(posts(p).filter((m) => m.type === "deck:reviews").at(-1)).toMatchObject({
+      enabled: false, alwaysVisible: false,
+    });
   });
 
   it("resolves a local checkout for a repo under reposRoot", async () => {

@@ -192,6 +192,7 @@ const CFG = {
   inflightShowAll: false,
   notifyOnActionRequired: false,
   reviewRequests: true,
+  reviewRequestsAlwaysVisible: false,
   reviewRequestsTtlSeconds: 300,
   reviewWrites: false,
   mergeWrites: false,
