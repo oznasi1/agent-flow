@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Only ticket-confirmed repos attach by default.** A repo the ticket merely
+  hints at — a matching label or a name mentioned in its text — no longer
+  arrives pre-selected: collapsed task cards chip only repos confirmed as
+  components on the ticket, the expanded card pre-selects only those, Take and
+  batch launches attach only those, and the confirm-repos QuickPick lists the
+  guesses (with their reason) unchecked instead of pre-checked. When a ticket
+  confirms nothing — including on sources with no components at all — the
+  guesses still apply, so no task loses its inference entirely.
+
 ## [0.49.0] — 2026-08-26
 
 ### Changed

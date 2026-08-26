@@ -19,7 +19,7 @@ import {
 import { validateFieldInput } from "./tasks/fields";
 import { effectiveFilter } from "./webview/helpers";
 import { discoverRepos } from "./engine/repos";
-import { inferServices } from "./engine/infer";
+import { confirmedServices, inferServices } from "./engine/infer";
 import { mapRepoComponents, resolveComponent } from "./engine/components";
 import { applyExploreVars, injectSlackDm, prReviewTemplate } from "./engine/prompt";
 import { openWorkspace, writeBriefInto, listWorkspaceFiles, workspaceFolderPaths, planWorkspaceMerge, attachmentFileName, attachmentRelPath, BRIEF_DIR, type MergeCandidate } from "./engine/workspace";
@@ -709,9 +709,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           const info = this.connector.info();
           const detail = await provider.detail(m.key);
           const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
-          const inferred = inferServices(
-            { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
-            repos,
+          // Confirmed repos only: a label/text guess must not arrive pre-selected —
+          // taking the card as-is would attach a repo the ticket never recorded.
+          // The guesses stay reachable through the card's picker.
+          const inferred = confirmedServices(
+            inferServices(
+              { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
+              repos,
+            ),
           ).map((r) => r.service.name);
           // After the issue read, never before: the component list swallows every
           // failure including a 401, so the detail read is what lets a dead token
@@ -1503,9 +1508,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   private guessServices(t: Task, repos: ServiceRef[]): string[] {
-    return inferServices(
-      { summary: t.summary, labels: t.labels, components: t.components },
-      repos,
+    // Collapsed-card chips claim "this task touches X", so only ticket-confirmed
+    // repos may make that claim; guesses show only when nothing is confirmed.
+    return confirmedServices(
+      inferServices({ summary: t.summary, labels: t.labels, components: t.components }, repos),
     ).map((r) => r.service.name);
   }
 
@@ -1588,26 +1594,32 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
         repos,
       );
-      inferredNames = new Set(inferred.map((r) => r.service.name));
-      inferredCount = inferred.length;
+      // Only ticket-confirmed repos arrive pre-checked: Enter-through-the-default
+      // must not attach a repo the ticket never recorded. The label/text guesses
+      // still surface — listed on top with their reason — just unchecked, and the
+      // telemetry proposal below is the pre-checked set for the same reason.
+      const proposedNames = new Set(confirmedServices(inferred).map((r) => r.service.name));
+      const mentioned = new Set(inferred.map((r) => r.service.name));
+      inferredNames = proposedNames;
+      inferredCount = proposedNames.size;
 
       // Pre-checked repos first. A QuickPick renders items in the order it's handed
       // them, so on a reposRoot with dozens of repos the inferred ones — the whole
       // point of the step — sit below the fold and read as "nothing was suggested".
       // Stable partition, so discovery order still holds within each group.
       const ordered = [
-        ...repos.filter((r) => inferredNames.has(r.name)),
-        ...repos.filter((r) => !inferredNames.has(r.name)),
+        ...repos.filter((r) => mentioned.has(r.name)),
+        ...repos.filter((r) => !mentioned.has(r.name)),
       ];
 
       const picks = await vscode.window.showQuickPick<vscode.QuickPickItem & { repo: ServiceRef }>(
         ordered.map((r) => ({
           label: r.name,
-          description: inferredNames.has(r.name)
+          description: mentioned.has(r.name)
             ? `inferred (${inferred.find((i) => i.service.name === r.name)!.reason})`
             : "",
           detail: r.isGit ? r.path : `${r.path}  (not a git repo)`,
-          picked: inferredNames.has(r.name),
+          picked: proposedNames.has(r.name),
           repo: r,
         })),
         {
@@ -2574,10 +2586,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * falling back to the whole set when inference finds nothing there — a task must
    * never launch with no repo at all. */
   private reposForTask(detail: TaskDetail, filterSet: ServiceRef[]): ServiceRef[] {
+    // Same rule as a single take: ticket-confirmed repos only, guesses as fallback —
+    // a batch must not open a worktree the ticket never recorded.
     const inferred = new Set(
-      inferServices(
-        { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
-        filterSet,
+      confirmedServices(
+        inferServices(
+          { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
+          filterSet,
+        ),
       ).map((r) => r.service.name),
     );
     const narrowed = filterSet.filter((r) => inferred.has(r.name));
