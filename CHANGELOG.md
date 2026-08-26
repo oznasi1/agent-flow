@@ -7,17 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.46.0] — 2026-08-26
-
-### Changed
-
-- **The Notepad's toolbar collapsed into one row.** *Clear completed*, *Reset order*
-  and the always-visible *New section name* input used to stack three control rows
-  between the add form and the list. They now live behind a single **⋯** menu beside
-  the filter: *New section…* summons the input on demand (focused, dismissed by
-  Enter or Esc), and the two housekeeping actions appear in the menu under the same
-  conditions that used to show their buttons.
-
 ### Fixed
 
 - **A pull request the Deck could not read no longer passes for one that does not
@@ -46,6 +35,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unread` — rather than displacing it. The account named there is the thing you
   would change to fix the reads, so the fact and its remedy sit on one row; the
   standalone note still appears when there is no account row to carry it.
+
+## [0.46.0] — 2026-08-26
+
+### Changed
+
+- **The Notepad's toolbar collapsed into one row.** *Clear completed*, *Reset order*
+  and the always-visible *New section name* input used to stack three control rows
+  between the add form and the list. They now live behind a single **⋯** menu beside
+  the filter: *New section…* summons the input on demand (focused, dismissed by
+  Enter or Esc), and the two housekeeping actions appear in the menu under the same
+  conditions that used to show their buttons.
 
 ## [0.45.0] — 2026-08-26
 
