@@ -132,6 +132,59 @@ describe("deriveActivity", () => {
     expect(a.state).toBe("unknown");
     expect(a.model).toBeNull();
   });
+
+  // A stale pending tool call, with the tool_use block Claude Code actually writes.
+  const asstToolNamed = (name: string): TranscriptLine => line({
+    type: "assistant",
+    slug: "export-streaming",
+    message: {
+      role: "assistant",
+      stop_reason: "tool_use",
+      content: [{ type: "text", text: "Running it now." }, { type: "tool_use", name, input: {} }],
+    },
+  });
+
+  it("names the tool a pending call is waiting on", () => {
+    expect(deriveActivity([userMsg, asstToolNamed("Bash")], NOW - 60_000, NOW).pendingTool).toBe("Bash");
+  });
+
+  it("names the tool on a fresh pending call too, so a working card can say what it is doing", () => {
+    expect(deriveActivity([userMsg, asstToolNamed("Edit")], NOW - 5_000, NOW).pendingTool).toBe("Edit");
+  });
+
+  it("reads the LAST tool_use block when one turn holds several", () => {
+    const multi = line({
+      type: "assistant",
+      message: {
+        role: "assistant",
+        stop_reason: "tool_use",
+        content: [{ type: "tool_use", name: "Read", input: {} }, { type: "tool_use", name: "Bash", input: {} }],
+      },
+    });
+    expect(deriveActivity([userMsg, multi], NOW - 60_000, NOW).pendingTool).toBe("Bash");
+  });
+
+  // Claude Code owns this format. Every one of these used to be the shape it
+  // wrote at some point, or plausibly could be next; none may throw, and all
+  // must land on null so the Task 3 rule falls through to today's `stalled`.
+  it.each([
+    ["no content field at all", undefined],
+    ["content as a bare string", "Running it now."],
+    ["content with no tool_use block", [{ type: "text", text: "hi" }]],
+    ["a tool_use block with no name", [{ type: "tool_use", input: {} }]],
+    ["a tool_use block whose name is not a string", [{ type: "tool_use", name: 7 }]],
+    ["a tool_use block whose name is empty", [{ type: "tool_use", name: "" }]],
+    ["a null member", [null]],
+  ])("yields a null pendingTool for %s", (_label, content) => {
+    const l = line({ type: "assistant", message: { role: "assistant", stop_reason: "tool_use", content } });
+    expect(deriveActivity([userMsg, l], NOW - 60_000, NOW).pendingTool).toBeNull();
+  });
+
+  it("still reads stalled for every shape above — this task changes no state", () => {
+    expect(deriveActivity([userMsg, asstTool], NOW - 60_000, NOW).state).toBe("stalled");
+    expect(deriveActivity([userMsg, asstToolNamed("Bash")], NOW - 60_000, NOW).state).toBe("stalled");
+    expect(deriveActivity([userMsg, asstToolNamed("AskUserQuestion")], NOW - 60_000, NOW).state).toBe("stalled");
+  });
 });
 
 describe("readAgentActivity", () => {

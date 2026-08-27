@@ -248,6 +248,14 @@ export interface AgentActivity {
    * reducer cannot know. Optional so every existing AgentActivity literal
    * (the test suite is full of them) still compiles; absent means false. */
   midWork?: boolean;
+  /** The name of the tool call a pending turn is waiting on — "Bash", "Edit",
+   * "AskUserQuestion" — or null when there is no pending call or the line could
+   * not be read. This is what lets a card say WHY it is stopped instead of
+   * hedging: `deriveActivity`'s `stalled` is deliberately true of both a
+   * permission prompt and a long command, and the tool's name is the only
+   * discriminator the transcript offers. Optional so every existing
+   * AgentActivity literal (the test suite is full of them) still compiles. */
+  pendingTool?: string | null;
   /** The model the last main-chain assistant line answered with, e.g. "claude-opus-5".
    * Null when the tail carries no such line — a transcript whose last 200 lines are all
    * subagent work, or a session that has not answered yet. Optional so every existing

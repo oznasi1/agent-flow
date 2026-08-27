@@ -17,7 +17,10 @@ export interface TranscriptLine {
   /** True on a subagent's turn. Its `message.model` is the subagent's, not this
    * session's, so the model read skips these. */
   isSidechain?: boolean;
-  message?: { role?: string; stop_reason?: string | null; model?: string };
+  /** `content` is the API content-block array — text and tool_use blocks. Typed
+   * `unknown` on purpose: Claude Code owns this format, and `pendingToolName`
+   * below checks every hop rather than trusting the shape. */
+  message?: { role?: string; stop_reason?: string | null; model?: string; content?: unknown };
 }
 
 /**
@@ -41,6 +44,34 @@ function modelOf(lines: TranscriptLine[]): { model: string | null; modelCount: n
 }
 
 /**
+ * The name of the tool call this line is waiting on, or null.
+ *
+ * Every hop is checked — the content array, its members, their `type` and their
+ * `name` — for the same reason `readOpenSessions` narrows `RawSession`: Claude
+ * Code owns this format and may change it under us. Anything unexpected yields
+ * null, and null is the fall-through case for the class table in
+ * `deriveActivity`, so a format change degrades to the pre-`blocked` reading
+ * rather than to a wrong state or a throw.
+ *
+ * Reads the LAST tool_use block: one assistant turn can hold several parallel
+ * calls, and the transcript cannot say which of them is the one still
+ * outstanding. The last is the best available guess and matches what the
+ * transcript's own tail-first reads elsewhere in this file already do.
+ */
+function pendingToolName(line: TranscriptLine): string | null {
+  const content = line.message?.content;
+  if (!Array.isArray(content)) return null;
+  for (let i = content.length - 1; i >= 0; i--) {
+    const block = content[i];
+    if (!block || typeof block !== "object") continue;
+    if ((block as { type?: unknown }).type !== "tool_use") continue;
+    const name = (block as { name?: unknown }).name;
+    return typeof name === "string" && name ? name : null;
+  }
+  return null;
+}
+
+/**
  * Derive live agent activity from the tail of a transcript plus the file's mtime.
  * Pure — `nowMs` is injected so callers control the clock. When no meaningful
  * lines exist the state is "unknown"; the caller uses "unknown" too when no
@@ -61,16 +92,17 @@ export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: 
   // A tool call that never returned. Nothing follows the last meaningful line by
   // definition, so "no tool_result after it" needs no separate check.
   const pendingTool = last.type === "assistant" && last.message?.stop_reason === "tool_use";
+  const toolName = pendingTool ? pendingToolName(last) : null;
   // Work is owed either way: a tool that has not returned, or a user line — a
   // real prompt, or a tool_result — the agent has not answered. Note that Claude
   // Code writes tool results as type "user".
   const midWork = pendingTool || last.type === "user";
   const age = nowMs - mtimeMs;
-  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: mtimeMs, slug, midWork, ...model };
+  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: mtimeMs, slug, midWork, pendingTool: toolName, ...model };
   // Stale with a tool still outstanding: the agent is at a permission prompt, or
   // a long command is running. The transcript cannot separate the two, so the
   // label is chosen to be true under either.
-  if (pendingTool) return { state: "stalled", lastActivityMs: mtimeMs, slug, midWork, ...model };
+  if (pendingTool) return { state: "stalled", lastActivityMs: mtimeMs, slug, midWork, pendingTool: toolName, ...model };
   return { state: "idle", lastActivityMs: mtimeMs, slug, midWork, ...model };
 }
 
