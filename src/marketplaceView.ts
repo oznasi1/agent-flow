@@ -50,7 +50,14 @@ export class MarketplacePanel {
   }
 
   private post(msg: OutboundMessage): void {
-    void this.panel.webview.postMessage(msg);
+    try {
+      void this.panel.webview.postMessage(msg);
+    } catch {
+      // A disposed panel's `postMessage` throws synchronously — a normal race
+      // (the user closed the Marketplace while an async step, e.g. mkt:copy's
+      // clipboard await, was still in flight), not a bug worth logging. Letting
+      // it escape used to strand whatever ran after this call in the caller.
+    }
   }
   private toast(level: "success" | "error" | "info", message: string): void {
     this.post({ type: "toast", level, message });

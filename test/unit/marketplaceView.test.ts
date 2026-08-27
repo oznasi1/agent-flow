@@ -237,3 +237,28 @@ describe("MarketplacePanel file preview", () => {
     expect(posts(p).at(-1).truncated).toBe(false);
   });
 });
+
+describe("MarketplacePanel post-after-dispose", () => {
+  it("mkt:copy still resolves when the panel was disposed during the clipboard await", async () => {
+    // A disposed panel's postMessage throws synchronously — the same race
+    // deckView's post() already absorbs: the user closes the panel while the
+    // `await clipboard.writeText` is still in flight, and the success toast
+    // lands on a dead webview. That must not become an unhandled rejection.
+    show();
+    const p = lastPanel();
+    p.webview.postMessage.mockImplementation(() => {
+      throw new Error("Webview is disposed");
+    });
+    await expect(p._fire({ type: "mkt:copy", text: "/plugin install x@y" })).resolves.toBeUndefined();
+    expect(env.clipboard.writeText).toHaveBeenCalledWith("/plugin install x@y");
+  });
+
+  it("a scan render onto a disposed panel resolves too", async () => {
+    show();
+    const p = lastPanel();
+    p.webview.postMessage.mockImplementation(() => {
+      throw new Error("Webview is disposed");
+    });
+    await expect(p._fire({ type: "mkt:ready" })).resolves.toBeUndefined();
+  });
+});
