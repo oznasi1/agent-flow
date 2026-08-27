@@ -498,6 +498,10 @@ export const ORCH_CSS = `
        fire    --c-done, the one thing that would actually happen
        defer   --c-idle, met and merely queued behind the cap
        blocked --c-attn, the same hue the resume gate spends on "needs you"
+       unset   --c-attn too, and deliberately not a fourth hue: to a reader
+               scanning the panel both mean "this one needs you before it can
+               ever fire", and the WORD beside the dot is what separates a rule
+               waiting on its card from a rule waiting on its own blank field
        waiting --dim, the resting state and the commonest, so it recedes
 
      The word carries a two-level hierarchy instead, which needs no hue at all:
@@ -510,6 +514,7 @@ export const ORCH_CSS = `
   .orch-dry .v.fire { color: var(--vscode-foreground); font-weight: 600; }
   .orch-dry .v.fire .d { background: var(--c-done); }
   .orch-dry .v.defer .d { background: var(--c-idle); }
+  .orch-dry .v.unset .d { background: var(--c-attn); }
   .orch-dry .v.blocked .d { background: var(--c-attn); }
 
   /* The keyboard path onto the same rules the canvas draws (flowList.tsx).

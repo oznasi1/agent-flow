@@ -3576,6 +3576,31 @@ describe("the dry run", () => {
   });
 });
 
+describe("the dry run and a blank condition", () => {
+  it("says a rule with a blank branch never fires, rather than that it is waiting", () => {
+    // The panel's `waiting` is documented as "the ordinary resting state" and
+    // shows the source place's own observation as its reason — both wrong for a
+    // rule nothing on any board could satisfy. Before the condition picker
+    // offered the parameterised kinds this shape only came from hand-editing a
+    // flow file; now it is two clicks away, so the dry run has to name it.
+    const blank = flow({
+      nodes: wired().nodes,
+      edges: [{
+        id: "e1", from: "n1", to: "n2",
+        cond: { kind: "branch-ci-passed", repo: "agent-flow", branch: "" },
+      }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [blank], runs: [runStatus("PROJ-1", "agent-flow")] })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    const row = screen.getByTestId("orch-dryrun-e1");
+    expect(row.textContent).toContain("never fires");
+    // In `condIncomplete`'s own words — the same string the inspector marks the
+    // field with and the arm warning counts, not a third phrasing of one fact.
+    expect(row.textContent).toContain("no branch set");
+    expect(row.textContent).not.toContain("waiting");
+  });
+});
+
 // ── The controls for what the engine could already do ────────────────────────
 // `join: "all"`, `branch-ci-passed`, `agent-idle-over`, `ticket-status-is` and a
 // command node's `cwdRepo` all shipped in the engine and ran correctly, with no

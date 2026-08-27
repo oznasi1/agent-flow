@@ -1001,6 +1001,9 @@ export function verdictLabel(v: RulePreview): string {
     case "fire": return v.perform ? "would fire" : "would close the join";
     case "defer": return "deferred";
     case "blocked": return "blocked";
+    // Not "blocked": that says something outside the rule is in the way and will
+    // pass. This one is a property of the rule itself and outlasts any board.
+    case "unset": return "never fires";
     case "waiting": return "waiting";
   }
 }
@@ -1019,6 +1022,10 @@ export function verdictWhy(v: RulePreview): string | null {
   if (v.verdict === "defer") {
     return `met, but ${MAX_LAUNCHES_PER_PASS} is this pass's cap — fires on a later pass`;
   }
+  // `condIncomplete`'s own words, unchanged — the inspector marks the field with
+  // this exact string and the arm warning counts the rules it applies to, so a
+  // third phrasing here would be a third claim about one fact.
+  if (v.verdict === "unset") return v.blank ?? null;
   if (v.verdict !== "blocked") return null;
   return v.reason === "gone"
     ? "its card is not on the board right now"

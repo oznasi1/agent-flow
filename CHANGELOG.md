@@ -30,6 +30,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **"What would fire?" tells a rule that can never fire from one that is merely waiting.**
+  A rule whose condition names a blank branch, repo or status now reads `never fires` with
+  the blank named, instead of `waiting` — which the panel documents as "the ordinary resting
+  state" and which for this rule never ends. It is the same predicate behind the marked field
+  in the inspector and the arm-time warning, so the three cannot disagree about one rule.
+
 - **Arming names a rule whose condition has a blank setting.** A rule waiting on an empty
   branch or status can never fire, so it joins "needs PR facts" in the warning shown when a
   flow is armed — listed first, because unlike the others it is fixed in the panel you just
