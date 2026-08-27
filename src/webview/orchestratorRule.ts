@@ -14,6 +14,8 @@
 // `onSave(withX(flow, ...))` and nothing about EITHER presentation needs to
 // know how the other renders a control.
 import { describeCond } from "../engine/orchestrator/conditions";
+import { MAX_LAUNCHES_PER_PASS } from "../engine/orchestrator/evaluate";
+import { RulePreview } from "../engine/orchestrator/preview";
 import {
   ACTION_MISMATCH_PREFIX,
   CommandNode,
@@ -768,4 +770,62 @@ export function nextNodeId(flow: Flow): string {
  * merge into whichever the code touches first. */
 export function nextEdgeId(flow: Flow): string {
   return nextId("e", new Set(flow.edges.map((x) => x.id)));
+}
+
+/** A rule as one compact line, for a presentation with no room for the open
+ * row's controls — the dry-run panel. Spends `endLabel`, `condOptionLabel` and
+ * `ACTION_LABEL`, the same three the closed row and the inspector spend, rather
+ * than a fourth hand-typed phrasing of the same sentence (see this file's own
+ * header comment for why that matters).
+ *
+ * `notify` deliberately drops its target's name: `ACTION_LABEL.notify` is
+ * already a whole clause ("Notify me in VS Code") and `endLabel` answers
+ * "notify" for that node, so spelling both would read "Notify me in VS Code
+ * notify". A target whose kind this build cannot derive an action for says so
+ * instead of silently reading as a rule that does nothing. */
+export function ruleOneLine(flow: Flow, e: FlowEdge): string {
+  const action = edgeAction(flow, e);
+  const then = action === undefined
+    ? "its target is gone"
+    : action === "notify"
+      ? ACTION_LABEL.notify
+      : `${ACTION_LABEL[action]} ${endLabel(flow, e.to)}`;
+  return `${endLabel(flow, e.from)} · ${condOptionLabel(e.cond)} → ${then}`;
+}
+
+/** A dry-run verdict in words.
+ *
+ * A `fire` row reads differently depending on `perform`, and that is the whole
+ * reason `RulePreview` carries the flag: the non-performing edges of an "all"
+ * junction ARE stamped this pass, so "would fire" is true of them, but the
+ * junction's action happens ONCE. Three siblings each reading "would launch"
+ * promises three windows where one opens — the exact overclaim a dry run exists
+ * to prevent. */
+export function verdictLabel(v: RulePreview): string {
+  switch (v.verdict) {
+    case "fire": return v.perform ? "would fire" : "would close the join";
+    case "defer": return "deferred";
+    case "blocked": return "blocked";
+    case "waiting": return "waiting";
+  }
+}
+
+/** Why a rule is in the state `verdictLabel` names, or `null` where the verdict
+ * says everything there is to say. `waiting` is deliberately absent: its reason
+ * is what the source place currently LOOKS like, which is `observationOf`'s
+ * question, and the caller already has that pair to hand.
+ *
+ * `blocked`'s two reasons get their first user-facing wording here.
+ * `BlockedNote` has been computed on every armed pass since the orchestrator
+ * shipped and read by nothing — `evaluate.ts`'s own doc comment claims the
+ * drawer's footer surfaces it, which was never true. The dry run is its first
+ * consumer, so these two strings are new copy, not a move. */
+export function verdictWhy(v: RulePreview): string | null {
+  if (v.verdict === "defer") {
+    return `met, but ${MAX_LAUNCHES_PER_PASS} is this pass's cap — fires on a later pass`;
+  }
+  if (v.verdict !== "blocked") return null;
+  return v.reason === "gone"
+    ? "its card is not on the board right now"
+    : "its session activity cannot be read";
 }
