@@ -2,7 +2,7 @@
   "name": "oznasi1-agent-flow",
   "displayName": "Agent Flow Deck",
   "description": "A task pool in your sidebar. Take a Jira ticket and it opens the repos that ticket touches, with a coding agent already briefed — Claude Code, GitHub Copilot, or Cursor.",
-  "version": "0.51.0",
+  "version": "0.52.0",
   "publisher": "Oznasi1",
   "icon": "media/icon-store.png",
   "license": "MIT",

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.52.0] — 2026-08-27
+
 ### Added
 
 - **A dry run for a flow, before you arm it.** The Orchestrator drawer has a new
