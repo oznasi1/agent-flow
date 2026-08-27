@@ -182,7 +182,13 @@ export function readFlows(io: FlowIo, dir: string): Flow[] {
       const text = io.readFile(path.join(dir, name));
       if (text === null) continue;
       const flow = coerceFlow(JSON.parse(text) as unknown);
-      if (flow) flows.push(flow);
+      // The filename must be the one this record's own id resolves to. The store
+      // only ever writes `<id>.json` (`fileFor`), so a mismatch is never
+      // store-authored — it is a copied file (`cp f1.json f1-backup.json`), and
+      // accepting it makes an ARMED duplicate that `removeFlow` (which deletes by
+      // id) cannot reach: it resurrects on every pass and can keep launching.
+      // Same posture as the id-charset skip in `coerceFlow`: malformed, one item.
+      if (flow && name === `${flow.id}.json`) flows.push(flow);
     } catch {
       /* skip a corrupt/half-written/unreadable flow rather than empty the drawer */
     }

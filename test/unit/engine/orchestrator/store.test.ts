@@ -297,3 +297,28 @@ describe("removeFlow", () => {
     expect(readFlows(io, DIR)).toEqual([]);
   });
 });
+
+describe("readFlows — a filename that does not match the record's own id", () => {
+  it("skips a record whose filename is not <id>.json", () => {
+    // `cp f1.json f1-backup.json` puts two records claiming the same id in the
+    // store, and `removeFlow` only ever deletes `<id>.json` — so without this
+    // skip the copy is an ARMED duplicate that resurrects on every 6s pass and
+    // cannot be deleted from the UI. The store itself always writes `<id>.json`
+    // (`fileFor`), so a mismatched name is never store-authored: treat it as
+    // malformed, exactly like the path-escape skip above.
+    const { io } = fakeIo({
+      [path.join(DIR, "f1.json")]: JSON.stringify(flow({ armed: true })),
+      [path.join(DIR, "f1-backup.json")]: JSON.stringify(flow({ armed: true })),
+    });
+    expect(readFlows(io, DIR).map((f) => f.id)).toEqual(["f1"]);
+  });
+
+  it("leaves nothing readable behind after removeFlow, even when a copy existed", () => {
+    const { io } = fakeIo({
+      [path.join(DIR, "f1.json")]: JSON.stringify(flow({ armed: true })),
+      [path.join(DIR, "f1-backup.json")]: JSON.stringify(flow({ armed: true })),
+    });
+    removeFlow(io, DIR, "f1");
+    expect(readFlows(io, DIR)).toEqual([]);
+  });
+});
