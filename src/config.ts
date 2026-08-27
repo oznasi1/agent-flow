@@ -404,6 +404,11 @@ export interface AgentFlowConfig {
   forge: string;
   baseUrl: string;
   project: string;
+  /** Agile Accelerator's own settings. Named in full rather than as `baseUrl`/
+   * `project` because those two are Jira's — see docs/CONNECTORS.md §7. */
+  agileAcceleratorInstanceUrl: string;
+  agileAcceleratorTeam: string;
+  agileAcceleratorTargetOrg: string;
   reposRoot: string;
   workspaceDir: string;
   githubOrg: string;
@@ -714,6 +719,9 @@ export function getConfig(): AgentFlowConfig {
     forge,
     baseUrl: (c.get<string>("jira.baseUrl") || "").replace(/\/+$/, ""),
     project: c.get<string>("jira.project") || "",
+    agileAcceleratorInstanceUrl: (c.get<string>("agileAccelerator.instanceUrl") || "").replace(/\/+$/, ""),
+    agileAcceleratorTeam: c.get<string>("agileAccelerator.team") || "",
+    agileAcceleratorTargetOrg: c.get<string>("agileAccelerator.targetOrg") || "",
     reposRoot: expandHome(c.get<string>("reposRoot") || "~/projects"),
     workspaceDir: expandHome(c.get<string>("workspaceDir") || "~/projects"),
     githubOrg: c.get<string>("githubOrg") || "",

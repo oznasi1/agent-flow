@@ -139,10 +139,12 @@
         "agentFlow.taskSource": {
           "type": "string",
           "enum": [
-            "jira"
+            "jira",
+            "agileAccelerator"
           ],
           "enumDescriptions": [
-            "Atlassian Jira Cloud"
+            "Atlassian Jira Cloud",
+            "Salesforce Agile Accelerator (and GUS, which is the same code line)"
           ],
           "default": "jira",
           "description": "Where Agent Flow Deck reads tasks from. Each source has its own settings under agentFlow.<source>.*. Requires a window reload."
@@ -171,6 +173,21 @@
           "type": "string",
           "default": "",
           "description": "Jira project key to pull tasks from (e.g. ABC). Set during first-run setup."
+        },
+        "agentFlow.agileAccelerator.instanceUrl": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Your Salesforce Lightning URL — GUS, or any org with the Agile Accelerator package installed. Example: `https://your-org.lightning.force.com`. Requires a window reload — the connector caches its resolved schema and identity for the session."
+        },
+        "agentFlow.agileAccelerator.team": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Your scrum team's name, exactly as it appears in Agile Accelerator. Bounds every query. Requires a window reload — the connector caches its resolved schema and identity for the session."
+        },
+        "agentFlow.agileAccelerator.targetOrg": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Salesforce CLI org alias or username. Leave blank to use the `sf` default org. Requires a window reload — the connector caches its key→Id map for the session, and changing orgs mid-session could pair a new instance with an Id memoised from the old one."
         },
         "agentFlow.reposRoot": {
           "type": "string",

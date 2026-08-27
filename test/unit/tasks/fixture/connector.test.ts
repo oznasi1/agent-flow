@@ -128,7 +128,13 @@ describe("fixture connector capabilities", () => {
 
 describe("the registry gate", () => {
   it("does NOT advertise the fixture in CONNECTOR_IDS — telemetry allowlist stays as shipped", () => {
-    expect(CONNECTOR_IDS).toEqual(["jira"]);
+    // Asserts the fixture's ABSENCE, not the size of the registry. The previous
+    // `toEqual(["jira"])` also froze "there is exactly one product connector",
+    // which is the hand-written literal registry.ts's own comment warns against
+    // — and which registry.test.ts already covers properly by deriving the
+    // manifest enum FROM CONNECTOR_IDS.
+    expect(CONNECTOR_IDS).not.toContain("fixture");
+    expect(CONNECTOR_IDS).toContain("jira");
   });
 
   it("falls back to jira for taskSource=fixture when the env var is unset — ships inert", () => {

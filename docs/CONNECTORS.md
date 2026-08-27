@@ -23,7 +23,8 @@ A task source plugs in as two interfaces, both declared in
   did.
 
 `agentFlow.taskSource` selects which connector is active, by id. **`jira` is
-the shipped default and, as of this writing, the only registered connector.**
+the shipped default.** As of this writing there is one other registered
+connector, `agileAccelerator` (§9).
 `src/tasks/registry.ts`'s `CONNECTORS` map is the full list; `CONNECTOR_IDS`
 (`Object.keys(CONNECTORS)`) is exported so the manifest, the telemetry
 allowlist, and this file's own test all derive from the registry instead of a
@@ -415,3 +416,39 @@ crashing.
 If you're starting connector #2, read `fixtureConnector.ts` top to bottom
 first — it is shorter than this document, and it is a working answer to
 almost every question §2 and §4 raise.
+
+## 9. Connector #2: `agileAccelerator`
+
+`agileAccelerator` reads from Salesforce **Agile Accelerator** — and from
+**GUS**, Salesforce's internal tracker, which is the same code line without the
+managed-package namespace. One connector serves both.
+
+It is **read-only**. `statusTargets()` returns `[]`, `moveTo()` throws
+`TaskWriteError`, and `assignToMe()` accepts and does nothing, so no write can
+reach a work item.
+
+What it demonstrates for a future connector author:
+
+- **A CLI transport rather than HTTP.** Every read is an `sf` invocation, so the
+  connector stores no credential and adds no SecretStorage key. Note that it
+  declares its own runner type instead of reusing `Runner` from
+  `src/engine/pr/provider.ts`: `execRunner` discards stdout on a non-zero exit,
+  and `sf --json` puts its error envelope there.
+- **A discovered schema rather than a hardcoded one.** A SOQL query naming a
+  field that does not exist fails *entirely*, so the connector runs one cached
+  `sf sobject describe` and builds each SELECT from the intersection with what
+  the org actually has. The same describe detects the namespace prefix and
+  resolves the team field's API name.
+- **Caches on the connector, not the provider.** `provider()` is rebuilt per
+  operation, so the describe cache, identity cache, key→Id memo and the batched
+  30s `status()` memo all live on the connector and are injected as
+  dependencies.
+- **`keyFromUrl` that mostly returns `null`.** Its record urls carry an
+  18-character Id, not a `W-` key, so it only answers when a `W-` token is
+  literally present — per §4, returning `null` more often beats inventing a
+  marker.
+
+Known gaps, all deliberate: no sprint-shaped lenses (`caps.sprints` absent), no
+size estimates (story points cannot honestly feed the 8-hour-workday
+`estimateSeconds`), no components, labels or children, and `descriptionText` is
+always empty because no description field name is verified.

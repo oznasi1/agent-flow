@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { getConfig } from "../config";
+import { makeAgileAcceleratorConnector } from "./agileAccelerator/connector";
 import { makeFixtureConnector } from "./fixture/connector";
 import { makeJiraConnector } from "./jira/connector";
 import { TaskConnector } from "./provider";
@@ -8,6 +9,7 @@ import { TaskConnector } from "./provider";
  * directory — see docs/CONNECTORS.md. */
 const CONNECTORS: Record<string, (ctx: vscode.ExtensionContext) => TaskConnector> = {
   jira: makeJiraConnector,
+  agileAccelerator: makeAgileAcceleratorConnector,
 };
 
 /** The registered ids. Exported so the telemetry snapshot's allowlist and the
