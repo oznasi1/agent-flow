@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.51.0] — 2026-08-27
+
 ### Added
 
 - **Agile Accelerator (GUS) as a second task source.** The Deck and the Tasks tab can now read
