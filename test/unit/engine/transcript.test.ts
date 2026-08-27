@@ -333,6 +333,32 @@ describe("readSessionActivity", () => {
   });
 });
 
+describe("readAgentActivity — empty project dir", () => {
+  const NOW = 1_800_000_000_000;
+  let root: string;
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-tx-empty-"));
+  });
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it("is unknown (no throw) when the dir exists but holds no transcript", () => {
+    // Claude Code creates the project dir before the first .jsonl lands in it;
+    // without the zero-files guard, files[0].path throws into the Deck poll.
+    const cwd = "/repo/no-transcripts-yet";
+    fs.mkdirSync(path.join(root, encodeProjectDir(cwd)), { recursive: true });
+    expect(readAgentActivity(root, cwd, null, NOW)).toEqual(UNKNOWN_ACTIVITY);
+  });
+
+  it("ignores non-transcript files in the dir the same way", () => {
+    const cwd = "/repo/only-strays";
+    const dir = path.join(root, encodeProjectDir(cwd));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "notes.txt"), "hello");
+    expect(readAgentActivity(root, cwd, "some-branch", NOW)).toEqual(UNKNOWN_ACTIVITY);
+  });
+});
+
 describe("deriveActivity — clock skew", () => {
   const NOW = 1_800_000_000_000;
   const userMsg: TranscriptLine = { type: "user", message: { role: "user" } };
