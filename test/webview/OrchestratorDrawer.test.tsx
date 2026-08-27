@@ -3454,3 +3454,72 @@ describe("the open and close animation", () => {
     expect(aside(container)).toBeNull();
   });
 });
+
+describe("the dry run", () => {
+  /** `wired()`'s ASM-1 with its PR already merged, so its `pr-merged` rule is met. */
+  const merged = (): RunStatus => ({
+    ...runStatus("ASM-1", "agent-flow"),
+    prs: {
+      "agent-flow": {
+        facts: {
+          number: 118, url: "u", title: "t", state: "MERGED", isDraft: false,
+          ci: { passing: 4, pending: 0, failing: [] }, review: "none", unresolved: null,
+          mergeable: "clean", ciAdvisory: false,
+        },
+        fetchedAt: 1,
+      },
+    },
+  });
+
+  const openDryRun = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()], runs: [merged()], ...over })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    return screen.getByTestId("orch-dryrun");
+  };
+
+  it("is closed until asked for", () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()], runs: [merged()] })} />);
+    expect(screen.queryByTestId("orch-dryrun")).toBeNull();
+    expect(screen.getByRole("button", { name: /what would fire/i })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("names a met rule as one that would fire", () => {
+    const panel = openDryRun();
+    expect(panel.textContent).toContain("would fire");
+    expect(panel.textContent).toContain("ASM-1");
+  });
+
+  it("does not arm the flow to answer", () => {
+    const onArm = vi.fn();
+    const onSave = vi.fn();
+    openDryRun({ onArm, onSave });
+    expect(onArm).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("says a rule is waiting when its condition is answerable and false", () => {
+    // The same flow with the PR still OPEN: `pr-merged` is false, not unobservable.
+    const panel = openDryRun({ runs: [runStatus("ASM-1", "agent-flow")] });
+    expect(panel.textContent).toContain("waiting");
+  });
+
+  it("says a rule is blocked, and why, when its source card is off the board", () => {
+    const panel = openDryRun({ runs: [] });
+    expect(panel.textContent).toContain("blocked");
+    expect(panel.textContent).toMatch(/not on the board/i);
+  });
+
+  it("does not claim the pass will act on this verdict alone", () => {
+    // `previewFlow` knows nothing about deckView's per-target dedupe or its
+    // first-spend ask, so the panel must not read as a promise.
+    expect(openDryRun().textContent).toMatch(/first spend still asks/i);
+  });
+
+  it("closes again", () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()], runs: [merged()] })} />);
+    const btn = screen.getByRole("button", { name: /what would fire/i });
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    expect(screen.queryByTestId("orch-dryrun")).toBeNull();
+  });
+});
