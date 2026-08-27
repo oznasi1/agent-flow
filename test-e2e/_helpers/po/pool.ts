@@ -67,6 +67,20 @@ export class Pool {
     await this.frame.getByRole("tab", { name: "Tasks" }).click();
   }
 
+  /** The text currently selected inside the webview.
+   *
+   *  Read INSIDE the frame on purpose. The webview is served from
+   *  `vscode-webview://…` while the workbench page is `vscode-file://vscode-app`,
+   *  so walking `iframe.webview` → `#active-frame` → `contentDocument` from a
+   *  `page.evaluate()` is a cross-origin read: it hands back `null`, always, for
+   *  every selection. A journey that did that walk read the resulting `""` as
+   *  "nothing is selected" and pinned a product defect that did not exist.
+   *  `FrameLocator`-rooted `evaluate` runs in the webview's own realm, where
+   *  `getSelection()` is the real thing. */
+  async selection(): Promise<string> {
+    return await this.frame.locator("body").evaluate(() => document.getSelection()?.toString() ?? "");
+  }
+
   notes(): Locator {
     return this.frame.locator(".np-item");
   }

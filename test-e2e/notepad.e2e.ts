@@ -12,7 +12,7 @@ import { shot } from "./_helpers/shot";
 // documented on `settle()` below, and — in whatever position it sat — a
 // failure there would have cascade-skipped the drag/selection tests, which
 // are this file's entire reason for existing. It is kept LAST as a standing
-// precaution: the highest-value tests (drag + the pinned selection defect)
+// precaution: the highest-value tests (the drag, and selection after a drag)
 // run first, so nothing about a later test's health can ever swallow them.
 // See task-5-report.md for the full reasoning.
 
@@ -99,8 +99,8 @@ describeWithHost("notepad", {}, (ctx) => {
 
   /** Drag a note by its `.grip` to a target row via a real mouse sequence.
    *  Both tests below need this — the drag itself (asserted independently),
-   *  and the selection defect, which only manifests on a row that was JUST
-   *  dragged. `dragTo` is deliberately not used: it does not reliably fire
+   *  and post-drag selection, which only means anything on a row that was
+   *  JUST dragged. `dragTo` is deliberately not used: it does not reliably fire
    *  dragstart/dragover/drop for HTML5 drag in Chromium, and a single mouse
    *  move (no `steps`) gets coalesced so the drop lands where it started. */
   async function dragNoteTo(pool: Pool, fromIndex: number, toIndex: number): Promise<void> {
@@ -137,41 +137,40 @@ describeWithHost("notepad", {}, (ctx) => {
     await backToTasks(pool);
   });
 
-  // PINS A KNOWN, DETERMINISTIC DEFECT — this is not a flake and not a test
-  // bug. In Blink, an element with the `draggable` attribute cannot be
-  // text-selected by mouse, and calling `preventDefault()` on `dragstart`
-  // does not hand the gesture back to selection. `Notepad.tsx:504-511`
-  // shows the author already anticipated exactly this trap and tried to
-  // design around it with an `armed` / `draggable={armed}` state machine
-  // that un-arms a row on mouseup/dragend — but the `onDragEnd` reset at
-  // `Notepad.tsx:626` does not fully hand the gesture back to selection for
-  // the row that was just dragged, which is what this test demonstrates.
-  // `jsdom` (the unit suite's environment) cannot observe either half of
-  // this fact, which is how the defect has survived a fully green unit
-  // suite until now — this is the ONE thing a real-Electron harness exists
-  // to catch that jsdom structurally cannot.
+  // The other half of the drag story: a row that was JUST dragged must still
+  // hand the mouse back to text selection. In Blink an element carrying the
+  // `draggable` attribute cannot be text-selected, and `preventDefault()` on
+  // `dragstart` does not give the gesture back — Blink forks "drag" from
+  // "select" at mousedown and never revisits it. `Notepad.tsx` designs around
+  // that with the `armed` / `draggable={armed}` state machine that un-arms the
+  // row on mouseup/dragend; this test is what proves the machine actually works
+  // in a real Electron workbench, which `jsdom` structurally cannot observe.
   //
-  // `test.fail()` (not `test.skip`/`test.fixme`, which would stop this from
-  // running at all and let the defect drift silently) marks failure as the
-  // EXPECTED outcome: the suite stays green while this fails, and the day
-  // someone fixes the drag/selection interaction in Notepad.tsx, THIS TEST
-  // GOES RED — that is the intended alarm. When that happens, the fix here
-  // is to delete the `test.fail()` line below, not to delete the test.
-  test("dragging a note leaves its body unselectable afterwards (pinned defect)", async ({}, testInfo) => {
-    test.fail();
+  // This test previously carried `test.fail()` and a comment declaring a
+  // "pinned defect" in Notepad.tsx. There was no defect: it read the selection
+  // by walking `iframe.webview` → `#active-frame` → `contentDocument` from a
+  // `page.evaluate()` in the workbench realm, which is a CROSS-ORIGIN read
+  // (`vscode-file://vscode-app` reaching into `vscode-webview://…`) and comes
+  // back `null` no matter what is selected — a `?? ""` then turned that null
+  // into "nothing selected". Measured with the same drag and the same
+  // selection gesture, the webview's own realm reports real selected text. Read
+  // the selection through `pool.selection()` and nowhere else; its doc comment
+  // records the trap.
+  test("a note body is still selectable after its row was dragged", async ({}, testInfo) => {
     const pool = await Pool.open(ctx.page(), 2);
     await pool.openNotepad();
-    // Reuses the 3 notes the previous (still-passing) drag test left behind
-    // in this shared host — see the top-of-file comment on test ordering.
+    // Reuses the 3 notes the previous drag test left behind in this shared
+    // host — see the top-of-file comment on test ordering.
     await expect(pool.notes()).toHaveCount(3);
 
-    // The defect is specifically "selection after THIS row was dragged", so
+    // The guarantee is specifically "selection after THIS row was dragged", so
     // the drag has to happen here too, not just be inherited from the prior
     // test's already-settled DOM.
     await dragNoteTo(pool, 0, 2);
-    await shot(ctx.page(), testInfo, "3 · dragged again, about to attempt selection");
+    await shot(ctx.page(), testInfo, "3 · dragged again, about to select");
 
     const body = pool.notes().nth(0).locator(".np-body");
+    const text = (await body.innerText()).trim();
     const box = await body.boundingBox();
     if (!box) throw new Error("notepad selection: the note body had no box");
     await pool.page.mouse.move(box.x + 4, box.y + box.height / 2);
@@ -179,27 +178,13 @@ describeWithHost("notepad", {}, (ctx) => {
     await pool.page.mouse.move(box.x + box.width - 4, box.y + box.height / 2, { steps: 8 });
     await pool.page.mouse.up();
 
-    const selected = await pool.page.evaluate(() => {
-      // Mirrors _helpers/host.ts's tasksFrame(): the outer wrapper is `.last()`
-      // among every `iframe.webview` the workbench may have mounted, with the
-      // real React app one level further in at `#active-frame`.
-      const outers = document.querySelectorAll("iframe.webview");
-      const wv = outers.length > 0 ? (outers[outers.length - 1] as HTMLIFrameElement) : null;
-      const inner = wv?.contentDocument?.querySelector("#active-frame") as HTMLIFrameElement | null;
-      return inner?.contentDocument?.getSelection()?.toString() ?? "";
-    });
-    // `backToTasks` runs BEFORE the assertion below on purpose: that
-    // assertion is expected to throw (this test pins a failure via
-    // `test.fail()`), and anything after a throw never runs. Without this
-    // ordering, the pinned failure would skip cleanup and leave the webview
-    // on the Notepad tab, which cascades into a false failure in the NEXT
-    // test via Pool.open()'s idempotency check — reproduced once while
-    // building this: see backToTasks()'s own doc comment for the mechanism.
+    const selected = (await pool.selection()).trim();
+    // Non-empty AND part of this row's body: an empty string would mean the
+    // drag ate the gesture, and text from elsewhere would mean the drag moved
+    // the selection instead of the row.
+    expect(selected.length).toBeGreaterThan(0);
+    expect(text).toContain(selected);
     await backToTasks(pool);
-    // Expected to be 0 today (the pinned defect). Fixed Notepad.tsx makes
-    // this > 0, which — via test.fail() above — turns this test RED as the
-    // signal to remove the pin.
-    expect(selected.trim().length).toBeGreaterThan(0);
   });
 
   test("running a note seeds a session and lands a plan file", async ({}, testInfo) => {
