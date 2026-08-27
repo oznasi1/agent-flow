@@ -100,6 +100,13 @@ export function mostActive(activities: AgentActivity[]): AgentActivity {
  * the caller passes null instead and this refuses to promote — no single failed
  * probe may call a card dead. The test for it is `=== 0`, which null already
  * fails, so the guard is the type rather than a new branch.
+ *
+ * Honest limit: refusing to promote does not make the underlying reading any
+ * more certain. When the registry is unreadable, a card can sit at
+ * `blocked · waiting on Edit` indefinitely while whether that process is even
+ * still alive is genuinely unknown — this function has no opinion either way.
+ * That is still the right trade: calling a live card dead on a failed probe is
+ * worse than leaving a dead one looking blocked a little longer.
  */
 export function promoteExited(reduced: AgentActivity, liveSessionCount: number | null): AgentActivity {
   return reduced.midWork && reduced.state !== "working" && liveSessionCount === 0
