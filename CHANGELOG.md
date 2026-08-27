@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A card stopped at a permission prompt now says so.** `stalled` has always
+  been a deliberate hedge — a tool call outstanding for over 45 seconds is a
+  permission prompt *or* a long command, and the transcript says the same thing
+  for both. Where the pending tool's name settles it, the card now reads
+  **blocked** and names what it is waiting on: `blocked · waiting on Bash · 12m
+  ago`. That covers a pending question, a plan awaiting approval, and an edit or
+  command left at the prompt. Every other tool keeps reading `stalled`, which now
+  names its tool too — a backgrounded session can legitimately sit for
+  three quarters of an hour, and nothing pretends to know better.
+
+### Fixed
+
+- **A session registry that could not be read no longer marks live cards as
+  exited.** `exited` was assigned whenever no live session was found, and an
+  unreadable `~/.claude/sessions` looked exactly like an empty one — so a single
+  failed read could move every in-flight card to Action required and raise the
+  sidebar badge to match, six seconds at a time. The read now reports whether it
+  succeeded, and a card is only called exited when its process is known to be
+  gone. Expect one or two cards that used to read `exited` to read `working`,
+  `idle` or `stalled` instead.
+
 ## [0.51.0] — 2026-08-27
 
 ### Added
