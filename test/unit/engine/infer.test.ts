@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { inferServices, type InferSource } from "../../../src/engine/infer";
+import { inferServices, confirmedServices, type InferSource } from "../../../src/engine/infer";
 import { mkRepos } from "../../_helpers/factories";
 
 const repos = mkRepos([
@@ -96,5 +96,35 @@ describe("inferServices — precedence & dedupe", () => {
 
   it("returns nothing when no repo matches", () => {
     expect(inferServices(src({ summary: "totally unrelated work" }), repos)).toEqual([]);
+  });
+});
+
+describe("confirmedServices — what may attach without the user's say-so", () => {
+  const infer = (o: Partial<InferSource>) => inferServices(src(o), repos);
+  const confirmedNames = (o: Partial<InferSource>) =>
+    confirmedServices(infer(o)).map((r) => r.service.name).sort();
+
+  it("drops label and text guesses when the ticket confirms a repo via component", () => {
+    expect(
+      confirmedNames({ summary: "sync centaur too", components: ["account-service"], labels: ["domains-manager"] }),
+    ).toEqual(["account-service"]);
+  });
+
+  it("keeps every confirmed repo when the ticket has several components", () => {
+    expect(confirmedNames({ summary: "x", components: ["account-service", "centaur"], labels: ["scan-service"] })).toEqual([
+      "account-service",
+      "centaur",
+    ]);
+  });
+
+  it("falls back to the guesses when the ticket confirms nothing", () => {
+    expect(confirmedNames({ summary: "centaur needs love", labels: ["scan-service"] })).toEqual([
+      "centaur",
+      "scan-service",
+    ]);
+  });
+
+  it("returns empty for empty input", () => {
+    expect(confirmedServices([])).toEqual([]);
   });
 });

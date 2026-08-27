@@ -54,6 +54,18 @@ export function inferServices(src: InferSource, repos: ServiceRef[]): InferResul
   return [...found.values()];
 }
 
+/**
+ * The inferred repos that may attach to a task without the user's say-so: only
+ * matches the ticket itself records (components) count as confirmed. Label and
+ * text matches are guesses — kept solely as a fallback when the ticket confirms
+ * nothing at all, because a guess still beats an empty default there (and it is
+ * all a source without components can ever offer).
+ */
+export function confirmedServices(results: InferResult[]): InferResult[] {
+  const confirmed = results.filter((r) => r.reason === "component");
+  return confirmed.length ? confirmed : results;
+}
+
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

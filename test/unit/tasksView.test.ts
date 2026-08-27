@@ -582,6 +582,26 @@ describe("fetch", () => {
     ]);
   });
 
+  it("guesses only ticket-confirmed repos when a component matches (label guess dropped)", async () => {
+    clientStub.fetchTasks.mockResolvedValue([
+      { key: "ASM-1", summary: "s", labels: ["centaur"], components: ["account-service"] },
+    ]);
+    const { send, posted } = setup();
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    const tasksMsg = posted().find((m) => m.type === "tasks") as { tasks: { services?: string[] }[] };
+    expect(tasksMsg.tasks[0].services).toEqual(["account-service"]);
+  });
+
+  it("keeps label guesses on the card when the ticket confirms no repo", async () => {
+    clientStub.fetchTasks.mockResolvedValue([
+      { key: "ASM-1", summary: "s", labels: ["centaur"], components: [] },
+    ]);
+    const { send, posted } = setup();
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    const tasksMsg = posted().find((m) => m.type === "tasks") as { tasks: { services?: string[] }[] };
+    expect(tasksMsg.tasks[0].services).toEqual(["centaur"]);
+  });
+
   it("prunes then sorts by saved order in the full My-sprint view", async () => {
     clientStub.fetchTasks.mockResolvedValue([
       { key: "A", summary: "", labels: [], components: [] },
@@ -1042,13 +1062,28 @@ describe("detail", () => {
       type: "detail",
       key: "ASM-1",
       descriptionText: "desc",
-      // account-service from the component, centaur from the label
-      inferred: ["account-service", "centaur"],
+      // account-service is confirmed by the ticket's component; the centaur label
+      // is only a guess, so it must not ride along as pre-selected.
+      inferred: ["account-service"],
       repos: ["account-service", "centaur"],
       sourceComponents: ["account-service"],
       // "centaur" is a discovered repo but not a component of ASM → absent
       mappable: { "account-service": "account-service" },
     });
+  });
+
+  it("keeps label/text guesses in `inferred` when the ticket confirms no repo", async () => {
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "Do the thing",
+      descriptionText: "desc",
+      labels: ["centaur"],
+      components: [],
+      url: "https://jira/browse/ASM-1",
+    });
+    const { send, posted } = setup();
+    await send({ type: "detail", key: "ASM-1" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "ASM-1", inferred: ["centaur"] }));
   });
 
   it("reads the issue before the component list, so a dead token still re-gates the panel", async () => {
@@ -1831,7 +1866,9 @@ describe("takeTask", () => {
     // Inference order would put delta-service (component) ahead of billing-service
     // (label); the partition keeps discovery order inside each group instead.
     expect(items.map((i) => i.label)).toEqual(["billing-service", "delta-service", "aardvark-service", "centaur"]);
-    expect(items.map((i) => i.picked)).toEqual([true, true, false, false]);
+    // Only delta-service is confirmed on the ticket; the billing-service label is a
+    // guess — listed with the inferred group, but not pre-checked.
+    expect(items.map((i) => i.picked)).toEqual([false, true, false, false]);
   });
 
   it("aborts when the repo QuickPick is cancelled", async () => {
@@ -2853,6 +2890,35 @@ describe("Take funnel", () => {
     expect(picked.accepted_inference).toBe(true);
   });
 
+  it("pre-checks only ticket-confirmed repos in the confirm QuickPick; a label guess stays listed unchecked", async () => {
+    const repos = mkRepos(["acme-billing", "centaur"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    clientStub.getDetail.mockResolvedValue({
+      key: "BILL-1234",
+      summary: "Fix the billing thing",
+      descriptionText: "desc",
+      labels: ["centaur"], // a guess — must not be pre-checked
+      components: ["acme-billing"], // confirmed on the ticket
+      url: "https://jira/browse/BILL-1234",
+    });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { provider } = setup();
+    await provider.takeTask("BILL-1234", "command");
+    const call = vi.mocked(window.showQuickPick).mock.calls.find((c) =>
+      String((c[1] as { title?: string } | undefined)?.title).includes("confirm the repos"),
+    )!;
+    const items = (await call[0]) as { label: string; picked: boolean; description: string }[];
+    const byLabel = new Map(items.map((i) => [i.label, i]));
+    expect(byLabel.get("acme-billing")!.picked).toBe(true);
+    expect(byLabel.get("centaur")!.picked).toBe(false);
+    // Still surfaced as a suggestion — just not attached without a say-so.
+    expect(byLabel.get("centaur")!.description).toBe("inferred (label)");
+    // Accepting the pre-checked set as-is counts as accepting the inference.
+    const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
+    expect(picked.inferred_count).toBe(1);
+    expect(picked.accepted_inference).toBe(true);
+  });
+
   it("marks accepted_inference false when the confirmed repo count differs from inference", async () => {
     const repos = mkRepos(["acme-billing", "centaur"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
@@ -3466,6 +3532,22 @@ describe("takeBatch", () => {
     await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
     const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
     expect(picked).toEqual(["billing"]); // payments is in the filter set but not inferred — excluded
+  });
+
+  it("narrows a batched task to its ticket-confirmed repos, dropping text guesses", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
+    clientStub.getDetail.mockResolvedValue({
+      key: "ASM-1",
+      summary: "fix the payments flow", // payments is only a text guess
+      descriptionText: "desc",
+      labels: [],
+      components: ["billing"], // billing is confirmed on the ticket
+      url: "https://jira/browse/ASM-1",
+    });
+    const { provider } = setup();
+    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
+    expect(picked).toEqual(["billing"]);
   });
 
   it("falls back to the whole filter set when a task infers no repo in it", async () => {
@@ -6195,10 +6277,10 @@ describe("takeTask: a ticket with children", () => {
     });
   });
 
-  /** Four repos where the PARENT infers two of them (one by label, one by component)
-   *  and the child infers none — the exact shape the fan-out's repo scoping is about.
-   *  "nothing recognisable here" is the non-matching summary the takeBatch tests above
-   *  already use. */
+  /** Four repos where the PARENT confirms two of them via components (plus a label
+   *  guess that must NOT widen the set) and the child infers none — the exact shape
+   *  the fan-out's repo scoping is about. "nothing recognisable here" is the
+   *  non-matching summary the takeBatch tests above already use. */
   function parentInfersTwoOfFourRepos(): void {
     vi.mocked(discoverRepos).mockReturnValue(
       mkRepos(["aardvark-service", "billing-service", "centaur", "delta-service"]),
@@ -6207,7 +6289,7 @@ describe("takeTask: a ticket with children", () => {
       key === "ASM-1"
         ? {
             key, summary: "the parent", descriptionText: "",
-            labels: ["billing-service"], components: ["delta-service"],
+            labels: ["centaur"], components: ["billing-service", "delta-service"],
             url: `https://jira/browse/${key}`,
           }
         : {
