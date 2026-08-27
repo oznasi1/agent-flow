@@ -96,7 +96,17 @@ function coerceFlow(v: unknown): Flow | null {
   const f = v as Partial<Flow>;
   if (typeof f.id !== "string" || !VALID_FLOW_ID.test(f.id)) return null;
   if (!Array.isArray(f.nodes) || !Array.isArray(f.edges)) return null;
-  const shaped = { ...(v as Flow), nodes: f.nodes.filter(validNode), edges: f.edges.filter(validEdge) };
+  const shaped = {
+    ...(v as Flow),
+    // Only the boolean `true` a released build writes arms. `evaluateFlow` gates
+    // on `!flow.armed`, so a truthy non-boolean — a hand-edited `"false"` is the
+    // nastiest shape — would read as ARMED, and an armed flow launches paid
+    // sessions and runs shell with no ask. Disarmed is the reading that costs a
+    // toggle, not money.
+    armed: f.armed === true,
+    nodes: f.nodes.filter(validNode),
+    edges: f.edges.filter(validEdge),
+  };
   return latchActionMismatches(shaped);
 }
 

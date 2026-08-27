@@ -298,6 +298,33 @@ describe("removeFlow", () => {
   });
 });
 
+describe("readFlows — an armed flag that is not a boolean", () => {
+  it("reads every non-boolean armed value back as disarmed", () => {
+    // `evaluateFlow` gates on `if (!flow.armed)`, so a truthy non-boolean — the
+    // string "false" is the nastiest — would evaluate the flow as ARMED, and an
+    // armed flow can launch paid sessions and run shell with no ask. Released
+    // builds only ever write the booleans, so only the boolean `true` arms.
+    const { io } = fakeIo({
+      [path.join(DIR, "a.json")]: JSON.stringify({ ...flow({ id: "a" }), armed: "false" }),
+      [path.join(DIR, "b.json")]: JSON.stringify({ ...flow({ id: "b" }), armed: 1 }),
+      [path.join(DIR, "c.json")]: JSON.stringify({ ...flow({ id: "c" }), armed: {} }),
+    });
+    const read = readFlows(io, DIR);
+    expect(read).toHaveLength(3);
+    expect(read.every((f) => f.armed === false)).toBe(true);
+  });
+
+  it("keeps a boolean true armed and a boolean false disarmed", () => {
+    const { io } = fakeIo({
+      [path.join(DIR, "on.json")]: JSON.stringify(flow({ id: "on", armed: true })),
+      [path.join(DIR, "off.json")]: JSON.stringify(flow({ id: "off", armed: false })),
+    });
+    const byId = new Map(readFlows(io, DIR).map((f) => [f.id, f.armed]));
+    expect(byId.get("on")).toBe(true);
+    expect(byId.get("off")).toBe(false);
+  });
+});
+
 describe("readFlows — a filename that does not match the record's own id", () => {
   it("skips a record whose filename is not <id>.json", () => {
     // `cp f1.json f1-backup.json` puts two records claiming the same id in the
