@@ -116,7 +116,14 @@ function coerceFlow(v: unknown): Flow | null {
     // sessions and runs shell with no ask. Disarmed is the reading that costs a
     // toggle, not money.
     armed: f.armed === true,
-    nodes: f.nodes.filter(validNode),
+    // A `join` that is not one of the two modes reads as "all". Every released
+    // build has written the field on every node since the model existed, so a
+    // missing or mangled join is only ever hand-authored — and `evaluate.ts`
+    // asks `join === "all"`, so leaving it absent silently means "any": an
+    // intended wait-for-both junction firing on the FIRST met edge, a paid
+    // launch the wiring said to wait on. "all" is the fail-safe reading — a
+    // junction that waits too hard costs a look at the drawer, never money.
+    nodes: f.nodes.filter(validNode).map((n) => (n.join === "any" || n.join === "all" ? n : { ...n, join: "all" as const })),
     edges: dedupedEdges,
   };
   return latchActionMismatches(shaped);

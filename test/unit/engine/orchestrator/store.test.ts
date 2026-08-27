@@ -298,6 +298,42 @@ describe("removeFlow", () => {
   });
 });
 
+describe("readFlows — a node with no usable join", () => {
+  it('reads a missing join as "all" — the junction that cannot fire prematurely', () => {
+    // Every released build has written `join` on every node since the model
+    // existed, so a join-less node is only ever hand-authored. `evaluate.ts`
+    // asks `target.join === "all"`, so absent read as "any" — and an intended
+    // wait-for-both junction fired on the FIRST met edge: a paid launch the
+    // wiring said to wait on. "all" is the fail-safe reading: a junction that
+    // waits too hard costs a look at the drawer, never money.
+    const p = path.join(DIR, "f1.json");
+    const { io } = fakeIo({
+      [p]: JSON.stringify({
+        ...flow(),
+        nodes: [
+          { id: "n1", kind: "notify", x: 0, y: 0, message: "m" }, // no join
+          { id: "n2", kind: "notify", x: 0, y: 0, join: "sometimes", message: "m" }, // not a JoinMode
+        ],
+      }),
+    });
+    expect(readFlows(io, DIR)[0].nodes.map((n) => n.join)).toEqual(["all", "all"]);
+  });
+
+  it("keeps a valid join untouched", () => {
+    const p = path.join(DIR, "f1.json");
+    const { io } = fakeIo({
+      [p]: JSON.stringify({
+        ...flow(),
+        nodes: [
+          { id: "n1", kind: "notify", x: 0, y: 0, join: "any", message: "m" },
+          { id: "n2", kind: "notify", x: 0, y: 0, join: "all", message: "m" },
+        ],
+      }),
+    });
+    expect(readFlows(io, DIR)[0].nodes.map((n) => n.join)).toEqual(["any", "all"]);
+  });
+});
+
 describe("readFlows — two edges sharing one id", () => {
   it("keeps only the first, so no per-edge bookkeeping is ever shared", () => {
     // Everything downstream keys per-edge state by `e.id`: evaluate.ts's met
