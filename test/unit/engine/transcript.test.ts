@@ -180,10 +180,13 @@ describe("deriveActivity", () => {
     expect(deriveActivity([userMsg, l], NOW - 60_000, NOW).pendingTool).toBeNull();
   });
 
-  it("still reads stalled for every shape above — this task changes no state", () => {
+  // AskUserQuestion used to be pinned to `stalled` here too, but that was a
+  // Task-1-only invariant ("this task changes no state") — the ceiling table
+  // above now deliberately reads a stale AskUserQuestion as `blocked`. Do not
+  // restore that assertion.
+  it("falls through to stalled for a nameless tool, and for a listed tool under its ceiling", () => {
     expect(deriveActivity([userMsg, asstTool], NOW - 60_000, NOW).state).toBe("stalled");
     expect(deriveActivity([userMsg, asstToolNamed("Bash")], NOW - 60_000, NOW).state).toBe("stalled");
-    expect(deriveActivity([userMsg, asstToolNamed("AskUserQuestion")], NOW - 60_000, NOW).state).toBe("stalled");
   });
 
   // Thresholds are measured, not assumed — see the spec's calibration table.
