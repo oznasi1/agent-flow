@@ -10,14 +10,20 @@ export function defaultRunsDir(): string {
   return path.join(os.homedir(), ".agentflow", "runs");
 }
 
-function fileFor(dir: string, key: string): string {
-  return path.join(dir, `${key}.json`);
+/** Null for a key that names a path: a separator would land the write — or the
+ * delete — outside the runs dir (`PROJ/1` threw ENOENT and was swallowed
+ * upstream; `../x` deleted a sibling). Escaping the dir requires a separator,
+ * so refusing one keeps every released single-segment key working unchanged. */
+function fileFor(dir: string, key: string): string | null {
+  return /[/\\]/.test(key) ? null : path.join(dir, `${key}.json`);
 }
 
 /** Persist a run, keyed by ticket — re-taking a task overwrites its record. */
 export function writeRun(dir: string, run: Run): void {
+  const file = fileFor(dir, run.key);
+  if (!file) return;
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(fileFor(dir, run.key), JSON.stringify(run, null, 2) + "\n");
+  fs.writeFileSync(file, JSON.stringify(run, null, 2) + "\n");
 }
 
 /** All runs in the store, newest first. Malformed files are skipped, not fatal. */
@@ -44,7 +50,8 @@ export function readRuns(dir: string): Run[] {
 
 /** Forget a run (e.g. after it's merged/archived). */
 export function removeRun(dir: string, key: string): void {
-  fs.rmSync(fileFor(dir, key), { force: true });
+  const file = fileFor(dir, key);
+  if (file) fs.rmSync(file, { force: true });
 }
 
 /** The path the Deck's "Open" acts on for a run: the multi-root workspace file,

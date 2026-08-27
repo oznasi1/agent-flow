@@ -64,6 +64,43 @@ describe("runs store", () => {
   });
 });
 
+describe("writeRun / removeRun — path-escaping keys", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-runs-esc-"));
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it("no-ops a write whose key holds a path separator, instead of throwing ENOENT", () => {
+    expect(() => writeRun(dir, mkRun("PROJ/1", 100))).not.toThrow();
+    expect(fs.readdirSync(dir)).toEqual([]);
+    expect(fs.existsSync(path.join(dir, "PROJ"))).toBe(false);
+  });
+
+  it("no-ops a write whose key climbs out of the runs dir", () => {
+    const outside = path.join(path.dirname(dir), `escape-w-${process.pid}.json`);
+    fs.rmSync(outside, { force: true });
+    expect(() => writeRun(dir, mkRun(`../escape-w-${process.pid}`, 100))).not.toThrow();
+    expect(fs.existsSync(outside)).toBe(false);
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+
+  it("no-ops a remove through a climbing key — the file outside the dir survives", () => {
+    const outside = path.join(path.dirname(dir), `escape-r-${process.pid}.json`);
+    fs.writeFileSync(outside, "{}");
+    removeRun(dir, `../escape-r-${process.pid}`);
+    expect(fs.existsSync(outside)).toBe(true);
+    fs.rmSync(outside, { force: true });
+  });
+
+  it("still round-trips and removes an ordinary key", () => {
+    writeRun(dir, mkRun("PROJ-1", 100));
+    expect(readRuns(dir).map((r) => r.key)).toEqual(["PROJ-1"]);
+    removeRun(dir, "PROJ-1");
+    expect(readRuns(dir)).toEqual([]);
+  });
+});
+
 describe("readRuns — malformed record files", () => {
   let dir: string;
   beforeEach(() => {
