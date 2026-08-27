@@ -149,9 +149,9 @@ git commit -m "feat(batch): carry a task's run kind through openSharedWorkspace"
       }),
     );
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
-    expect(plans[0].matches[0].prompt).toContain("Review aws-ops#8491 — ASM-1");
+    expect(plans[0].matches[0].prompt).toContain("Review aws-ops#8491 — PROJ-1");
     // The task that set nothing still gets the shared template, rendered as always.
-    expect(plans[1].matches[0].prompt).toContain("Start ASM-2");
+    expect(plans[1].matches[0].prompt).toContain("Start PROJ-2");
   });
 
   it("puts a task's brief in its own sub-directory when it asks for one", async () => {
@@ -189,8 +189,8 @@ git commit -m "feat(batch): carry a task's run kind through openSharedWorkspace"
   it("leaves a task batch's brief path exactly where it was", async () => {
     await openSharedWorkspace(baseReq());
     expect(writes((p) => p.endsWith("TASK.md")).map((c) => String(c[0]))).toEqual([
-      "/repos/api/.claude/worktrees/ASM-1/.pick-task/TASK.md",
-      "/repos/api/.claude/worktrees/ASM-2/.pick-task/TASK.md",
+      "/repos/api/.claude/worktrees/PROJ-1/.pick-task/TASK.md",
+      "/repos/api/.claude/worktrees/PROJ-2/.pick-task/TASK.md",
     ]);
   });
 ```

@@ -15,10 +15,10 @@ Measured on the author's machine while writing this:
 | cwd | open sessions | on the Deck today |
 |---|---|---|
 | `~/dev/agent-flow` | 4 | ✗ |
-| `~/At-Bay-Projects/automation_e2e` | 3 | ✗ |
-| `centaur/.claude/worktrees/ASM-5772` | 2 | ✓ — as card `ASM-5772`, showing one of them |
+| `~/Work-Projects/e2e_suite` | 3 | ✗ |
+| `webapp/.claude/worktrees/PROJ-5772` | 2 | ✓ — as card `PROJ-5772`, showing one of them |
 | `agent-flow/.claude/worktrees/explore-verify-on-environment` | 1 | ✗ |
-| `~/At-Bay-Projects/oncall-agent` | 1 | ✗ |
+| `~/Work-Projects/infra-tools` | 1 | ✗ |
 | `portfolio/.claude/worktrees/surf-portfolio` | 1 | ✗ |
 
 Eleven cards, twelve open agents, one card in common. This design closes that
@@ -97,7 +97,7 @@ export function defaultSessionsDir(): string;
 export function readOpenSessions(dir: string): OpenSession[];
 
 /** Sessions grouped by the git repo root containing their cwd, so a session
- *  started in `centaur/src` groups with one started in `centaur`. Memoized per
+ *  started in `webapp/src` groups with one started in `webapp`. Memoized per
  *  cwd for the process — a directory does not change repo. A cwd in no repo
  *  groups under itself. */
 export function groupByPlace(sessions: OpenSession[]): Map<string, OpenSession[]>;
@@ -130,7 +130,7 @@ export interface RunStatus {
 ```
 
 A tracked run collects sessions from every one of its `repos[].path`, which is
-what fixes `ASM-5772` showing one of its two agents.
+what fixes `PROJ-5772` showing one of its two agents.
 
 Each session's activity is read from *its own* transcript rather than the
 directory's newest, which is what today's per-repo read settles for:
@@ -167,7 +167,7 @@ keeps the last-known state it shows today instead of dropping to *parked*.
 }
 ```
 
-`summary` is derived locally and never fetched: `ASM-5641-team-table-new-design`
+`summary` is derived locally and never fetched: `PROJ-5641-team-table-new-design`
 gives *"team table new design"*, and a branch with no key gives the directory
 basename. Reading the real summary would mean an extra Jira call before the card
 could even be built, to improve a line the branch already says.
@@ -190,7 +190,7 @@ A synthetic run is never written to `~/.agentflow/runs/` unless the user asks
 
 | | Gate | Why |
 |---|---|---|
-| Jira poll | the branch matches `^${config.project}-\d+` | `project` is already configured (`ASM`), so an inferred key can only ever name an issue in the project the user works in. The card marks it `~inferred`. |
+| Jira poll | the branch matches `^${config.project}-\d+` | `project` is already configured (`PROJ`), so an inferred key can only ever name an issue in the project the user works in. The card marks it `~inferred`. |
 | PR fetch | the repo is git, has a branch, and that branch is **not** the repo's default branch | `gh pr list --head <feature-branch>` can only return that branch's pull request. |
 
 `isTicketRun(run)` keeps gating the Jira poll: a local run with an inferred key
@@ -259,8 +259,8 @@ the intended reading, and it makes `deriveBucket`'s own doc comment true.
 
 ```
 ┌────────────────────────────────────────────────┐   ┌────────────────────────────────────────────────┐
-│ agent-flow   local            ended turn · 1h  │   │ ASM-5772          In Review     working · 4s   │
-│ main · +412 −38 · 6 files · dirty              │   │ centaur · ASM-5772-bec-show-date-detected…     │
+│ agent-flow   local            ended turn · 1h  │   │ PROJ-5772          In Review     working · 4s   │
+│ main · +412 −38 · 6 files · dirty              │   │ webapp · PROJ-5772-bec-show-date-detected…     │
 │ ▾ 4 agents                                     │   │ pr #318 · ✓ 12 checks · approved               │
 │    agent-flow-2e    working · 12s   ·  3h      │   │ ▸ 2 agents                                     │
 │    agent-flow-47    ended turn · 1h ·  5h      │   │                                                │
@@ -295,7 +295,7 @@ forget; closing the last session in a place removes the card.
 
 **Track it** writes the synthetic run to `~/.agentflow/runs/`:
 
-- key inferred and free → `ASM-5641.json`, `kind: "task"`, keeping the ticket url
+- key inferred and free → `PROJ-5641.json`, `kind: "task"`, keeping the ticket url
 - key inferred but a tracked run already owns it → the `local-…` key, still
   `kind: "task"` with the url, so it polls Jira but cannot overwrite the record
   that exists
@@ -346,12 +346,12 @@ dwarf the feature.
 | synthetic run | the key is stable across two reads of the same place, is filename-safe, and differs for two places sharing a basename; `createdAt` is the earliest session's `startedAt`; `summary` is the branch tail after the key, and the basename when there is no key |
 | `readSessionActivity` | the named transcript is read even when a newer one sits beside it; an absent `<sessionId>.jsonl` yields `unknown` |
 | the aggregate | four sessions decide the card, not the newest transcript; a tracked run with no session open keeps its per-repo state instead of dropping to `unknown` |
-| inference | `ASM-5641-team-table` → key and url; `feature/x` → none; `main` → none; `PROJ-12-x` when the config names `ASM` → none |
+| inference | `PROJ-5641-team-table` → key and url; `feature/x` → none; `main` → none; `PROJ-12-x` when the config names `PROJ` → none |
 | `defaultBranch` / `prEligible` | `origin/HEAD` present; absent with `origin/main`; absent with `origin/master`; no origin at all → `""` and not eligible; a non-git repo → not eligible; a feature branch → eligible |
 | `buildAll` | a session matching a tracked repo path attaches there and spawns no second card; an unmatched place becomes a local card; a stale `prfacts/explore-*.json` on a default branch is not read; a local card on a feature branch enqueues a fetch; the toggle off drops local cards *and* the agents row |
 | `status` | `needs-you` outranks `working` in `mostActive`; a place with one ended-turn agent among three working lands in Action required |
 | `DeckApp` | collapsed and expanded agents row; a single agent renders its name; the `local` and `~inferred` chips; Track it posts and the card has no Forget; a tracked card shows both its agents |
-| Track it | an inferred, free key writes `ASM-5641.json` with the url; an inferred key a tracked run already owns writes the `local-…` key and leaves the existing record intact; no key writes an `explore` record; the orphaned `prfacts/local-….json` is deleted |
+| Track it | an inferred, free key writes `PROJ-5641.json` with the url; an inferred key a tracked run already owns writes the `local-…` key and leaves the existing record intact; no key writes an `explore` record; the orphaned `prfacts/local-….json` is deleted |
 
 Existing tests that assert a multi-repo run's aggregate agent state may need
 updating for the `STATE_RANK` flip.

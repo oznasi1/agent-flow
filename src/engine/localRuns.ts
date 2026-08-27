@@ -17,7 +17,7 @@ function escapeRe(s: string): string {
 /**
  * The ticket a branch names, or null. Gated on the project key the user actually
  * works in, so a guess can only ever name an issue that could exist for them —
- * `feature/x` names nothing, and `PROJ-12-x` in an ASM shop is somebody else's
+ * `feature/x` names nothing, and `OTHER-12-x` in a PROJ shop is somebody else's
  * convention. The summary is the branch's own tail, never fetched: reading the
  * real one would mean a Jira round trip before the card could be built at all,
  * to improve a line the branch already says.
@@ -55,7 +55,7 @@ export interface LocalGroup {
   places: string[];
 }
 
-/** A workspace file's display name — "centaur+e2e.code-workspace" → "centaur+e2e". */
+/** A workspace file's display name — "webapp+e2e.code-workspace" → "webapp+e2e". */
 function workspaceName(file: string): string {
   return path.basename(file).replace(/\.code-workspace$/, "");
 }

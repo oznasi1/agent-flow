@@ -15,7 +15,7 @@
 - **Never destructive.** The merge stays additive-or-nothing. No task removes, reorders or rewrites an existing workspace folder.
 - **No new configuration key.** The prompt is unconditional when something new would be added.
 - **Name dedup is case-insensitive** and compares against **both** a declared folder's `name` field **and** its path's basename.
-- **Dedup keys off the bare repo name**, never the folder label. Batch labels are key-qualified (`ASM-1-api`) and must still dedup against a folder called `api`.
+- **Dedup keys off the bare repo name**, never the folder label. Batch labels are key-qualified (`PROJ-1-api`) and must still dedup against a folder called `api`.
 - **Dismissing the add-prompt means "leave as-is", not "abort".** Worktrees already exist by then; the precedent is `resolveRemoteControl` in `src/tasksView.ts`.
 - **Run the whole suite before each commit:** `npm test`. Baseline on this branch is 62 files / 1618 tests passing.
 - Repo style: comments explain *why*, not *what*. Match the surrounding density in `src/engine/workspace.ts`.
@@ -44,17 +44,17 @@ Add to `test/unit/engine/workspace.test.ts`, immediately before the existing `de
 describe("workspaceFolders", () => {
   it("returns each folder's name and canonical path, resolved against the file's dir", () => {
     readFileSync.mockReturnValue(
-      '{ "folders": [{ "name": "API", "path": "api" }, { "path": "/repos/centaur" }] }',
+      '{ "folders": [{ "name": "API", "path": "api" }, { "path": "/repos/webapp" }] }',
     );
     expect(workspaceFolders("/repos/team.code-workspace")).toEqual([
       { name: "API", path: "/repos/api" },
-      { path: "/repos/centaur" },
+      { path: "/repos/webapp" },
     ]);
   });
 
   it("skips folders with no string path", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "name": "nameless" }, { "path": "/repos/centaur" }] }');
-    expect(workspaceFolders("/ws/t.code-workspace")).toEqual([{ path: "/repos/centaur" }]);
+    readFileSync.mockReturnValue('{ "folders": [{ "name": "nameless" }, { "path": "/repos/webapp" }] }');
+    expect(workspaceFolders("/ws/t.code-workspace")).toEqual([{ path: "/repos/webapp" }]);
   });
 
   it("distinguishes a valid empty folders array from a parse failure", () => {
@@ -226,47 +226,47 @@ describe("planWorkspaceMerge", () => {
   });
 
   it("buckets an already-declared path as present", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
-    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("centaur", "/repos/centaur")]);
-    expect(plan.present.map((c) => c.repoName)).toEqual(["centaur"]);
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("webapp", "/repos/webapp")]);
+    expect(plan.present.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.add).toEqual([]);
     expect(plan.duplicates).toEqual([]);
     expect(plan.ok).toBe(true);
   });
 
   it("buckets a worktree of an already-declared repo as a duplicate, not an addition", () => {
-    // The core case: same repo NAME, different path. A second root called `centaur`
-    // is indistinguishable in the explorer and makes @centaur/… ambiguous.
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    // The core case: same repo NAME, different path. A second root called `webapp`
+    // is indistinguishable in the explorer and makes @webapp/… ambiguous.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("centaur", "/repos/centaur/.claude/worktrees/ASM-1"),
+      cand("webapp", "/repos/webapp/.claude/worktrees/PROJ-1"),
     ]);
-    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.add).toEqual([]);
   });
 
   it("buckets a repo the workspace has by neither path nor name as an addition", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("infra", "/repos/infra")]);
     expect(plan.add.map((c) => c.repoName)).toEqual(["infra"]);
     expect(plan.duplicates).toEqual([]);
   });
 
   it("dedups against a folder's custom name field", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "name": "centaur", "path": "/elsewhere/c" }] }');
-    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("centaur", "/repos/centaur")]);
-    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    readFileSync.mockReturnValue('{ "folders": [{ "name": "webapp", "path": "/elsewhere/c" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("webapp", "/repos/webapp")]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["webapp"]);
   });
 
   it("dedups against a folder's path basename even when a custom name differs", () => {
     // servicesFromExistingDestination derives an unmatched folder's service name from
     // the BASENAME, so comparing only the `name` field would let a custom name defeat
     // the rule against the service derived from that very folder.
-    readFileSync.mockReturnValue('{ "folders": [{ "name": "Custom Label", "path": "/repos/centaur" }] }');
+    readFileSync.mockReturnValue('{ "folders": [{ "name": "Custom Label", "path": "/repos/webapp" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("centaur", "/repos/centaur/.claude/worktrees/ASM-1"),
+      cand("webapp", "/repos/webapp/.claude/worktrees/PROJ-1"),
     ]);
-    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["webapp"]);
   });
 
   it("compares names case-insensitively", () => {
@@ -276,12 +276,12 @@ describe("planWorkspaceMerge", () => {
   });
 
   it("dedups a key-qualified batch label against the bare repo name", () => {
-    // The label written into the file is ASM-1-api, but dedup must compare `api`.
+    // The label written into the file is PROJ-1-api, but dedup must compare `api`.
     readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/api" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("api", "/repos/api/.claude/worktrees/ASM-1", "ASM-1-api"),
+      cand("api", "/repos/api/.claude/worktrees/PROJ-1", "PROJ-1-api"),
     ]);
-    expect(plan.duplicates.map((c) => c.label)).toEqual(["ASM-1-api"]);
+    expect(plan.duplicates.map((c) => c.label)).toEqual(["PROJ-1-api"]);
     expect(plan.add).toEqual([]);
   });
 
@@ -289,9 +289,9 @@ describe("planWorkspaceMerge", () => {
     readFileSync.mockReturnValue('{ "folders": [] }');
     const plan = planWorkspaceMerge("/ws/empty.code-workspace", [
       cand("api", "/repos/api"),
-      cand("centaur", "/repos/centaur"),
+      cand("webapp", "/repos/webapp"),
     ]);
-    expect(plan.add.map((c) => c.repoName)).toEqual(["api", "centaur"]);
+    expect(plan.add.map((c) => c.repoName)).toEqual(["api", "webapp"]);
     expect(plan.ok).toBe(true);
   });
 
@@ -330,7 +330,7 @@ In `src/engine/workspace.ts`, add immediately after `workspaceFolderPaths`:
 ```ts
 /** A folder that might be added to an existing workspace. `label` is the folder name
  *  written into the file; `repoName` is the bare repo name dedup compares on — batch
- *  labels are key-qualified (`ASM-1-api`) but must still dedup against a folder the
+ *  labels are key-qualified (`PROJ-1-api`) but must still dedup against a folder the
  *  workspace already calls `api`. */
 export interface MergeCandidate {
   label: string;
@@ -409,7 +409,7 @@ the repo name against both a folder's name field and its path basename."
 
 `mention()` emits `@api/src/foo.ts` for every repo in multiroot mode. Once worktrees stop being added as roots, that form resolves against whatever root *is* called `api` — the **main checkout** — silently pointing the agent at the wrong tree and defeating the worktree isolation the user asked for.
 
-A worktree lives *inside* its repo, so when the main checkout is a root the correct mention exists and is precise: `@api/.claude/worktrees/ASM-1/src/foo.ts`.
+A worktree lives *inside* its repo, so when the main checkout is a root the correct mention exists and is precise: `@api/.claude/worktrees/PROJ-1/src/foo.ts`.
 
 **Files:**
 - Modify: `src/engine/workspace.ts` (add after `planWorkspaceMerge`)
@@ -426,39 +426,39 @@ Add to `test/unit/engine/workspace.test.ts`. Add `mentionInWorkspace` to the lin
 ```ts
 describe("mentionInWorkspace", () => {
   it("uses the root's own name when the repo IS a root", () => {
-    const roots = [{ path: "/repos/centaur" }];
-    expect(mentionInWorkspace(roots, "/repos/centaur", "src/x.ts")).toBe("@centaur/src/x.ts");
+    const roots = [{ path: "/repos/webapp" }];
+    expect(mentionInWorkspace(roots, "/repos/webapp", "src/x.ts")).toBe("@webapp/src/x.ts");
   });
 
   it("prefers a root's custom name field over its basename", () => {
-    const roots = [{ name: "Centaur Service", path: "/repos/centaur" }];
-    expect(mentionInWorkspace(roots, "/repos/centaur", "src/x.ts")).toBe("@Centaur Service/src/x.ts");
+    const roots = [{ name: "Webapp Service", path: "/repos/webapp" }];
+    expect(mentionInWorkspace(roots, "/repos/webapp", "src/x.ts")).toBe("@Webapp Service/src/x.ts");
   });
 
   it("routes a worktree through its containing root", () => {
     // The whole point: the worktree is not a root, but it IS inside one, so the
     // mention can name it precisely instead of resolving to the main checkout.
-    const roots = [{ path: "/repos/centaur" }];
-    expect(mentionInWorkspace(roots, "/repos/centaur/.claude/worktrees/ASM-1", "src/x.ts")).toBe(
-      "@centaur/.claude/worktrees/ASM-1/src/x.ts",
+    const roots = [{ path: "/repos/webapp" }];
+    expect(mentionInWorkspace(roots, "/repos/webapp/.claude/worktrees/PROJ-1", "src/x.ts")).toBe(
+      "@webapp/.claude/worktrees/PROJ-1/src/x.ts",
     );
   });
 
   it("picks the deepest containing root, matching VS Code's most-specific resolution", () => {
-    const roots = [{ path: "/repos" }, { path: "/repos/centaur" }];
-    expect(mentionInWorkspace(roots, "/repos/centaur/.claude/worktrees/ASM-1", "src/x.ts")).toBe(
-      "@centaur/.claude/worktrees/ASM-1/src/x.ts",
+    const roots = [{ path: "/repos" }, { path: "/repos/webapp" }];
+    expect(mentionInWorkspace(roots, "/repos/webapp/.claude/worktrees/PROJ-1", "src/x.ts")).toBe(
+      "@webapp/.claude/worktrees/PROJ-1/src/x.ts",
     );
   });
 
   it("returns undefined when the repo is inside no root", () => {
-    // Emitting @centaur/src/x.ts here would point the agent at a DIFFERENT checkout.
-    const roots = [{ path: "/repos/centaur" }];
+    // Emitting @webapp/src/x.ts here would point the agent at a DIFFERENT checkout.
+    const roots = [{ path: "/repos/webapp" }];
     expect(mentionInWorkspace(roots, "/repos/infra", "src/x.ts")).toBeUndefined();
   });
 
   it("returns undefined when there are no roots at all", () => {
-    expect(mentionInWorkspace([], "/repos/centaur", "src/x.ts")).toBeUndefined();
+    expect(mentionInWorkspace([], "/repos/webapp", "src/x.ts")).toBeUndefined();
   });
 
   it("does not treat a sibling with a shared prefix as containment", () => {
@@ -482,7 +482,7 @@ In `src/engine/workspace.ts`, add after `planWorkspaceMerge`:
  *  are `roots`. The repo is a root → `@<root>/<rel>`. The repo is INSIDE a root →
  *  `@<root>/<repo's path from that root>/<rel>`, which is the worktree case, since
  *  worktrees live at `<repo>/.claude/worktrees/<KEY>`. Inside no root → undefined, and
- *  the caller drops the mention: `@centaur/src/x.ts` when the root named `centaur` is
+ *  the caller drops the mention: `@webapp/src/x.ts` when the root named `webapp` is
  *  the MAIN checkout would send the agent to the wrong tree. */
 export function mentionInWorkspace(
   roots: WorkspaceFolder[],
@@ -522,7 +522,7 @@ stop being added as roots, that form resolves to whatever root IS called
 'api' — the main checkout — silently editing the wrong tree.
 
 A worktree is inside its repo, so when the checkout is a root the precise
-mention exists: @api/.claude/worktrees/ASM-1/rel. Inside no root, return
+mention exists: @api/.claude/worktrees/PROJ-1/rel. Inside no root, return
 undefined so the caller drops the mention rather than emit a wrong one."
 ```
 
@@ -550,7 +550,7 @@ First **update** the two existing tests in `describe("openWorkspace — existing
   it("merges exactly foldersToAdd — never anything derived from services", async () => {
     // services names two repos; only the approved one may reach the file.
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
 
     const result = await openWorkspace(
@@ -564,7 +564,7 @@ First **update** the two existing tests in `describe("openWorkspace — existing
     expect(result.workspaceFile).toBe("/ws/team.code-workspace");
     expect(result.mergedRepos).toEqual(["account-service"]);
     expect(result.mergeFailed).toBeUndefined();
-    expect(writeArg((p) => p.endsWith("ASM-1.code-workspace"))).toBeUndefined();
+    expect(writeArg((p) => p.endsWith("PROJ-1.code-workspace"))).toBeUndefined();
     expect(result.opened).toContain("/ws/team.code-workspace");
   });
 ```
@@ -575,7 +575,7 @@ Then add these new tests inside the same `describe` block:
   it("leaves the file untouched when foldersToAdd is absent", async () => {
     // The user's workspace is their artifact: no approval, no write.
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
 
     const result = await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace" }));
@@ -588,7 +588,7 @@ Then add these new tests inside the same `describe` block:
 
   it("leaves the file untouched when foldersToAdd is empty", async () => {
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
     await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace", foldersToAdd: [] }));
     expect(writeArg((p) => p.endsWith(".code-workspace"))).toBeUndefined();
@@ -597,12 +597,12 @@ Then add these new tests inside the same `describe` block:
   it("routes a worktree's mentions through its containing root", async () => {
     execSync.mockReturnValue("src/export.py\n"); // git ls-files
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
 
     await openWorkspace(
       baseReq({
-        services: [{ name: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-1", isGit: true }],
+        services: [{ name: "webapp", path: "/repos/webapp/.claude/worktrees/PROJ-1", isGit: true }],
         descriptionText: "fix `src/export.py`",
         existingWorkspaceFile: "/ws/team.code-workspace",
       }),
@@ -610,13 +610,13 @@ Then add these new tests inside the same `describe` block:
 
     const planWrite = writeArg((p) => p.includes("/.agentflow/plans/"));
     const plan = JSON.parse(String(planWrite![1]));
-    expect(plan.matches[0].prompt).toContain("@centaur/.claude/worktrees/ASM-1/src/export.py");
+    expect(plan.matches[0].prompt).toContain("@webapp/.claude/worktrees/PROJ-1/src/export.py");
   });
 
   it("drops mentions for a repo that is inside no root", async () => {
     execSync.mockReturnValue("src/export.py\n");
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
 
     await openWorkspace(
@@ -639,14 +639,14 @@ Then add these new tests inside the same `describe` block:
 
     await openWorkspace(
       baseReq({
-        services: mkRepos(["centaur"]),
+        services: mkRepos(["webapp"]),
         promptTemplate: "brief at {brief}",
         existingWorkspaceFile: "/ws/team.code-workspace",
       }),
     );
 
     const plan = JSON.parse(String(writeArg((p) => p.includes("/.agentflow/plans/"))![1]));
-    expect(plan.matches[0].prompt).toBe("brief at /repos/centaur/.pick-task/TASK.md");
+    expect(plan.matches[0].prompt).toBe("brief at /repos/webapp/.pick-task/TASK.md");
   });
 ```
 
@@ -772,14 +772,14 @@ Add `planWorkspaceMerge` to the import on line 64.
       pickExisting();
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
-        duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+        duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-1" }],
         present: [],
         ok: true,
       });
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       // Exactly one quick-pick fired: the workspace-file picker. No add-prompt.
       expect(window.showQuickPick).toHaveBeenCalledTimes(1);
@@ -799,7 +799,7 @@ Add `planWorkspaceMerge` to the import on line 64.
         .mockResolvedValueOnce({ yes: true } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ foldersToAdd: [{ name: "infra", path: "/repos/infra" }] }),
@@ -819,7 +819,7 @@ Add `planWorkspaceMerge` to the import on line 64.
         .mockResolvedValueOnce({ yes: false } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
     });
@@ -838,7 +838,7 @@ Add `planWorkspaceMerge` to the import on line 64.
         .mockResolvedValueOnce(undefined as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalled();
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
@@ -850,7 +850,7 @@ Add `planWorkspaceMerge` to the import on line 64.
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(window.showQuickPick).toHaveBeenCalledTimes(1);
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
@@ -860,7 +860,7 @@ Add `planWorkspaceMerge` to the import on line 64.
       pickExisting();
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
-        duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+        duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-1" }],
         present: [],
         ok: true,
       });
@@ -874,7 +874,7 @@ Add `planWorkspaceMerge` to the import on line 64.
       });
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
       expect(toast.level).toBe("success");
@@ -885,7 +885,7 @@ Add `planWorkspaceMerge` to the import on line 64.
     it("passes no foldersToAdd for a new-window destination", async () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
       expect(planWorkspaceMerge).not.toHaveBeenCalled();
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ existingWorkspaceFile: undefined, foldersToAdd: [] }),
@@ -1047,10 +1047,10 @@ describe("openSharedWorkspace — existing workspace", () => {
     const result = await openSharedWorkspace(
       baseReq({
         target: { kind: "existing", file: "/ws/team.code-workspace" },
-        foldersToAdd: [{ name: "ASM-1-infra", path: "/repos/infra/.claude/worktrees/ASM-1" }],
+        foldersToAdd: [{ name: "PROJ-1-infra", path: "/repos/infra/.claude/worktrees/PROJ-1" }],
       }),
     );
-    expect(result.mergedFolders).toEqual(["ASM-1-infra"]);
+    expect(result.mergedFolders).toEqual(["PROJ-1-infra"]);
   });
 
   it("routes a worktree's mentions through its containing root", async () => {
@@ -1060,24 +1060,24 @@ describe("openSharedWorkspace — existing workspace", () => {
       baseReq({
         tasks: [
           {
-            ticket: { key: "ASM-1", summary: "one", url: "" },
+            ticket: { key: "PROJ-1", summary: "one", url: "" },
             planMd: "p",
             descriptionText: "fix `src/export.py`",
-            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-1", isGit: true }],
           },
         ],
         target: { kind: "existing", file: "/ws/team.code-workspace" },
       }),
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/.agentflow/plans/"))[0][1]));
-    expect(plan.matches[0].prompt).toContain("@api/.claude/worktrees/ASM-1/src/export.py");
+    expect(plan.matches[0].prompt).toContain("@api/.claude/worktrees/PROJ-1/src/export.py");
   });
 });
 
 describe("folderName", () => {
   it("key-qualifies so two tasks in one repo stay distinct roots", () => {
-    expect(folderName("ASM-1", "api")).toBe("ASM-1-api");
-    expect(folderName("ASM-2", "api")).toBe("ASM-2-api");
+    expect(folderName("PROJ-1", "api")).toBe("PROJ-1-api");
+    expect(folderName("PROJ-2", "api")).toBe("PROJ-2-api");
   });
 });
 ```
@@ -1101,7 +1101,7 @@ describe("folderName", () => {
         .mockResolvedValueOnce({ yes: true } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const addPrompt = vi.mocked(window.showQuickPick).mock.calls[1];
       expect((addPrompt[1] as { title: string }).title).toBe("Add 2 folders to team.code-workspace?");
@@ -1121,8 +1121,8 @@ describe("folderName", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
         duplicates: [
-          { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/ASM-1" },
-          { label: "web", repoName: "web", path: "/repos/web/.claude/worktrees/ASM-1" },
+          { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/PROJ-1" },
+          { label: "web", repoName: "web", path: "/repos/web/.claude/worktrees/PROJ-1" },
         ],
         present: [],
         ok: true,
@@ -1137,7 +1137,7 @@ describe("folderName", () => {
       });
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast") as { message: string };
       expect(toast.message).toContain("api, web already in the workspace");
@@ -1154,7 +1154,7 @@ describe("folderName", () => {
       ]);
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
-        duplicates: [{ label: "ASM-1-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+        duplicates: [{ label: "PROJ-1-account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-1" }],
         present: [],
         ok: true,
       });
@@ -1164,14 +1164,14 @@ describe("folderName", () => {
       });
 
       const { provider } = setup();
-      await provider.takeBatch(["ASM-1"], ["account-service"]);
+      await provider.takeBatch(["PROJ-1"], ["account-service"]);
 
       expect(openSharedWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
     });
 ```
 
 `takeBatch(keys: string[], repos: string[])` — both arguments are required; the existing
-batch tests call it as `provider.takeBatch(["ASM-1"], ["api"])` (see `:1826`).
+batch tests call it as `provider.takeBatch(["PROJ-1"], ["api"])` (see `:1826`).
 
 - [ ] **Step 2: Run the tests to verify they fail**
 

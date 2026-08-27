@@ -110,7 +110,7 @@ const job = (over: Partial<GlabJob> = {}): GlabJob => ({
 
 const mr = (over: Partial<GlabMr> = {}): GlabMr => ({
   iid: 12, web_url: "https://gitlab.com/group/sub/proj/-/merge_requests/12",
-  title: "Fix export", state: "opened", draft: false, source_branch: "feat/ASM-1",
+  title: "Fix export", state: "opened", draft: false, source_branch: "feat/PROJ-1",
   has_conflicts: false, detailed_merge_status: "mergeable",
   blocking_discussions_resolved: true, ...over,
 });
@@ -595,7 +595,7 @@ const provider = (run: Runner) => new GlabProvider(run, () => GLAB);
 
 const MR = {
   iid: 12, web_url: "https://gitlab.com/group/sub/proj/-/merge_requests/12",
-  title: "Fix export", state: "opened", draft: false, source_branch: "feat/ASM-1",
+  title: "Fix export", state: "opened", draft: false, source_branch: "feat/PROJ-1",
   has_conflicts: false, detailed_merge_status: "mergeable",
   blocking_discussions_resolved: true, head_pipeline: null,
 };
@@ -619,29 +619,29 @@ function routed(routes: Record<string, string | Error>): { run: Runner; calls: {
 describe("GlabProvider.fetch — argv", () => {
   it("asks for the source branch first, in the repo directory", async () => {
     const { run, calls } = routed({ source_branch: JSON.stringify([MR]), approvals: "{}" });
-    await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(calls[0].cwd).toBe("/r/api");
     expect(calls[0].args[0]).toBe("api");
     expect(calls[0].args[1]).toContain("projects/:fullpath/merge_requests");
-    expect(calls[0].args[1]).toContain("source_branch=feat%2FASM-1");
+    expect(calls[0].args[1]).toContain("source_branch=feat%2FPROJ-1");
     expect(calls[0].args[1]).toContain("state=all");
   });
 
   it("falls back to a key title search when the branch has no MR", async () => {
     const { run, calls } = routed({ source_branch: "[]", search: JSON.stringify([MR]), approvals: "{}" });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
-    expect(calls[1].args[1]).toContain("search=ASM-1");
+    expect(calls[1].args[1]).toContain("search=PROJ-1");
     expect(calls[1].args[1]).toContain("in=title");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 12 }) });
   });
 
   it("searches by key alone when there is no branch", async () => {
     const { run, calls } = routed({ search: JSON.stringify([MR]), approvals: "{}" });
-    await provider(run).fetch("/r/api", null, "ASM-1");
+    await provider(run).fetch("/r/api", null, "PROJ-1");
     expect(calls).toHaveLength(2); // the search, then approvals — no branch call
-    expect(calls[0].args[1]).toContain("search=ASM-1");
+    expect(calls[0].args[1]).toContain("search=PROJ-1");
   });
 
   it("url-encodes a branch containing a slash and a key containing a space", async () => {
@@ -674,7 +674,7 @@ describe("GlabProvider.fetch — assembly", () => {
 
   it("skips the discussions call when blocking discussions are resolved, and reports 0", async () => {
     const { run, calls } = routed({ source_branch: JSON.stringify([MR]), approvals: "{}" });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(calls.some((c) => c.args[1].includes("discussions"))).toBe(false);
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: 0 }) });
@@ -687,7 +687,7 @@ describe("GlabProvider.fetch — assembly", () => {
       approvals: "{}",
       discussions: JSON.stringify([{ notes: [{ resolvable: true, resolved: false }] }]),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: 1 }) });
   });
 
@@ -701,7 +701,7 @@ describe("GlabProvider.fetch — assembly", () => {
         { name: "lint", status: "failed", web_url: "https://gl/j/lint", allow_failure: false },
       ]),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(calls.some((c) => c.args[1].includes("pipelines/777/jobs"))).toBe(true);
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({
@@ -712,7 +712,7 @@ describe("GlabProvider.fetch — assembly", () => {
 
   it("skips the jobs call entirely when the MR has no pipeline", async () => {
     const { run, calls } = routed({ source_branch: JSON.stringify([MR]), approvals: "{}" });
-    await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(calls.some((c) => c.args[1].includes("jobs"))).toBe(false);
   });
 
@@ -721,7 +721,7 @@ describe("GlabProvider.fetch — assembly", () => {
       source_branch: JSON.stringify([MR]),
       approvals: JSON.stringify({ approved: true, approvals_required: 1 }),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ review: "approved" }) });
   });
 });
@@ -748,14 +748,14 @@ describe("GlabProvider.fetch — degradation", () => {
   // fetch on every tick, forever.
   it("still returns facts when the approvals call fails, with review none", async () => {
     const { run } = routed({ source_branch: JSON.stringify([MR]), approvals: new Error("403") });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 12, review: "none" }) });
   });
 
   it("still returns facts when the jobs call fails, with an empty ci tally", async () => {
     const mr = { ...MR, head_pipeline: { id: 777 } };
     const { run } = routed({ source_branch: JSON.stringify([mr]), approvals: "{}", jobs: new Error("500") });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({
       ci: { passing: 0, pending: 0, failing: [] }, ciAdvisory: false,
     }) });
@@ -764,7 +764,7 @@ describe("GlabProvider.fetch — degradation", () => {
   it("still returns facts when the discussions call fails, with unresolved null", async () => {
     const mr = { ...MR, blocking_discussions_resolved: false };
     const { run } = routed({ source_branch: JSON.stringify([mr]), approvals: "{}", discussions: new Error("500") });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: null }) });
   });
 });
@@ -1676,10 +1676,10 @@ Append to `test/unit/engine/orchestrator/branchCi.test.ts`:
 ```ts
 describe("GLAB_BRANCH_CI_ARGS", () => {
   it("asks for the newest pipeline on that ref, in one call", () => {
-    const args = GLAB_BRANCH_CI_ARGS("feat/ASM-1");
+    const args = GLAB_BRANCH_CI_ARGS("feat/PROJ-1");
     expect(args[0]).toBe("api");
     expect(args[1]).toContain("projects/:fullpath/pipelines");
-    expect(args[1]).toContain("ref=feat%2FASM-1");
+    expect(args[1]).toContain("ref=feat%2FPROJ-1");
     expect(args[1]).toContain("per_page=1");
   });
 

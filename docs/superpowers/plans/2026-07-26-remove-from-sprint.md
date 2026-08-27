@@ -34,10 +34,10 @@ Add inside `describe("write methods", …)` in `test/unit/jira/client.test.ts`:
 ```ts
 it("removeIssueFromSprint posts the key to the backlog", async () => {
   const fetchMock = installFetch([emptyResponse()]);
-  await client().removeIssueFromSprint("ASM-1");
+  await client().removeIssueFromSprint("PROJ-1");
   expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/agile/1.0/backlog/issue`);
   expect(fetchMock.mock.calls[0][1].method).toBe("POST");
-  expect(bodyOf(fetchMock, 0)).toEqual({ issues: ["ASM-1"] });
+  expect(bodyOf(fetchMock, 0)).toEqual({ issues: ["PROJ-1"] });
 });
 ```
 
@@ -120,26 +120,26 @@ In `test/unit/tasksView.test.ts`, add after the `describe("addToMySprint", …)`
 describe("removeFromSprint", () => {
   it("moves to backlog, stamps the label, prunes saved order, and posts removedFromSprint", async () => {
     const { provider, posted, workspaceState } = setup({
-      workspaceState: { "agentFlow.sprintOrder": ["ASM-1", "ASM-2"] },
+      workspaceState: { "agentFlow.sprintOrder": ["PROJ-1", "PROJ-2"] },
     });
-    await provider.removeFromSprint("ASM-1", "any");
-    expect(clientStub.removeIssueFromSprint).toHaveBeenCalledWith("ASM-1");
-    expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
-    expect(workspaceState.update).toHaveBeenCalledWith("agentFlow.sprintOrder", ["ASM-2"]);
-    expect(posted()).toContainEqual({ type: "removedFromSprint", key: "ASM-1" });
+    await provider.removeFromSprint("PROJ-1", "any");
+    expect(clientStub.removeIssueFromSprint).toHaveBeenCalledWith("PROJ-1");
+    expect(clientStub.addLabel).toHaveBeenCalledWith("PROJ-1", "claude-code");
+    expect(workspaceState.update).toHaveBeenCalledWith("agentFlow.sprintOrder", ["PROJ-2"]);
+    expect(posted()).toContainEqual({ type: "removedFromSprint", key: "PROJ-1" });
   });
 
   it("skips the label stamp when stampLabelOnWrite is off", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, stampLabelOnWrite: false });
     const { provider } = setup();
-    await provider.removeFromSprint("ASM-1", "any");
+    await provider.removeFromSprint("PROJ-1", "any");
     expect(clientStub.addLabel).not.toHaveBeenCalled();
   });
 
   it("does not remove the card when the backlog write fails", async () => {
     clientStub.removeIssueFromSprint.mockRejectedValue(new Error("boom"));
     const { send, posted } = setup();
-    await send({ type: "removeFromSprint", key: "ASM-1", size: "any" });
+    await send({ type: "removeFromSprint", key: "PROJ-1", size: "any" });
     expect(posted()).not.toContainEqual(expect.objectContaining({ type: "removedFromSprint" }));
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
@@ -147,9 +147,9 @@ describe("removeFromSprint", () => {
   it("re-adds to the active sprint and refetches when Undo is chosen", async () => {
     vi.mocked(window.showInformationMessage).mockResolvedValue("Undo");
     const { provider, posted } = setup();
-    await provider.removeFromSprint("ASM-1", "any");
+    await provider.removeFromSprint("PROJ-1", "any");
     expect(clientStub.getActiveSprintId).toHaveBeenCalled();
-    expect(clientStub.addIssueToSprint).toHaveBeenCalledWith(42, "ASM-1");
+    expect(clientStub.addIssueToSprint).toHaveBeenCalledWith(42, "PROJ-1");
     expect(posted()).toContainEqual(expect.objectContaining({ type: "tasks", filter: "mysprint" }));
   });
 });
@@ -253,25 +253,25 @@ In `test/webview/App.test.tsx`, add inside `describe("task card actions", …)` 
   it("shows Remove on the My sprint tab and sends removeFromSprint", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "ASM-1", assignee: "Jane", inOpenSprint: true })] });
+    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "PROJ-1", assignee: "Jane", inOpenSprint: true })] });
     fireEvent.click(screen.getByRole("button", { name: /Remove/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "removeFromSprint", key: "ASM-1", size: "any" });
+    expect(sent).toHaveBeenCalledWith({ type: "removeFromSprint", key: "PROJ-1", size: "any" });
   });
 
   it("does not show Remove on other tabs", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", assignee: "Jane", inOpenSprint: true })] });
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", assignee: "Jane", inOpenSprint: true })] });
     expect(screen.queryByRole("button", { name: /Remove/i })).not.toBeInTheDocument();
   });
 
   it("drops the card when removedFromSprint arrives", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "ASM-1" }), mkTask({ key: "ASM-2" })] });
-    host({ type: "removedFromSprint", key: "ASM-1" });
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "PROJ-1" }), mkTask({ key: "PROJ-2" })] });
+    host({ type: "removedFromSprint", key: "PROJ-1" });
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
   });
 ```
 

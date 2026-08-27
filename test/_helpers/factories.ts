@@ -8,7 +8,7 @@ import type { JiraAuth } from "../../src/tasks/jira/auth";
 
 /** A Task with sensible defaults; override any field. */
 export function mkTask(overrides: Partial<Task> = {}): Task {
-  const key = overrides.key ?? "ASM-1";
+  const key = overrides.key ?? "PROJ-1";
   return {
     key,
     summary: key,

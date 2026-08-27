@@ -243,7 +243,7 @@ describe("attentionLabel", () => {
   it("prefers the resolved ticket key over the record key", () => {
     // A local card promoted with Track it keeps its place-hash key and carries
     // the ticket only in its url, so the key is not the name even here.
-    const promoted = run({ key: "local-centaur-3f2a91bc", summary: "centaur", url: "https://jira/browse/BITE-9" });
+    const promoted = run({ key: "local-webapp-3f2a91bc", summary: "webapp", url: "https://jira/browse/BITE-9" });
     expect(attentionLabel(promoted, "BITE-9")).toBe("BITE-9");
   });
 

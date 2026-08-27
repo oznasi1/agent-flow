@@ -16,7 +16,7 @@ const provider = (run: Runner) => new GlabProvider(run, () => GLAB);
  * `shown()` below, which is the only response that has one. */
 const MR = {
   iid: 12, web_url: "https://gitlab.com/group/sub/proj/-/merge_requests/12",
-  title: "Fix export", state: "opened", draft: false, source_branch: "feat/ASM-1",
+  title: "Fix export", state: "opened", draft: false, source_branch: "feat/PROJ-1",
   has_conflicts: false, detailed_merge_status: "mergeable",
   blocking_discussions_resolved: true,
 };
@@ -51,12 +51,12 @@ describe("GlabProvider.fetch — argv", () => {
     const { run, calls } = routed({
       source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown(),
     });
-    await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(calls[0].cwd).toBe("/r/api");
     expect(calls[0].args[0]).toBe("api");
     expect(calls[0].args[1]).toContain("projects/:fullpath/merge_requests");
-    expect(calls[0].args[1]).toContain("source_branch=feat%2FASM-1");
+    expect(calls[0].args[1]).toContain("source_branch=feat%2FPROJ-1");
     expect(calls[0].args[1]).toContain("state=all");
   });
 
@@ -64,19 +64,19 @@ describe("GlabProvider.fetch — argv", () => {
     const { run, calls } = routed({
       source_branch: "[]", search: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown(),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
-    expect(calls[1].args[1]).toContain("search=ASM-1");
+    expect(calls[1].args[1]).toContain("search=PROJ-1");
     expect(calls[1].args[1]).toContain("in=title");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 12 }) });
   });
 
   it("searches by key alone when there is no branch", async () => {
     const { run, calls } = routed({ search: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown() });
-    await provider(run).fetch("/r/api", null, "ASM-1");
+    await provider(run).fetch("/r/api", null, "PROJ-1");
     // The search, the single-MR read, then approvals — and no branch call.
     expect(calls).toHaveLength(3);
-    expect(calls[0].args[1]).toContain("search=ASM-1");
+    expect(calls[0].args[1]).toContain("search=PROJ-1");
   });
 
   // The list row is not enough: GitLab sends `head_pipeline` on the single-MR route
@@ -85,7 +85,7 @@ describe("GlabProvider.fetch — argv", () => {
     const { run, calls } = routed({
       source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown(),
     });
-    await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(calls[1].cwd).toBe("/r/api");
     expect(calls[1].args).toEqual(["api", "projects/:fullpath/merge_requests/12"]);
@@ -123,7 +123,7 @@ describe("GlabProvider.fetch — assembly", () => {
     const { run, calls } = routed({
       source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown(),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(calls.some((c) => c.args[1].includes("discussions"))).toBe(false);
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: 0 }) });
@@ -137,7 +137,7 @@ describe("GlabProvider.fetch — assembly", () => {
       discussions: JSON.stringify([{ notes: [{ resolvable: true, resolved: false }] }]),
       "merge_requests/12": JSON.stringify(mr),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: 1 }) });
   });
 
@@ -156,7 +156,7 @@ describe("GlabProvider.fetch — assembly", () => {
       ]),
       "merge_requests/12": shown({ head_pipeline: { id: 777, status: "failed" } }),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(MR).not.toHaveProperty("head_pipeline"); // the premise, pinned
     expect(calls.some((c) => c.args[1].includes("pipelines/777/jobs"))).toBe(true);
@@ -170,7 +170,7 @@ describe("GlabProvider.fetch — assembly", () => {
     const { run, calls } = routed({
       source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": shown({ head_pipeline: null }),
     });
-    await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(calls.some((c) => c.args[1].includes("jobs"))).toBe(false);
   });
 
@@ -180,7 +180,7 @@ describe("GlabProvider.fetch — assembly", () => {
       approvals: JSON.stringify({ approved: true, approvals_required: 1 }),
       "merge_requests/12": shown(),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ review: "approved" }) });
   });
 });
@@ -209,7 +209,7 @@ describe("GlabProvider.fetch — degradation", () => {
     const { run } = routed({
       source_branch: JSON.stringify([MR]), approvals: new Error("403"), "merge_requests/12": shown(),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 12, review: "none" }) });
   });
 
@@ -220,7 +220,7 @@ describe("GlabProvider.fetch — degradation", () => {
       jobs: new Error("500"),
       "merge_requests/12": shown({ head_pipeline: { id: 777 } }),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({
       ci: { passing: 0, pending: 0, failing: [] }, ciAdvisory: false,
     }) });
@@ -234,7 +234,7 @@ describe("GlabProvider.fetch — degradation", () => {
       discussions: new Error("500"),
       "merge_requests/12": JSON.stringify(mr),
     });
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: null }) });
   });
 
@@ -248,7 +248,7 @@ describe("GlabProvider.fetch — degradation", () => {
     const { run } = routed({
       source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": new Error("500"),
     });
-    expect(await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1")).toEqual({ ok: true, facts: {
+    expect(await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1")).toEqual({ ok: true, facts: {
       number: 12,
       url: "https://gitlab.com/group/sub/proj/-/merge_requests/12",
       title: "Fix export",
@@ -275,7 +275,7 @@ describe("GlabProvider.fetch — degradation", () => {
     ["a record whose web_url is empty", '{"iid":12,"web_url":""}'],
   ])("falls back to the list row when the single-MR read answers with %s", async (_what, body) => {
     const { run } = routed({ source_branch: JSON.stringify([MR]), approvals: "{}", "merge_requests/12": body });
-    expect(await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1")).toEqual({ ok: true, facts: expect.objectContaining({
+    expect(await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1")).toEqual({ ok: true, facts: expect.objectContaining({
       number: 12, title: "Fix export", ci: { passing: 0, pending: 0, failing: [] },
     }) });
   });

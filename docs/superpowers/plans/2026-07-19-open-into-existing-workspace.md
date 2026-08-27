@@ -177,40 +177,40 @@ Add to `test/unit/engine/workspace.test.ts`:
 import { mergeReposIntoWorkspace } from "../../../src/engine/workspace";
 
 describe("mergeReposIntoWorkspace", () => {
-  const repos = mkRepos(["account-service", "centaur"]); // paths: /repos/account-service, /repos/centaur
+  const repos = mkRepos(["account-service", "webapp"]); // paths: /repos/account-service, /repos/webapp
 
   it("appends only missing repos and preserves comments + settings", () => {
     readFileSync.mockReturnValue(
-      '{\n  // my workspace\n  "folders": [{ "name": "centaur", "path": "/repos/centaur" }],\n  "settings": { "editor.tabSize": 2 }\n}\n',
+      '{\n  // my workspace\n  "folders": [{ "name": "webapp", "path": "/repos/webapp" }],\n  "settings": { "editor.tabSize": 2 }\n}\n',
     );
     let written = "";
     writeFileSync.mockImplementation((_p, data) => { written = String(data); });
 
-    const res = mergeReposIntoWorkspace("/ws/ASM-1.code-workspace", repos);
+    const res = mergeReposIntoWorkspace("/ws/PROJ-1.code-workspace", repos);
 
     expect(res).toEqual({ added: ["account-service"], ok: true });
     expect(written).toContain("// my workspace");            // comment preserved
     expect(written).toContain('"editor.tabSize": 2');        // settings preserved
     expect(written).toContain('"path": "/repos/account-service"'); // repo added
-    // centaur present exactly once (not duplicated)
-    expect(written.match(/\/repos\/centaur/g)?.length).toBe(1);
+    // webapp present exactly once (not duplicated)
+    expect(written.match(/\/repos\/webapp/g)?.length).toBe(1);
   });
 
   it("is idempotent — no write when all repos already present", () => {
     readFileSync.mockReturnValue(
-      '{ "folders": [{ "path": "/repos/account-service" }, { "path": "/repos/centaur" }] }',
+      '{ "folders": [{ "path": "/repos/account-service" }, { "path": "/repos/webapp" }] }',
     );
-    const res = mergeReposIntoWorkspace("/ws/ASM-1.code-workspace", repos);
+    const res = mergeReposIntoWorkspace("/ws/PROJ-1.code-workspace", repos);
     expect(res).toEqual({ added: [], ok: true });
     expect(writeFileSync).not.toHaveBeenCalled();
   });
 
   it("resolves relative existing-folder paths against the workspace dir", () => {
-    // workspace lives in /repos, folder path "centaur" → /repos/centaur (already present)
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "centaur" }] }');
+    // workspace lives in /repos, folder path "webapp" → /repos/webapp (already present)
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "webapp" }] }');
     writeFileSync.mockImplementation(() => {});
     const res = mergeReposIntoWorkspace("/repos/team.code-workspace", repos);
-    expect(res.added).toEqual(["account-service"]); // centaur matched via relative resolution
+    expect(res.added).toEqual(["account-service"]); // webapp matched via relative resolution
   });
 
   it("does NOT write on unparseable input (ok:false)", () => {
@@ -317,9 +317,9 @@ Add to `test/unit/engine/workspace.test.ts`:
 ```ts
 describe("openWorkspace — existing workspace", () => {
   it("merges repos into the picked file and does not generate a new one", async () => {
-    // Picked workspace already contains centaur; account-service is missing.
+    // Picked workspace already contains webapp; account-service is missing.
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
 
     const result = await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace" }));
@@ -329,7 +329,7 @@ describe("openWorkspace — existing workspace", () => {
     expect(result.mergedRepos).toEqual(["account-service"]);
     expect(result.mergeFailed).toBeUndefined();
     // No generated <KEY>.code-workspace was written.
-    expect(writeArg((p) => p.endsWith("ASM-1.code-workspace"))).toBeUndefined();
+    expect(writeArg((p) => p.endsWith("PROJ-1.code-workspace"))).toBeUndefined();
     // It opened the picked file.
     expect(result.opened).toContain("/ws/team.code-workspace");
   });

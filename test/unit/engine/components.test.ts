@@ -37,9 +37,9 @@ describe("resolveComponent", () => {
 
 describe("mapRepoComponents", () => {
   it("keys by the repo's own spelling and values with the component's", () => {
-    expect(mapRepoComponents(["billing-service", "centaur"], ["Billing-Service", "Centaur"])).toEqual({
+    expect(mapRepoComponents(["billing-service", "webapp"], ["Billing-Service", "Webapp"])).toEqual({
       "billing-service": "Billing-Service",
-      centaur: "Centaur",
+      webapp: "Webapp",
     });
   });
 

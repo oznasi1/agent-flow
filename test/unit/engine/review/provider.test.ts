@@ -11,10 +11,10 @@ const searchPayload = JSON.stringify({
       issueCount: 1,
       nodes: [{
         number: 850, title: "Encrypt only Synqly credential",
-        url: "https://github.com/CyberJackGit/centaur/pull/850",
+        url: "https://github.com/CyberJackGit/webapp/pull/850",
         isDraft: false, createdAt: "2026-07-27T14:31:30Z", updatedAt: "2026-07-28T06:23:08Z",
         additions: 409, deletions: 50, changedFiles: 8,
-        author: { login: "OshriBay" }, repository: { nameWithOwner: "CyberJackGit/centaur" },
+        author: { login: "OshriBay" }, repository: { nameWithOwner: "CyberJackGit/webapp" },
         reviewDecision: null, mergeable: "MERGEABLE",
         commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
       }],
@@ -30,7 +30,7 @@ describe("GhReviewProvider.search", () => {
     const run = runner(async () => searchPayload);
     const out = await new GhReviewProvider(run, locate).search();
     expect(out!.issueCount).toBe(1);
-    expect(out!.requests[0].id).toBe("CyberJackGit/centaur#850");
+    expect(out!.requests[0].id).toBe("CyberJackGit/webapp#850");
     const [file, args, opts] = (run as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(file).toBe("/opt/homebrew/bin/gh");
     // Pins both the flag order and, crucially, which flag carries the query

@@ -184,7 +184,7 @@ describe("readAgentActivity", () => {
 describe("readSessionActivity", () => {
   const NOW = 1_800_000_000_000;
   let root: string;
-  const cwd = "/Users/dev/projects/centaur";
+  const cwd = "/Users/dev/projects/webapp";
 
   const write = (id: string, lines: object[], mtimeMs: number): void => {
     const dir = path.join(root, encodeProjectDir(cwd));

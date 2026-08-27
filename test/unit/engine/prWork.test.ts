@@ -11,9 +11,9 @@ const HERE: CurrentWindow = {
 
 /** A per-window run: one window per repo, each rendered against its own brief. */
 const perWindow = (over: Partial<Run> = {}): Run => ({
-  key: "ASM-1",
+  key: "PROJ-1",
   summary: "s",
-  url: "https://j/browse/ASM-1",
+  url: "https://j/browse/PROJ-1",
   createdAt: 1,
   mode: "per-window",
   repos: [{ name: "svc", path: "/r/svc", isGit: true }],
@@ -23,7 +23,7 @@ const perWindow = (over: Partial<Run> = {}): Run => ({
 
 /** A multiroot run: one window on the workspace file, rendered against one brief. */
 const multiroot = (over: Partial<Run> = {}): Run =>
-  perWindow({ mode: "multiroot", workspaceFile: "/ws/ASM-1.code-workspace", ...over });
+  perWindow({ mode: "multiroot", workspaceFile: "/ws/PROJ-1.code-workspace", ...over });
 
 describe("prWorkPlan", () => {
   describe("stay — the run's own window, which is what shipped before the destination question", () => {
@@ -45,8 +45,8 @@ describe("prWorkPlan", () => {
 
     it("seeds the workspace file once, against the run's absolute brief", () => {
       expect(prWorkPlan(multiroot(), { kind: "stay" })).toEqual({
-        seats: [{ matchPath: "/ws/ASM-1.code-workspace", briefPath: "/r/svc/.pick-task/TASK.md" }],
-        toOpen: ["/ws/ASM-1.code-workspace"],
+        seats: [{ matchPath: "/ws/PROJ-1.code-workspace", briefPath: "/r/svc/.pick-task/TASK.md" }],
+        toOpen: ["/ws/PROJ-1.code-workspace"],
       });
     });
 

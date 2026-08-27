@@ -113,7 +113,7 @@ is **rewritten in place** to a `place` node bound to the run that was just creat
 `id`, same `x`/`y`, same `join`, so every downstream edge keeps pointing at it and starts
 evaluating against the new run's `RunStatus` on the very next pass.
 
-Without this, `ASM-1 merged → launch ASM-12 → ASM-12's CI passes → launch ASM-15` could
+Without this, `PROJ-1 merged → launch PROJ-12 → PROJ-12's CI passes → launch PROJ-15` could
 never advance past the second step: a planned node has no run to observe.
 
 The rewrite is part of the same store write that stamps `firedAt`, so a crash between the
@@ -297,7 +297,7 @@ make the feature unreachable without a mouse. Same store, no second model.
 **On the board.** A card wired into a flow carries one quiet line — `⚡ Ship the migration ·
 node 1 of 3` — and only while a flow exists. No persistent hint lines.
 
-**Toast.** `Ship the migration launched ASM-12 in bite-me — CI passed on ASM-2.` Every
+**Toast.** `Ship the migration launched PROJ-12 in bite-me — CI passed on PROJ-2.` Every
 autonomous action reports what it did and why, with an **Open** action.
 
 ## Concurrency: resolved in Phase 3

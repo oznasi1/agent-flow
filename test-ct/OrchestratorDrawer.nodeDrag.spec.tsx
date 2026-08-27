@@ -15,7 +15,7 @@ import type { Flow } from "../src/engine/orchestrator/model";
  * falsifiable.
  */
 
-const NODE = { id: "n1", kind: "place" as const, x: 24, y: 24, join: "any" as const, runKey: "ASM-1", repo: "agent-flow" };
+const NODE = { id: "n1", kind: "place" as const, x: 24, y: 24, join: "any" as const, runKey: "PROJ-1", repo: "agent-flow" };
 
 const flow: Flow = { id: "f1", name: "Ship the migration", armed: false, createdAt: 1_000, nodes: [NODE], edges: [] };
 

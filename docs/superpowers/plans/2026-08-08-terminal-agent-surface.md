@@ -303,14 +303,14 @@ The boot delay means every terminal test needs the file's established fake-timer
 
     it("runs claude in a terminal named for the ticket and types the prompt unsubmitted", async () => {
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
       readFileSync.mockReturnValue(planJson());
       const { context } = fakeContext();
 
       await seedWithTimers(context);
 
       expect(window.createTerminal).toHaveBeenCalledTimes(1);
-      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · ASM-1" });
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · PROJ-1" });
       const t = terminalAt();
       expect(t.show).toHaveBeenCalled();
       // First send runs the CLI (submitted); second types the prompt (NOT submitted).
@@ -326,10 +326,10 @@ The boot delay means every terminal test needs the file's established fake-timer
       // mentions, so this is the common case, not an edge case. Without the
       // markers the TUI would submit at the blank line and drop the file list.
       withWorkspaceFile();
-      const prompt = "Start ASM-1\n\nRelevant files: @a.ts";
-      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      const prompt = "Start PROJ-1\n\nRelevant files: @a.ts";
+      readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
       readFileSync.mockReturnValue(
-        planJson({ matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt }] }),
+        planJson({ matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt }] }),
       );
       const { context } = fakeContext();
 
@@ -341,7 +341,7 @@ The boot delay means every terminal test needs the file's established fake-timer
     it("uses a folder matchPath as the terminal cwd", async () => {
       workspace.workspaceFile = undefined;
       workspace.workspaceFolders = [{ uri: { scheme: "file", fsPath: "/repos/api" } }];
-      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
       readFileSync.mockReturnValue(
         planJson({ matches: [{ matchPath: "/repos/api", prompt: "do it" }] }),
       );
@@ -356,7 +356,7 @@ The boot delay means every terminal test needs the file's established fake-timer
       // A workspace file is not a directory. Omitting cwd lets VS Code default to
       // the window's first root, which is the right answer for a multiroot window.
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
       readFileSync.mockReturnValue(planJson());
       const { context } = fakeContext();
 
@@ -367,7 +367,7 @@ The boot delay means every terminal test needs the file's established fake-timer
 
     it("falls back to the clipboard when creating the terminal throws", async () => {
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
       readFileSync.mockReturnValue(planJson());
       window.createTerminal.mockImplementationOnce(() => {
         throw new Error("no terminal for you");
@@ -389,7 +389,7 @@ Then a test proving the default surface is untouched — put it **outside** the 
     setConfig({ agentSurface: undefined });
     window.createTerminal.mockClear();
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson());
     commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
     const { context } = fakeContext();
@@ -572,7 +572,7 @@ Inside the `terminal surface` describe:
       // Same contract as the panel: the slash command cannot be stacked ahead of
       // a prompt in one submission, so the prompt travels by clipboard.
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
       readFileSync.mockReturnValue(planJson({ remoteControl: true }));
       const { context } = fakeContext();
 
@@ -580,7 +580,7 @@ Inside the `terminal surface` describe:
 
       expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
       expect(terminalAt().sendText.mock.calls[1][0]).toBe(
-        `${BRACKET_ON}/remote-control ASM-1${BRACKET_OFF}`,
+        `${BRACKET_ON}/remote-control PROJ-1${BRACKET_OFF}`,
       );
       expect(terminalAt().sendText.mock.calls[1][1]).toBe(false);
       // The user is told what to press.
@@ -595,24 +595,24 @@ Inside the `terminal surface` describe:
 ```ts
     it("gives each task in a batch its own named terminal", async () => {
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
       readFileSync.mockImplementation((p) =>
-        String(p).includes("ASM-1")
-          ? planJson({ key: "ASM-1", seq: 0 })
-          : planJson({ key: "ASM-2", seq: 1 }),
+        String(p).includes("PROJ-1")
+          ? planJson({ key: "PROJ-1", seq: 0 })
+          : planJson({ key: "PROJ-2", seq: 1 }),
       );
       const { context } = fakeContext();
 
       await seedWithTimers(context);
 
       expect(window.createTerminal.mock.calls.map((c) => c[0].name)).toEqual([
-        "Claude · ASM-1",
-        "Claude · ASM-2",
+        "Claude · PROJ-1",
+        "Claude · PROJ-2",
       ]);
     });
 ```
 
-`planJson`'s default `matches` pins `matchPath` to `/ws/ASM-1.code-workspace`, which is this window's identity — so both plans match, exactly as the existing multi-plan tests at lines 338 and 362 rely on.
+`planJson`'s default `matches` pins `matchPath` to `/ws/PROJ-1.code-workspace`, which is this window's identity — so both plans match, exactly as the existing multi-plan tests at lines 338 and 362 rely on.
 
 - [ ] **Step 3: Run the tests**
 

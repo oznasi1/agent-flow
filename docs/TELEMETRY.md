@@ -32,8 +32,9 @@ sending — telemetry code only runs when **both** are satisfied.
 
 ## Where it goes
 
-Events are sent to a personal PostHog project (not an At-Bay project, and not
-shared with or accessible to At-Bay) at `https://eu.i.posthog.com`, batched over
+Events are sent to the author's personal PostHog project — not an organization's
+project, and not shared with or accessible to any employer — at
+`https://eu.i.posthog.com`, batched over
 plain HTTPS POST requests. The queue holding not-yet-sent events lives in memory
 only — it is never written to disk, so a window close before the next flush loses
 whatever was still queued rather than persisting it anywhere.

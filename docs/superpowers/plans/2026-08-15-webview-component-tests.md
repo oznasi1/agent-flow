@@ -219,7 +219,7 @@ and the `vscode` mock, neither of which can load in a Playwright browser bundle.
 import type { NotepadItemView, SerializedCaps, Task } from "../../src/types";
 
 export function mkTask(over: Partial<Task> = {}): Task {
-  const key = over.key ?? "ASM-1";
+  const key = over.key ?? "PROJ-1";
   return {
     key, summary: key, status: "", statusCategory: "new", priority: "",
     assignee: "Unassigned", labels: [], components: [], sprint: null,
@@ -344,7 +344,7 @@ import { ALL_FILTERS, JIRA_CAPS, mkTask } from "./_helpers/factories";
 async function threeCards(page: import("@playwright/test").Page) {
   await host(page, {
     type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true,
-    project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS,
+    project: "PROJ", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS,
   });
   await host(page, {
     type: "tasks", filter: "mysprint",

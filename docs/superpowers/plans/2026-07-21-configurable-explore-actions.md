@@ -444,7 +444,7 @@ import { SLACK_DM_SENTENCE } from "../../src/engine/prompt";
 describe("explore", () => {
   it("prompts for an action when exploreMode is 'ask' and seeds the chosen action's prompt", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
-    const repos = mkRepos(["account-service", "centaur"]);
+    const repos = mkRepos(["account-service", "webapp"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("retry logic");
     vi.mocked(window.showQuickPick)

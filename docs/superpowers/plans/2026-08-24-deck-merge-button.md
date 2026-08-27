@@ -978,7 +978,7 @@ describe("deck:mergePr", () => {
   it("does nothing when mergeWrites is off, however green the PR", async () => {
     h.mergeWrites = false;
     // ...seed a run whose PR facts are greenFacts(), open the panel...
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).not.toHaveBeenCalled();
     expect(window.showWarningMessage).not.toHaveBeenCalled();
   });
@@ -1005,7 +1005,7 @@ describe("deck:mergePr", () => {
     // say review_required; a hand-crafted (or merely stale) message says merge.
     h.mergeWrites = true;
     // ...seed facts with review: "review_required"...
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).not.toHaveBeenCalled();
     expect(window.showWarningMessage).not.toHaveBeenCalled();
   });
@@ -1013,7 +1013,7 @@ describe("deck:mergePr", () => {
   it("refuses when the message names a different repo or number than the re-check found", async () => {
     h.mergeWrites = true;
     // ...seed greenFacts() under repo "svc" as PR 124...
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 999 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 999 });
     expect(h.prMerge).not.toHaveBeenCalled();
   });
 
@@ -1022,7 +1022,7 @@ describe("deck:mergePr", () => {
     h.mergeMethod = "squash";
     vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
     // ...seed greenFacts()...
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
 
     const [message, opts] = vi.mocked(window.showWarningMessage).mock.calls[0];
     expect(message).toContain("svc#124");
@@ -1036,7 +1036,7 @@ describe("deck:mergePr", () => {
     h.mergeMethod = "rebase";
     vi.mocked(window.showWarningMessage).mockResolvedValue("Rebase and merge");
     // ...seed greenFacts()...
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).toHaveBeenCalledWith("/r/svc", 124, "rebase");
   });
 
@@ -1044,10 +1044,10 @@ describe("deck:mergePr", () => {
     h.mergeWrites = true;
     vi.mocked(window.showWarningMessage).mockResolvedValue(undefined);
     // ...seed greenFacts()...
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(
-      expect.objectContaining({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 124, outcome: "cancelled" }),
+      expect.objectContaining({ type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 124, outcome: "cancelled" }),
     );
   });
 
@@ -1056,7 +1056,7 @@ describe("deck:mergePr", () => {
     vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
     h.prMerge.mockResolvedValue({ ok: false, message: "Pull request is not mergeable" });
     // ...seed greenFacts()...
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(posted()).toContainEqual(
       expect.objectContaining({
         type: "toast", level: "error",
@@ -1073,11 +1073,11 @@ describe("deck:mergePr", () => {
     h.mergeWrites = true;
     vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
     // ...seed greenFacts() and note the entry's fetchedAt...
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
-    expect(readPrEntries(tmpPrDir, "ASM-1").svc.fetchedAt).toBe(0);
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    expect(readPrEntries(tmpPrDir, "PROJ-1").svc.fetchedAt).toBe(0);
     // The facts themselves survive, so the card does not blink to "no PR" before
     // the refetch lands.
-    expect(readPrEntries(tmpPrDir, "ASM-1").svc.facts).toMatchObject({ number: 124 });
+    expect(readPrEntries(tmpPrDir, "PROJ-1").svc.facts).toMatchObject({ number: 124 });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "deck:mergeDone", outcome: "ok" }));
   });
 
@@ -1091,8 +1091,8 @@ describe("deck:mergePr", () => {
     let release!: () => void;
     h.prMerge.mockImplementation(() => new Promise((res) => { release = () => res({ ok: true }); }));
     // ...seed greenFacts()...
-    const first = p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    const first = p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     release();
     await first;
     expect(h.prMerge).toHaveBeenCalledTimes(1);
@@ -1419,7 +1419,7 @@ describe("the card's Merge row", () => {
     host({ ...runsMsg([withPr(mergeablePr())]), mergeWrites: true });
     const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
     fireEvent.click(btn);
-    expect(sent).toHaveBeenCalledWith({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 2044 });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 2044 });
   });
 
   it("disables the button until deck:mergeDone comes back", async () => {
@@ -1427,7 +1427,7 @@ describe("the card's Merge row", () => {
     const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
     fireEvent.click(btn);
     await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(true));
-    host({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 2044, outcome: "cancelled" });
+    host({ type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 2044, outcome: "cancelled" });
     await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(false));
   });
 

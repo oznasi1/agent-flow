@@ -300,14 +300,14 @@ Append to `test/unit/engine/workspace.test.ts`:
 ```ts
 describe("seedClaudeCode — remote control", () => {
   const seedPlan = (over: Record<string, unknown> = {}) => {
-    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/PROJ-1.code-workspace" };
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(
       JSON.stringify({
-        key: "ASM-1",
+        key: "PROJ-1",
         createdAt: Date.now(),
         seedAgent: true,
-        matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "do it" }],
+        matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "do it" }],
         ...over,
       }),
     );
@@ -320,7 +320,7 @@ describe("seedClaudeCode — remote control", () => {
 
     await maybeSeedAgent(context, () => {});
 
-    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "/remote-control ASM-1");
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "/remote-control PROJ-1");
     expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
     expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining("Remote Control"));
   });
@@ -358,7 +358,7 @@ describe("seedClaudeCode — remote control", () => {
       await p;
 
       const uri = String(vi.mocked(env.openExternal).mock.calls[0][0]);
-      expect(uri).toContain(encodeURIComponent("/remote-control ASM-1"));
+      expect(uri).toContain(encodeURIComponent("/remote-control PROJ-1"));
     } finally {
       vi.useRealTimers();
     }
@@ -495,7 +495,7 @@ describe("remote control", () => {
 
   it("passes false and never prompts when the setting is off", async () => {
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("PROJ-1", ["account-service"]);
     expect(lastOpen().remoteControl).toBe(false);
     expect(window.showQuickPick).not.toHaveBeenCalled();
   });
@@ -503,7 +503,7 @@ describe("remote control", () => {
   it("passes true without prompting when the setting is on", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("PROJ-1", ["account-service"]);
     expect(lastOpen().remoteControl).toBe(true);
     expect(window.showQuickPick).not.toHaveBeenCalled();
   });
@@ -512,7 +512,7 @@ describe("remote control", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("PROJ-1", ["account-service"]);
     expect(lastOpen().remoteControl).toBe(true);
   });
 
@@ -520,7 +520,7 @@ describe("remote control", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // dismissed
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("PROJ-1", ["account-service"]);
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(lastOpen().remoteControl).toBe(false);
   });
@@ -529,7 +529,7 @@ describe("remote control", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    await provider.takeTask("PROJ-1", ["account-service", "webapp"]);
     expect(window.showQuickPick).toHaveBeenCalledTimes(1);
   });
 
@@ -543,7 +543,7 @@ describe("remote control", () => {
       remoteControl: false, // withheld by the single-window guard
     });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", ["account-service", "centaur"]);
+    await provider.takeTask("PROJ-1", ["account-service", "webapp"]);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).toContain("Remote Control skipped");
   });
@@ -566,7 +566,7 @@ describe("remote control", () => {
       s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], "api");
+    await provider.takeBatch(["PROJ-1", "PROJ-2"], "api");
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(vi.mocked(openWorkspace).mock.calls.every((c) => !c[0].remoteControl)).toBe(true);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
@@ -761,7 +761,7 @@ Do this in a real editor window after Task 5 — the unit tests mock the panel, 
 above proves the bridge actually connects.
 
 1. Set `agentFlow.remoteControl` to `ask`, take a task, choose **Enable Remote Control**.
-   The panel should show `/remote-control ASM-1234`. Press Enter — the session should
+   The panel should show `/remote-control PROJ-1234`. Press Enter — the session should
    connect and appear on claude.ai. Paste and press Enter — the task should start.
 2. Set it to `off` and take a task: the task prompt is seeded exactly as before, one Enter.
 3. With the setting `on`, take a task spanning two repos in per-window mode. Both windows

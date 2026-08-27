@@ -77,12 +77,12 @@ describe("MultiCombo", () => {
     // per control. A command label in mono would be the drift this guards.
     mount({
       options: [
-        { value: "a", label: "ASM-1", detail: "agent-flow", mono: true },
+        { value: "a", label: "PROJ-1", detail: "agent-flow", mono: true },
         { value: "b", label: "Deploy to staging" },
       ],
     });
     const list = open();
-    expect(rowNamed(list, "ASM-1").querySelector(".l")!.className).toBe("l k");
+    expect(rowNamed(list, "PROJ-1").querySelector(".l")!.className).toBe("l k");
     expect(rowNamed(list, "Deploy to staging").querySelector(".l")!.className).toBe("l");
   });
 

@@ -11,7 +11,7 @@ import { ALL_FILTERS, JIRA_CAPS, mkTask } from "./_helpers/factories";
 async function threeCards(page: Page) {
   await host(page, {
     type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true,
-    project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS,
+    project: "PROJ", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS,
   });
   await host(page, {
     type: "tasks", filter: "mysprint",

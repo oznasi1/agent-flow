@@ -6,7 +6,7 @@ import { PluginPicker, PickerItem } from "../../src/webview/PluginPicker";
 
 const items: PickerItem[] = [
   { key: "superpowers@official", name: "superpowers", marketplace: "official", count: 17 },
-  { key: "cicd-plugin@atbay", name: "cicd-plugin", marketplace: "atbay", count: 5 },
+  { key: "cicd-plugin@acme", name: "cicd-plugin", marketplace: "acme", count: 5 },
   { key: "figma@official", name: "figma", marketplace: "official", count: 0 },
 ];
 const setup = (selected: string[] = []) => {
@@ -25,7 +25,7 @@ describe("PluginPicker", () => {
   });
 
   it("shows the selected count on the button and nothing when empty", () => {
-    setup(["cicd-plugin@atbay"]);
+    setup(["cicd-plugin@acme"]);
     expect(screen.getByRole("button", { name: /^Plugins/ }).textContent).toContain("1");
   });
 
@@ -42,7 +42,7 @@ describe("PluginPicker", () => {
     setup();
     fireEvent.click(screen.getByRole("button", { name: /^Plugins/ }));
     fireEvent.change(screen.getByPlaceholderText(/filter plugins/i), { target: { value: "cicd" } });
-    expect(screen.getByLabelText("cicd-plugin (atbay)")).toBeInTheDocument();
+    expect(screen.getByLabelText("cicd-plugin (acme)")).toBeInTheDocument();
     expect(screen.queryByLabelText("superpowers (official)")).not.toBeInTheDocument();
   });
 

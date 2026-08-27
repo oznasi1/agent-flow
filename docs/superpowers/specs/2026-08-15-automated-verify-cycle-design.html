@@ -107,7 +107,7 @@
 
 <div class="callout">
   <div class="t">The goal in one line</div>
-  <b>Zero manual steps before a feature ships.</b> No smoke checklist for the bits that cross into the OS and the Claude Code extension — instead, host-driven E2E is the <b>core</b> layer, and a <b>screenshot-backed "verify feature" report</b> (the pattern used at At-Bay) posts to the PR and gates the release.
+  <b>Zero manual steps before a feature ships.</b> No smoke checklist for the bits that cross into the OS and the Claude Code extension — instead, host-driven E2E is the <b>core</b> layer, and a <b>screenshot-backed "verify feature" report</b> (the pattern used at work) posts to the PR and gates the release.
 </div>
 
 <div class="card">
@@ -140,7 +140,7 @@
 <ul>
   <li><b>No manual testing, ever</b>, before a feature ships. The release-on-merge flow gets an automated proof step, not a checklist.</li>
   <li><b>Prove the feature in a real host</b> — a real window opens, the real Claude Code panel receives its seed — not a mock's approximation.</li>
-  <li><b>Screenshots + a report</b> as first-class output: an auto-generated "verify feature" artifact, deliverable to Slack / At-Bay / CI, mirroring the MCP flow you already use.</li>
+  <li><b>Screenshots + a report</b> as first-class output: an auto-generated "verify feature" artifact, deliverable to Slack / an internal endpoint / CI, mirroring the MCP flow you already use.</li>
   <li><b>Deterministic enough to gate on</b> — the whole thing is only worth it if it's green when the product is good and red when it isn't.</li>
 </ul>
 </section>
@@ -171,7 +171,7 @@
   <div class="arrow">→</div>
   <div class="step"><div class="n">05</div><div class="h">Assert + shoot</div><div class="s">DOM / fs / recorded-write assertions + labelled screenshots</div></div>
   <div class="arrow">→</div>
-  <div class="step"><div class="n">06</div><div class="h">Report</div><div class="s">verify-feature HTML + trace/video → Slack / At-Bay / artifact</div></div>
+  <div class="step"><div class="n">06</div><div class="h">Report</div><div class="s">verify-feature HTML + trace/video → Slack / an internal endpoint / artifact</div></div>
   <div class="arrow">→</div>
   <div class="step"><div class="n">07</div><div class="h">Gate</div><div class="s">green → release proceeds · red → blocked</div></div>
 </div>
@@ -230,9 +230,9 @@
 <p>Playwright already captures a screenshot/video/trace per step. Layer C curates them into the artifact you're used to: for each feature, an ordered strip of <b>labelled screenshots</b> ("1 · pool loaded", "2 · task picked", "3 · window opened", "4 · panel seeded"), a pass/fail verdict, and the run's metadata. Options, in priority order:</p>
 <ul>
   <li><span class="badge b-ok">baseline</span> Playwright's built-in HTML report + trace viewer (zero extra code) as the CI artifact.</li>
-  <li><span class="badge b-accent">the "verify feature" analog</span> a thin generator that lays the labelled screenshots into a single self-contained HTML report per feature — matching the At-Bay flow.</li>
+  <li><span class="badge b-accent">the "verify feature" analog</span> a thin generator that lays the labelled screenshots into a single self-contained HTML report per feature — matching that same flow.</li>
   <li><span class="badge b-stop">out of scope</span> <b>No pixel-diff visual regression.</b> No <code>toHaveScreenshot()</code>, no committed baselines, no baseline-maintenance tax. Screenshots are <b>evidence attached to the PR</b>, read by a human when they want to look — they never fail a build on their own. Correctness is proven by the DOM / filesystem / recorded-write assertions.</li>
-  <li><span class="badge b-accent">delivery</span> <b>the PR itself</b> — see §5d. Slack / At-Bay endpoint remain optional extras.</li>
+  <li><span class="badge b-accent">delivery</span> <b>the PR itself</b> — see §5d. Slack / an internal endpoint remain optional extras.</li>
 </ul>
 
 <h3 id="ld">5d · Delivering the report on the GitHub PR <span class="badge b-ok">DECIDED</span></h3>
@@ -349,7 +349,7 @@
 <table>
 <thead><tr><th>#</th><th>Decision</th><th>Resolution</th></tr></thead>
 <tbody>
-<tr><td>1</td><td><b>Report destination</b></td><td><span class="badge b-ok">DECIDED — on the GitHub PR</span> sticky comment + job summary + Pages-hosted HTML report, with an <code>e2e</code> label to run the full lane on demand. See §5d. Slack / At-Bay optional later.</td></tr>
+<tr><td>1</td><td><b>Report destination</b></td><td><span class="badge b-ok">DECIDED — on the GitHub PR</span> sticky comment + job summary + Pages-hosted HTML report, with an <code>e2e</code> label to run the full lane on demand. See §5d. Slack / an internal endpoint optional later.</td></tr>
 <tr><td>2</td><td><b>Cursor lane</b></td><td><span class="badge b-ok">DECIDED — VS Code first</span> ship and stabilize the VS Code gate; add a non-blocking Cursor lane later (CLI-drops-<code>--extensionDevelopmentPath</code> caveat, §7, still to be disproven).</td></tr>
 <tr><td>3</td><td><b>Visual regression</b></td><td><span class="badge b-ok">DECIDED — screenshots only</span> no pixel-diff, no baselines. Screenshots ride along as PR evidence; assertions decide pass/fail. See §5c.</td></tr>
 <tr><td>4</td><td><b>Where it runs / gate strictness</b></td><td><span class="badge b-ok">DECIDED — Model B</span> CT gates every PR; Layer B gates at merge-to-main / pre-release; local <code>test:e2e</code> for authoring + macOS check; optional nightly macOS lane. See §8.</td></tr>

@@ -42,11 +42,11 @@ describe("the drawer shell", () => {
   });
 
   it("names the landmark, and hides it only while closing", () => {
-    const { rerender } = render(<Drawer surface="dd" label="Detail for ASM-1" closing={false}>b</Drawer>);
-    expect(aside().getAttribute("aria-label")).toBe("Detail for ASM-1");
+    const { rerender } = render(<Drawer surface="dd" label="Detail for PROJ-1" closing={false}>b</Drawer>);
+    expect(aside().getAttribute("aria-label")).toBe("Detail for PROJ-1");
     // Absent, not "false" — see the attribute's own comment in Drawer.tsx.
     expect(aside().hasAttribute("aria-hidden")).toBe(false);
-    rerender(<Drawer surface="dd" label="Detail for ASM-1" closing>b</Drawer>);
+    rerender(<Drawer surface="dd" label="Detail for PROJ-1" closing>b</Drawer>);
     expect(aside().getAttribute("aria-hidden")).toBe("true");
   });
 

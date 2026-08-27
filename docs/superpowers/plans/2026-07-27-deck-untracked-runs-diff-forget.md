@@ -61,7 +61,7 @@ import { isTicketRun } from "../../src/types";
 import type { Run } from "../../src/types";
 
 const mkRun = (over: Partial<Run> = {}): Run => ({
-  key: "ASM-1", summary: "do it", url: "https://jira/ASM-1", createdAt: 1, mode: "per-window",
+  key: "PROJ-1", summary: "do it", url: "https://jira/PROJ-1", createdAt: 1, mode: "per-window",
   repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }], briefPaths: [], ...over,
 });
 
@@ -135,7 +135,7 @@ In `test/unit/deckView.test.ts`, inside the `describe("DeckPanel", …)` block, 
     // Asserted by argument, not by count: the constructor's unawaited first refresh
     // races this one, and whether the second finds a warm jiraCache depends on
     // microtask ordering. Which keys are looked up at all is the actual contract.
-    expect(h.getStatus).toHaveBeenCalledWith("ASM-1");
+    expect(h.getStatus).toHaveBeenCalledWith("PROJ-1");
     expect(h.getStatus).not.toHaveBeenCalledWith("explore-retry-logic");
   });
 
@@ -165,7 +165,7 @@ And inside `describe("DeckPanel PR facts", …)`, after `"does not fetch a repo 
     h.runs = [mkRun(), mkRun({ key: "explore-retry-logic", url: "", repos: [{ name: "other", path: "/r/other", isGit: true, branch: "master" }] })];
     await showAndWarm();
     expect(h.prFetch).toHaveBeenCalledTimes(1);
-    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "ASM-1");
+    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "PROJ-1");
   });
 ```
 
@@ -273,8 +273,8 @@ In `test/webview/DeckApp.test.tsx`, after the `"opens the ticket in Jira from th
   it("keeps the Jira link on a tracked run", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByTitle(/Open ASM-1 in Jira/i));
-    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+    fireEvent.click(screen.getByTitle(/Open PROJ-1 in Jira/i));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/PROJ-1" });
   });
 ```
 
@@ -423,7 +423,7 @@ describe("taskDiff", () => {
   it("shows work the agent already committed on a task branch", () => {
     // The defect: `git diff HEAD` is blank here, so the Deck reported "no changes"
     // for every run whose agent had committed — i.e. every run with a PR.
-    g("checkout", "-qb", "ASM-1-retry");
+    g("checkout", "-qb", "PROJ-1-retry");
     fs.appendFileSync(file(), "committed\n");
     g("add", "-A");
     g("commit", "-q", "-m", "work");
@@ -538,7 +538,7 @@ Add `h.taskDiff.mockClear().mockReturnValue("");` to `beforeEach`. Then update t
   it("inspect diff on a repo with no changes toasts instead of opening a doc", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const toast = posts(p).find((m) => m.type === "toast");
     expect(toast.message).toMatch(/No changes to show/i);
     expect(workspace.openTextDocument).not.toHaveBeenCalled();
@@ -549,7 +549,7 @@ Add `h.taskDiff.mockClear().mockReturnValue("");` to `beforeEach`. Then update t
     h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+committed\n");
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     expect(h.taskDiff).toHaveBeenCalledWith("/r/svc");
     expect(workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("+committed"), language: "diff" }),
@@ -564,7 +564,7 @@ Add `h.taskDiff.mockClear().mockReturnValue("");` to `beforeEach`. Then update t
     h.taskDiff.mockReturnValue("diff --git a/a.txt b/a.txt\n+x\n");
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const arg = workspace.openTextDocument.mock.calls.at(-1)![0] as { content: string };
     expect(arg.content).toContain("# svc");
     expect(arg.content).toContain("# web");
@@ -651,13 +651,13 @@ In `test/webview/DeckApp.test.tsx`, after the forget tests (~line 171):
 ```ts
   it("removes a forgotten card immediately, without waiting for the host", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
     fireEvent.click(screen.getAllByTitle(/more actions/i)[0]);
     fireEvent.click(screen.getByText(/^Forget$/));
     // No deck:runs has arrived; the card is gone regardless.
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
-    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
+    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "PROJ-1" });
   });
 
   it("restores an optimistically removed card if the host still reports it", () => {
@@ -666,9 +666,9 @@ In `test/webview/DeckApp.test.tsx`, after the forget tests (~line 171):
     host(runsMsg([mkStatus()]));
     fireEvent.click(screen.getByTitle(/more actions/i));
     fireEvent.click(screen.getByText(/^Forget$/));
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
     host(runsMsg([mkStatus()]));
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
   });
 
   it("shows a syncing indicator while the host is refreshing", () => {
@@ -800,7 +800,7 @@ In `test/unit/deckView.test.ts`, inside `describe("DeckPanel", …)`:
   it("brackets a forget with the busy indicator", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:forget", key: "ASM-1" });
+    await p._fire({ type: "deck:forget", key: "PROJ-1" });
     const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
     expect(loads).toContain(true);
     expect(loads.at(-1)).toBe(false);
@@ -818,7 +818,7 @@ In `test/unit/deckView.test.ts`, inside `describe("DeckPanel", …)`:
   it("issues every run's Jira lookup at once rather than one at a time", async () => {
     // Serially, a cold board of six runs costs six round trips before anything
     // paints — and Forget waits on that whole pass.
-    h.runs = [mkRun(), mkRun({ key: "ASM-2", url: "https://jira/ASM-2" }), mkRun({ key: "ASM-3", url: "https://jira/ASM-3" })];
+    h.runs = [mkRun(), mkRun({ key: "PROJ-2", url: "https://jira/PROJ-2" }), mkRun({ key: "PROJ-3", url: "https://jira/PROJ-3" })];
     let inFlight = 0;
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -964,5 +964,5 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
   1. Open the Deck. The `explore-export-asset-file-name-per-asset-type` card shows **no** `pr #241` block, and its key reads `explore`.
   2. `Diff` on a card whose agent has committed opens a diff document with the committed work in it.
   3. `Forget` removes its card instantly, and the header reads `syncing…` while the host catches up.
-  4. A tracked card (e.g. `ASM-5809`) still shows its PR, CI, review and merge lines.
+  4. A tracked card (e.g. `PROJ-5809`) still shows its PR, CI, review and merge lines.
 - [ ] **Stale cache note:** `~/.agentflow/prfacts/explore-*.json` stays on disk by design (spec, "Explicitly not doing"). It is no longer read.

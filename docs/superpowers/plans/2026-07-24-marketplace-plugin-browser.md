@@ -319,16 +319,16 @@ Append to `test/unit/engine/marketplace.test.ts`:
 ```ts
 import { buildMarketplaceView, MarketplaceParseError } from "../../../src/engine/marketplace";
 
-const ATBAY_MANIFEST = JSON.stringify({
-  name: "atbay-plugins",
-  owner: { name: "At-Bay plugins marketplace" },
-  metadata: { description: "At-Bay's Claude Code plugin marketplace", pluginRoot: "./plugins" },
+const ACME_MANIFEST = JSON.stringify({
+  name: "acme-plugins",
+  owner: { name: "Acme plugins marketplace" },
+  metadata: { description: "Acme's Claude Code plugin marketplace", pluginRoot: "./plugins" },
   plugins: [
     { name: "cicd-plugin", source: "./plugins/cicd-plugin", description: "CI/CD automation" },
     { name: "ui-ux-pro-max", source: "./plugins/ui-ux", description: "UI/UX design" },
   ],
 });
-const ATBAY_TREE = [
+const ACME_TREE = [
   ".claude-plugin/marketplace.json",
   "plugins/cicd-plugin/.claude-plugin/plugin.json",
   "plugins/cicd-plugin/commands/build.md",
@@ -341,27 +341,27 @@ const ATBAY_TREE = [
 
 describe("buildMarketplaceView", () => {
   it("derives marketplace name, description, owner and addCommand", () => {
-    const v = buildMarketplaceView("cyberjackgit/atbay-plugins", ATBAY_MANIFEST, ATBAY_TREE);
-    expect(v.name).toBe("atbay-plugins");
-    expect(v.owner).toBe("At-Bay plugins marketplace");
-    expect(v.description).toBe("At-Bay's Claude Code plugin marketplace");
-    expect(v.addCommand).toBe("/plugin marketplace add cyberjackgit/atbay-plugins");
+    const v = buildMarketplaceView("cyberjackgit/acme-plugins", ACME_MANIFEST, ACME_TREE);
+    expect(v.name).toBe("acme-plugins");
+    expect(v.owner).toBe("Acme plugins marketplace");
+    expect(v.description).toBe("Acme's Claude Code plugin marketplace");
+    expect(v.addCommand).toBe("/plugin marketplace add cyberjackgit/acme-plugins");
     expect(v.error).toBeUndefined();
     expect(v.plugins).toHaveLength(2);
   });
 
   it("discovers skills/agents/commands by convention and builds installCommand", () => {
-    const v = buildMarketplaceView("cyberjackgit/atbay-plugins", ATBAY_MANIFEST, ATBAY_TREE);
+    const v = buildMarketplaceView("cyberjackgit/acme-plugins", ACME_MANIFEST, ACME_TREE);
     const cicd = v.plugins.find((p) => p.name === "cicd-plugin")!;
     expect(cicd.source).toBe("plugins/cicd-plugin");
     expect(cicd.commands.map((c) => c.name)).toEqual(["build", "deploy"]);
     expect(cicd.agents.map((a) => a.name)).toEqual(["pipeline-agent"]);
     expect(cicd.skills.map((s) => s.name)).toEqual(["build"]);
-    expect(cicd.installCommand).toBe("/plugin install cicd-plugin@atbay-plugins");
+    expect(cicd.installCommand).toBe("/plugin install cicd-plugin@acme-plugins");
   });
 
   it("discovers a skill under a non-conventional path (parent folder = skill name)", () => {
-    const v = buildMarketplaceView("cyberjackgit/atbay-plugins", ATBAY_MANIFEST, ATBAY_TREE);
+    const v = buildMarketplaceView("cyberjackgit/acme-plugins", ACME_MANIFEST, ACME_TREE);
     const ui = v.plugins.find((p) => p.name === "ui-ux-pro-max")!;
     expect(ui.skills.map((s) => s.name)).toEqual(["ui-ux-pro-max"]);
     expect(ui.agents).toEqual([]);
@@ -1043,14 +1043,14 @@ function host(msg: OutboundMessage) {
   act(() => { window.dispatchEvent(new MessageEvent("message", { data: msg })); });
 }
 const mkView = (over: Partial<MarketplaceView> = {}): MarketplaceView => ({
-  repo: "o/r", name: "atbay-plugins", description: "At-Bay plugins", owner: "At-Bay",
+  repo: "o/r", name: "acme-plugins", description: "Acme plugins", owner: "Acme",
   addCommand: "/plugin marketplace add o/r",
   plugins: [{
     name: "cicd-plugin", description: "CI/CD automation", source: "plugins/cicd-plugin",
     skills: [{ name: "build", path: "plugins/cicd-plugin/skills/build/SKILL.md" }],
     agents: [{ name: "pipeline-agent", path: "plugins/cicd-plugin/agents/pipeline-agent.md" }],
     commands: [{ name: "deploy", path: "plugins/cicd-plugin/commands/deploy.md" }],
-    installCommand: "/plugin install cicd-plugin@atbay-plugins",
+    installCommand: "/plugin install cicd-plugin@acme-plugins",
   }],
   ...over,
 });
@@ -1073,7 +1073,7 @@ describe("MarketplaceApp", () => {
   it("renders a marketplace card with its plugin and item chips", () => {
     render(<MarketplaceApp />);
     host(stateMsg([mkView()]));
-    expect(screen.getByText("atbay-plugins")).toBeInTheDocument();
+    expect(screen.getByText("acme-plugins")).toBeInTheDocument();
     expect(screen.getByText("cicd-plugin")).toBeInTheDocument();
     expect(screen.getByText("build")).toBeInTheDocument();
     expect(screen.getByText("pipeline-agent")).toBeInTheDocument();
@@ -1100,7 +1100,7 @@ describe("MarketplaceApp", () => {
     fireEvent.click(screen.getByRole("button", { name: /copy/i }));
     expect(sent).toHaveBeenCalledWith({
       type: "mkt:copy",
-      text: "/plugin marketplace add o/r\n/plugin install cicd-plugin@atbay-plugins",
+      text: "/plugin marketplace add o/r\n/plugin install cicd-plugin@acme-plugins",
     });
   });
 
@@ -1266,7 +1266,7 @@ export function MarketplaceApp(): JSX.Element {
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `npm test -- test/webview/MarketplaceApp.test.tsx`
-Expected: PASS. Note: the "sends mkt:copy" test expects the snippet `"/plugin marketplace add o/r\n/plugin install cicd-plugin@atbay-plugins"` — the `Plugin` component builds exactly that. The "×" element uses `title="Remove o/r"` so `getByTitle(/remove/i)` matches.
+Expected: PASS. Note: the "sends mkt:copy" test expects the snippet `"/plugin marketplace add o/r\n/plugin install cicd-plugin@acme-plugins"` — the `Plugin` component builds exactly that. The "×" element uses `title="Remove o/r"` so `getByTitle(/remove/i)` matches.
 
 - [ ] **Step 5: Create the styles file `src/webview/marketplaceStyles.ts`**
 
@@ -1560,7 +1560,7 @@ Run: `npm run build`, then press F5 (or "Run Extension") in VS Code. In the dev 
 1. Open the Agent Flow Tasks sidebar; confirm a puzzle-piece (`$(extensions)`) button sits to the LEFT of the Deck (dashboard) button.
 2. Click it → the "Agent Flow — Marketplace" panel opens.
 3. Add `anthropics/claude-plugins` (a public marketplace) → confirm plugins render with command chips; click Copy → paste elsewhere to confirm the snippet.
-4. Add a private At-Bay marketplace (e.g. the org's `atbay-plugins` repo) → confirm it loads via `gh` auth.
+4. Add a private org marketplace (e.g. an internal `acme-plugins` repo) → confirm it loads via `gh` auth.
 5. Add `garbage` → confirm an error toast, no card.
 6. Add a real repo that has no `.claude-plugin/marketplace.json` → confirm the "isn't a Claude Code marketplace" card.
 7. Remove a repo with `×` → confirm it disappears and stays gone after reopening the panel.

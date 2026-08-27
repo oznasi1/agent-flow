@@ -396,7 +396,7 @@ git commit -m "feat(orchestrator): add the lock's fs implementation and a first-
 **Interfaces:**
 - Produces: `promoteToPlace(flow: Flow, nodeId: string, runKey: string, repo: string): Flow`. Task 5 calls it after a successful launch.
 
-**Why this is what makes a chain work.** A `planned` node has no run to observe, so no condition on it can ever be evaluated. When a launch succeeds, the node must become a `place` bound to the run that was just created — same `id`, same `x`/`y`, same `join` — so every downstream edge keeps pointing at it and starts evaluating on the next pass. Without this, `ASM-1 merged → launch ASM-12 → ASM-12's CI passes → launch ASM-15` can never reach the third step.
+**Why this is what makes a chain work.** A `planned` node has no run to observe, so no condition on it can ever be evaluated. When a launch succeeds, the node must become a `place` bound to the run that was just created — same `id`, same `x`/`y`, same `join` — so every downstream edge keeps pointing at it and starts evaluating on the next pass. Without this, `PROJ-1 merged → launch PROJ-12 → PROJ-12's CI passes → launch PROJ-15` can never reach the third step.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -409,25 +409,25 @@ import { Flow, FlowNode, PlannedNode, emptyFlow, isPlace } from "../../../../src
 
 const planned = (id: string, over: Partial<PlannedNode> = {}): PlannedNode => ({
   id, kind: "planned", x: 40, y: 80, join: "all",
-  ticketKey: "ASM-12", repos: ["bite-me"], mode: "tdd", dest: "worktree", ...over,
+  ticketKey: "PROJ-12", repos: ["bite-me"], mode: "tdd", dest: "worktree", ...over,
 });
 const flowWith = (nodes: FlowNode[]): Flow => ({ ...emptyFlow("f1", "f", 0), nodes });
 
 describe("promoteToPlace", () => {
   it("turns the planned node into a place bound to the new run", () => {
-    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "ASM-12", "bite-me");
+    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "PROJ-12", "bite-me");
     const n = out.nodes[0];
     expect(isPlace(n)).toBe(true);
-    expect(n).toMatchObject({ kind: "place", runKey: "ASM-12", repo: "bite-me" });
+    expect(n).toMatchObject({ kind: "place", runKey: "PROJ-12", repo: "bite-me" });
   });
 
   it("keeps the id, position and join so downstream edges still point at it", () => {
-    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "ASM-12", "bite-me");
+    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "PROJ-12", "bite-me");
     expect(out.nodes[0]).toMatchObject({ id: "n3", x: 40, y: 80, join: "all" });
   });
 
   it("drops the planned-only fields", () => {
-    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "ASM-12", "bite-me");
+    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "PROJ-12", "bite-me");
     expect(out.nodes[0]).not.toHaveProperty("ticketKey");
     expect(out.nodes[0]).not.toHaveProperty("mode");
     expect(out.nodes[0]).not.toHaveProperty("dest");
@@ -437,26 +437,26 @@ describe("promoteToPlace", () => {
   it("does not mutate the flow it is given", () => {
     const flow = flowWith([planned("n3")]);
     const before = JSON.stringify(flow);
-    promoteToPlace(flow, "n3", "ASM-12", "bite-me");
+    promoteToPlace(flow, "n3", "PROJ-12", "bite-me");
     expect(JSON.stringify(flow)).toBe(before);
   });
 
   it("leaves every other node alone", () => {
-    const other: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" };
-    const out = promoteToPlace(flowWith([other, planned("n3")]), "n3", "ASM-12", "bite-me");
+    const other: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" };
+    const out = promoteToPlace(flowWith([other, planned("n3")]), "n3", "PROJ-12", "bite-me");
     expect(out.nodes[0]).toEqual(other);
   });
 
   it("is a no-op for an id that is not in the flow", () => {
     const flow = flowWith([planned("n3")]);
-    expect(promoteToPlace(flow, "nope", "ASM-12", "bite-me")).toEqual(flow);
+    expect(promoteToPlace(flow, "nope", "PROJ-12", "bite-me")).toEqual(flow);
   });
 
   it("is a no-op for a node that is not planned", () => {
     // Promoting a place again would rewrite the repo it is bound to, which is a
     // silent change of what every condition on it means.
-    const place: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "api" };
-    const out = promoteToPlace(flowWith([place]), "n1", "ASM-9", "web");
+    const place: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "api" };
+    const out = promoteToPlace(flowWith([place]), "n1", "PROJ-9", "web");
     expect(out.nodes[0]).toEqual(place);
   });
 
@@ -465,7 +465,7 @@ describe("promoteToPlace", () => {
       ...flowWith([planned("n3")]),
       edges: [{ id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", mode: "tdd" }],
     };
-    expect(promoteToPlace(flow, "n3", "ASM-12", "bite-me").edges).toEqual(flow.edges);
+    expect(promoteToPlace(flow, "n3", "PROJ-12", "bite-me").edges).toEqual(flow.edges);
   });
 });
 ```
@@ -477,7 +477,7 @@ Create `src/engine/orchestrator/promote.ts`:
 ```ts
 // A planned node has no run, so no condition on it can be evaluated. The moment a
 // launch succeeds it must become a real place, or a chain dies at its second step:
-// "ASM-1 merged -> launch ASM-12 -> ASM-12's CI passes -> launch ASM-15" would
+// "PROJ-1 merged -> launch PROJ-12 -> PROJ-12's CI passes -> launch PROJ-15" would
 // never reach the third link.
 //
 // Same id, position and join, so every downstream edge keeps pointing at it.

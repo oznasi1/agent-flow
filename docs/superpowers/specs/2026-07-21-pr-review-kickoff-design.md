@@ -9,7 +9,7 @@ When a task is in a PR-related status (default **"PR initiated"**), show a
 **"Review PR"** button on the sidebar task card, next to **Take**. Clicking it
 kicks off a Claude Code agent — the same machinery as Take — inside a **git
 worktree**. The agent finds the task's GitHub PR by its Jira key (all PRs are
-prefixed `ASM-****`), checks out the PR's branch, and **assesses whether the PR
+prefixed `PROJ-****`), checks out the PR's branch, and **assesses whether the PR
 is ready for us to work on** (review comments, CI, merge conflicts, approval
 state). By **default it then proceeds to implement the requested changes** on
 that branch; a setting gates that fixing step.
@@ -40,7 +40,7 @@ design.
   toggled by the setting. Shared middle extracted into a private `launch()` core
   so the two entry points don't duplicate ~120 lines.
 - **Agent-driven GitHub discovery is reliable here** because all PRs are prefixed
-  with the Jira key (`ASM-****`). No need for extension-side GitHub integration,
+  with the Jira key (`PROJ-****`). No need for extension-side GitHub integration,
   tokens, or Jira dev-status calls.
 - **Configurable status string, not an enum.** Jira statuses are free-form,
   project-specific strings (there is no status enum in the codebase). A single

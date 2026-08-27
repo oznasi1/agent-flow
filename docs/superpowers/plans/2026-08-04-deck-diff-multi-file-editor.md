@@ -536,13 +536,13 @@ describe("openTaskDiff", () => {
   });
 
   it("reports empty and opens nothing when the task changed no files", async () => {
-    expect(await openTaskDiff("Changes in ASM-1", svc)).toBe("empty");
+    expect(await openTaskDiff("Changes in PROJ-1", svc)).toBe("empty");
     expect(commands.executeCommand).not.toHaveBeenCalled();
   });
 
   it("reports binary-only when every change was a binary file", async () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "pic.bin", binary: true }]);
-    expect(await openTaskDiff("Changes in ASM-1", svc)).toBe("binary-only");
+    expect(await openTaskDiff("Changes in PROJ-1", svc)).toBe("binary-only");
     expect(commands.executeCommand).not.toHaveBeenCalled();
   });
 
@@ -551,16 +551,16 @@ describe("openTaskDiff", () => {
       { status: "M", path: "pic.bin", binary: true },
       { status: "M", path: "a.ts", binary: false },
     ]);
-    expect(await openTaskDiff("Changes in ASM-1", svc)).toBe("opened");
+    expect(await openTaskDiff("Changes in PROJ-1", svc)).toBe("opened");
     expect(list()).toHaveLength(1);
     expect(list()[0][0].fsPath).toContain("a.ts");
   });
 
   it("runs the multi-file diff command with the run's key as the title", async () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.ts", binary: false }]);
-    await openTaskDiff("Changes in ASM-1", svc);
+    await openTaskDiff("Changes in PROJ-1", svc);
     expect(args()[0]).toBe("vscode.changes");
-    expect(args()[1]).toBe("Changes in ASM-1");
+    expect(args()[1]).toBe("Changes in PROJ-1");
   });
 
   it("gives a modified file both sides", async () => {
@@ -746,10 +746,10 @@ Replace those last two tests and add the rest:
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const call = commands.executeCommand.mock.calls.at(-1)!;
     expect(call[0]).toBe("vscode.changes");
-    expect(call[1]).toBe("Changes in ASM-1");
+    expect(call[1]).toBe("Changes in PROJ-1");
     expect(workspace.openTextDocument).not.toHaveBeenCalled();
   });
 
@@ -761,7 +761,7 @@ Replace those last two tests and add the rest:
     commands.executeCommand.mockRejectedValueOnce(new Error("no such command"));
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     expect(workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("+committed"), language: "diff" }),
     );
@@ -777,7 +777,7 @@ Replace those last two tests and add the rest:
     commands.executeCommand.mockRejectedValueOnce(new Error("no such command"));
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const arg = workspace.openTextDocument.mock.calls.at(-1)![0] as { content: string };
     expect(arg.content).toContain("# svc");
     expect(arg.content).toContain("# web");
@@ -787,7 +787,7 @@ Replace those last two tests and add the rest:
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "pic.bin", binary: true }]);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const toast = posts(p).find((m) => m.type === "toast");
     expect(toast.message).toMatch(/binary/i);
     expect(commands.executeCommand).not.toHaveBeenCalled();
@@ -801,7 +801,7 @@ Replace those last two tests and add the rest:
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff", repo: "web" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff", repo: "web" });
     expect(h.taskChangedFiles).toHaveBeenCalledWith("/r/web");
     expect(h.taskChangedFiles).not.toHaveBeenCalledWith("/r/svc");
   });

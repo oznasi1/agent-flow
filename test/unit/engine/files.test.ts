@@ -65,11 +65,11 @@ describe("matchFiles", () => {
 
 describe("mention", () => {
   it("includes the repo name in a multi-root workspace", () => {
-    expect(mention("multiroot", "centaur", "src/a.ts")).toBe("@centaur/src/a.ts");
+    expect(mention("multiroot", "webapp", "src/a.ts")).toBe("@webapp/src/a.ts");
   });
 
   it("is a bare relative path per-window", () => {
-    expect(mention("per-window", "centaur", "src/a.ts")).toBe("@src/a.ts");
+    expect(mention("per-window", "webapp", "src/a.ts")).toBe("@src/a.ts");
   });
 });
 

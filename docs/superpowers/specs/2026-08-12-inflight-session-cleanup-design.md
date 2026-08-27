@@ -23,7 +23,7 @@ notepad-the-details-int-notepad-task-is-not-atta-… | /Users/oznasi/dev/agent-f
 ```
 
 Two agents open in that checkout render as eight cards under the Agents lens.
-The two `explore-` runs that both hold `centaur` double the same way.
+The two `explore-` runs that both hold `webapp` double the same way.
 
 **2. Nothing prunes a ticketless run.** `retireVerdict` rule 3
 ([`src/engine/retire.ts:88-97`](../../../src/engine/retire.ts)) needs

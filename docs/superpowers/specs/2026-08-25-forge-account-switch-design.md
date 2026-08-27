@@ -20,7 +20,7 @@ therefore **byte-identical to a run with no PR at all**: `open`, `blocked`,
 card falls through `deriveBucket`'s ladder to whatever its local session state
 says.
 
-Observed on a real board: run `ASM-6029`, four repos, all four entries
+Observed on a real board: run `PROJ-6029`, four repos, all four entries
 `error: true` for a week. The card sat in **Action required** on a six-day-old
 `needs-you` with no indication that its PR state was unreadable rather than
 absent.
@@ -313,9 +313,9 @@ timeout — pass `timeout: 600000`, and never pipe it through `tail` or `head`.
 
 ## 10. What this does not fix
 
-The `ASM-6029` card that prompted this work will not move. Its four repos have
-no PR on the run's recorded branch — the work shipped under `ASM-6030`,
-`ASM-6031`, `ASM-6032` (all merged) and `ASM-6043` (open), on four different
+The `PROJ-6029` card that prompted this work will not move. Its four repos have
+no PR on the run's recorded branch — the work shipped under `PROJ-6030`,
+`PROJ-6031`, `PROJ-6032` (all merged) and `PROJ-6043` (open), on four different
 branches. Post-switch, `facts: null` for that run is an honest "no PR on this
 branch" rather than an auth artifact, and `prSignals.merged` stays false because
 it requires every PR-bearing repo to have merged. **Forget** is what clears that

@@ -196,8 +196,8 @@ it("carries each task's own prompt suffix into that task's seeded plan", async (
   const plans = writes((p) => p.includes("plans") && p.endsWith(".json"))
     .map((c) => JSON.parse(String(c[1])));
   const promptFor = (key: string) => plans.find((p) => p.key === key)!.matches[0].prompt;
-  expect(promptFor("ASM-1")).toContain("Details from the note:\n\nfirst detail");
-  expect(promptFor("ASM-2")).not.toContain("Details from the note");
+  expect(promptFor("PROJ-1")).toContain("Details from the note:\n\nfirst detail");
+  expect(promptFor("PROJ-2")).not.toContain("Details from the note");
 });
 ```
 

@@ -46,7 +46,7 @@ describe("parseFrontmatter", () => {
 
 import { discoverAssets, memReader } from "../../../src/engine/claudeAssets";
 
-const ATTR = { plugin: "cicd-plugin", marketplace: "atbay-plugins", category: "deployment", state: "installed" as const, enabled: true };
+const ATTR = { plugin: "cicd-plugin", marketplace: "acme-plugins", category: "deployment", state: "installed" as const, enabled: true };
 
 describe("discoverAssets", () => {
   it("finds a skill at any depth, naming it from the parent folder", () => {
@@ -74,7 +74,7 @@ describe("discoverAssets", () => {
     expect(a.type).toBe("agent");
     expect(a.name).toBe("pipeline-agent");
     expect(a.plugin).toBe("cicd-plugin");
-    expect(a.marketplace).toBe("atbay-plugins");
+    expect(a.marketplace).toBe("acme-plugins");
     expect(a.state).toBe("installed");
     expect(a.enabled).toBe(true);
     expect(a.file).toBe("/p/agents/pipeline.md");
@@ -182,7 +182,7 @@ describe("resolveEnabled", () => {
 // hand back a directory outside `installLocation`, no matter how the manifest
 // tries to climb out of it.
 describe("resolveContentDir containment", () => {
-  const root = "/home/u/.claude/plugins/marketplaces/atbay";
+  const root = "/home/u/.claude/plugins/marketplaces/acme";
 
   it("refuses a source that climbs out of installLocation", () => {
     // memReader has no real ".." resolution — it matches literal path strings.
@@ -266,25 +266,25 @@ const P = `${CLAUDE}/plugins`;
 
 /** A fixture with one github marketplace holding three plugins, one of each state. */
 function fixture(extra: Record<string, string> = {}): Record<string, string> {
-  const mkt = `${P}/marketplaces/atbay`;
+  const mkt = `${P}/marketplaces/acme`;
   return {
     [`${P}/known_marketplaces.json`]: JSON.stringify({
-      atbay: { source: { source: "github", repo: "org/atbay" }, installLocation: mkt },
+      acme: { source: { source: "github", repo: "org/acme" }, installLocation: mkt },
     }),
     [`${P}/installed_plugins.json`]: JSON.stringify({
       version: 2,
       plugins: {
-        "installed-one@atbay": [
-          { scope: "user", version: "1.2.3", installPath: `${P}/cache/atbay/installed-one/1.2.3` },
+        "installed-one@acme": [
+          { scope: "user", version: "1.2.3", installPath: `${P}/cache/acme/installed-one/1.2.3` },
         ],
       },
     }),
     [`${CLAUDE}/settings.json`]: JSON.stringify({
-      enabledPlugins: { "installed-one@atbay": true, "clone-one@atbay": false },
+      enabledPlugins: { "installed-one@acme": true, "clone-one@acme": false },
       skillOverrides: { "off-skill": "off" },
     }),
     [`${mkt}/.claude-plugin/marketplace.json`]: JSON.stringify({
-      name: "atbay",
+      name: "acme",
       metadata: { pluginRoot: "./plugins" },
       plugins: [
         { name: "installed-one", description: "installed", source: "./plugins/installed-one" },
@@ -292,7 +292,7 @@ function fixture(extra: Record<string, string> = {}): Record<string, string> {
         { name: "remote-one", description: "elsewhere", source: { source: "github", repo: "x/y" } },
       ],
     }),
-    [`${P}/cache/atbay/installed-one/1.2.3/skills/from-cache/SKILL.md`]: "---\ndescription: cached\n---",
+    [`${P}/cache/acme/installed-one/1.2.3/skills/from-cache/SKILL.md`]: "---\ndescription: cached\n---",
     [`${mkt}/plugins/installed-one/skills/from-clone/SKILL.md`]: "",
     [`${mkt}/plugins/clone-one/commands/run.md`]: "---\ndescription: runs\n---",
     ...extra,
@@ -312,7 +312,7 @@ describe("scanClaudeAssets", () => {
   it("lists the marketplace with its origin and plugin count", () => {
     const v = scan(fixture());
     expect(v.marketplaces).toHaveLength(1);
-    expect(v.marketplaces[0]).toMatchObject({ name: "atbay", kind: "github", origin: "org/atbay", pluginCount: 3, stale: false });
+    expect(v.marketplaces[0]).toMatchObject({ name: "acme", kind: "github", origin: "org/acme", pluginCount: 3, stale: false });
     expect(v.notSetUp).toBe(false);
   });
 
@@ -322,7 +322,7 @@ describe("scanClaudeAssets", () => {
     expect(names).toEqual(["from-cache"]);
     expect(v.plugins.find((p) => p.name === "installed-one")).toMatchObject({
       state: "installed", enabled: true, version: "1.2.3", scopes: ["user"],
-      installCommand: "/plugin install installed-one@atbay",
+      installCommand: "/plugin install installed-one@acme",
     });
   });
 
@@ -346,9 +346,9 @@ describe("scanClaudeAssets", () => {
 
   it("refuses a plugin source that climbs out of installLocation", () => {
     const tree = fixture();
-    const mkt = `${P}/marketplaces/atbay`;
+    const mkt = `${P}/marketplaces/acme`;
     tree[`${mkt}/.claude-plugin/marketplace.json`] = JSON.stringify({
-      name: "atbay",
+      name: "acme",
       metadata: { pluginRoot: "./plugins" },
       plugins: [{ name: "escapee", description: "hostile", source: "../../../../etc" }],
     });
@@ -366,9 +366,9 @@ describe("scanClaudeAssets", () => {
 
   it("falls back to pluginRoot/name when a plugin omits source", () => {
     const tree = fixture();
-    const mkt = `${P}/marketplaces/atbay`;
+    const mkt = `${P}/marketplaces/acme`;
     tree[`${mkt}/.claude-plugin/marketplace.json`] = JSON.stringify({
-      name: "atbay", metadata: { pluginRoot: "./plugins" }, plugins: [{ name: "no-source" }],
+      name: "acme", metadata: { pluginRoot: "./plugins" }, plugins: [{ name: "no-source" }],
     });
     tree[`${mkt}/plugins/no-source/skills/found/SKILL.md`] = "";
     const v = scan(tree);
@@ -380,9 +380,9 @@ describe("scanClaudeAssets", () => {
     const tree = fixture();
     tree[`${P}/installed_plugins.json`] = JSON.stringify({
       plugins: {
-        "installed-one@atbay": [
-          { scope: "user", version: "0.0.1", installPath: `${P}/cache/atbay/installed-one/gone` },
-          { scope: "project", version: "1.2.3", installPath: `${P}/cache/atbay/installed-one/1.2.3` },
+        "installed-one@acme": [
+          { scope: "user", version: "0.0.1", installPath: `${P}/cache/acme/installed-one/gone` },
+          { scope: "project", version: "1.2.3", installPath: `${P}/cache/acme/installed-one/1.2.3` },
         ],
       },
     });
@@ -395,17 +395,17 @@ describe("scanClaudeAssets", () => {
   it("marks a marketplace stale when its installLocation is gone", () => {
     const tree = fixture();
     tree[`${P}/known_marketplaces.json`] = JSON.stringify({
-      atbay: { source: { source: "github", repo: "org/atbay" }, installLocation: `${P}/marketplaces/atbay` },
+      acme: { source: { source: "github", repo: "org/acme" }, installLocation: `${P}/marketplaces/acme` },
       ghost: { source: { source: "directory", path: "/nowhere" }, installLocation: "/nowhere" },
     });
     const v = scan(tree);
     expect(v.marketplaces.find((m) => m.name === "ghost")).toMatchObject({ stale: true, kind: "directory", pluginCount: 0 });
-    expect(v.marketplaces.find((m) => m.name === "atbay")!.stale).toBe(false);
+    expect(v.marketplaces.find((m) => m.name === "acme")!.stale).toBe(false);
   });
 
   it("survives malformed JSON in a manifest without losing other marketplaces", () => {
     const tree = fixture();
-    tree[`${P}/marketplaces/atbay/.claude-plugin/marketplace.json`] = "{ not json";
+    tree[`${P}/marketplaces/acme/.claude-plugin/marketplace.json`] = "{ not json";
     const v = scan(tree);
     expect(v.notSetUp).toBe(false);
     expect(v.plugins).toEqual([]);
@@ -414,7 +414,7 @@ describe("scanClaudeAssets", () => {
 
   it("marks a skill disabled when skillOverrides turns it off inside an enabled plugin", () => {
     const tree = fixture();
-    tree[`${P}/cache/atbay/installed-one/1.2.3/skills/off-skill/SKILL.md`] = "";
+    tree[`${P}/cache/acme/installed-one/1.2.3/skills/off-skill/SKILL.md`] = "";
     const v = scan(tree);
     const off = v.assets.find((a) => a.name === "off-skill")!;
     expect(off.enabled).toBe(false);
@@ -454,8 +454,8 @@ describe("scanClaudeAssets", () => {
 
   it("lets workspace settings.local.json override the user layer", () => {
     const tree = fixture({
-      "/ws/.claude/settings.json": JSON.stringify({ enabledPlugins: { "installed-one@atbay": false } }),
-      "/ws/.claude/settings.local.json": JSON.stringify({ enabledPlugins: { "installed-one@atbay": true } }),
+      "/ws/.claude/settings.json": JSON.stringify({ enabledPlugins: { "installed-one@acme": false } }),
+      "/ws/.claude/settings.local.json": JSON.stringify({ enabledPlugins: { "installed-one@acme": true } }),
     });
     const v = scan(tree, { workspaceDir: "/ws", workspaceName: "ws" });
     expect(v.plugins.find((p) => p.name === "installed-one")!.enabled).toBe(true);
@@ -465,11 +465,11 @@ describe("scanClaudeAssets", () => {
 describe("scanClaudeAssets categories", () => {
   const tree = (over: Record<string, string> = {}) => ({
     "/h/.claude/plugins/known_marketplaces.json": JSON.stringify({
-      atbay: { installLocation: "/mk", source: { source: "github", repo: "org/atbay" } },
+      acme: { installLocation: "/mk", source: { source: "github", repo: "org/acme" } },
     }),
     "/h/.claude/plugins/installed_plugins.json": JSON.stringify({ plugins: {} }),
     "/mk/.claude-plugin/marketplace.json": JSON.stringify({
-      name: "atbay",
+      name: "acme",
       plugins: [
         { name: "cicd", description: "Ships things", category: "Deployment" },
         { name: "plain", description: "No category" },

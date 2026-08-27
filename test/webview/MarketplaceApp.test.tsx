@@ -16,16 +16,16 @@ function host(msg: OutboundMessage) {
 
 const asset = (over: Partial<AssetView> = {}): AssetView => ({
   type: "skill", name: "build", description: "Builds the thing", plugin: "cicd-plugin",
-  marketplace: "atbay", file: "/a/skills/build/SKILL.md", rel: "skills/build/SKILL.md",
+  marketplace: "acme", file: "/a/skills/build/SKILL.md", rel: "skills/build/SKILL.md",
   enabled: true, state: "installed", category: "deployment", ...over,
 });
 const plugin = (over: Partial<PluginRowView> = {}): PluginRowView => ({
-  name: "remote-one", marketplace: "atbay", description: "Lives elsewhere", state: "manifest",
+  name: "remote-one", marketplace: "acme", description: "Lives elsewhere", state: "manifest",
   enabled: null, scopes: [], version: "", counts: { skill: 0, command: 0, agent: 0, hook: 0 },
-  category: "deployment", readme: "", installCommand: "/plugin install remote-one@atbay", ...over,
+  category: "deployment", readme: "", installCommand: "/plugin install remote-one@acme", ...over,
 });
 const view = (over: Partial<ClaudeAssetsView> = {}): ClaudeAssetsView => ({
-  marketplaces: [{ name: "atbay", kind: "github", origin: "org/atbay", pluginCount: 2, stale: false }],
+  marketplaces: [{ name: "acme", kind: "github", origin: "org/acme", pluginCount: 2, stale: false }],
   plugins: [plugin()],
   assets: [
     asset(),
@@ -201,7 +201,7 @@ describe("MarketplaceApp", () => {
     // the row keeps its marketplace, just as plain text instead.
     const row = document.querySelector<HTMLElement>(".row.t-plugin")!;
     expect(within(row).getAllByText("remote-one")).toHaveLength(1);
-    expect(within(row).getByText("atbay")).toBeInTheDocument();
+    expect(within(row).getByText("acme")).toBeInTheDocument();
     expect(row.querySelector(".meta.link")).toBeNull();
   });
 
@@ -237,7 +237,7 @@ describe("MarketplaceApp", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Plugins \d/i }));
     fireEvent.click(rowText("remote-one")); // the list row, not the detail heading
     fireEvent.click(screen.getByRole("button", { name: /^copy$/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "mkt:copy", text: "/plugin install remote-one@atbay" });
+    expect(sent).toHaveBeenCalledWith({ type: "mkt:copy", text: "/plugin install remote-one@acme" });
   });
 
   it("moves the selection with the arrow keys", () => {
@@ -331,7 +331,7 @@ describe("MarketplaceApp plugin filter", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
     openPicker();
-    fireEvent.click(screen.getByLabelText("gc-plugin (atbay)"));
+    fireEvent.click(screen.getByLabelText("gc-plugin (acme)"));
     expect(rowText("watch")).toBeInTheDocument();
     expect(screen.queryByText("/deploy")).not.toBeInTheDocument();
   });
@@ -340,8 +340,8 @@ describe("MarketplaceApp plugin filter", () => {
     render(<MarketplaceApp />);
     host(assetsMsg());
     openPicker();
-    fireEvent.click(screen.getByLabelText("gc-plugin (atbay)"));
-    fireEvent.click(screen.getByLabelText("cicd-plugin (atbay)"));
+    fireEvent.click(screen.getByLabelText("gc-plugin (acme)"));
+    fireEvent.click(screen.getByLabelText("cicd-plugin (acme)"));
     expect(rowText("watch")).toBeInTheDocument();
     expect(screen.getAllByText("/deploy").length).toBeGreaterThan(0);
   });
@@ -374,7 +374,7 @@ describe("MarketplaceApp plugin filter", () => {
     // cicd-plugin has one skill among its four assets; gc-plugin has its one.
     expect(item("cicd-plugin").textContent).toContain("1");
     // Selecting one plugin must not zero the others out of reach of their own box.
-    fireEvent.click(screen.getByLabelText("gc-plugin (atbay)"));
+    fireEvent.click(screen.getByLabelText("gc-plugin (acme)"));
     expect(item("cicd-plugin")).toBeTruthy();
   });
 
@@ -401,7 +401,7 @@ describe("MarketplaceApp plugin filter", () => {
     const { container } = render(<MarketplaceApp />);
     host(assetsMsg());
     openPicker();
-    fireEvent.click(screen.getByLabelText("gc-plugin (atbay)"));
+    fireEvent.click(screen.getByLabelText("gc-plugin (acme)"));
     // gc-plugin's only asset is "watch", which "deploy" doesn't match — narrowing
     // by the search box (a dimension the picker's own sift pass never skips)
     // drives gc-plugin's count to zero, which is exactly the case the zero-count
@@ -494,7 +494,7 @@ describe("MarketplaceApp category sections", () => {
 describe("MarketplaceApp marketplace filter", () => {
   const v = () => view({
     marketplaces: [
-      { name: "atbay", kind: "github", origin: "org/atbay", pluginCount: 2, stale: false },
+      { name: "acme", kind: "github", origin: "org/acme", pluginCount: 2, stale: false },
       { name: "~/.claude", kind: "user", origin: "~/.claude", pluginCount: 1, stale: false },
     ],
   });
@@ -511,9 +511,9 @@ describe("MarketplaceApp marketplace filter", () => {
     render(<MarketplaceApp />);
     host(assetsMsg(v()));
     fireEvent.click(screen.getByRole("button", { name: "~/.claude" }));
-    fireEvent.click(screen.getByRole("button", { name: "atbay" }));
+    fireEvent.click(screen.getByRole("button", { name: "acme" }));
     expect(screen.getAllByText("pipeline").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /atbay ×/ }));
+    fireEvent.click(screen.getByRole("button", { name: /acme ×/ }));
     expect(screen.queryByText("pipeline")).not.toBeInTheDocument();
   });
 
@@ -522,7 +522,7 @@ describe("MarketplaceApp marketplace filter", () => {
     host(assetsMsg(v()));
     fireEvent.click(screen.getByRole("button", { name: "~/.claude" }));
     fireEvent.click(screen.getByRole("button", { name: /^Plugins ▾/ }));
-    expect(screen.queryByLabelText("gc-plugin (atbay)")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("gc-plugin (acme)")).not.toBeInTheDocument();
   });
 });
 

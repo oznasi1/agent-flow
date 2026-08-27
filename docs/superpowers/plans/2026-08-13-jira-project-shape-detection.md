@@ -351,7 +351,7 @@ describe("loadShape", () => {
   it("reads the project's boards and reports a scrum project", async () => {
     const fetchMock = installFetch([jsonResponse(BOARDS)]);
     expect(await client().loadShape()).toEqual({ boardId: 2, hasSprints: true, boardCount: 2 });
-    expect(urlOf(fetchMock, 0)).toContain("/rest/agile/1.0/board?projectKeyOrId=ASM");
+    expect(urlOf(fetchMock, 0)).toContain("/rest/agile/1.0/board?projectKeyOrId=PROJ");
   });
 
   it("reports a kanban-only project as sprintless", async () => {
@@ -381,7 +381,7 @@ describe("loadShape", () => {
       jsonResponse(BOARDS),
       jsonResponse({ values: [{ id: 5, type: "kanban" }] }),
     ]);
-    await new mod.JiraClient(BASE, "ASM", fakeAuth()).loadShape();
+    await new mod.JiraClient(BASE, "PROJ", fakeAuth()).loadShape();
     expect(await new mod.JiraClient(BASE, "OTHER", fakeAuth()).loadShape())
       .toEqual({ boardId: 5, hasSprints: false, boardCount: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -962,24 +962,24 @@ Append to `test/unit/tasks/jira/jql.test.ts`:
 ```ts
 describe("stripPriorityOrder — no-priority fallback", () => {
   it("drops the priority term and keeps the updated sort", () => {
-    expect(stripPriorityOrder(buildJql("ASM", "mine"))).toBe(
-      "project = ASM AND statusCategory != Done ORDER BY updated DESC",
+    expect(stripPriorityOrder(buildJql("PROJ", "mine"))).toBe(
+      "project = PROJ AND statusCategory != Done ORDER BY updated DESC",
     );
   });
 
   it("leaves the WHERE clause untouched", () => {
-    const stripped = stripPriorityOrder(buildJql("ASM", "mysprint", "s"));
+    const stripped = stripPriorityOrder(buildJql("PROJ", "mysprint", "s"));
     expect(stripped).toContain("sprint in openSprints()");
     expect(stripped).toContain('originalEstimate <= "4h"');
   });
 
   it("is idempotent", () => {
-    const once = stripPriorityOrder(buildJql("ASM", "mine"));
+    const once = stripPriorityOrder(buildJql("PROJ", "mine"));
     expect(stripPriorityOrder(once)).toBe(once);
   });
 
   it("leaves a query with no priority sort alone", () => {
-    const q = "project = ASM ORDER BY updated DESC";
+    const q = "project = PROJ ORDER BY updated DESC";
     expect(stripPriorityOrder(q)).toBe(q);
   });
 });
@@ -1000,7 +1000,7 @@ Append to `test/unit/tasks/jira/client.test.ts`:
     const tasks = await client().fetchTasks("mine");
     expect(tasks).toHaveLength(1);
     expect(bodyOf(fetchMock, 1).jql).toContain("ORDER BY priority DESC");
-    expect(bodyOf(fetchMock, 2).jql).toBe("project = ASM AND statusCategory != Done ORDER BY updated DESC");
+    expect(bodyOf(fetchMock, 2).jql).toBe("project = PROJ AND statusCategory != Done ORDER BY updated DESC");
   });
 ```
 

@@ -100,10 +100,10 @@ describe("branchCiKey", () => {
 
 describe("GLAB_BRANCH_CI_ARGS", () => {
   it("asks for the newest pipeline on that ref, in one call", () => {
-    const args = GLAB_BRANCH_CI_ARGS("feat/ASM-1");
+    const args = GLAB_BRANCH_CI_ARGS("feat/PROJ-1");
     expect(args[0]).toBe("api");
     expect(args[1]).toContain("projects/:fullpath/pipelines");
-    expect(args[1]).toContain("ref=feat%2FASM-1");
+    expect(args[1]).toContain("ref=feat%2FPROJ-1");
     expect(args[1]).toContain("per_page=1");
   });
 

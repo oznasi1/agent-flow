@@ -220,7 +220,7 @@ describe("openWorkspace — this window", () => {
     await openWorkspace(
       baseReq({
         openIn: "current",
-        currentWindow: folderWindow, // only account-service is a root; centaur is not
+        currentWindow: folderWindow, // only account-service is a root; webapp is not
         descriptionText: "fix `src/export.py`",
         promptTemplate: "Go{files}",
       }),
@@ -228,7 +228,7 @@ describe("openWorkspace — this window", () => {
     const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
     const prompt = String(JSON.parse(String(planWrite![1])).matches[0].prompt);
     expect(prompt).toContain("@account-service/src/export.py");
-    expect(prompt).not.toContain("@centaur/");
+    expect(prompt).not.toContain("@webapp/");
   });
 });
 ```
@@ -318,7 +318,7 @@ Replace line 205's `if (req.existingWorkspaceFile) {` with a new leading branch:
     // other live window.
     //
     // Mentions resolve against THIS window's roots and are dropped for anything outside
-    // them: `@centaur/src/x.ts` when centaur isn't a root here would send the agent to a
+    // them: `@webapp/src/x.ts` when webapp isn't a root here would send the agent to a
     // different checkout, which is worse than no mention at all. `{brief}` is absolute
     // for the same reason its relative form can't be trusted off-root.
     const mentions = services.flatMap((s) =>
@@ -426,7 +426,7 @@ In `test/unit/engine/batchWorkspace.test.ts`, delete this test at lines 212-224 
     expect(exec).not.toHaveBeenCalled();
     expect(commands.executeCommand).toHaveBeenCalledWith(
       "vscode.openFolder",
-      expect.objectContaining({ fsPath: "/ws/ASM-1+1.code-workspace" }),
+      expect.objectContaining({ fsPath: "/ws/PROJ-1+1.code-workspace" }),
       { forceNewWindow: false },
     );
     expect(result.opened).toBe(true);
@@ -475,16 +475,16 @@ and put this in its place:
           promptTemplate: "Go{files}",
           tasks: [
             {
-              ticket: { key: "ASM-1", summary: "one", url: "https://jira/ASM-1" },
+              ticket: { key: "PROJ-1", summary: "one", url: "https://jira/PROJ-1" },
               planMd: "## Plan\n\na",
               descriptionText: "fix `src/export.py`",
-              services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+              services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-1", isGit: true }],
             },
           ],
         }),
       );
       const plan = JSON.parse(String(writes((p) => p.includes("plans") && p.endsWith(".json"))[0][1]));
-      expect(String(plan.matches[0].prompt)).toContain("@api/.claude/worktrees/ASM-1/src/export.py");
+      expect(String(plan.matches[0].prompt)).toContain("@api/.claude/worktrees/PROJ-1/src/export.py");
     });
   });
 ```
@@ -765,7 +765,7 @@ Append to `test/unit/tasksView.test.ts`, in the describe block that already cove
       vi.mocked(currentWindow).mockReturnValue(HERE);
       window.showQuickPick.mockResolvedValueOnce(undefined); // cancel; we only inspect the items
 
-      await view.takeTask("ASM-1");
+      await view.takeTask("PROJ-1");
 
       const items = window.showQuickPick.mock.calls[0][0] as { label: string; detail: string }[];
       const item = items.find((i) => i.label.includes("This window"));
@@ -779,7 +779,7 @@ Append to `test/unit/tasksView.test.ts`, in the describe block that already cove
       vi.mocked(currentWindow).mockReturnValue(undefined);
       window.showQuickPick.mockResolvedValueOnce(undefined);
 
-      await view.takeTask("ASM-1");
+      await view.takeTask("PROJ-1");
 
       const items = window.showQuickPick.mock.calls[0][0] as { label: string }[];
       expect(items.some((i) => i.label.includes("This window"))).toBe(false);
@@ -789,7 +789,7 @@ Append to `test/unit/tasksView.test.ts`, in the describe block that already cove
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
       vi.mocked(currentWindow).mockReturnValue(HERE);
 
-      await view.takeTask("ASM-1");
+      await view.takeTask("PROJ-1");
 
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ openIn: "current", currentWindow: HERE, mode: "per-window" }),
@@ -804,7 +804,7 @@ Append to `test/unit/tasksView.test.ts`, in the describe block that already cove
         roots: [{ name: "api", path: "/repos/api" }],
       });
 
-      await view.takeTask("ASM-1");
+      await view.takeTask("PROJ-1");
 
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "multiroot" }));
     });
@@ -813,7 +813,7 @@ Append to `test/unit/tasksView.test.ts`, in the describe block that already cove
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
       vi.mocked(currentWindow).mockReturnValue(undefined);
 
-      await view.takeTask("ASM-1");
+      await view.takeTask("PROJ-1");
 
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ openIn: "new" }));
       expect(posted()).toContainEqual(
@@ -822,7 +822,7 @@ Append to `test/unit/tasksView.test.ts`, in the describe block that already cove
     });
 ```
 
-Match the surrounding tests' setup for `view.takeTask("ASM-1")` — the existing block already stubs the connector, `openWorkspace`, and the repo picker. Reuse whatever helper those tests use rather than building a new fixture; if they call a differently named entry point (e.g. a `take` helper), use that instead.
+Match the surrounding tests' setup for `view.takeTask("PROJ-1")` — the existing block already stubs the connector, `openWorkspace`, and the repo picker. Reuse whatever helper those tests use rather than building a new fixture; if they call a differently named entry point (e.g. a `take` helper), use that instead.
 
 Then, next to the toast assertions (the block around line 2440):
 
@@ -838,7 +838,7 @@ Then, next to the toast assertions (the block around line 2440):
         seededInPlace: true,
       } as never);
 
-      await view.takeTask("ASM-1");
+      await view.takeTask("PROJ-1");
 
       expect(posted()).toContainEqual(
         expect.objectContaining({ type: "toast", level: "success", message: expect.stringContaining("in this window") }),
@@ -981,7 +981,7 @@ with:
     const where = this.openedWhere(result);
 ```
 
-The surrounding sentences are unchanged: `Opened ${where} …` reads "Opened in this window for ASM-1."
+The surrounding sentences are unchanged: `Opened ${where} …` reads "Opened in this window for PROJ-1."
 
 - [ ] **Step 9: Run the tasksView suite**
 

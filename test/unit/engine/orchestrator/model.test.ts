@@ -6,11 +6,11 @@ import {
 } from "../../../../src/engine/orchestrator/model";
 
 const place = (id: string, over: Partial<PlaceNode> = {}): PlaceNode => ({
-  id, kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow", ...over,
+  id, kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow", ...over,
 });
 const planned = (id: string, over: Partial<PlannedNode> = {}): PlannedNode => ({
   id, kind: "planned", x: 0, y: 0, join: "any",
-  ticketKey: "ASM-12", repos: ["bite-me"], mode: "tdd", dest: "worktree", ...over,
+  ticketKey: "PROJ-12", repos: ["bite-me"], mode: "tdd", dest: "worktree", ...over,
 });
 const notify = (id: string, over: Partial<NotifyNode> = {}): NotifyNode => ({
   id, kind: "notify", x: 0, y: 0, join: "any", message: "landed", ...over,
@@ -61,7 +61,7 @@ describe("isSettled", () => {
   });
 
   it("is true for an error with no firedAt — the half a firedAt-only check misses", () => {
-    expect(isSettled(edge("e1", "a", "z", { error: "Couldn't launch ASM-12: no worktree" }))).toBe(true);
+    expect(isSettled(edge("e1", "a", "z", { error: "Couldn't launch PROJ-12: no worktree" }))).toBe(true);
   });
 
   it("is true when both are set", () => {

@@ -655,7 +655,7 @@ Add to `test/webview/App.test.tsx` inside the `mount + auth gate` describe block
 ```tsx
   it("reports open windows on the header gauge", () => {
     render(<App />);
-    host({ type: "state", authed: true, configured: true, project: "ASM", me: "Jane",
+    host({ type: "state", authed: true, configured: true, project: "PROJ", me: "Jane",
            prReviewStatus: "PR initiated", filters: ALL_FILTERS, liveCount: 2 });
     expect(screen.getByRole("img", { name: "2 Agent Flow windows open" })).toBeInTheDocument();
   });
@@ -731,10 +731,10 @@ Replace `src/webview/App.tsx:450`:
 
 Add the import at the top of the file: `import { GaugeMark } from "./GaugeMark";`
 
-Then fix the existing header assertion at `test/webview/App.test.tsx:46`, which matches the clipboard emoji that no longer exists. `getByText` is a whole-string match, so `"ASM"` finds the header and not the `ASM-1` card key:
+Then fix the existing header assertion at `test/webview/App.test.tsx:46`, which matches the clipboard emoji that no longer exists. `getByText` is a whole-string match, so `"PROJ"` finds the header and not the `PROJ-1` card key:
 
 ```tsx
-    expect(screen.getByText("ASM")).toBeInTheDocument(); // header title, not the card key
+    expect(screen.getByText("PROJ")).toBeInTheDocument(); // header title, not the card key
 ```
 
 - [ ] **Step 12: Run the tests to verify they pass**
@@ -1126,8 +1126,8 @@ In `test/webview/App.test.tsx`:
     render(<App />);
     authed();
     host({ type: "tasks", filter: "mine", tasks: [
-      mkTask({ key: "ASM-1", summary: "Moving", statusCategory: "indeterminate", priority: "Highest" }),
-      mkTask({ key: "ASM-2", summary: "Not started", statusCategory: "new", priority: "Low" }),
+      mkTask({ key: "PROJ-1", summary: "Moving", statusCategory: "indeterminate", priority: "Highest" }),
+      mkTask({ key: "PROJ-2", summary: "Not started", statusCategory: "new", priority: "Low" }),
     ] });
     expect(screen.getByText("Moving").closest(".card")).toHaveClass("s-progress");
     expect(screen.getByText("Not started").closest(".card")).toHaveClass("s-new");
@@ -1137,8 +1137,8 @@ In `test/webview/App.test.tsx`:
     render(<App />);
     authed();
     host({ type: "tasks", filter: "mine", tasks: [
-      mkTask({ key: "ASM-1", summary: "Urgent", priority: "Highest" }),
-      mkTask({ key: "ASM-2", summary: "Ordinary", priority: "High" }),
+      mkTask({ key: "PROJ-1", summary: "Urgent", priority: "Highest" }),
+      mkTask({ key: "PROJ-2", summary: "Ordinary", priority: "High" }),
     ] });
     expect(within(screen.getByText("Urgent").closest(".card")!).getByText("Highest")).toBeInTheDocument();
     expect(within(screen.getByText("Ordinary").closest(".card")!).queryByText("Highest")).not.toBeInTheDocument();
@@ -1203,8 +1203,8 @@ In `test/webview/App.test.tsx`:
   it("keeps Remove reachable by name once its label goes", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "ASM-1", summary: "In sprint" })] });
-    const remove = screen.getByRole("button", { name: /Remove ASM-1 from your active sprint/i });
+    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "PROJ-1", summary: "In sprint" })] });
+    const remove = screen.getByRole("button", { name: /Remove PROJ-1 from your active sprint/i });
     expect(remove).toBeInTheDocument();
     expect(remove).toHaveTextContent("");
   });

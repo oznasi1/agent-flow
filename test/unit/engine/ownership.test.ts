@@ -96,10 +96,10 @@ describe("resolveOwnership — sessions", () => {
 
   it("attributes a multi-repo run's session through whichever repo it runs in", () => {
     const o = resolveOwnership({
-      runs: [run("ASM-1", NOW - 60 * MIN, "/w/api", "/w/web")],
+      runs: [run("PROJ-1", NOW - 60 * MIN, "/w/api", "/w/web")],
       sessionsByPlace: places({ "/w/web": [sess("s1", NOW - 30 * MIN)] }),
     });
-    expect(o.sessionOwner.get("s1")).toBe("ASM-1");
+    expect(o.sessionOwner.get("s1")).toBe("PROJ-1");
   });
 });
 
@@ -124,11 +124,11 @@ describe("resolveOwnership — paths", () => {
 
   it("gives every repo of a sole holder to that run", () => {
     const o = resolveOwnership({
-      runs: [run("ASM-1", NOW, "/w/api", "/w/web")],
+      runs: [run("PROJ-1", NOW, "/w/api", "/w/web")],
       sessionsByPlace: new Map(),
     });
-    expect(o.pathOwner.get("/w/api")).toBe("ASM-1");
-    expect(o.pathOwner.get("/w/web")).toBe("ASM-1");
+    expect(o.pathOwner.get("/w/api")).toBe("PROJ-1");
+    expect(o.pathOwner.get("/w/web")).toBe("PROJ-1");
   });
 
   it("records no owner for a path no run holds", () => {

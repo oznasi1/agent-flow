@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Attribution is the author's alone.** The `LICENSE` copyright line, the `package.json`
+  `author` field and the README footer no longer name an employer — Agent Flow Deck is a
+  personal open-source project and now says so consistently. `docs/TELEMETRY.md` states the
+  same about where events go.
+
+- **Fixtures and docs use neutral placeholders.** Test fixtures, code comments and archived
+  design docs previously carried one organization's names — a `ASM` Jira project key, repo
+  names, a marketplace name, a Jira site URL. They now read `PROJ`, `webapp`, `e2e_suite`,
+  `acme` and `example.atlassian.net`. No shipped behaviour changes: every occurrence was a
+  test fixture, a comment or prose.
+
 ## [0.51.0] — 2026-08-27
 
 ### Added
@@ -760,11 +773,11 @@ older local install.
 ### Changed
 
 - **A worktree's workspace folder now leads with its service.** A root pointing at
-  a per-task worktree is named `<repo>-<KEY>` — `account-service-ASM-6031` — so the
+  a per-task worktree is named `<repo>-<KEY>` — `account-service-PROJ-6031` — so the
   explorer says which checkout a row came from instead of showing a bare key beside
   the repos it belongs to. A folder pointing at a main checkout is still just the
   repo name. Batch launches carried the same qualifier the other way round
-  (`ASM-6031-account-service`) and now group by service too. File mentions follow
+  (`PROJ-6031-account-service`) and now group by service too. File mentions follow
   the folder name, so they keep resolving to the worktree they name; workspaces
   already on disk are untouched.
 
@@ -1061,7 +1074,7 @@ older local install.
 
 ### Changed
 
-- **A task's diff says which repo you are looking at.** The multi-file diff editor lists files flat, so on a task spanning repos nothing on screen named the repo whose file was open — the tab said only `Changes in ASM-1`. It now names the scope: `Changes in ASM-1 — svc` for one repo, the workspace's own name for a whole multi-root task, `all repos` otherwise. Diffing a task that spans repos asks which one first, with **All repos** as the first answer; a single-repo task, or a card already acting on one repo, still opens straight into the diff.
+- **A task's diff says which repo you are looking at.** The multi-file diff editor lists files flat, so on a task spanning repos nothing on screen named the repo whose file was open — the tab said only `Changes in PROJ-1`. It now names the scope: `Changes in PROJ-1 — svc` for one repo, the workspace's own name for a whole multi-root task, `all repos` otherwise. Diffing a task that spans repos asks which one first, with **All repos** as the first answer; a single-repo task, or a card already acting on one repo, still opens straight into the diff.
 
 ## [0.15.2] — 2026-08-12
 
@@ -1879,7 +1892,7 @@ No code changed in this release.
 
 - **Jira failures read as sentences instead of raw JSON.** A refused write used to
   surface as `Jira 400: {"errorMessages":[…],"errors":{}}`. It now reads
-  *"Couldn't update ASM-1. Ticket cannot be closed unless Resolution will be
+  *"Couldn't update PROJ-1. Ticket cannot be closed unless Resolution will be
   provided."*, with field-level problems named by their display name rather than
   their `customfield_10042` id. Error pages and empty bodies become a plain
   status sentence instead of being dumped on screen.

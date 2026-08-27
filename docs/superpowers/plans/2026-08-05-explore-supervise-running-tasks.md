@@ -43,51 +43,51 @@ describe("describeActiveTasks", () => {
   });
 
   it("excludes a finished run", () => {
-    const finished = { ...mkRun("ASM-1", 100), finishedAt: 200 };
+    const finished = { ...mkRun("PROJ-1", 100), finishedAt: 200 };
     expect(describeActiveTasks([finished], new Set())).toBe("_No other active tasks right now._");
   });
 
   it("includes only the unfinished runs from a mix of finished and unfinished", () => {
-    const finished = { ...mkRun("ASM-1", 100), finishedAt: 200 };
-    const unfinished = mkRun("ASM-2", 300);
+    const finished = { ...mkRun("PROJ-1", 100), finishedAt: 200 };
+    const unfinished = mkRun("PROJ-2", 300);
     const md = describeActiveTasks([finished, unfinished], new Set());
-    expect(md).not.toContain("ASM-1");
-    expect(md).toContain("ASM-2");
+    expect(md).not.toContain("PROJ-1");
+    expect(md).toContain("PROJ-2");
   });
 
   it("lists an unfinished run as idle when its repo has no live session", () => {
-    const run = mkRun("ASM-1", 100);
+    const run = mkRun("PROJ-1", 100);
     expect(describeActiveTasks([run], new Set())).toBe(
-      "## Active tasks\n- **ASM-1** (task) — ASM-1 summary — `/repos/svc` (branch: asm-1) — idle, no agent attached",
+      "## Active tasks\n- **PROJ-1** (task) — PROJ-1 summary — `/repos/svc` (branch: proj-1) — idle, no agent attached",
     );
   });
 
   it("marks a run as having an agent open when its repo is in livePlaces", () => {
-    const run = mkRun("ASM-1", 100);
+    const run = mkRun("PROJ-1", 100);
     expect(describeActiveTasks([run], new Set(["/repos/svc"]))).toContain("agent open");
     expect(describeActiveTasks([run], new Set(["/repos/svc"]))).not.toContain("idle");
   });
 
   it("renders a run's kind, tolerating an old record with no kind field", () => {
-    const tagged = { ...mkRun("ASM-1", 100), kind: "explore" as const };
-    expect(describeActiveTasks([tagged], new Set())).toContain("**ASM-1** (explore)");
-    const untagged = mkRun("ASM-2", 100);
-    expect(describeActiveTasks([untagged], new Set())).toContain("**ASM-2** (task)");
+    const tagged = { ...mkRun("PROJ-1", 100), kind: "explore" as const };
+    expect(describeActiveTasks([tagged], new Set())).toContain("**PROJ-1** (explore)");
+    const untagged = mkRun("PROJ-2", 100);
+    expect(describeActiveTasks([untagged], new Set())).toContain("**PROJ-2** (task)");
   });
 
   it("falls back to an 'unknown location' placeholder for a run with no repos", () => {
-    const run = { ...mkRun("ASM-1", 100), repos: [] };
+    const run = { ...mkRun("PROJ-1", 100), repos: [] };
     expect(describeActiveTasks([run], new Set())).toContain("unknown location");
   });
 
   it("lists multiple active runs as separate bullets, newest first if readRuns already sorted them", () => {
-    const a = mkRun("ASM-1", 100);
-    const b = mkRun("ASM-2", 300);
+    const a = mkRun("PROJ-1", 100);
+    const b = mkRun("PROJ-2", 300);
     const md = describeActiveTasks([b, a], new Set());
     expect(md.split("\n")).toEqual([
       "## Active tasks",
-      "- **ASM-2** (task) — ASM-2 summary — `/repos/svc` (branch: asm-2) — idle, no agent attached",
-      "- **ASM-1** (task) — ASM-1 summary — `/repos/svc` (branch: asm-1) — idle, no agent attached",
+      "- **PROJ-2** (task) — PROJ-2 summary — `/repos/svc` (branch: proj-2) — idle, no agent attached",
+      "- **PROJ-1** (task) — PROJ-1 summary — `/repos/svc` (branch: proj-1) — idle, no agent attached",
     ]);
   });
 });
@@ -466,9 +466,9 @@ Add two new tests at the end of the `describe("explore", ...)` block, right befo
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(readRuns).mockReturnValue([
       {
-        key: "ASM-9",
+        key: "PROJ-9",
         summary: "Fix retry bug",
-        url: "https://jira/ASM-9",
+        url: "https://jira/PROJ-9",
         createdAt: 1,
         mode: "per-window",
         repos: [{ name: "svc", path: "/repos/svc", isGit: true, branch: "fix/retry" }],
@@ -484,7 +484,7 @@ Add two new tests at the end of the `describe("explore", ...)` block, right befo
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
         planMd: expect.stringContaining(
-          "- **ASM-9** (task) — Fix retry bug — `/repos/svc` (branch: fix/retry) — idle, no agent attached",
+          "- **PROJ-9** (task) — Fix retry bug — `/repos/svc` (branch: fix/retry) — idle, no agent attached",
         ),
       }),
     );

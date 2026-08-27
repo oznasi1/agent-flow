@@ -3,7 +3,7 @@ import { isTicketRun, runKind, ticketKeyFor } from "../../src/types";
 import type { Run } from "../../src/types";
 
 const mkRun = (over: Partial<Run> = {}): Run => ({
-  key: "ASM-1", summary: "do it", url: "https://jira/ASM-1", createdAt: 1, mode: "per-window",
+  key: "PROJ-1", summary: "do it", url: "https://jira/PROJ-1", createdAt: 1, mode: "per-window",
   repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }], briefPaths: [], ...over,
 });
 
@@ -50,14 +50,14 @@ describe("ticketKeyFor", () => {
   };
 
   it("is a no-op for a normal task run — the key already equals the url tail", () => {
-    expect(ticketKeyFor(mkRun({ key: "ASM-1", url: "https://jira/browse/ASM-1" }), jira)).toBe("ASM-1");
+    expect(ticketKeyFor(mkRun({ key: "PROJ-1", url: "https://jira/browse/PROJ-1" }), jira)).toBe("PROJ-1");
   });
 
   it("derives the real ticket from the url when the record's own key is a place-hash", () => {
     // Exactly what Track it writes for case 3: a tracked run already owned the
     // inferred key, so the record is saved under its local place-hash instead —
     // the ticket survives only in the url.
-    expect(ticketKeyFor(mkRun({ key: "local-centaur-1a2b3c4d", url: "https://jira/browse/ASM-5641" }), jira)).toBe("ASM-5641");
+    expect(ticketKeyFor(mkRun({ key: "local-webapp-1a2b3c4d", url: "https://jira/browse/PROJ-5641" }), jira)).toBe("PROJ-5641");
   });
 
   it("falls back to the key for an Explore run, which has no url", () => {

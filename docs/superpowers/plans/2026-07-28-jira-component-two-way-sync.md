@@ -82,9 +82,9 @@ describe("resolveComponent", () => {
 
 describe("mapRepoComponents", () => {
   it("keys by the repo's own spelling and values with the component's", () => {
-    expect(mapRepoComponents(["billing-service", "centaur"], ["Billing-Service", "Centaur"])).toEqual({
+    expect(mapRepoComponents(["billing-service", "webapp"], ["Billing-Service", "Webapp"])).toEqual({
       "billing-service": "Billing-Service",
-      centaur: "Centaur",
+      webapp: "Webapp",
     });
   });
 
@@ -193,7 +193,7 @@ describe("listComponents", () => {
   it("GETs the project's components and returns their names", async () => {
     const fetchMock = installFetch([jsonResponse([{ id: "1", name: "billing-service" }, { id: "2", name: "Infra" }])]);
     await expect(client().listComponents()).resolves.toEqual(["billing-service", "Infra"]);
-    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/ASM/components`);
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/PROJ/components`);
   });
 
   // Two separate cases on purpose. The cache is module-level and keyed by project,
@@ -254,21 +254,21 @@ describe("listComponents", () => {
 describe("updateComponents", () => {
   it("PUTs an additive add", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().updateComponents("ASM-1", { add: ["billing-service"] });
-    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/ASM-1`);
+    await client().updateComponents("PROJ-1", { add: ["billing-service"] });
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/PROJ-1`);
     expect(fetchMock.mock.calls[0][1].method).toBe("PUT");
     expect(bodyOf(fetchMock, 0)).toEqual({ update: { components: [{ add: { name: "billing-service" } }] } });
   });
 
   it("PUTs a remove", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().updateComponents("ASM-1", { remove: ["pricing-api"] });
+    await client().updateComponents("PROJ-1", { remove: ["pricing-api"] });
     expect(bodyOf(fetchMock, 0)).toEqual({ update: { components: [{ remove: { name: "pricing-api" } }] } });
   });
 
   it("PUTs adds before removes in one call", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().updateComponents("ASM-1", { add: ["a"], remove: ["b"] });
+    await client().updateComponents("PROJ-1", { add: ["a"], remove: ["b"] });
     expect(bodyOf(fetchMock, 0)).toEqual({
       update: { components: [{ add: { name: "a" } }, { remove: { name: "b" } }] },
     });
@@ -276,15 +276,15 @@ describe("updateComponents", () => {
 
   it("never uses the destructive set verb (which would drop components with no local repo)", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().updateComponents("ASM-1", { add: ["a"] });
+    await client().updateComponents("PROJ-1", { add: ["a"] });
     expect(JSON.stringify(bodyOf(fetchMock, 0))).not.toContain("set");
     expect(bodyOf(fetchMock, 0)).not.toHaveProperty("fields");
   });
 
   it("makes no request at all when there is nothing to change", async () => {
     const fetchMock = installFetch([]);
-    await client().updateComponents("ASM-1", {});
-    await client().updateComponents("ASM-1", { add: [], remove: [] });
+    await client().updateComponents("PROJ-1", {});
+    await client().updateComponents("PROJ-1", { add: [], remove: [] });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -394,24 +394,24 @@ Then add this describe block (put it just before `describe("addToMySprint"`):
 describe("detail", () => {
   it("reports the issue's components and the repo → component map for every repo", async () => {
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "Do the thing",
       descriptionText: "desc",
-      labels: ["centaur"],
+      labels: ["webapp"],
       components: ["account-service"],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { send, posted } = setup();
-    await send({ type: "detail", key: "ASM-1" });
+    await send({ type: "detail", key: "PROJ-1" });
     expect(posted()).toContainEqual({
       type: "detail",
-      key: "ASM-1",
+      key: "PROJ-1",
       descriptionText: "desc",
-      // account-service from the component, centaur from the label
-      inferred: ["account-service", "centaur"],
-      repos: ["account-service", "centaur"],
+      // account-service from the component, webapp from the label
+      inferred: ["account-service", "webapp"],
+      repos: ["account-service", "webapp"],
       jiraComponents: ["account-service"],
-      // "centaur" is a discovered repo but not a component of ASM → absent
+      // "webapp" is a discovered repo but not a component of PROJ → absent
       mappable: { "account-service": "account-service" },
     });
   });
@@ -419,7 +419,7 @@ describe("detail", () => {
   it("reads the issue before the component list, so a dead token still re-gates the panel", async () => {
     clientStub.getDetail.mockRejectedValue(new JiraAuthError("nope"));
     const { send, posted } = setup();
-    await send({ type: "detail", key: "ASM-1" });
+    await send({ type: "detail", key: "PROJ-1" });
     expect(clientStub.listComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
   });
@@ -427,8 +427,8 @@ describe("detail", () => {
   it("still reports the detail when the component list is unavailable — every chip is local-only", async () => {
     clientStub.listComponents.mockResolvedValue([]);
     const { send, posted } = setup();
-    await send({ type: "detail", key: "ASM-1" });
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "ASM-1", mappable: {} }));
+    await send({ type: "detail", key: "PROJ-1" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "PROJ-1", mappable: {} }));
   });
 });
 ```
@@ -493,7 +493,7 @@ import { mapRepoComponents } from "./engine/components";
 `test/webview/App.test.tsx:707` sends a `detail` message that now lacks two required fields. Update that one call:
 
 ```ts
-    host({ type: "detail", key: "ASM-1", descriptionText: "The full description", inferred: [], repos: ["centaur"], jiraComponents: [], mappable: {} });
+    host({ type: "detail", key: "PROJ-1", descriptionText: "The full description", inferred: [], repos: ["webapp"], jiraComponents: [], mappable: {} });
 ```
 
 - [ ] **Step 6: Run the full suite and typecheck**
@@ -535,49 +535,49 @@ describe("setComponent", () => {
   it("adds the component under the project's spelling and echoes ok", async () => {
     clientStub.listComponents.mockResolvedValue(["Account-Service"]);
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
-    expect(clientStub.updateComponents).toHaveBeenCalledWith("ASM-1", { add: ["Account-Service"] });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.updateComponents).toHaveBeenCalledWith("PROJ-1", { add: ["Account-Service"] });
     expect(posted()).toContainEqual({
-      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: true, ok: true,
+      type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: true, movedChip: true, ok: true,
     });
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success", message: "Added Account-Service to ASM-1" }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success", message: "Added Account-Service to PROJ-1" }));
   });
 
   it("removes the component and echoes ok", async () => {
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: false, movedChip: true });
-    expect(clientStub.updateComponents).toHaveBeenCalledWith("ASM-1", { remove: ["account-service"] });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: false, movedChip: true });
+    expect(clientStub.updateComponents).toHaveBeenCalledWith("PROJ-1", { remove: ["account-service"] });
     expect(posted()).toContainEqual({
-      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: false, movedChip: true, ok: true,
+      type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: false, movedChip: true, ok: true,
     });
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success", message: "Removed account-service from ASM-1" }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success", message: "Removed account-service from PROJ-1" }));
   });
 
   it("echoes movedChip: false back unchanged (a push leaves the chip where it is)", async () => {
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: false });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: false });
     expect(posted()).toContainEqual({
-      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: false, ok: true,
+      type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: true, movedChip: false, ok: true,
     });
   });
 
   it("stamps the provenance label", async () => {
     const { send } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
-    expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.addLabel).toHaveBeenCalledWith("PROJ-1", "claude-code");
   });
 
   it("skips the label stamp when stampLabelOnWrite is off", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, stampLabelOnWrite: false });
     const { send } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(clientStub.addLabel).not.toHaveBeenCalled();
   });
 
   it("still succeeds when the label stamp fails", async () => {
     clientStub.addLabel.mockRejectedValue(new Error("label 500"));
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: true }));
   });
 
@@ -588,12 +588,12 @@ describe("setComponent", () => {
   it("echoes ok: false with an actionable toast when Jira rejects the write", async () => {
     clientStub.updateComponents.mockRejectedValue(parseJiraError(400, JSON.stringify({ errorMessages: ["Component name is not valid"], errors: {} })));
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(posted()).toContainEqual({
-      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: true, ok: false,
+      type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: true, movedChip: true, ok: false,
     });
     expect(posted()).toContainEqual(expect.objectContaining({
-      type: "toast", level: "error", action: { label: "Open in Jira", url: "https://jira/browse/ASM-1" },
+      type: "toast", level: "error", action: { label: "Open in Jira", url: "https://jira/browse/PROJ-1" },
     }));
     expect(clientStub.addLabel).not.toHaveBeenCalled();
   });
@@ -603,7 +603,7 @@ describe("setComponent", () => {
   it("echoes ok: false and re-gates the panel on an auth failure, posting no toast", async () => {
     clientStub.updateComponents.mockRejectedValue(new JiraAuthError("token dead"));
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
     // Re-gating to the sign-in screen is itself the indication — a toast on top
@@ -614,11 +614,11 @@ describe("setComponent", () => {
   it("writes nothing and echoes ok: false when the project has no such component", async () => {
     clientStub.listComponents.mockResolvedValue(["Infra"]);
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "scratch-tool", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "scratch-tool", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({
-      type: "toast", level: "error", message: "ASM has no component named “scratch-tool”.",
+      type: "toast", level: "error", message: "PROJ has no component named “scratch-tool”.",
     }));
   });
 
@@ -628,18 +628,18 @@ describe("setComponent", () => {
   it("blames the connection, not the repo, when the component list came back empty", async () => {
     clientStub.listComponents.mockResolvedValue([]);
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({
       type: "toast", level: "error",
-      message: "Couldn't read ASM's components from Jira. Check the connection and try again.",
+      message: "Couldn't read PROJ's components from Jira. Check the connection and try again.",
     }));
   });
 
   it("echoes ok: false and re-gates when not signed in, without touching Jira", async () => {
     const { send, posted } = setup({ authed: false });
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
@@ -779,20 +779,20 @@ Presentation only — no messages are sent and no `↑` exists yet. This task's 
 Add to `test/webview/App.test.tsx`, inside the same `describe` that holds `withTask` (the one containing "shows ticket detail once it arrives"):
 
 ```ts
-  /** Expand ASM-1 and deliver a detail. `jiraComponents` / `mappable` decide the
+  /** Expand PROJ-1 and deliver a detail. `jiraComponents` / `mappable` decide the
    *  chip states: account-service is on the ticket (A), pricing-api maps but is not
    *  on it (B), scratch-tool maps to nothing (C). */
   const withChips = (over: Partial<{ inferred: string[]; jiraComponents: string[]; mappable: Record<string, string> }> = {}) => {
-    withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
+    withTask(mkTask({ key: "PROJ-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByText("Fix bug"));
     host({
       type: "detail",
-      key: "ASM-1",
+      key: "PROJ-1",
       descriptionText: "desc",
-      repos: ["account-service", "pricing-api", "scratch-tool", "centaur"],
+      repos: ["account-service", "pricing-api", "scratch-tool", "webapp"],
       inferred: over.inferred ?? ["account-service", "pricing-api", "scratch-tool"],
       jiraComponents: over.jiraComponents ?? ["Account-Service"],
-      mappable: over.mappable ?? { "account-service": "Account-Service", "pricing-api": "Pricing-Api", centaur: "Centaur" },
+      mappable: over.mappable ?? { "account-service": "Account-Service", "pricing-api": "Pricing-Api", webapp: "Webapp" },
     });
   };
 
@@ -804,7 +804,7 @@ Add to `test/webview/App.test.tsx`, inside the same `describe` that holds `withT
     const chip = chipFor("account-service");
     expect(chip.className).not.toContain("off-ticket");
     expect(chip).not.toHaveAttribute("title");
-    expect(within(chip).getByTitle("Remove Account-Service from ASM-1")).toBeInTheDocument();
+    expect(within(chip).getByTitle("Remove Account-Service from PROJ-1")).toBeInTheDocument();
     expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
   });
 
@@ -812,7 +812,7 @@ Add to `test/webview/App.test.tsx`, inside the same `describe` that holds `withT
     withChips();
     const chip = chipFor("pricing-api");
     expect(chip.className).toContain("off-ticket");
-    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Jira");
+    expect(chip).toHaveAttribute("title", "Not on PROJ-1 in Jira");
     // The × is local-only here: there is no component on the ticket to remove.
     expect(within(chip).getByTitle("Remove")).toBeInTheDocument();
   });
@@ -821,7 +821,7 @@ Add to `test/webview/App.test.tsx`, inside the same `describe` that holds `withT
     withChips();
     const chip = chipFor("scratch-tool");
     expect(chip.className).toContain("off-ticket");
-    expect(chip).toHaveAttribute("title", "No ASM component named “scratch-tool” — this selection stays local");
+    expect(chip).toHaveAttribute("title", "No PROJ component named “scratch-tool” — this selection stays local");
     expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
     expect(within(chip).getByTitle("Remove")).toBeInTheDocument();
   });
@@ -1037,14 +1037,14 @@ In `test/webview/App.test.tsx`, add to the describe holding `withChips`:
   it("writes an add when a mappable repo is picked, moving the chip too", () => {
     withChips();
     sent.mockClear();
-    pick("centaur");
-    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "ASM-1", repo: "centaur", on: true, movedChip: true });
+    pick("webapp");
+    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "PROJ-1", repo: "webapp", on: true, movedChip: true });
     // Optimistic: the new chip is already solid, before any verdict.
-    expect(chipFor("centaur").className).not.toContain("off-ticket");
+    expect(chipFor("webapp").className).not.toContain("off-ticket");
   });
 
   it("sends nothing when an unmappable repo is picked, and marks it local-only", () => {
-    withChips({ inferred: [], mappable: { centaur: "Centaur" } });
+    withChips({ inferred: [], mappable: { webapp: "Webapp" } });
     sent.mockClear();
     pick("scratch-tool");
     expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "setComponent" }));
@@ -1054,16 +1054,16 @@ In `test/webview/App.test.tsx`, add to the describe holding `withChips`:
   it("pushes a state-B chip without moving it, and shows it solid at once", () => {
     withChips();
     sent.mockClear();
-    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to ASM-1"));
-    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "ASM-1", repo: "pricing-api", on: true, movedChip: false });
+    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to PROJ-1"));
+    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "PROJ-1", repo: "pricing-api", on: true, movedChip: false });
     expect(chipFor("pricing-api").className).not.toContain("off-ticket");
   });
 
   it("writes a remove when a state-A chip is dismissed", () => {
     withChips();
     sent.mockClear();
-    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove Account-Service from ASM-1"));
-    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "ASM-1", repo: "account-service", on: false, movedChip: true });
+    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove Account-Service from PROJ-1"));
+    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: false, movedChip: true });
     expect(chipFor("account-service")).toBeUndefined();
   });
 
@@ -1079,29 +1079,29 @@ In `test/webview/App.test.tsx`, add to the describe holding `withChips`:
 
   it("keeps the optimistic state when the host reports ok", () => {
     withChips();
-    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to ASM-1"));
-    host({ type: "componentsChanged", key: "ASM-1", repo: "pricing-api", on: true, movedChip: false, ok: true });
+    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to PROJ-1"));
+    host({ type: "componentsChanged", key: "PROJ-1", repo: "pricing-api", on: true, movedChip: false, ok: true });
     expect(chipFor("pricing-api").className).not.toContain("off-ticket");
   });
 
   it("undoes a rejected push — the chip goes dashed again but stays in the list", () => {
     withChips();
-    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to ASM-1"));
-    host({ type: "componentsChanged", key: "ASM-1", repo: "pricing-api", on: true, movedChip: false, ok: false });
+    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to PROJ-1"));
+    host({ type: "componentsChanged", key: "PROJ-1", repo: "pricing-api", on: true, movedChip: false, ok: false });
     expect(chipFor("pricing-api").className).toContain("off-ticket");
   });
 
   it("undoes a rejected picker add — the chip disappears again", () => {
     withChips();
-    pick("centaur");
-    host({ type: "componentsChanged", key: "ASM-1", repo: "centaur", on: true, movedChip: true, ok: false });
-    expect(chipFor("centaur")).toBeUndefined();
+    pick("webapp");
+    host({ type: "componentsChanged", key: "PROJ-1", repo: "webapp", on: true, movedChip: true, ok: false });
+    expect(chipFor("webapp")).toBeUndefined();
   });
 
   it("undoes a rejected remove — the chip comes back solid", () => {
     withChips();
-    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove Account-Service from ASM-1"));
-    host({ type: "componentsChanged", key: "ASM-1", repo: "account-service", on: false, movedChip: true, ok: false });
+    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove Account-Service from PROJ-1"));
+    host({ type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: false, movedChip: true, ok: false });
     expect(chipFor("account-service")).toBeDefined();
     expect(chipFor("account-service").className).not.toContain("off-ticket");
   });
@@ -1109,7 +1109,7 @@ In `test/webview/App.test.tsx`, add to the describe holding `withChips`:
   it("ignores a verdict for a ticket with no loaded detail", () => {
     withChips();
     expect(() =>
-      host({ type: "componentsChanged", key: "ASM-99", repo: "centaur", on: true, movedChip: true, ok: false }),
+      host({ type: "componentsChanged", key: "PROJ-99", repo: "webapp", on: true, movedChip: true, ok: false }),
     ).not.toThrow();
   });
 ```
@@ -1220,7 +1220,7 @@ Extend the state-B title now that the affordance exists — `` `Not on ${taskKey
 Update the Task 5 test that asserted the old wording:
 
 ```ts
-    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Jira — ↑ adds it");
+    expect(chip).toHaveAttribute("title", "Not on PROJ-1 in Jira — ↑ adds it");
 ```
 
 And add the affordance's CSS to `src/webview/styles.ts`, after the `.chip.off-ticket` rule:

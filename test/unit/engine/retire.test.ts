@@ -7,12 +7,12 @@ const DAY = 24 * HOUR;
 const NOW = 1_700_000_000_000;
 
 const run = (over: Partial<Run> = {}): Run => ({
-  key: "ASM-1", summary: "s", url: "https://jira/browse/ASM-1", createdAt: NOW - 30 * DAY,
-  mode: "per-window", repos: [{ name: "api", path: "/r/api", isGit: true, branch: "ASM-1-x" }],
+  key: "PROJ-1", summary: "s", url: "https://jira/browse/PROJ-1", createdAt: NOW - 30 * DAY,
+  mode: "per-window", repos: [{ name: "api", path: "/r/api", isGit: true, branch: "PROJ-1-x" }],
   briefPaths: [], ...over,
 });
 const repo = (over: Partial<RepoGit> = {}): RepoGit => ({
-  name: "api", path: "/r/api", branch: "ASM-1-x", dirty: false, ahead: 0,
+  name: "api", path: "/r/api", branch: "PROJ-1-x", dirty: false, ahead: 0,
   added: 0, removed: 0, files: 0, ...over,
 });
 const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -264,7 +264,7 @@ describe("rule 0 — an in-place run that closed", () => {
 
   it("spares a ticket-bearing run even when its kind says explore", () => {
     expect(retireVerdict(input({
-      run: inPlace({ url: "https://jira/browse/ASM-1" }), shelf: "closed",
+      run: inPlace({ url: "https://jira/browse/PROJ-1" }), shelf: "closed",
       repos: [repo({ dirty: true })],
     }))).toEqual({ action: "keep" });
   });

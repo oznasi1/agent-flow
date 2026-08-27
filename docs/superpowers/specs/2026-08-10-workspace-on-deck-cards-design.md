@@ -4,9 +4,9 @@
 
 An In-flight card built from a local Claude Code session names one repo, even when
 the session runs inside a multi-root workspace. A window holding
-`centaur+e2e.code-workspace` (two folders) with one Claude session open in
-`automation_e2e` produces a card whose title, branch line and only repo chip all say
-`automation_e2e`. The workspace the work actually belongs to is nowhere on the card.
+`webapp+e2e.code-workspace` (two folders) with one Claude session open in
+`e2e_suite` produces a card whose title, branch line and only repo chip all say
+`e2e_suite`. The workspace the work actually belongs to is nowhere on the card.
 
 The cause is in the data, not the rendering. `localRunFor` builds one `Run` per
 *session place* — the git root of the session's cwd — with exactly one repo
@@ -85,7 +85,7 @@ When a run has a `workspaceFile` and more than one repo, the flat `.c-repos` row
 replaced by a single chip:
 
 ```
-▸ centaur+e2e  2 repos
+▸ webapp+e2e  2 repos
 ```
 
 The name is mono (an identifier); "2 repos" is UI font (prose) — the sheet's own rule.
@@ -96,7 +96,7 @@ The chip's tooltip is the workspace file path.
 
 A single-repo run renders exactly what it renders today. Tracked multi-repo runs get
 the chip too — this is the one place where existing UI changes shape, and it makes a
-two-repo `ASM-5989` card one line shorter at rest.
+two-repo `PROJ-5989` card one line shorter at rest.
 
 ### 4. The branch line follows the agent
 
