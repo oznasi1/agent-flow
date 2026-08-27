@@ -482,26 +482,150 @@ every test in the surface at once, which is the loud failure mode</td></tr>
 
 <section>
 <h2 id="findings">12 · Findings from implementation</h2>
-<p>Two real product defects surfaced while building the Notepad journey (Task 5). Both are recorded here — not
+<p>Two findings surfaced while building the Notepad journey (Task 5) — one of them, Finding A, since retracted.
+Both are recorded here — not
 just in the throwaway execution ledger under <code>.superpowers/sdd/...</code>, which is deleted once this work
 lands — so a maintainer diffing the spec against the code later can still find them.</p>
 
 <div class="callout warn">
-<div class="t">Finding A — post-drag text selection is broken (pinned by a test)</div>
-<p>After a Notepad row is dragged to a new position, its body text can no longer be selected with the mouse.
-Deterministic — reproduced three times in a row, not a flake. In Blink, an element carrying the
-<code>draggable</code> attribute cannot be text-selected by mouse, and calling <code>preventDefault()</code> on
-<code>dragstart</code> does not hand the gesture back to selection — Blink forks "drag" from "select" at
-<code>mousedown</code>, before <code>dragstart</code> even fires, and does not revisit that fork afterward.</p>
-<p><code>src/webview/Notepad.tsx:504-511</code> shows the author already anticipated exactly this trap and built an
-<code>armed</code> / <code>draggable={armed}</code> state machine meant to un-arm a row once its drag completes —
-but the reset on <code>onDragEnd</code> at <code>Notepad.tsx:626</code> (<code>() =&gt; { setArmed(false);
-dnd.onEnd(); }</code>) does not fully hand the gesture back to selection for the row that was just dragged.</p>
-<p>Pinned by <code>test.fail()</code> in <code>test-e2e/notepad.e2e.ts</code> ("dragging a note leaves its body
-unselectable afterwards (pinned defect)"). <b>When this is fixed:</b> delete the <code>test.fail()</code> line —
-not the test itself — which is what turns the test from "expected to fail" back into an ordinary passing
-regression check.</p>
+<div class="t">Finding A — post-drag text selection is <s>broken</s> FINE; the test that pinned it was wrong</div>
+<p><b>Corrected 2026-08-27.</b> This finding claimed that after a Notepad row is dragged, its body text can no
+longer be selected with the mouse, and pinned it with <code>test.fail()</code> in
+<code>test-e2e/notepad.e2e.ts</code>. <b>The product is not defective. The measurement was.</b></p>
+<p>The test read the selection with a <code>page.evaluate()</code> in the <i>workbench</i> realm that walked
+<code>iframe.webview</code> → <code>#active-frame</code> → <code>contentDocument</code>. The workbench page is
+<code>vscode-file://vscode-app</code> and the webview is <code>vscode-webview://…</code>, so that walk is a
+cross-origin read: <code>contentDocument</code> is <code>null</code> regardless of what is selected, and the
+walk's trailing <code>?? ""</code> turned that <code>null</code> into "nothing is selected". The assertion
+<code>selected.trim().length &gt; 0</code> could therefore never pass, for any product behaviour — which is why it
+"reproduced" every time.</p>
+<p>Instrumented on the real host (same drag, same selection gesture, both reads side by side): the outer walk
+reported <code>contentDocument: null</code>, while a <code>FrameLocator</code>-rooted evaluate inside the webview's
+own realm reported real selected text from the dragged row. `Notepad.tsx`'s <code>armed</code> /
+<code>draggable={armed}</code> state machine does hand the gesture back — the design works, and nothing in
+<code>src/</code> was changed.</p>
+<p>The test now asserts the guarantee positively ("a note body is still selectable after its row was dragged"),
+with no <code>test.fail()</code>, and reads the selection through <code>Pool.selection()</code> — one helper,
+inside the frame, whose doc comment records this trap so no journey re-walks <code>contentDocument</code>.</p>
 </div>
+
+<div class="callout stop">
+<div class="t">The scar this addresses</div>
+On a prior plan, six plan-authored tests turned out to be vacuous or impossible while the implementers' code was
+correct — the tests were the defect source. A green suite that cannot fail is worse than no suite, because it is
+believed. Note also that a sabotage check only means anything against <b>committed</b> work: the
+<code>git checkout</code> that restores the mutant also reverts any uncommitted fix.
+</div>
+
+<h3>7.2 Unfaked shell calls fail loudly</h3>
+<p>The forge shim's unknown-argv handling is self-discovering by design: log to <code>unknown.jsonl</code>, return
+<code>[]</code>, exit 0 — so the first run against real code <em>reports</em> what else must be faked instead of
+crashing cryptically. That is right during development and wrong forever after: once a journey is green, a product
+change that starts shelling a new subcommand silently receives an empty answer and the journey keeps passing.
+<code>expectNoUnknownForgeCalls(sb)</code> in each forge journey's teardown asserts <code>unknown.jsonl</code> is
+empty or absent.</p>
+
+<h3>7.3 Flake stops hiding</h3>
+<p>CI keeps <code>retries: 1</code> — dropping it would make a required check hostile — but
+<code>scripts/verify-report.mjs</code> learns to read each result's retry count and mark
+<b>"passed on retry"</b> in the markdown summary and the sticky PR comment. Today a journey that only passes the
+second time is indistinguishable in the report from one that passes cleanly, which is how an intermittently broken
+journey becomes permanent background noise.</p>
+</section>
+
+<section>
+<h2 id="spike">8 · The Cursor-as-host spike — timeboxed, gates its own tasks</h2>
+<p>Measured on 2026-08-22: Playwright's <code>_electron.launch</code> against Cursor with
+<code>--extensionDevelopmentPath</code> and a fresh user-data <b>never completes the launch handshake</b> — the
+driver's inspector pipe does not answer, and it times out at five minutes. CDP was never tried.</p>
+<p><b>The probe:</b> launch Cursor with <code>--remote-debugging-port=&lt;n&gt;</code> as a plain child process,
+attach with <code>chromium.connectOverCDP</code>, locate the workbench target among the CDP pages, and assert
+<code>.activitybar</code>. Timebox: one session.</p>
+<table>
+<thead><tr><th>Outcome</th><th>Consequence</th></tr></thead>
+<tbody>
+<tr><td><span class="yes">Go</span></td><td><code>launchCursorHost()</code> joins <code>host.ts</code> beside
+<code>launchHost</code>, and <b>one</b> journey (smoke + take) runs on Cursor. Not the whole suite — the point is to
+prove the host boots and the extension activates, not to double the lane.</td></tr>
+<tr><td><span class="no">No-go</span></td><td>A documented negative result in the plan's ledger, naming what was
+tried and how it failed. The Cursor lane stays manual. <b>No other task depends on this either way</b> — the
+Cursor <em>provider</em> journey (§6.2) runs on the VS Code host and is unaffected.</td></tr>
+</tbody>
+</table>
+<p>The spike runs <b>first</b>, before any plan task is written against it, so a no-go costs one session rather
+than a restructured plan.</p>
+</section>
+
+<section>
+<h2 id="runtime">9 · Runtime and CI</h2>
+<p>Boot count is the honest cost metric: each boot downloads nothing (the VS Code build is cached on the key that
+hashes <code>host.ts</code> and <code>claudeCode.ts</code>) but each pays full Electron start-up.</p>
+<table>
+<thead><tr><th></th><th>Boots</th><th>Note</th></tr></thead>
+<tbody>
+<tr><td>Today</td><td>11</td><td>Measured at ~1–2 min in CI</td></tr>
+<tr><td>Purely additive</td><td>~25</td><td>The approach this design rejected</td></tr>
+<tr><td><b>This design</b></td><td><b>~21</b></td><td>11 existing + 3 grouped + 7 per-test (+1 if the spike says go)</td></tr>
+</tbody>
+</table>
+<p><b>CI changes:</b> the cache key in <code>e2e.yml</code> gains <code>copilotChat.ts</code>; a new weekly
+<code>sabotage.yml</code> job runs §7.1. The required check keeps its current shape — same job, same sticky
+comment, same artifacts.</p>
+<div class="callout">
+<div class="t">Escape hatch, not built now</div>
+If the required check crosses roughly eight minutes, tag journeys <code>@core</code> / <code>@extended</code> and
+run only <code>@core</code> on PRs with the full set on merge-to-main. It is named here so the option is designed
+rather than improvised, and deliberately deferred because it lets a break reach <code>main</code>.
+</div>
+</section>
+
+<section>
+<h2 id="dod">10 · Definition of done</h2>
+<ul>
+<li><code>npm run typecheck</code> clean · <code>npm test</code> passes <b>unmodified</b> · <code>npm run build</code>
+succeeds · <code>npm run test:cov</code> thresholds hold · <code>npm run test:ct</code> passes ·
+<code>npm run test:e2e</code> passes (11 existing + new).</li>
+<li>The one <code>src/</code> change is the fixture connector's three capabilities (§5), covered by unit tests
+that also re-pin the double gate.</li>
+<li>Every new journey ships with its sabotage patch in <code>test-e2e/sabotage/</code>, and
+<code>scripts/sabotage.mjs</code> passes over the full set at least once.</li>
+<li>No new dependencies. Pins move only deliberately: VS Code 1.96.2, Claude Code 2.1.238, plus the new Copilot
+Chat pin.</li>
+<li>Lockfile hygiene: <code>grep -c codeartifact package-lock.json</code> → 0.</li>
+<li>Both required checks green on the PR; merged via the REST path.</li>
+<li>A <code>CHANGELOG.md</code> entry only if user-facing behaviour changes — expected to be <b>none</b>, since the
+fixture connector is unreachable in shipped installs.</li>
+</ul>
+</section>
+
+<section>
+<h2 id="risks">11 · Risks</h2>
+<table>
+<thead><tr><th>Risk</th><th>Mitigation</th></tr></thead>
+<tbody>
+<tr><td>A shared-host group cascades: one failure hides the rest</td><td><code>mode: "serial"</code> makes the skip
+explicit rather than reporting phantom failures; groups are capped at the read-only surfaces where a cascade is
+cheap to read</td></tr>
+<tr><td>Copilot Chat demands sign-in and never exposes its command</td><td>Go/no-go inside the task (§4.4); delete
+the journey and record the finding rather than ship a vacuous test</td></tr>
+<tr><td>The Cursor CDP spike fails like the inspector pipe did</td><td>Timeboxed, runs first, nothing depends
+on it (§8)</td></tr>
+<tr><td>Doubling the journey count doubles the flake surface on a required check</td><td>§7.3 makes retries
+visible, so flake is measured rather than absorbed; <code>workers: 1</code> stays</td></tr>
+<tr><td>The review rail's GraphQL shape drifts upstream in <code>gh</code></td><td>§7.2 turns an unfaked call into
+a failure instead of an empty answer</td></tr>
+<tr><td>Page objects drift from the real classes</td><td>They are thin and centralised; a wrong selector fails
+every test in the surface at once, which is the loud failure mode</td></tr>
+</tbody>
+</table>
+</section>
+
+<section>
+<h2 id="findings">12 · Findings from implementation</h2>
+<p>Two findings surfaced while building the Notepad journey (Task 5) — one of them, Finding A, since retracted.
+Both are recorded here — not
+just in the throwaway execution ledger under <code>.superpowers/sdd/...</code>, which is deleted once this work
+lands — so a maintainer diffing the spec against the code later can still find them.</p>
 
 <div class="callout stop">
 <div class="t">Finding B — Notepad <code>globalState</code> data-loss race (previously unknown, NOT fixed)</div>
