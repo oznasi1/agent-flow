@@ -298,6 +298,31 @@ describe("removeFlow", () => {
   });
 });
 
+describe("readFlows — two edges sharing one id", () => {
+  it("keeps only the first, so no per-edge bookkeeping is ever shared", () => {
+    // Everything downstream keys per-edge state by `e.id`: evaluate.ts's met
+    // memo (the second edge would fire on the FIRST's condition — a silent paid
+    // launch), applyFired's stamps and its outcomes map, and Reset. Ids are
+    // minted unique by every released build, so a duplicate is only ever a
+    // hand-edit or a file merge; the first occurrence wins, like everything
+    // else in flow order.
+    const p = path.join(DIR, "f1.json");
+    const { io } = fakeIo({
+      [p]: JSON.stringify({
+        ...flow(),
+        edges: [
+          { id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify" },
+          { id: "e1", from: "b", to: "z", cond: { kind: "ci-passed" }, action: "notify" },
+          { id: "e2", from: "c", to: "z", cond: { kind: "ci-failed" }, action: "notify" },
+        ],
+      }),
+    });
+    const edges = readFlows(io, DIR)[0].edges;
+    expect(edges.map((e) => e.id)).toEqual(["e1", "e2"]);
+    expect(edges[0].cond).toEqual({ kind: "pr-merged" });
+  });
+});
+
 describe("readFlows — an armed flag that is not a boolean", () => {
   it("reads every non-boolean armed value back as disarmed", () => {
     // `evaluateFlow` gates on `if (!flow.armed)`, so a truthy non-boolean — the

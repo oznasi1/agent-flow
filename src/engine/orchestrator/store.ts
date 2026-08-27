@@ -96,6 +96,18 @@ function coerceFlow(v: unknown): Flow | null {
   const f = v as Partial<Flow>;
   if (typeof f.id !== "string" || !VALID_FLOW_ID.test(f.id)) return null;
   if (!Array.isArray(f.nodes) || !Array.isArray(f.edges)) return null;
+  // Two edges sharing one id (a hand-edit or a file merge — every released build
+  // mints ids unique) would share every piece of per-edge bookkeeping downstream:
+  // evaluate.ts's met memo (the second fires on the FIRST's condition — silent
+  // spend), applyFired's stamps and its outcomes map, and Reset. Dropped HERE, at
+  // the one door bad data comes through, so those id-keyed invariants stay true
+  // for every consumer. First occurrence wins, like everything else in flow order.
+  const seenEdgeIds = new Set<string>();
+  const dedupedEdges = f.edges.filter(validEdge).filter((e) => {
+    if (seenEdgeIds.has(e.id)) return false;
+    seenEdgeIds.add(e.id);
+    return true;
+  });
   const shaped = {
     ...(v as Flow),
     // Only the boolean `true` a released build writes arms. `evaluateFlow` gates
@@ -105,7 +117,7 @@ function coerceFlow(v: unknown): Flow | null {
     // toggle, not money.
     armed: f.armed === true,
     nodes: f.nodes.filter(validNode),
-    edges: f.edges.filter(validEdge),
+    edges: dedupedEdges,
   };
   return latchActionMismatches(shaped);
 }
