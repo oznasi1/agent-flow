@@ -43,13 +43,13 @@ const many = (): { flow: Flow; runs: RunStatus[] } => {
   const edges: Flow["edges"] = [];
   const runs: RunStatus[] = [];
   for (let i = 0; i < N; i++) {
-    nodes.push({ id: `a${i}`, kind: "place", x: 20, y: 20 + i * 70, join: "any", runKey: `ASM-${i}`, repo: `repo-${i}` });
+    nodes.push({ id: `a${i}`, kind: "place", x: 20, y: 20 + i * 70, join: "any", runKey: `PROJ-${i}`, repo: `repo-${i}` });
     nodes.push({ id: `p${i}`, kind: "planned", x: 300, y: 20 + i * 70, join: "any",
       ticketKey: `NEXT-${i}`, repos: [`repo-${i}`], mode: "quick", dest: "worktree" });
     edges.push({ id: `e${i}`, from: `a${i}`, to: `p${i}`, cond: { kind: "pr-merged" }, action: "launch", mode: "quick" });
     // Alternating, so the panel carries a mix of verdicts rather than ten
     // identical rows — a uniform list could scroll correctly for a wrong reason.
-    runs.push(status(`ASM-${i}`, `repo-${i}`, i % 2 === 0));
+    runs.push(status(`PROJ-${i}`, `repo-${i}`, i % 2 === 0));
   }
   return { flow: { id: "f1", name: "Ship the migration", armed: false, createdAt: 1_000, nodes, edges }, runs };
 };

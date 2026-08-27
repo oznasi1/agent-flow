@@ -3456,8 +3456,8 @@ describe("the open and close animation", () => {
 });
 
 describe("the dry run", () => {
-  /** `wired()`'s ASM-1 with its PR already merged, so its `pr-merged` rule is met. */
-  const merged = (key = "ASM-1", repo = "agent-flow"): RunStatus => ({
+  /** `wired()`'s PROJ-1 with its PR already merged, so its `pr-merged` rule is met. */
+  const merged = (key = "PROJ-1", repo = "agent-flow"): RunStatus => ({
     ...runStatus(key, repo),
     prs: {
       [repo]: {
@@ -3486,7 +3486,7 @@ describe("the dry run", () => {
   it("names a met rule as one that would fire", () => {
     const panel = openDryRun();
     expect(panel.textContent).toContain("would fire");
-    expect(panel.textContent).toContain("ASM-1");
+    expect(panel.textContent).toContain("PROJ-1");
   });
 
   it("does not arm the flow to answer", () => {
@@ -3499,7 +3499,7 @@ describe("the dry run", () => {
 
   it("says a rule is waiting when its condition is answerable and false", () => {
     // The same flow with the PR still OPEN: `pr-merged` is false, not unobservable.
-    const panel = openDryRun({ runs: [runStatus("ASM-1", "agent-flow")] });
+    const panel = openDryRun({ runs: [runStatus("PROJ-1", "agent-flow")] });
     expect(panel.textContent).toContain("waiting");
   });
 
@@ -3539,12 +3539,12 @@ describe("the dry run", () => {
   it("does not promise two launches where an all-join opens one", () => {
     // Both siblings of an "all" junction are stamped this pass, so "would fire"
     // is true of both — but the junction LAUNCHES once. Two rows reading "would
-    // fire" beside "launch ASM-9" is a promise of two windows.
+    // fire" beside "launch PROJ-9" is a promise of two windows.
     const join = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-        { id: "n2", kind: "place", x: 24, y: 140, join: "any", runKey: "ASM-2", repo: "other" },
-        { id: "n3", kind: "planned", x: 320, y: 80, join: "all", ticketKey: "ASM-9",
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+        { id: "n2", kind: "place", x: 24, y: 140, join: "any", runKey: "PROJ-2", repo: "other" },
+        { id: "n3", kind: "planned", x: 320, y: 80, join: "all", ticketKey: "PROJ-9",
           repos: ["agent-flow"], mode: "quick", dest: "worktree" },
       ],
       edges: [
@@ -3552,7 +3552,7 @@ describe("the dry run", () => {
         { id: "e2", from: "n2", to: "n3", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" },
       ],
     });
-    render(<OrchestratorDrawer {...props({ flows: [join], runs: [merged(), merged("ASM-2", "other")] })} />);
+    render(<OrchestratorDrawer {...props({ flows: [join], runs: [merged(), merged("PROJ-2", "other")] })} />);
     fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
     expect(screen.getByTestId("orch-dryrun-e1").textContent).toContain("would fire");
     const second = screen.getByTestId("orch-dryrun-e2").textContent ?? "";
