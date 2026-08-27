@@ -355,12 +355,13 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // previous session would be about a board that has moved.
   const [dryRun, setDryRun] = React.useState(false);
 
-  // Only computed while the panel is open: `previewFlow` runs `evaluateFlow`
-  // twice, and this component re-renders on every pointer move of a node drag.
-  const dry = React.useMemo(
-    () => (dryRun && flow ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : []),
-    [dryRun, flow, p.runs, p.branchCi],
-  );
+  // Computed on every render while the panel is open, and deliberately NOT
+  // memoised. `previewFlow` is two passes over a graph of a dozen edges, so there
+  // is nothing to save — and a memo would have to key on time to be correct,
+  // since a condition like `agent-idle-over` is answered against `Date.now()`.
+  // A stale-by-one-render verdict beside a `waiting` reason line that reads a
+  // fresh clock (`observationOf`, below) is two answers about one rule.
+  const dry = dryRun && flow ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : [];
   const firing = dry.filter((v) => v.verdict === "fire").length;
   const [picking, setPicking] = React.useState(false);
   const [over, setOver] = React.useState(false);

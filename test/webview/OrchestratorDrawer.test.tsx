@@ -3457,10 +3457,10 @@ describe("the open and close animation", () => {
 
 describe("the dry run", () => {
   /** `wired()`'s ASM-1 with its PR already merged, so its `pr-merged` rule is met. */
-  const merged = (): RunStatus => ({
-    ...runStatus("ASM-1", "agent-flow"),
+  const merged = (key = "ASM-1", repo = "agent-flow"): RunStatus => ({
+    ...runStatus(key, repo),
     prs: {
-      "agent-flow": {
+      [repo]: {
         facts: {
           number: 118, url: "u", title: "t", state: "MERGED", isDraft: false,
           ci: { passing: 4, pending: 0, failing: [] }, review: "none", unresolved: null,
@@ -3521,5 +3521,29 @@ describe("the dry run", () => {
     fireEvent.click(btn);
     fireEvent.click(btn);
     expect(screen.queryByTestId("orch-dryrun")).toBeNull();
+  });
+
+  it("does not promise two launches where an all-join opens one", () => {
+    // Both siblings of an "all" junction are stamped this pass, so "would fire"
+    // is true of both — but the junction LAUNCHES once. Two rows reading "would
+    // fire" beside "launch ASM-9" is a promise of two windows.
+    const join = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n2", kind: "place", x: 24, y: 140, join: "any", runKey: "ASM-2", repo: "other" },
+        { id: "n3", kind: "planned", x: 320, y: 80, join: "all", ticketKey: "ASM-9",
+          repos: ["agent-flow"], mode: "quick", dest: "worktree" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" },
+      ],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [join], runs: [merged(), merged("ASM-2", "other")] })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    expect(screen.getByTestId("orch-dryrun-e1").textContent).toContain("would fire");
+    const second = screen.getByTestId("orch-dryrun-e2").textContent ?? "";
+    expect(second).toContain("would close the join");
+    expect(second).not.toContain("would fire");
   });
 });

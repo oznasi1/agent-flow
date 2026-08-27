@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A dry run for a flow, before you arm it.** The Orchestrator drawer has a new
+  **What would fire?** control beside Arm. It shows, per rule, what an armed flow
+  would do to the board as it stands right now: which rules would fire, which are
+  met but held behind the per-pass launch cap, which are blocked and why, and
+  which are simply waiting — with the same observation the inspector shows.
+
+  Arming used to be a leap of faith backed only by a hold-on-first-look. It reads
+  the verdict without acting on it: nothing launches, nothing is written, and the
+  flow is not armed to answer. A rule waiting on a card that has left the board
+  now says so before you find out by waiting — the reason was computed on every
+  pass and shown nowhere.
+
+  The panel states what it does not cover, so it is never mistaken for the gates
+  themselves: an armed flow re-checks every 6s, and the first spend still asks.
+
 ### Changed
 
 - **Attribution is the author's alone.** The `LICENSE` copyright line, the `package.json`
