@@ -71,7 +71,9 @@ export function describeActiveTasks(runs: Run[], livePlaces: ReadonlySet<string>
     const where = first ? `\`${first.path}\`${first.branch ? ` (branch: ${first.branch})` : ""}` : "unknown location";
     // Collapse any embedded newline so one run's summary can't split a single
     // bullet across multiple lines of the `## Active tasks` markdown list.
-    const summary = r.summary.replace(/\s*\n\s*/g, " ");
+    // Guarded like `repos` above: the key-only readRuns guard admits a record
+    // with no summary at all.
+    const summary = (r.summary ?? "").replace(/\s*\n\s*/g, " ");
     return `- **${r.key}** (${runKind(r)}) — ${summary} — ${where} — ${live ? "session open" : "idle, no session attached"}`;
   });
   return `## Active tasks\n${lines.join("\n")}`;

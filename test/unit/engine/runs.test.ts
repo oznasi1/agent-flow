@@ -143,6 +143,17 @@ describe("describeActiveTasks", () => {
     ]);
   });
 
+  it("doesn't throw on a record admitted by the key guard but missing summary", () => {
+    // readRuns only validates `.key`, so {"key":"X","createdAt":1} in
+    // ~/.agentflow/runs/ reaches here with no summary to .replace() on.
+    const { summary, ...rest } = mkRun("PROJ-1", 100);
+    const noSummary = rest as unknown as Run;
+    expect(() => describeActiveTasks([noSummary], new Set())).not.toThrow();
+    const md = describeActiveTasks([noSummary], new Set());
+    expect(md).toContain("**PROJ-1** (task)");
+    expect(md).toContain("idle, no session attached");
+  });
+
   it("lists multiple active runs as separate bullets, newest first if readRuns already sorted them", () => {
     const a = mkRun("PROJ-1", 100);
     const b = mkRun("PROJ-2", 300);
