@@ -220,6 +220,39 @@ describe("runSetup — settings write failure", () => {
   });
 });
 
+describe("runSetup — re-entrancy", () => {
+  it("a second concurrent invocation joins the first wizard instead of interleaving", async () => {
+    // The wizard is reachable simultaneously from the palette command and the
+    // lingering first-run welcome toast. Two interleaved wizards mean duplicate
+    // input boxes and duplicate credential prompts; the second call must join
+    // the in-flight run rather than start its own.
+    const c = connector();
+    stubInputBox("~/code");
+    const { context, globalState } = fakeContext();
+
+    const first = runSetup(context, c, log);
+    const second = runSetup(context, c, log);
+    const [r1, r2] = await Promise.all([first, second]);
+
+    expect(r1).toBe(true);
+    expect(r2).toBe(true);
+    expect(c.configure).toHaveBeenCalledTimes(1);
+    expect(c.signIn).toHaveBeenCalledTimes(1);
+    expect(globalState.get(SETUP_COMPLETE_KEY)).toBe(true);
+  });
+
+  it("a later invocation after the first settles runs the wizard afresh", async () => {
+    const c = connector();
+    stubInputBox("~/code", "~/other");
+    const { context } = fakeContext();
+
+    await runSetup(context, c, log);
+    await runSetup(context, c, log);
+
+    expect(c.configure).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe("maybeRunSetup", () => {
   it("does nothing when setup is already complete", async () => {
     const { context } = fakeContext({ globalState: { [SETUP_COMPLETE_KEY]: true } });

@@ -35,7 +35,30 @@ function abort(log: Log, reason: string): false {
  * `configure()` would already have overwritten their site URL and project key by
  * then — no undo, no toast, and the log line still saying nothing happened.
  */
+/** The wizard currently on screen, if any. `runSetup` is reachable from the
+ * palette command and from the lingering first-run welcome toast at the same
+ * time; without this latch the two invocations interleave — two wizards
+ * fighting over focus, duplicate credential prompts. A second caller joins the
+ * in-flight run and gets its result. */
+let setupInFlight: Promise<boolean> | undefined;
+
 export async function runSetup(
+  context: vscode.ExtensionContext,
+  connector: TaskConnector,
+  log: Log,
+  refresh?: Refresh,
+): Promise<boolean> {
+  if (setupInFlight) {
+    log("setup: already running — joining the in-flight wizard");
+    return setupInFlight;
+  }
+  setupInFlight = doRunSetup(context, connector, log, refresh).finally(() => {
+    setupInFlight = undefined;
+  });
+  return setupInFlight;
+}
+
+async function doRunSetup(
   context: vscode.ExtensionContext,
   connector: TaskConnector,
   log: Log,
