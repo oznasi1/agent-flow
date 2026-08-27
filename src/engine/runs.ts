@@ -48,7 +48,7 @@ export function removeRun(dir: string, key: string): void {
 /** The path the Deck's "Open" acts on for a run: the multi-root workspace file,
  * else the first repo. Undefined when a run somehow has neither. */
 export function runTarget(run: Run): string | undefined {
-  return run.workspaceFile ?? run.repos[0]?.path;
+  return run.workspaceFile ?? run.repos?.[0]?.path;
 }
 
 /** One bullet per still-active run, for folding into a supervising session's

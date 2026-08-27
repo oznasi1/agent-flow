@@ -79,6 +79,14 @@ describe("runTarget", () => {
   it("is undefined when there is nothing to open", () => {
     expect(runTarget({ ...base, repos: [] })).toBeUndefined();
   });
+
+  it("is undefined (no throw) for a record with neither workspaceFile nor repos", () => {
+    // The key-only readRuns guard admits this shape; the optional chain used
+    // to sit on the element, not on `repos` itself.
+    const bare = base as unknown as Run;
+    expect(() => runTarget(bare)).not.toThrow();
+    expect(runTarget(bare)).toBeUndefined();
+  });
 });
 
 describe("describeActiveTasks", () => {
