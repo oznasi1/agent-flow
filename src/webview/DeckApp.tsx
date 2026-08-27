@@ -13,7 +13,7 @@ import { ReviewStrip } from "./ReviewStrip";
 import { LoadingMark } from "./LoadingMark";
 import { CardKindIcon } from "./icons";
 import { keyLabel, timeAgo } from "./helpers";
-import { type Tone } from "./deckParts";
+import { onTool, type Tone } from "./deckParts";
 import { DeckDetail } from "./DeckDetail";
 import { useDrawerExit } from "./Drawer";
 import { cardActions, cardMerge, cardSignal } from "./deckSignal";
@@ -154,7 +154,8 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
     case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
-    case "stalled": return { text: `stalled · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
+    case "blocked": return { text: `blocked${onTool(r.agent.pendingTool)} · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
+    case "stalled": return { text: `stalled${onTool(r.agent.pendingTool)} · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
     case "exited": return { text: `exited · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
     case "idle": return { text: `idle · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
     default: return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };

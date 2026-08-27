@@ -347,6 +347,18 @@ describe("buildRunStatus", () => {
     expect(s.agent.state).toBe("exited");
   });
 
+  it("does not report exited when the sessions registry could not be read", () => {
+    // Identical inputs to the exited case above, plus the one fact that changes
+    // the answer: [] agents because we could not look, not because nobody is home.
+    const s = buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: LATER, sessionsReadable: false });
+    expect(s.agent.state).not.toBe("exited");
+  });
+
+  it("defaults sessionsReadable to true, so every existing caller behaves as before", () => {
+    const s = buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: LATER });
+    expect(s.agent.state).toBe("exited");
+  });
+
   it("leaves a stale mid-work transcript as stalled while a session is still live", () => {
     // stalled (4) outranks working (2), so the reduction keeps the per-repo
     // reading — and its midWork is not promoted, because an agent is open.

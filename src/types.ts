@@ -85,12 +85,14 @@ export interface FlowCommand {
 
 // ── The Deck: in-flight orchestration board ─────────────────────────────────────
 
-/** `stalled` and `exited` both mean "look at this", and both were `idle` before:
- * an agent waiting at a permission prompt and one that died mid-tool used to
- * render in the calmest tone on the board. `stalled` is derived from the
- * transcript alone; `exited` needs session liveness and so is assigned by
+/** `blocked`, `stalled` and `exited` all mean "look at this", and all three were
+ * `idle` before: an agent waiting at a permission prompt and one that died
+ * mid-tool used to render in the calmest tone on the board. `stalled` and
+ * `blocked` are derived from the transcript alone — `blocked` where the pending
+ * tool's name settles what `stalled` can only hedge about (see
+ * `deriveActivity`); `exited` needs session liveness and so is assigned by
  * `buildRunStatus` (see AgentActivity.midWork). */
-export type AgentState = "working" | "needs-you" | "stalled" | "exited" | "idle" | "unknown";
+export type AgentState = "working" | "needs-you" | "blocked" | "stalled" | "exited" | "idle" | "unknown";
 
 /** The board column a run lands in, in board order. Attention rises left to
  * right and ends at the merge: something is running, something wants you,
@@ -248,6 +250,14 @@ export interface AgentActivity {
    * reducer cannot know. Optional so every existing AgentActivity literal
    * (the test suite is full of them) still compiles; absent means false. */
   midWork?: boolean;
+  /** The name of the tool call a pending turn is waiting on — "Bash", "Edit",
+   * "AskUserQuestion" — or null when there is no pending call or the line could
+   * not be read. This is what lets a card say WHY it is stopped instead of
+   * hedging: `deriveActivity`'s `stalled` is deliberately true of both a
+   * permission prompt and a long command, and the tool's name is the only
+   * discriminator the transcript offers. Optional so every existing
+   * AgentActivity literal (the test suite is full of them) still compiles. */
+  pendingTool?: string | null;
   /** The model the last main-chain assistant line answered with, e.g. "claude-opus-5".
    * Null when the tail carries no such line — a transcript whose last 200 lines are all
    * subagent work, or a session that has not answered yet. Optional so every existing

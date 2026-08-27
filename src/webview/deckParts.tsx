@@ -105,9 +105,22 @@ export function WorkspaceChip({ label, repos, filePath }: { label: string; repos
   );
 }
 
+/** " · waiting on Bash", or "" when the tool name could not be read. Called
+ * from `stateView` in DeckApp.tsx, its only caller, so the card's `blocked`
+ * and `stalled` lines share one definition of this phrase rather than two
+ * copies drifting apart. The per-session row below (`AgentsRow`'s `.ag-state`)
+ * deliberately does NOT call this — it renders the bare state name in a
+ * fixed-width slot beside the model chip and the age, and a variable-length
+ * "waiting on Bash" there would blow that layout. That omission is a
+ * considered choice, not an oversight to fix. */
+export function onTool(pendingTool: string | null | undefined): string {
+  return pendingTool ? ` · waiting on ${pendingTool}` : "";
+}
+
 const AGENT_STATE: Record<AgentActivity["state"], { text: string; tone: Tone }> = {
   working: { text: "working", tone: "working" },
   "needs-you": { text: "ended turn", tone: "attn" },
+  blocked: { text: "blocked", tone: "attn" },
   stalled: { text: "stalled", tone: "attn" },
   exited: { text: "exited", tone: "attn" },
   idle: { text: "idle", tone: "idle" },

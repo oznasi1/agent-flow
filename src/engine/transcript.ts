@@ -7,6 +7,49 @@ import { UNKNOWN_ACTIVITY } from "./activity";
 // "working" (and, with a tool still outstanding, "stalled").
 const WORKING_WINDOW_MS = 45_000;
 
+/**
+ * How long a pending call to each tool must stand before it means a human is
+ * being asked something rather than a command is running. `deriveActivity`'s
+ * `stalled` is deliberately true of both; the tool's NAME is the only
+ * discriminator the transcript offers, and it settles the question only for a
+ * tool that is permission-gated AND bounded — which is these six names.
+ *
+ * Thresholds are measured, not assumed: 279 transcripts in ~/.claude/projects
+ * over eight days, ~13,000 tool calls, each gap taken between a
+ * `stop_reason: "tool_use"` line and the `type: "user"` line that answered it.
+ *
+ *  - AskUserQuestion / ExitPlanMode — pendency IS the gate, so 0: there is no
+ *    timing claim to make. Measured max 88,782s (24.7 hours), every second of
+ *    which read `stalled` before this.
+ *  - Edit / Write / NotebookEdit — measured max 47.2s across 1,566 calls, which
+ *    is barely past WORKING_WINDOW_MS. 60s gives the ceiling a real margin.
+ *  - Bash — the ONE threshold here that is not a heuristic: the Bash tool's own
+ *    schema caps `timeout` at 600,000ms, so a pending call past that provably is
+ *    not a running command. 720s is that cap plus two minutes for clock skew and
+ *    a slow transcript flush; measured max 639s across 10,172 calls.
+ *
+ * A tool ABSENT from this table is never `blocked`, and for two distinct
+ * reasons worth keeping straight when adding one:
+ *
+ *  - Agent, Workflow, TaskOutput, Monitor and every mcp__* call are gated but
+ *    UNBOUNDED. A backgrounded subagent legitimately pends 46 minutes (measured
+ *    max 2,775s), so no ceiling can be honest and none is offered.
+ *  - Read, Grep, Glob and TodoWrite are bounded but NOT GATED. A hung read is a
+ *    wedged host, not a question; calling it `blocked` would claim someone is
+ *    being asked something when nobody is.
+ *
+ * WebFetch and WebSearch are gated and bounded in practice but the sample was
+ * n=8, which is not a sample. They stay out until there is data.
+ */
+const BLOCKED_AFTER_MS: Record<string, number> = {
+  AskUserQuestion: 0,
+  ExitPlanMode: 0,
+  Edit: 60_000,
+  Write: 60_000,
+  NotebookEdit: 60_000,
+  Bash: 720_000,
+};
+
 /** The subset of a Claude Code transcript line we read. */
 export interface TranscriptLine {
   type?: string; // "user" | "assistant" | "attachment" | "file-history-snapshot" | …
@@ -17,7 +60,10 @@ export interface TranscriptLine {
   /** True on a subagent's turn. Its `message.model` is the subagent's, not this
    * session's, so the model read skips these. */
   isSidechain?: boolean;
-  message?: { role?: string; stop_reason?: string | null; model?: string };
+  /** `content` is the API content-block array — text and tool_use blocks. Typed
+   * `unknown` on purpose: Claude Code owns this format, and `pendingToolName`
+   * below checks every hop rather than trusting the shape. */
+  message?: { role?: string; stop_reason?: string | null; model?: string; content?: unknown };
 }
 
 /**
@@ -41,6 +87,34 @@ function modelOf(lines: TranscriptLine[]): { model: string | null; modelCount: n
 }
 
 /**
+ * The name of the tool call this line is waiting on, or null.
+ *
+ * Every hop is checked — the content array, its members, their `type` and their
+ * `name` — for the same reason `readOpenSessions` narrows `RawSession`: Claude
+ * Code owns this format and may change it under us. Anything unexpected yields
+ * null, and null is the fall-through case for the class table in
+ * `deriveActivity`, so a format change degrades to the pre-`blocked` reading
+ * rather than to a wrong state or a throw.
+ *
+ * Reads the LAST tool_use block: one assistant turn can hold several parallel
+ * calls, and the transcript cannot say which of them is the one still
+ * outstanding. The last is the best available guess and matches what the
+ * transcript's own tail-first reads elsewhere in this file already do.
+ */
+function pendingToolName(line: TranscriptLine): string | null {
+  const content = line.message?.content;
+  if (!Array.isArray(content)) return null;
+  for (let i = content.length - 1; i >= 0; i--) {
+    const block = content[i];
+    if (!block || typeof block !== "object") continue;
+    if ((block as { type?: unknown }).type !== "tool_use") continue;
+    const name = (block as { name?: unknown }).name;
+    return typeof name === "string" && name ? name : null;
+  }
+  return null;
+}
+
+/**
  * Derive live agent activity from the tail of a transcript plus the file's mtime.
  * Pure — `nowMs` is injected so callers control the clock. When no meaningful
  * lines exist the state is "unknown"; the caller uses "unknown" too when no
@@ -61,16 +135,25 @@ export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: 
   // A tool call that never returned. Nothing follows the last meaningful line by
   // definition, so "no tool_result after it" needs no separate check.
   const pendingTool = last.type === "assistant" && last.message?.stop_reason === "tool_use";
+  const toolName = pendingTool ? pendingToolName(last) : null;
   // Work is owed either way: a tool that has not returned, or a user line — a
   // real prompt, or a tool_result — the agent has not answered. Note that Claude
   // Code writes tool results as type "user".
   const midWork = pendingTool || last.type === "user";
   const age = nowMs - mtimeMs;
-  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: mtimeMs, slug, midWork, ...model };
-  // Stale with a tool still outstanding: the agent is at a permission prompt, or
-  // a long command is running. The transcript cannot separate the two, so the
-  // label is chosen to be true under either.
-  if (pendingTool) return { state: "stalled", lastActivityMs: mtimeMs, slug, midWork, ...model };
+  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: mtimeMs, slug, midWork, pendingTool: toolName, ...model };
+  // Stale with a tool still outstanding. The table settles this for the four
+  // gated-and-bounded tools; for everything else, and for a line whose tool name
+  // could not be read, `stalled` stays the honest hedge it always was — the
+  // agent is at a permission prompt, or a long command is running, and the
+  // transcript cannot say which.
+  if (pendingTool) {
+    const ceiling = toolName === null ? undefined : BLOCKED_AFTER_MS[toolName];
+    if (ceiling !== undefined && age > ceiling) {
+      return { state: "blocked", lastActivityMs: mtimeMs, slug, midWork, pendingTool: toolName, ...model };
+    }
+    return { state: "stalled", lastActivityMs: mtimeMs, slug, midWork, pendingTool: toolName, ...model };
+  }
   return { state: "idle", lastActivityMs: mtimeMs, slug, midWork, ...model };
 }
 

@@ -26,7 +26,13 @@ import { AgentActivity, AgentState } from "../types";
 // stalled — a turn that handed control back is more actionable than a tool that
 // has not returned. `exited` is assigned by buildRunStatus AFTER this reduction,
 // so it never competes as an input; its rank exists only for totality.
+//
+// blocked outranks needs-you for the same reason needs-you outranks working: a
+// session stopped at a permission prompt cannot make progress at all, and a run
+// holding one alongside a session that ended its turn is a run about the frozen
+// one. Letting the polite session bury it is the identical bug.
 const STATE_RANK: Record<AgentState, number> = {
+  blocked: 6,
   "needs-you": 5,
   stalled: 4,
   exited: 3,
@@ -48,7 +54,10 @@ export const UNKNOWN_ACTIVITY: AgentActivity = { state: "unknown", lastActivityM
  * it silently drops back to pre-widening behaviour the next time the union grows
  * — see conditions.ts's `agent-idle-over`, which did exactly that until this set
  * was introduced. `needs-you`, `working` and `unknown` are deliberately absent:
- * each already means something an idle-style rule must not fire on. */
+ * each already means something an idle-style rule must not fire on. `blocked`
+ * must not join this set either: a session waiting on your approval is not
+ * idle, and `agent-idle-over` firing on it would auto-nudge past a modal
+ * dialog. */
 export const IDLE_LIKE: ReadonlySet<AgentState> = new Set<AgentState>(["idle", "stalled", "exited"]);
 
 /** Is this state "idle-like" — see `IDLE_LIKE` above for what that means and why
@@ -84,8 +93,22 @@ export function mostActive(activities: AgentActivity[]): AgentActivity {
  * Lives here rather than in status.ts so `attentionFs.ts` derives the same state
  * the Deck does. Two copies of this rule is the fork the attention badge exists
  * to avoid.
+ *
+ * `liveSessionCount` is `null` when the sessions registry could not be READ, as
+ * opposed to read and found empty. `readOpenSessions` returns `[]` for an
+ * unreadable directory, which is indistinguishable from "nothing is running", so
+ * the caller passes null instead and this refuses to promote — no single failed
+ * probe may call a card dead. The test for it is `=== 0`, which null already
+ * fails, so the guard is the type rather than a new branch.
+ *
+ * Honest limit: refusing to promote does not make the underlying reading any
+ * more certain. When the registry is unreadable, a card can sit at
+ * `blocked · waiting on Edit` indefinitely while whether that process is even
+ * still alive is genuinely unknown — this function has no opinion either way.
+ * That is still the right trade: calling a live card dead on a failed probe is
+ * worse than leaving a dead one looking blocked a little longer.
  */
-export function promoteExited(reduced: AgentActivity, liveSessionCount: number): AgentActivity {
+export function promoteExited(reduced: AgentActivity, liveSessionCount: number | null): AgentActivity {
   return reduced.midWork && reduced.state !== "working" && liveSessionCount === 0
     ? { ...reduced, state: "exited" }
     : reduced;

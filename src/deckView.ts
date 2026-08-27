@@ -52,7 +52,7 @@ import { accountSlot } from "./engine/forge/accounts";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
 import { sortRequests } from "./engine/review/sort";
 import { groupPlacesByWindow, inferTicket, localRunFor } from "./engine/localRuns";
-import { defaultSessionsDir, groupByPlace, readOpenSessions } from "./engine/sessions";
+import { defaultSessionsDir, groupByPlace, readOpenSessions, readOpenSessionsProbe } from "./engine/sessions";
 import { readSessionActivity } from "./engine/transcript";
 import { canon, claudeProjectsRoot } from "./engine/paths";
 import { OwnedRun, resolveOwnership } from "./engine/ownership";
@@ -2841,7 +2841,8 @@ export class DeckPanel {
     // Read unconditionally: `openAgents` is a *display* toggle, but the retire
     // sweep must never mistake "not showing agents" for "no agent is running" —
     // that would retire a run with somebody actively working in it.
-    const allPlaces = groupByPlace(readOpenSessions(defaultSessionsDir()));
+    const sessionsProbe = readOpenSessionsProbe(defaultSessionsDir());
+    const allPlaces = groupByPlace(sessionsProbe.sessions);
     const places = this.openAgents ? allPlaces : new Map<string, OpenSession[]>();
     const livePlaces = new Set(allPlaces.keys());
     // Ownership is resolved from `allPlaces`, NOT `places`: `openAgents` is a
@@ -3031,6 +3032,7 @@ export class DeckPanel {
         openIdentities, prs,
         agents: agentsByKey.get(run.key) ?? [],
         activityRoots: activeRoots,
+        sessionsReadable: sessionsProbe.readable,
       });
       // Read once per run and shared below by both the shelf and the candidate
       // built from it, rather than called again at each use — this is the same

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { promoteExited } from "../../../src/engine/activity";
+import { mostActive, promoteExited } from "../../../src/engine/activity";
 import { AgentActivity } from "../../../src/types";
 
 const act = (over: Partial<AgentActivity> = {}): AgentActivity => ({
@@ -28,5 +28,44 @@ describe("promoteExited", () => {
   it("preserves every other field, so the caller's activity is not rebuilt", () => {
     const out = promoteExited(act({ midWork: true, slug: "fix-ci", lastActivityMs: 42 }), 0);
     expect(out).toEqual({ state: "exited", lastActivityMs: 42, slug: "fix-ci", midWork: true });
+  });
+
+  it("promotes a blocked reading whose process is gone — a dead session is not awaiting approval", () => {
+    expect(promoteExited(act({ state: "blocked", midWork: true }), 0).state).toBe("exited");
+  });
+
+  it("refuses to promote when the session count is null — a failed probe is not a dead process", () => {
+    // readOpenSessions returns [] for an unreadable ~/.claude/sessions, which is
+    // indistinguishable from "nothing is running". null is the probe saying it
+    // could not look, and it must never promote a live card to exited.
+    expect(promoteExited(act({ midWork: true }), null).state).toBe("idle");
+  });
+
+  it("still promotes on a real zero", () => {
+    expect(promoteExited(act({ midWork: true }), 0).state).toBe("exited");
+  });
+});
+
+describe("STATE_RANK via mostActive", () => {
+  // A run holds several sessions and the card shows ONE reading. `blocked` must
+  // win: a session frozen at a permission prompt cannot make progress at all,
+  // and letting a session that politely ended its turn bury it is the same bug
+  // the needs-you-over-working rung was written to fix.
+  it("prefers blocked over needs-you", () => {
+    expect(mostActive([act({ state: "needs-you" }), act({ state: "blocked" })]).state).toBe("blocked");
+  });
+
+  it("prefers blocked over every other state", () => {
+    for (const loser of ["stalled", "exited", "working", "idle", "unknown"] as const) {
+      expect(mostActive([act({ state: loser }), act({ state: "blocked" })]).state).toBe("blocked");
+    }
+  });
+
+  it("breaks a blocked-vs-blocked tie on the most recent activity", () => {
+    const out = mostActive([
+      act({ state: "blocked", lastActivityMs: 100 }),
+      act({ state: "blocked", lastActivityMs: 900 }),
+    ]);
+    expect(out.lastActivityMs).toBe(900);
   });
 });

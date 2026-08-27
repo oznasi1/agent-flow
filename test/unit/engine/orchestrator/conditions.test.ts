@@ -188,6 +188,34 @@ describe("evalCond — agent state", () => {
     expect(met({ kind: "no-agent-left" }, ctx({ agents: [cardAgent("idle", NOW, REPO)] }))).toBe(false);
     expect(met({ kind: "no-agent-left" }, ctx({ agents: [cardAgent("idle", NOW, "elsewhere")] }))).toBe(true);
   });
+
+  // Pinning a decision, not a bug fix: `blocked` is deliberately absent from
+  // `IDLE_LIKE` (see its doc comment in activity.ts) because a session
+  // waiting on your approval is not idle, and this rule auto-nudging past a
+  // modal dialog would be worse than not firing at all. That is correct, but
+  // it is also a real behaviour change for two released conditions — a stale
+  // `Edit`/`Write`/`NotebookEdit`/`Bash`/`AskUserQuestion`/`ExitPlanMode`
+  // pending used to read `stalled` (idle-like) and now reads `blocked`
+  // (not). These tests exist so a future change to `IDLE_LIKE` or
+  // `STATE_RANK` has to consciously break them rather than silently restoring
+  // the old firing behaviour.
+  it("agent-idle-over does NOT fire on a blocked reading, however stale", () => {
+    const c = ctx({ agents: [cardAgent("blocked", NOW - 999 * 60_000, REPO)] });
+    expect(met({ kind: "agent-idle-over", minutes: 10 }, c)).toBe(false);
+  });
+
+  it("agent-ended-turn does not fire when the place's reduction lands on blocked", () => {
+    // One session that ended its turn, one frozen at a gated tool. `blocked`
+    // (rank 6) outranks `needs-you` (rank 5) in `mostActive`'s reduction, so
+    // the place reads `blocked`, not `needs-you` — and `agent-ended-turn`
+    // must not fire on that, even though a `needs-you` session is genuinely
+    // present in the same place.
+    const c = ctx({
+      agents: [cardAgent("needs-you", NOW, REPO), cardAgent("blocked", NOW - 5_000, REPO)],
+    });
+    expect(placeActivity(c).state).toBe("blocked");
+    expect(met({ kind: "agent-ended-turn" }, c)).toBe(false);
+  });
 });
 
 // Regression for C1: `agent-idle-over` used to compare `state !== "idle"`

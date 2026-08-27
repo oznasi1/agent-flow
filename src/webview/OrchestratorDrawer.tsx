@@ -281,6 +281,7 @@ const NOTIFY_W = 138;
 const STATE_HUE: Record<AgentState, string> = {
   working: "var(--c-progress)",
   "needs-you": "var(--c-attn)",
+  blocked: "var(--c-attn)",
   stalled: "var(--c-attn)",
   exited: "var(--c-attn)",
   idle: "var(--c-idle)",
