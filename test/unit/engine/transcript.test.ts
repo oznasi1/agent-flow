@@ -332,3 +332,44 @@ describe("readSessionActivity", () => {
     expect(readSessionActivity(root, "/nowhere", "x", NOW)).toEqual(UNKNOWN_ACTIVITY);
   });
 });
+
+describe("parseLines hardening — raw on-disk lines (via readSessionActivity)", () => {
+  const NOW = 1_800_000_000_000;
+  const cwd = "/Users/dev/projects/webapp";
+  let root: string;
+
+  const writeRaw = (id: string, content: string, mtimeMs: number): void => {
+    const dir = path.join(root, encodeProjectDir(cwd));
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${id}.jsonl`);
+    fs.writeFileSync(file, content);
+    fs.utimesSync(file, new Date(mtimeMs), new Date(mtimeMs));
+  };
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-txraw-"));
+  });
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it("tolerates a line that is exactly `null` and derives from the real lines", () => {
+    // "null" is a non-empty string, so .filter(Boolean) keeps the row, and it
+    // parses to null — reading `.slug` off it used to throw into the Deck poll.
+    const content =
+      [
+        JSON.stringify({ type: "user" }),
+        "null",
+        JSON.stringify({ type: "assistant", slug: "real", message: { stop_reason: "end_turn" } }),
+      ].join("\n") + "\n";
+    writeRaw("with-null", content, NOW - 1000);
+    const a = readSessionActivity(root, cwd, "with-null", NOW);
+    expect(a.state).toBe("needs-you");
+    expect(a.slug).toBe("real");
+  });
+
+  it("drops a line holding a bare number or string (valid JSON, not a record)", () => {
+    const content =
+      ["5", '"text"', JSON.stringify({ type: "assistant", message: { stop_reason: "end_turn" } })].join("\n") + "\n";
+    writeRaw("with-scalars", content, NOW - 1000);
+    expect(readSessionActivity(root, cwd, "with-scalars", NOW).state).toBe("needs-you");
+  });
+});

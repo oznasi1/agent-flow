@@ -173,7 +173,10 @@ function parseLines(file: string, tail = 200): TranscriptLine[] {
   const out: TranscriptLine[] = [];
   for (const r of rows.slice(-tail)) {
     try {
-      out.push(JSON.parse(r));
+      // A line that is exactly "null" (or a bare scalar) is valid JSON but not
+      // a record — property reads off it would throw downstream.
+      const parsed = JSON.parse(r);
+      if (parsed && typeof parsed === "object") out.push(parsed);
     } catch {
       /* tolerate a partially-written trailing line */
     }
