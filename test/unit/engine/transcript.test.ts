@@ -333,6 +333,32 @@ describe("readSessionActivity", () => {
   });
 });
 
+describe("deriveActivity — clock skew", () => {
+  const NOW = 1_800_000_000_000;
+  const userMsg: TranscriptLine = { type: "user", message: { role: "user" } };
+  const asstTool: TranscriptLine = { type: "assistant", message: { role: "assistant", stop_reason: "tool_use" } };
+  const asstEnd: TranscriptLine = { type: "assistant", message: { role: "assistant", stop_reason: "end_turn" } };
+
+  it("clamps a future mtime so lastActivityMs never sits ahead of the clock", () => {
+    // mtime ahead of nowMs (skew, a restored file) gave a negative age; the
+    // state may momentarily read working, but the timestamp must not be in
+    // the future — everything downstream renders and sorts by it.
+    const a = deriveActivity([userMsg, asstTool], NOW + 60_000, NOW);
+    expect(a.state).toBe("working");
+    expect(a.lastActivityMs).toBe(NOW);
+  });
+
+  it("clamps the finished-turn timestamp too", () => {
+    const a = deriveActivity([userMsg, asstEnd], NOW + 60_000, NOW);
+    expect(a.state).toBe("needs-you");
+    expect(a.lastActivityMs).toBe(NOW);
+  });
+
+  it("leaves a past mtime untouched", () => {
+    expect(deriveActivity([userMsg, asstTool], NOW - 10_000, NOW).lastActivityMs).toBe(NOW - 10_000);
+  });
+});
+
 describe("parseLines hardening — raw on-disk lines (via readSessionActivity)", () => {
   const NOW = 1_800_000_000_000;
   const cwd = "/Users/dev/projects/webapp";

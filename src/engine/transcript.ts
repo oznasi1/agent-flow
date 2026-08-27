@@ -123,14 +123,17 @@ function pendingToolName(line: TranscriptLine): string | null {
 export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: number): AgentActivity {
   const slug = [...lines].reverse().find((l) => l.slug)?.slug ?? null;
   const model = modelOf(lines);
+  // An mtime ahead of the injected clock (skew, a restored file) would put a
+  // future timestamp on lastActivityMs and a negative age below; clamp to now.
+  const at = mtimeMs > nowMs ? nowMs : mtimeMs;
   const meaningful = lines.filter((l) => l.type === "user" || l.type === "assistant");
-  if (meaningful.length === 0) return { state: "unknown", lastActivityMs: mtimeMs ?? null, slug, midWork: false, ...model };
+  if (meaningful.length === 0) return { state: "unknown", lastActivityMs: at ?? null, slug, midWork: false, ...model };
 
   const last = meaningful[meaningful.length - 1];
   // Turn ended and control is back with the human — actionable regardless of how
   // long ago it happened.
   if (last.type === "assistant" && last.message?.stop_reason === "end_turn") {
-    return { state: "needs-you", lastActivityMs: mtimeMs, slug, midWork: false, ...model };
+    return { state: "needs-you", lastActivityMs: at, slug, midWork: false, ...model };
   }
   // A tool call that never returned. Nothing follows the last meaningful line by
   // definition, so "no tool_result after it" needs no separate check.
@@ -140,8 +143,8 @@ export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: 
   // real prompt, or a tool_result — the agent has not answered. Note that Claude
   // Code writes tool results as type "user".
   const midWork = pendingTool || last.type === "user";
-  const age = nowMs - mtimeMs;
-  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: mtimeMs, slug, midWork, pendingTool: toolName, ...model };
+  const age = nowMs - at;
+  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: at, slug, midWork, pendingTool: toolName, ...model };
   // Stale with a tool still outstanding. The table settles this for the four
   // gated-and-bounded tools; for everything else, and for a line whose tool name
   // could not be read, `stalled` stays the honest hedge it always was — the
@@ -150,11 +153,11 @@ export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs: 
   if (pendingTool) {
     const ceiling = toolName === null ? undefined : BLOCKED_AFTER_MS[toolName];
     if (ceiling !== undefined && age > ceiling) {
-      return { state: "blocked", lastActivityMs: mtimeMs, slug, midWork, pendingTool: toolName, ...model };
+      return { state: "blocked", lastActivityMs: at, slug, midWork, pendingTool: toolName, ...model };
     }
-    return { state: "stalled", lastActivityMs: mtimeMs, slug, midWork, pendingTool: toolName, ...model };
+    return { state: "stalled", lastActivityMs: at, slug, midWork, pendingTool: toolName, ...model };
   }
-  return { state: "idle", lastActivityMs: mtimeMs, slug, midWork, ...model };
+  return { state: "idle", lastActivityMs: at, slug, midWork, ...model };
 }
 
 // Defined in ./activity now, so a browser bundle can reach the constant without
