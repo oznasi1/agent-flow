@@ -60,6 +60,10 @@ export function readOpenSessionsProbe(dir: string): SessionsProbe {
     } catch {
       continue; // a half-written or hand-edited record must not blow up the read
     }
+    // A file whose entire content is `null`, a number, or a string is valid
+    // JSON, so the catch above never fires — but it is not a record and has no
+    // fields to probe.
+    if (!raw || typeof raw !== "object") continue;
     if (typeof raw.kind === "string" && raw.kind !== "interactive") continue;
     if (typeof raw.pid !== "number" || raw.pid <= 0) continue;
     if (typeof raw.sessionId !== "string" || !raw.sessionId) continue;

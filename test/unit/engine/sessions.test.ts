@@ -100,6 +100,64 @@ describe("readOpenSessions", () => {
   });
 });
 
+describe("readOpenSessions — malformed on-disk records", () => {
+  let dir: string;
+  const putRaw = (name: string, content: string): void => {
+    fs.writeFileSync(path.join(dir, name), content);
+  };
+  const putGood = (): void =>
+    putRaw(
+      "good.json",
+      JSON.stringify({ pid: process.pid, sessionId: "good", cwd: "/r", startedAt: 1, kind: "interactive" }),
+    );
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-sessions-bad-"));
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it("skips a file whose entire content is null — valid JSON, not an object — and keeps the good ones", () => {
+    // JSON.parse("null") succeeds, so the parse catch never fires; reading
+    // `.kind` off null used to throw and kill the whole 6s attention pass.
+    putRaw("null.json", "null");
+    putGood();
+    expect(readOpenSessions(dir).map((s) => s.sessionId)).toEqual(["good"]);
+  });
+
+  it("skips a file holding a bare number or string (valid JSON, wrong type)", () => {
+    putRaw("num.json", "5");
+    putRaw("str.json", '"text"');
+    putGood();
+    expect(readOpenSessions(dir).map((s) => s.sessionId)).toEqual(["good"]);
+  });
+
+  it("still reports the directory readable when a null record is skipped", () => {
+    putRaw("null.json", "null");
+    expect(readOpenSessionsProbe(dir)).toEqual({ sessions: [], readable: true });
+  });
+
+  // Pins for the pid guard: these shapes are skipped today, and must stay skipped.
+  it.each([
+    ["a pid of 0", 0],
+    ["a negative pid", -42],
+    ["a string pid", "123"],
+  ])("skips a record with %s", (_label, pid) => {
+    putRaw("bad-pid.json", JSON.stringify({ pid, sessionId: "s", cwd: "/r", kind: "interactive" }));
+    putGood();
+    expect(readOpenSessions(dir).map((s) => s.sessionId)).toEqual(["good"]);
+  });
+
+  // Pins for the cwd guard beside it.
+  it.each([
+    ["no cwd at all", undefined],
+    ["an empty cwd", ""],
+  ])("skips a record with %s", (_label, cwd) => {
+    putRaw("bad-cwd.json", JSON.stringify({ pid: process.pid, sessionId: "s", cwd, kind: "interactive" }));
+    putGood();
+    expect(readOpenSessions(dir).map((s) => s.sessionId)).toEqual(["good"]);
+  });
+});
+
 describe("readOpenSessionsProbe", () => {
   let dir: string;
   beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-probe-")); });
