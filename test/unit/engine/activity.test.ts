@@ -33,6 +33,17 @@ describe("promoteExited", () => {
   it("promotes a blocked reading whose process is gone — a dead session is not awaiting approval", () => {
     expect(promoteExited(act({ state: "blocked", midWork: true }), 0).state).toBe("exited");
   });
+
+  it("refuses to promote when the session count is null — a failed probe is not a dead process", () => {
+    // readOpenSessions returns [] for an unreadable ~/.claude/sessions, which is
+    // indistinguishable from "nothing is running". null is the probe saying it
+    // could not look, and it must never promote a live card to exited.
+    expect(promoteExited(act({ midWork: true }), null).state).toBe("idle");
+  });
+
+  it("still promotes on a real zero", () => {
+    expect(promoteExited(act({ midWork: true }), 0).state).toBe("exited");
+  });
 });
 
 describe("STATE_RANK via mostActive", () => {

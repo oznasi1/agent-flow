@@ -93,8 +93,15 @@ export function mostActive(activities: AgentActivity[]): AgentActivity {
  * Lives here rather than in status.ts so `attentionFs.ts` derives the same state
  * the Deck does. Two copies of this rule is the fork the attention badge exists
  * to avoid.
+ *
+ * `liveSessionCount` is `null` when the sessions registry could not be READ, as
+ * opposed to read and found empty. `readOpenSessions` returns `[]` for an
+ * unreadable directory, which is indistinguishable from "nothing is running", so
+ * the caller passes null instead and this refuses to promote — no single failed
+ * probe may call a card dead. The test for it is `=== 0`, which null already
+ * fails, so the guard is the type rather than a new branch.
  */
-export function promoteExited(reduced: AgentActivity, liveSessionCount: number): AgentActivity {
+export function promoteExited(reduced: AgentActivity, liveSessionCount: number | null): AgentActivity {
   return reduced.midWork && reduced.state !== "working" && liveSessionCount === 0
     ? { ...reduced, state: "exited" }
     : reduced;

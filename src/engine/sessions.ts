@@ -25,22 +25,30 @@ interface RawSession {
   kind?: unknown;
 }
 
+/** What a sessions read saw, and whether it could see at all. */
+export interface SessionsProbe {
+  sessions: OpenSession[];
+  /** False when the directory itself could not be read. `sessions: []` alone
+   * cannot say whether nothing is running or nothing could be SEEN, and
+   * `promoteExited` needs that difference: it calls a card's agent dead on a
+   * zero count, so a single failed read used to mark every mid-work card on the
+   * board `exited` on the next 6s poll — and inflate the sidebar badge to
+   * match. A record that fails to parse, or whose pid is dead, does NOT clear
+   * this flag: the directory was read fine and that record really is not a live
+   * session. */
+  readable: boolean;
+}
+
 /**
- * Every session still open, oldest first. Skips a record that fails to parse or
- * lacks a field a card needs, drops one whose pid is dead (a crash leaves the
- * file behind), and drops one whose `kind` is present and is not "interactive".
- * An absent `kind` is kept on purpose: a future Claude Code that stops writing
- * the field should degrade to showing sessions, not to showing none.
- *
- * Best-effort throughout — an unreadable directory yields [] and the Deck falls
- * back to the board it renders today.
+ * `readOpenSessions`, plus whether the directory could be read. See
+ * `SessionsProbe.readable` for why the difference is worth a return type.
  */
-export function readOpenSessions(dir: string): OpenSession[] {
+export function readOpenSessionsProbe(dir: string): SessionsProbe {
   let names: string[];
   try {
     names = fs.readdirSync(dir).filter((f) => f.endsWith(".json"));
   } catch {
-    return [];
+    return { sessions: [], readable: false };
   }
   const out: OpenSession[] = [];
   for (const name of names) {
@@ -65,7 +73,21 @@ export function readOpenSessions(dir: string): OpenSession[] {
   }
   // Oldest first: the expansion then lists a place's agents in the order they
   // were opened, and a local card's createdAt is simply the first one's start.
-  return out.sort((a, b) => a.startedAt - b.startedAt);
+  return { sessions: out.sort((a, b) => a.startedAt - b.startedAt), readable: true };
+}
+
+/**
+ * Every session still open, oldest first. Skips a record that fails to parse or
+ * lacks a field a card needs, drops one whose pid is dead (a crash leaves the
+ * file behind), and drops one whose `kind` is present and is not "interactive".
+ * An absent `kind` is kept on purpose: a future Claude Code that stops writing
+ * the field should degrade to showing sessions, not to showing none.
+ *
+ * Best-effort throughout — an unreadable directory yields [] and the Deck falls
+ * back to the board it renders today.
+ */
+export function readOpenSessions(dir: string): OpenSession[] {
+  return readOpenSessionsProbe(dir).sessions;
 }
 
 /**

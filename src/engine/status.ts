@@ -42,6 +42,11 @@ export interface BuildRunStatusInput {
    * genuinely its own regardless of whether an agent happens to be open in each
    * one right now — the default (every repo) keeps that path byte-identical. */
   activityRoots?: ReadonlySet<string>;
+  /** False when `~/.claude/sessions` could not be read this pass, so `agents`
+   * being empty proves nothing. Defaults to TRUE when absent, which keeps every
+   * existing caller and every existing test byte-identical — only the Deck,
+   * which holds the probe, passes it. */
+  sessionsReadable?: boolean;
 }
 
 /** Reconcile a durable Run with every observable source into the status a card
@@ -69,7 +74,10 @@ export function buildRunStatus(i: BuildRunStatusInput): RunStatus {
     ...agents.map((a) => a.activity),
     ...activityRepos.map((r) => readAgentActivity(projectsRoot, r.path, r.branch ?? null, nowMs)),
   ]);
-  const agent: AgentActivity = promoteExited(reduced, agents.length);
+  // `null`, not 0, when the registry could not be read: an empty `agents` is
+  // then "we could not look", and promoting on it is how a live card got called
+  // dead. See promoteExited and SessionsProbe.readable.
+  const agent: AgentActivity = promoteExited(reduced, i.sessionsReadable === false ? null : agents.length);
   const pr = prSignals(prs);
   const column = deriveBucket({
     ticketStatus: ticket?.status ?? null,

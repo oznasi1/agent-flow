@@ -11,7 +11,7 @@ import { AttentionCandidate, attentionLabel, ownsWorkToLose } from "./attention"
 import { mostActive, promoteExited } from "./activity";
 import { canon, claudeProjectsRoot } from "./paths";
 import { resolveOwnership } from "./ownership";
-import { groupByPlace, readOpenSessions, defaultSessionsDir } from "./sessions";
+import { groupByPlace, readOpenSessionsProbe, defaultSessionsDir, SessionsProbe } from "./sessions";
 import { readPrEntries, defaultPrFactsDir } from "./pr/store";
 import { readRuns, defaultRunsDir } from "./runs";
 import { groupPlacesByWindow, localFallbackName, localKey } from "./localRuns";
@@ -28,6 +28,9 @@ export const NEEDS_STATES: ReadonlySet<AgentState> = new Set<AgentState>([
 export interface AttentionDeps {
   runs: () => Run[];
   sessions: () => OpenSession[];
+  /** Whether `sessions()` could read the registry at all this pass. Absent means
+   * "assume yes", which keeps every existing test's deps literal valid. */
+  sessionsReadable?: () => boolean;
   windows: () => PresenceRecord[];
   prEntries: (key: string) => PrEntryMap;
   sessionActivity: (cwd: string, sessionId: string) => AgentActivity;
@@ -80,9 +83,15 @@ export function defaultAttentionDeps(opts: {
 }): AttentionDeps {
   const { nowMs, showAll, openAgents, prFacts } = opts;
   const projectsRoot = claudeProjectsRoot();
+  // One probe, both readings. `sessions()` and `sessionsReadable()` are each
+  // called at most once per pass but by different code paths, and reading the
+  // directory twice could return two different answers.
+  let probe: SessionsProbe | null = null;
+  const sessionsProbe = (): SessionsProbe => (probe ??= readOpenSessionsProbe(defaultSessionsDir()));
   return {
     runs: () => readRuns(defaultRunsDir()),
-    sessions: () => readOpenSessions(defaultSessionsDir()),
+    sessions: () => sessionsProbe().sessions,
+    sessionsReadable: () => sessionsProbe().readable,
     windows: () => readLiveWindows(defaultWindowsDir()),
     prEntries: (key) => readPrEntries(defaultPrFactsDir(), key),
     sessionActivity: (cwd, sessionId) => readSessionActivity(projectsRoot, cwd, sessionId, nowMs),
@@ -137,7 +146,8 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
       ...owned,
       ...run.repos.map((r) => deps.repoActivity(r.path, r.branch ?? null)),
     ]);
-    const agentState = promoteExited(reduced, owned.length).state;
+    const readable = deps.sessionsReadable?.() ?? true;
+    const agentState = promoteExited(reduced, readable ? owned.length : null).state;
     const hasLiveSession = ownership.runsWithSession.has(run.key);
 
     // Rungs 3 and 4, spent ONLY where they could change the answer. A quiet
@@ -272,7 +282,8 @@ export function gatherAttention(deps: AttentionDeps): AttentionCandidate[] {
       ]);
       // Called even though it cannot fire here (the sessions exist), so both
       // paths in this file read identically.
-      const agentState = promoteExited(reduced, sessions.length).state;
+      const readable = deps.sessionsReadable?.() ?? true;
+      const agentState = promoteExited(reduced, readable ? sessions.length : null).state;
       // `roots[0]`, the loop's own post-normalization list, not the LocalGroup's
       // raw `group.roots[0]` — deckView.ts's `localRunFor` is handed `liveGroup`
       // (roots already normalized the identical way), so its fallback key reads

@@ -3,7 +3,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { execFileSync } from "child_process";
-import { readOpenSessions, defaultSessionsDir, groupByPlace, OpenSession } from "../../../src/engine/sessions";
+import { readOpenSessions, readOpenSessionsProbe, defaultSessionsDir, groupByPlace, OpenSession } from "../../../src/engine/sessions";
 
 const DEAD = 2 ** 30;
 
@@ -97,6 +97,27 @@ describe("readOpenSessions", () => {
       JSON.stringify({ pid: process.pid, sessionId: "early", cwd: "/r", startedAt: 100, kind: "interactive" }),
     );
     expect(readOpenSessions(dir).map((s) => s.sessionId)).toEqual(["early", `sess-${process.pid}`]);
+  });
+});
+
+describe("readOpenSessionsProbe", () => {
+  let dir: string;
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-probe-")); });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it("reports readable with no sessions for an empty directory", () => {
+    expect(readOpenSessionsProbe(dir)).toEqual({ sessions: [], readable: true });
+  });
+
+  it("reports NOT readable for a directory that does not exist", () => {
+    // The distinction the guardrail exists for: `sessions: []` alone cannot say
+    // whether nothing is running or nothing could be SEEN.
+    expect(readOpenSessionsProbe(path.join(dir, "nope"))).toEqual({ sessions: [], readable: false });
+  });
+
+  it("readOpenSessions returns a bare array for both, unchanged", () => {
+    expect(readOpenSessions(dir)).toEqual([]);
+    expect(readOpenSessions(path.join(dir, "nope"))).toEqual([]);
   });
 });
 

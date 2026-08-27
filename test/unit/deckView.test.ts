@@ -101,6 +101,10 @@ const h = vi.hoisted(() => ({
   // Every Claude Code session open on this machine (Task 8) — the registry
   // readOpenSessions reads, stubbed here rather than touching real ~/.claude/sessions.
   openSessions: [] as OpenSession[],
+  // Whether the sessions registry could be read this pass (the guardrail —
+  // a failed read is not "nothing is running"). True by default so every
+  // existing test's reading of `openSessions` is unaffected.
+  openSessionsReadable: true as boolean,
   // Every window presence knows about (Task 1/4) — steerable per test so a
   // multi-root workspace window can be asserted to fold its sessions into one
   // card. Empty by default, which groups nothing: every pre-existing
@@ -317,11 +321,16 @@ vi.mock("../../src/engine/git", () => ({
   prEligible: (r: { isGit: boolean; branch?: string }) => r.isGit && !!r.branch && r.branch !== "master",
   gitState: (name: string, path: string) => h.gitState(name, path),
 }));
-// groupByPlace and canon stay real — only the two functions that touch the real
-// filesystem (~/.claude/sessions) are replaced.
+// groupByPlace and canon stay real — only the functions that touch the real
+// filesystem (~/.claude/sessions) are replaced. `readOpenSessionsProbe` mirrors
+// `readOpenSessions` (Task 4's guardrail: buildAll now takes the probe, not the
+// bare list, so it must be stubbed too or it would hit the real, absent
+// "/sessions" and read every existing test as an unreadable registry).
+// `h.openSessionsReadable` defaults true, matching every caller's default.
 vi.mock("../../src/engine/sessions", async (importActual) => ({
   ...(await importActual<typeof import("../../src/engine/sessions")>()),
   readOpenSessions: () => h.openSessions,
+  readOpenSessionsProbe: () => ({ sessions: h.openSessions, readable: h.openSessionsReadable }),
   defaultSessionsDir: () => "/sessions",
 }));
 // UNKNOWN_ACTIVITY stays real (deckView.ts imports it directly, and it is the
@@ -709,6 +718,7 @@ beforeEach(() => {
   h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
   h.reviewRequests = true;
   h.openSessions = [];
+  h.openSessionsReadable = true;
   h.liveWindows = [];
   h.currentWindow = undefined;
   h.workspaceFiles = [];
