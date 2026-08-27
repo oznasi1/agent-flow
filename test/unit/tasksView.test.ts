@@ -7309,3 +7309,37 @@ describe("take — in-flight guard", () => {
     expect(vi.mocked(openWorkspace)).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("takeTask — palette (command) failure surfacing", () => {
+  it("resolves without throwing and toasts when the ticket read fails on a command take", async () => {
+    // The palette command is registered as a bare handler in extension.ts, so a
+    // rethrow from a command-sourced take surfaces only VS Code's generic
+    // "command failed" notification — no toast, no output-channel line.
+    clientStub.getDetail.mockRejectedValueOnce(
+      parseJiraError(404, JSON.stringify({ errorMessages: ["Issue does not exist"] })),
+    );
+    const { provider, messages, logged } = setup();
+    await expect(provider.takeTask("BILL-1234", "command", ["acme-billing"])).resolves.toBeUndefined();
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: expect.stringContaining("Issue does not exist") }),
+    );
+    expect(logged.join("\n")).toContain("Issue does not exist");
+    // The Take funnel still gets its terminator exactly as before.
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("failed");
+  });
+
+  it("re-gates the panel instead of toasting when a command take fails on a dead credential", async () => {
+    clientStub.getDetail.mockRejectedValueOnce(new JiraAuthError("Jira auth failed (401). Sign in again."));
+    const { provider, messages } = setup();
+    await expect(provider.takeTask("BILL-1234", "command", ["acme-billing"])).resolves.toBeUndefined();
+    expect(messages).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
+    expect(messages).not.toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+  });
+
+  it("keeps the card path byte-identical: a failing card take still rethrows to the dispatcher", async () => {
+    clientStub.getDetail.mockRejectedValueOnce(new Error("boom"));
+    const { provider } = setup();
+    await expect(provider.takeTask("BILL-1234", "card", ["acme-billing"])).rejects.toThrow("boom");
+  });
+});

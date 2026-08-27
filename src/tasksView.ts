@@ -2215,7 +2215,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       track({ name: "take_completed", flow_id: flow.id, outcome: launched ? "launched" : "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), task_fp: taskFp });
     } catch (e) {
       track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), failure_class: classifyFailure(e), task_fp: taskFp });
-      throw e; // onMessage's existing catch (tasksView.ts:255) still owns the user-facing handling.
+      // A palette Take has no webview dispatcher above it — extension.ts registers
+      // the command as a bare handler, so a rethrow surfaces only VS Code's generic
+      // "command failed" notification: no toast, no output-channel line, no re-gate.
+      // Give it the same user-facing handling the card path's dispatcher applies —
+      // the sign-in gate for a dead credential, a toast for everything else.
+      if (source === "command") {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.log(`take ${key}: failed — ${msg}`);
+        if (e instanceof TaskAuthError) {
+          this.postState(false, this.connector.isConfigured(), null);
+        } else {
+          this.toast("error", msg);
+        }
+        return;
+      }
+      throw e; // onMessage's existing catch (tasksView.ts:255) still owns the card path's user-facing handling.
     }
   }
 
