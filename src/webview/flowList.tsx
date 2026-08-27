@@ -187,7 +187,7 @@ function ruleSentence(
       {/* The condition's own parameters, INLINE — a repo picker and a branch
           field sitting in the sentence between WHEN and THEN, which is where
           they read: "WHEN branch CI passed… repo agent-flow branch main THEN
-          launch ASM-12". The canvas gives them a row of their own instead,
+          launch PROJ-12". The canvas gives them a row of their own instead,
           because its clauses stack; the fields themselves are the same
           component, which is the whole point of `CondParams` (see its header).
 

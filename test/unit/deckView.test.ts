@@ -8614,6 +8614,62 @@ describe("arm, disarm and reset", () => {
     expect(toast).toBeTruthy();
   });
 
+  // A blank parameter is the reason that does not depend on any toggle, and the
+  // one that replaced the old picker filter: `branch-ci-passed`,
+  // `ticket-status-is` and `agent-idle-over` are offered in the drawer now, so a
+  // rule CAN be armed with a status nobody typed. Silence would leave the user
+  // watching a rule that looks configured and can never fire.
+  it("flow:arm names a rule whose condition has a blank setting, with every source on", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ticket-status-is", status: "" }, action: "notify" }],
+    }];
+    const { p, send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    // Armed anyway, like every other dead-rule reason — a flow with one blank
+    // rule and three filled ones is still worth arming.
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(true);
+    const toast = posts(p).find((m) => m.type === "toast" && /can never fire/i.test(m.message ?? ""));
+    expect(toast?.message).toContain("1 rule has a setting left blank");
+  });
+
+  it("flow:arm puts the blank setting FIRST, ahead of a toggle it outranks", async () => {
+    // With PR facts off, a `branch-ci-passed` rule qualifies for both reasons.
+    // Leading with the toggle would send the user to turn on a setting that
+    // still leaves the rule dead; the branch is the fix.
+    setConfig({ orchestrator: true });
+    h.prFacts = false;
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "branch-ci-passed", repo: "r", branch: "" }, action: "notify" },
+        { id: "e2", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" },
+      ],
+    }];
+    const { p, send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    const toast = posts(p).find((m) => m.type === "toast" && /can never fire/i.test(m.message ?? ""));
+    expect(toast?.message).toContain("1 rule has a setting left blank");
+    // The other rule still earns its own, unchanged reason — and after this one.
+    expect(toast?.message).toContain("1 needs PR facts");
+    expect(toast!.message!.indexOf("left blank")).toBeLessThan(toast!.message!.indexOf("PR facts"));
+  });
+
+  it("flow:arm says nothing about a parameterised rule that is filled in", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [{
+        id: "e1", from: "n1", to: "n2",
+        cond: { kind: "agent-idle-over", minutes: 30 }, action: "notify",
+      }],
+    }];
+    const { p, send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    expect(posts(p).some((m) => m.type === "toast" && /can never fire/i.test(m.message ?? ""))).toBe(false);
+  });
+
   // Task 10 threads `forge: this.caps()` through this call site — until now,
   // `unfirableRules` was always called with no `forge` at all, so the
   // "forge-unsupported" branch (Task 9, armability.ts) was dead code from here.
