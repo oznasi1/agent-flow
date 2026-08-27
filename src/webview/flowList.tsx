@@ -25,6 +25,9 @@ import {
   commandTargetOf,
   condOffered,
   condOptionLabel,
+  isBareCond,
+  seedCond,
+  sourceRepoOfNode,
   COND_LABEL,
   defaultCondFor,
   DEST_LABEL,
@@ -40,26 +43,30 @@ import {
   NOTE_PLACEHOLDER,
   notifyMessageOf,
   offeredConds,
+  repoOptions,
   OFFERED_DESTS,
   truncatedNote,
   withCommandId,
   withCommandRun,
   withCond,
+  withCondParams,
   withDest,
   withMode,
   withNote,
   withNotifyMessage,
   withoutEdge,
 } from "./orchestratorRule";
+import { CondParams } from "./CondParams";
 
 export interface FlowListProps {
   flow: Flow;
-  /** Unused today — kept in the prop list because the canvas's own props
-   * carry it (`OrchestratorDrawerProps.runs`) and "same callbacks the canvas
-   * already uses" (this task's own brief) means the same SHAPE, not a
-   * narrower one invented for this file. A future row that shows what a
-   * place currently looks like (the inspector's `observationOf`) reads it
-   * from here rather than this file growing a second prop for it later. */
+  /** The board, which this file reads for exactly one thing so far: the checkout
+   * names a `branch-ci-passed` rule's repo picker offers (`repoOptions`). It was
+   * carried unused for a while before that, because the canvas's own props carry
+   * it (`OrchestratorDrawerProps.runs`) and "the same callbacks the canvas already
+   * uses" means the same SHAPE, not a narrower one invented for this file. A
+   * future row that shows what a place currently looks like (the inspector's
+   * `observationOf`) reads it from here too. */
   runs: RunStatus[];
   promptModes: FlowPromptMode[];
   /** `agentFlow.commands`, from the same `deck:flows` post the canvas reads it
@@ -84,6 +91,9 @@ function ruleSentence(
   open: boolean,
   promptModes: FlowPromptMode[],
   commands: FlowCommand[],
+  /** Every checkout the board can see — `repoOptions(runs)`, computed once by
+   * `FlowList` rather than per row, since every row offers the same list. */
+  repos: string[],
   onSave: (f: Flow) => void,
 ): JSX.Element {
   const modeValue = modeValueOf(flow, e);
@@ -173,6 +183,24 @@ function ruleSentence(
         // which branch — and the ellipsis promised a parameter it then never
         // showed. Same string the open row's own option spends.
         <span>{condOptionLabel(e.cond)}</span>
+      )}
+      {/* The condition's own parameters, INLINE — a repo picker and a branch
+          field sitting in the sentence between WHEN and THEN, which is where
+          they read: "WHEN branch CI passed… repo agent-flow branch main THEN
+          launch PROJ-12". The canvas gives them a row of their own instead,
+          because its clauses stack; the fields themselves are the same
+          component, which is the whole point of `CondParams` (see its header).
+
+          Open rows only. A closed row already says which branch it watches —
+          `condOptionLabel` above is what names it — and a closed row is a
+          sentence to scan, not a form. */}
+      {open && !isBareCond(e.cond.kind) && (
+        <CondParams
+          cond={e.cond}
+          repos={repos}
+          editKey={e.id}
+          onEdit={(patch) => onSave(withCondParams(flow, e.id, patch))}
+        />
       )}
 
       {/* THEN is a STATEMENT, not a choice — the same conclusion Task 9 reached
@@ -367,20 +395,23 @@ function ruleSentence(
 function NewRuleBar(p: {
   flow: Flow;
   promptModes: FlowPromptMode[];
+  /** Every checkout on the board — `repoOptions(runs)`, the same list every open
+   * row's repo picker offers. */
+  repos: string[];
   onSave: (f: Flow) => void;
 }): JSX.Element | null {
-  const { flow, promptModes, onSave } = p;
+  const { flow, promptModes, repos, onSave } = p;
   const [from, setFrom] = React.useState("");
   const [to, setTo] = React.useState("");
-  // `CondKind` is by its own definition every kind that needs no parameter, which
-  // is exactly what `OFFERED_CONDS` offers — the parameterised kinds
-  // (`agent-idle-over`, `ticket-status-is`, `branch-ci-passed`) each need a value
-  // this bar has no input for, same reason `OFFERED_CONDS` itself excludes them
-  // (see `isBareCond` and its own doc comment in orchestratorRule.ts). Naming the
-  // model type rather than re-`Exclude`ing the kinds by hand is what keeps this
-  // state from falling behind `Condition`: building `{ kind: cond }` below stays a
-  // complete `Condition` with no cast needed, and stops compiling if it ever is not.
-  const [cond, setCond] = React.useState<CondKind>("pr-merged");
+  // A whole `Condition`, not a bare kind. This used to be a `CondKind` because
+  // the picker only ever offered kinds that need no parameter — that filter is
+  // gone (see `OFFERED_CONDS`), and a `{ kind }` cast to fit would now build a
+  // `branch-ci-passed` rule with no `repo` and no `branch` fields at all: not
+  // merely an unfired rule but a record no reader in the engine is written for.
+  // Holding the real shape means the bar builds exactly what it shows, and
+  // `seedCond` is what fills it in — the same seeds the inspector's own picker
+  // spends, so one choice cannot mean two things depending on where it was made.
+  const [cond, setCond] = React.useState<Condition>({ kind: "pr-merged" });
   // Seeded from nothing in particular — there is no `to` chosen yet for
   // either to describe anything about. The moment a `to` IS chosen, the
   // "To node" handler below reseeds both from `modeValueOf`/`launchDestOf` —
@@ -411,7 +442,7 @@ function NewRuleBar(p: {
   React.useEffect(() => {
     setFrom("");
     setTo("");
-    setCond("pr-merged");
+    setCond({ kind: "pr-merged" });
     setMode(promptModes[0]?.id ?? "");
     setDest("worktree");
     // eslint has no opinion in this repo (no config), but the omission of
@@ -433,7 +464,7 @@ function NewRuleBar(p: {
    * lives on the edge itself, which does not exist yet), so this falls back to
    * the first configured mode. */
   const seedModeAndDest = (toId: string) => {
-    const probe: FlowEdge = { id: "draft", from, to: toId, cond: { kind: cond } };
+    const probe: FlowEdge = { id: "draft", from, to: toId, cond };
     setMode(modeValueOf(flow, probe) || promptModes[0]?.id || "");
     setDest(launchDestOf(flow, probe) ?? "worktree");
   };
@@ -464,7 +495,7 @@ function NewRuleBar(p: {
    * one shape `latchActionMismatches` can never latch (see this component's own
    * doc comment). `edgeAction` reads the verb off it exactly as every other
    * presentation of a rule does. */
-  const draft: FlowEdge | null = from && to ? { id: "draft", from, to, cond: { kind: cond } } : null;
+  const draft: FlowEdge | null = from && to ? { id: "draft", from, to, cond } : null;
   /** What the drafted rule will DO, once a `to` names a node: whatever that node
    * implies. `undefined` before a `to` is chosen (nothing to derive from yet) and
    * also for a target of a kind this build does not know — `store.ts`'s
@@ -508,7 +539,7 @@ function NewRuleBar(p: {
     onSave(next);
     setFrom("");
     setTo("");
-    setCond("pr-merged");
+    setCond({ kind: "pr-merged" });
     // Reset too, not left to carry into the NEXT rule: `to` above always
     // clears back to "", so the next rule's own "To node" pick will reseed
     // these the moment it's made — but resetting here as well means nothing
@@ -533,7 +564,7 @@ function NewRuleBar(p: {
           // `pr-merged` selected after choosing a command node would leave this
           // select's value out of its own option list — blank, and one click
           // from building a rule that can never be met.
-          setCond(defaultCondFor(flow, val).kind as CondKind);
+          setCond(defaultCondFor(flow, val));
         }}
       >
         <option value="">choose a node…</option>
@@ -542,13 +573,33 @@ function NewRuleBar(p: {
       <select
         className="orch-sel"
         aria-label="New rule condition"
-        value={cond}
+        value={cond.kind}
+        // `seedCond`, not `{ kind }`: a parameterised kind needs a value the
+        // moment it is named, and the repo half of a `branch-ci-passed` rule is
+        // seeded from whichever node `from` currently holds — the same guess
+        // `withCond` makes on the other surface.
         onChange={(ev) =>
-          setCond(ev.currentTarget.value as CondKind)
+          setCond(seedCond(ev.currentTarget.value as Condition["kind"], sourceRepoOfNode(flow, from)))
         }
       >
         {offeredConds(flow, from).map((k) => <option key={k} value={k}>{COND_LABEL[k]}</option>)}
       </select>
+      {/* The parameters, when the chosen kind has any — the same component the
+          open rows below and the canvas inspector spend. Without it this bar
+          could name `branch CI passed…` and then build a rule with no branch in
+          it, which is precisely why the kind used to be filtered out of the
+          picker instead. `editKey` is a constant here because there is only ever
+          one draft: nothing else on screen can collide with it, and it must NOT
+          change as the draft is edited or each keystroke would remount the field
+          it was typed into. */}
+      {!isBareCond(cond.kind) && (
+        <CondParams
+          cond={cond}
+          repos={repos}
+          editKey={`newrule-${cond.kind}`}
+          onEdit={(patch) => setCond((c) => ({ ...c, ...patch }) as Condition)}
+        />
+      )}
       <span className="orch-kw">THEN</span>
       {/* A STATEMENT, exactly as in an open row and the canvas inspector — the
           To picker beside it is the only thing that decides the verb, so there
@@ -648,6 +699,10 @@ export function FlowList(p: FlowListProps): JSX.Element {
    * select would otherwise match more than one element. (Deliberately NOT
    * "Action": there is no action control, and this file must not grow one —
    * see the `THEN` clause's own comment in `ruleSentence`.) */
+  /** Every checkout on the board, for the repo picker a `branch-ci-passed` rule
+   * opens with. Once per render, not once per row: every row offers the same
+   * list, and `repoOptions` sorts. */
+  const boardRepos = repoOptions(p.runs);
   const [openId, setOpenId] = React.useState<string | null>(null);
   const rowRefs = React.useRef<(HTMLDivElement | null)[]>([]);
   /** Where focus goes once the last rule is deleted and the empty state
@@ -802,7 +857,7 @@ export function FlowList(p: FlowListProps): JSX.Element {
                 row's onClick grows anything with a side effect beyond
                 opening. */}
             <div className="fl-sentence" onClick={(ev) => ev.stopPropagation()}>
-              {ruleSentence(flow, e, open, p.promptModes, p.commands, p.onSave)}
+              {ruleSentence(flow, e, open, p.promptModes, p.commands, boardRepos, p.onSave)}
             </div>
             {settled && (
               <div className="fl-receipt" onClick={(ev) => ev.stopPropagation()}>
@@ -846,7 +901,7 @@ export function FlowList(p: FlowListProps): JSX.Element {
   return (
     <>
       {body}
-      <NewRuleBar flow={flow} promptModes={p.promptModes} onSave={p.onSave} />
+      <NewRuleBar flow={flow} promptModes={p.promptModes} repos={boardRepos} onSave={p.onSave} />
     </>
   );
 }

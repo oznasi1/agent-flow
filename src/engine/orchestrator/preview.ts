@@ -12,7 +12,7 @@
 import { RunStatus } from "../../types";
 import { BranchCiStatus } from "./branchCi";
 import { BlockedNote, evaluateFlow } from "./evaluate";
-import { Flow, isSettled } from "./model";
+import { condIncomplete, Flow, isSettled } from "./model";
 
 /** One pending rule's fate, if the flow were armed right now. */
 export interface RulePreview {
@@ -21,8 +21,12 @@ export interface RulePreview {
    *   - `defer` — met, but the launch cap is already spent; a later pass fires it.
    *   - `blocked` — its source cannot be observed at all, so it can never be met
    *     while that stays true. `reason` says which way.
+   *   - `unset` — its own condition names a blank branch, repo or status, so
+   *     nothing on any board could satisfy it. `blank` says which. Distinct from
+   *     `blocked`, which is about the SOURCE: a blocked rule fires once the card
+   *     is back, an unset one never fires until the rule itself is edited.
    *   - `waiting` — answerable and false. The ordinary resting state. */
-  verdict: "fire" | "defer" | "blocked" | "waiting";
+  verdict: "fire" | "defer" | "blocked" | "unset" | "waiting";
   /** Whether this edge would perform its action, or only be stamped. `false` on
    * the non-performing siblings of an "all" junction, which close the join while
    * one edge acts for all of them — so a caller can say "would close" where it
@@ -32,6 +36,11 @@ export interface RulePreview {
   perform: boolean;
   /** Set on `blocked` alone. */
   reason?: BlockedNote["reason"];
+  /** Set on `unset` alone: which parameter is blank, in `condIncomplete`'s own
+   * words — the same string the inspector marks the field with and the arm
+   * warning counts. One predicate behind all three, so a dry run cannot call a
+   * rule ordinary that arming then calls dead. */
+  blank?: string;
 }
 
 /** Every rule still in play, with what would become of it. Settled rules are
@@ -91,6 +100,20 @@ export function previewFlow(
     const held = uncappedFiring.get(e.id);
     if (held !== undefined) {
       out.push({ edgeId: e.id, verdict: "defer", perform: held });
+      continue;
+    }
+    // AFTER fire and defer, deliberately. `evalCond` compares a ticket status by
+    // equality, so a rule waiting on the empty string does match a run whose
+    // `ticketStatus` is itself `""` — vanishingly rare, but real, and if the
+    // engine says it would fire then "never fires" is the wrong answer. What the
+    // engine actually decided always wins here.
+    //
+    // BEFORE blocked, matching `unfirableRules`' own precedence (armability.ts)
+    // for the same reason: when a rule is both, the blank is the half the user
+    // can fix, and putting the card back would still leave it dead.
+    const blank = condIncomplete(e.cond);
+    if (blank !== undefined) {
+      out.push({ edgeId: e.id, verdict: "unset", perform: false, blank });
       continue;
     }
     const reason = blockedNodes.get(e.from);

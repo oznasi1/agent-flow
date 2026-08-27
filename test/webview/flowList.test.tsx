@@ -903,7 +903,7 @@ describe("a migrated rule's mismatch notice", () => {
   });
 });
 
-describe("a condition the picker does not offer", () => {
+describe("a parameterised condition", () => {
   const branchRule = () =>
     flow({
       nodes: [
@@ -930,7 +930,13 @@ describe("a condition the picker does not offer", () => {
     // browser's blank control shows up here as the WRONG condition — the same
     // defect, and this is the assertion that catches both.
     expect(select.value).toBe("branch-ci-passed");
-    expect(select.selectedOptions[0].textContent).toBe("CI passed on agent-flow#main");
+    // The repo and branch moved out of the option text and into fields of their
+    // own — `CondParams`, the same component the canvas inspector renders. The
+    // fact this test guards is unchanged: an open row must not lose which branch
+    // the rule is about. A CLOSED row still reads it off `condOptionLabel`, which
+    // is what the test above asserts and what did not move.
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).value).toBe("agent-flow");
+    expect((screen.getByLabelText("Branch") as HTMLInputElement).value).toBe("main");
   });
 
   it("does not offer the command condition on a row out of a place", () => {
@@ -1367,5 +1373,101 @@ describe("adding a rule from the keyboard", () => {
     const bar2 = screen.getByTestId("flowlist-newrule");
     fireEvent.click(within(bar2).getByRole("button", { name: "+ Add rule" }));
     expect(onSave).toHaveBeenCalledTimes(0);
+  });
+});
+
+// ── The keyboard path reaches the parameters too ─────────────────────────────
+// `offeredConds` is shared by both presentations, so opening the picker to the
+// parameterised kinds opened it HERE as well. That is the whole reason
+// `CondParams` is a component rather than a block of JSX in the inspector: the
+// two must not drift into one surface that can set a branch and one that cannot.
+
+/** Two runs across three checkouts, board order deliberately unsorted, so a
+ * picker that merely echoed `runs` would fail the sort assertion. */
+const BOARD = [
+  { repos: [{ name: "web" }, { name: "agent-flow" }] },
+  { repos: [{ name: "payments-api" }] },
+] as unknown as React.ComponentProps<typeof FlowList>["runs"];
+
+describe("a parameterised condition in an open row", () => {
+  const branchRule = () =>
+    flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+        { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "deploy" },
+      ],
+      edges: [{
+        id: "e1", from: "n1", to: "n2",
+        cond: { kind: "branch-ci-passed", repo: "agent-flow", branch: "main" },
+      }],
+    });
+
+  it("edits the branch from the keyboard, which was impossible before", () => {
+    // The capability this whole change exists for: "wait for the build to pass
+    // on master, then deploy" needed a hand-edited file under ~/.agentflow/flows.
+    const onSave = vi.fn();
+    render(<FlowList {...props({ onSave, runs: BOARD, flow: branchRule() })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const box = screen.getByLabelText("Branch");
+    fireEvent.change(box, { target: { value: "master" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].cond)
+      .toEqual({ kind: "branch-ci-passed", repo: "agent-flow", branch: "master" });
+  });
+
+  it("offers the same board checkouts the canvas does", () => {
+    render(<FlowList {...props({ runs: BOARD, flow: branchRule() })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const values = Array.from(
+      (screen.getByLabelText("Repo") as HTMLSelectElement).querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["agent-flow", "payments-api", "web"]);
+  });
+
+  it("shows no fields in a CLOSED row, which is a sentence to scan", () => {
+    // The closed row already names the branch through `condOptionLabel` — that
+    // is the assertion further up this file, and it did not move. Fields there
+    // would turn a list into a form.
+    render(<FlowList {...props({ runs: BOARD, flow: branchRule() })} />);
+    expect(screen.queryByLabelText("Branch")).toBeNull();
+  });
+
+  it("marks a blank parameter in the row, in the arm warning's own words", () => {
+    const f = branchRule();
+    (f.edges[0].cond as { branch: string }).branch = "";
+    render(<FlowList {...props({ runs: BOARD, flow: f })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    expect(screen.getByTestId("flowlist-row-e1").textContent).toContain("no branch set");
+  });
+});
+
+describe("the new-rule bar and a parameterised condition", () => {
+  it("builds a complete branch-CI rule rather than a kind with no fields", () => {
+    // The bar used to hold a bare `CondKind`, which was safe only because the
+    // picker withheld these kinds. With them offered, that state would have
+    // built `{ kind: "branch-ci-passed" }` — no `repo`, no `branch` — a record
+    // no reader in the engine is written for.
+    const onSave = vi.fn();
+    render(<FlowList {...props({ onSave, runs: BOARD, flow: twoPlacesNoEdge() })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n1" } });
+    fireEvent.change(within(bar).getByLabelText("New rule condition"), { target: { value: "branch-ci-passed" } });
+    // Seeded from the source place's own repo, exactly as the inspector seeds it.
+    expect((within(bar).getByLabelText("Repo") as HTMLSelectElement).value).toBe("agent-flow");
+    const branch = within(bar).getByLabelText("Branch");
+    fireEvent.change(branch, { target: { value: "master" } });
+    fireEvent.blur(branch);
+    fireEvent.change(within(bar).getByLabelText("To node"), { target: { value: "n2" } });
+    fireEvent.click(within(bar).getByRole("button", { name: "+ Add rule" }));
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges).toHaveLength(1);
+    expect(saved.edges[0].cond).toEqual({ kind: "branch-ci-passed", repo: "agent-flow", branch: "master" });
+  });
+
+  it("shows no parameter fields for a bare kind", () => {
+    render(<FlowList {...props({ runs: BOARD, flow: twoPlacesNoEdge() })} />);
+    const bar = screen.getByTestId("flowlist-newrule");
+    fireEvent.change(within(bar).getByLabelText("New rule condition"), { target: { value: "pr-merged" } });
+    expect(within(bar).queryByLabelText("Branch")).toBeNull();
   });
 });

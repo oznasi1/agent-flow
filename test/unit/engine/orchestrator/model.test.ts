@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isSettled, isSpendAction, findNode, incomingEdges,
-  actionFor, edgeAction,
+  actionFor, edgeAction, condIncomplete,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -160,5 +160,45 @@ describe("edgeAction", () => {
 
   it("is undefined when the target is missing", () => {
     expect(edgeAction(flow, edge("e1", "n1", "nope"))).toBeUndefined();
+  });
+});
+
+describe("condIncomplete", () => {
+  it("says nothing about a condition that carries no parameter", () => {
+    expect(condIncomplete({ kind: "pr-merged" })).toBeUndefined();
+  });
+
+  it("says nothing about an idle rule, which is always complete", () => {
+    // `withCond` seeds it with a real span and the control cannot produce a
+    // blank, so it has no incomplete shape. `minutes: 0` is not incomplete
+    // either — "fires as soon as the session is idle" is a rule that works.
+    expect(condIncomplete({ kind: "agent-idle-over", minutes: 0 })).toBeUndefined();
+  });
+
+  it("names a blank status", () => {
+    expect(condIncomplete({ kind: "ticket-status-is", status: "" })).toBe("no status set");
+    expect(condIncomplete({ kind: "ticket-status-is", status: "   " })).toBe("no status set");
+    expect(condIncomplete({ kind: "ticket-status-is", status: "In Review" })).toBeUndefined();
+  });
+
+  it("names the repo before the branch, so one fix is asked for at a time", () => {
+    // Both blank is the shape a rule seeded from a source with no repo to lend
+    // arrives in. Reporting both at once would put two complaints on one field
+    // row; reporting the repo first matches the order the controls sit in.
+    expect(condIncomplete({ kind: "branch-ci-passed", repo: "", branch: "" })).toBe("no repo set");
+    expect(condIncomplete({ kind: "branch-ci-passed", repo: "api", branch: "" })).toBe("no branch set");
+    expect(condIncomplete({ kind: "branch-ci-passed", repo: "api", branch: "main" })).toBeUndefined();
+  });
+
+  it("survives a hand-edited flow file that omits the parameter entirely", () => {
+    // `store.ts`'s `validEdge` admits an edge on the strength of its `kind`
+    // without reading the parameters beside it, so `{"kind":"ticket-status-is"}`
+    // reaches here with no `status` at all. A bare `.trim()` throws — and it
+    // throws inside `unfirableRules`, which runs while ARMING, so one
+    // hand-edited rule would take the whole arm down instead of being reported
+    // as the one rule that cannot fire.
+    expect(condIncomplete({ kind: "ticket-status-is" } as never)).toBe("no status set");
+    expect(condIncomplete({ kind: "branch-ci-passed" } as never)).toBe("no repo set");
+    expect(condIncomplete({ kind: "branch-ci-passed", repo: "api" } as never)).toBe("no branch set");
   });
 });

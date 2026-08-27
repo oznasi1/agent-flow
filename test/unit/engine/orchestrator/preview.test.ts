@@ -146,3 +146,60 @@ describe("previewFlow — an all-join", () => {
     ]);
   });
 });
+
+describe("previewFlow — a rule whose own condition is blank", () => {
+  // The picker offers `branch-ci-passed`, `ticket-status-is` and
+  // `agent-idle-over` now, each with fields for its parameters, so a rule
+  // waiting on a blank branch is something a user can build in two clicks
+  // rather than only by hand-editing a flow file. `waiting` — this panel's own
+  // "ordinary resting state" — would be the wrong word for one: it never stops
+  // resting.
+  const blankBranch = () =>
+    flowWith(
+      [place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { cond: { kind: "branch-ci-passed", repo: "repo-PROJ-1", branch: "" } })],
+    );
+
+  it("reads as unset, not as waiting, and names the blank", () => {
+    const rows = previewFlow(blankBranch(), [status("PROJ-1")], NOW);
+    expect(rows).toEqual([
+      { edgeId: "e1", verdict: "unset", perform: false, blank: "no branch set" },
+    ]);
+  });
+
+  it("says nothing special once the branch is filled in", () => {
+    const f = blankBranch();
+    (f.edges[0].cond as { branch: string }).branch = "main";
+    expect(verdictOf(previewFlow(f, [status("PROJ-1")], NOW), "e1")).toBe("waiting");
+  });
+
+  it("outranks blocked, because putting the card back would not help", () => {
+    // Both are true of this rule: its source is off the board AND its branch is
+    // blank. `unfirableRules` (armability.ts) makes the same call for the same
+    // reason, and the two surfaces must not disagree about one rule.
+    const rows = previewFlow(blankBranch(), [], NOW);
+    expect(rows[0].verdict).toBe("unset");
+  });
+
+  it("still defers to what the engine actually decided", () => {
+    // `evalCond` matches a ticket status by equality, so a rule waiting on the
+    // empty string DOES match a run whose own `ticketStatus` is `""`. Rare, but
+    // real — and if the engine says it would fire, "never fires" is the wrong
+    // answer. The check sits after fire/defer precisely so this case wins.
+    const f = flowWith(
+      [place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { cond: { kind: "ticket-status-is", status: "" } })],
+    );
+    const empty = { ...status("PROJ-1"), ticketStatus: "" };
+    expect(verdictOf(previewFlow(f, [empty], NOW), "e1")).toBe("fire");
+  });
+
+  it("survives a hand-edited rule with the parameter missing entirely", () => {
+    const f = flowWith(
+      [place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { cond: { kind: "ticket-status-is" } as never })],
+    );
+    expect(previewFlow(f, [status("PROJ-1")], NOW)[0])
+      .toMatchObject({ verdict: "unset", blank: "no status set" });
+  });
+});
