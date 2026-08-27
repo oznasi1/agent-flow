@@ -1,6 +1,14 @@
 .vscode/**
 src/**
 test/**
+test-ct/**
+test-e2e/**
+playwright/**
+test-results/**
+playwright-e2e-report/**
+.vscode-test/**
+playwright-e2e.config.ts
+playwright-ct.config.ts
 coverage/**
 preview/**
 node_modules/**

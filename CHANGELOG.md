@@ -25,6 +25,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   failing. Jira is untouched and remains the default — nothing changes for an existing
   setup unless you switch `agentFlow.taskSource` yourself.
 
+## [0.50.1] — 2026-08-27
+
+### Fixed
+
+- **The E2E lane no longer pins a Notepad defect that does not exist.** The
+  real-host journey read the webview's text selection from the workbench realm,
+  walking `iframe.webview` → `#active-frame` → `contentDocument` — a
+  cross-origin read that always answers `null`, so its "after a drag, a note
+  body cannot be selected" assertion could never pass for any behaviour. It read
+  that as a product bug and pinned it with `test.fail()`. The selection is now
+  read inside the frame, the test asserts the guarantee positively, and the
+  finding is retracted in the E2E design spec. No runtime code changed.
+- **The `.vsix` no longer carries the test lanes or their leftovers.**
+  `.vscodeignore` dropped `*.ts` specs but not `.tsx` ones, fixtures, or output
+  directories — and vsce packages a gitignored directory that exists on disk, so
+  running the E2E lane before `npm run package` swept 1MB of
+  `test-results/e2e-results.json` into the extension. `test-ct/`, `test-e2e/`,
+  `playwright/`, `test-results/`, `playwright-e2e-report/`, `.vscode-test/` and
+  the two Playwright configs are now excluded: 36 files / 1.64MB, down from 61
+  files. Nothing in `dist/` or `media/` changed.
+
 ## [0.50.0] — 2026-08-27
 
 ### Changed
