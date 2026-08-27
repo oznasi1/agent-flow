@@ -101,40 +101,57 @@ export class MarketplacePanel {
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
-    switch (m.type) {
-      case "mkt:ready":
-      case "mkt:refresh":
-        this.render();
-        break;
-      case "mkt:open": {
-        if (!this.allowed(m.file)) return;
-        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(m.file));
-        await vscode.window.showTextDocument(doc, { preview: true });
-        break;
+    // The promise this returns is discarded by onDidReceiveMessage's caller, so
+    // anything that escapes here is an unhandled rejection and a row that
+    // silently does nothing forever — e.g. mkt:open on a file deleted between
+    // scan and click. Missing payload fields are guarded per-arm (the mock-free
+    // real `Uri.parse(undefined)` throws); everything else lands in the catch
+    // below as a log line plus an error toast.
+    try {
+      switch (m.type) {
+        case "mkt:ready":
+        case "mkt:refresh":
+          this.render();
+          break;
+        case "mkt:open": {
+          if (!m.file || !this.allowed(m.file)) return;
+          const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(m.file));
+          await vscode.window.showTextDocument(doc, { preview: true });
+          break;
+        }
+        case "mkt:reveal":
+          if (!m.file || !this.allowed(m.file)) return;
+          await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(m.file));
+          break;
+        case "mkt:read": {
+          if (!m.file || !this.allowed(m.file)) return;
+          const raw = fsReader().readFile(m.file) ?? "";
+          const truncated = raw.length > MAX_PREVIEW;
+          this.post({
+            type: "mkt:file",
+            file: m.file,
+            text: truncated ? raw.slice(0, MAX_PREVIEW) : raw,
+            truncated,
+          });
+          break;
+        }
+        case "mkt:copy":
+          if (!m.text) return;
+          await vscode.env.clipboard.writeText(m.text);
+          this.toast("success", "Copied to clipboard.");
+          break;
+        case "openExternal":
+          if (!m.url) return;
+          await vscode.env.openExternal(vscode.Uri.parse(m.url));
+          break;
+        default:
+          // A webview build ahead of (or behind) the host, or a typo'd type:
+          // named in the log rather than vanishing without a trace.
+          this.log(`marketplace: unknown message type ${(m as { type?: string }).type}`);
       }
-      case "mkt:reveal":
-        if (!this.allowed(m.file)) return;
-        await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(m.file));
-        break;
-      case "mkt:read": {
-        if (!this.allowed(m.file)) return;
-        const raw = fsReader().readFile(m.file) ?? "";
-        const truncated = raw.length > MAX_PREVIEW;
-        this.post({
-          type: "mkt:file",
-          file: m.file,
-          text: truncated ? raw.slice(0, MAX_PREVIEW) : raw,
-          truncated,
-        });
-        break;
-      }
-      case "mkt:copy":
-        await vscode.env.clipboard.writeText(m.text);
-        this.toast("success", "Copied to clipboard.");
-        break;
-      case "openExternal":
-        await vscode.env.openExternal(vscode.Uri.parse(m.url));
-        break;
+    } catch (e) {
+      this.log(`marketplace: handling ${m.type} failed: ${e}`);
+      this.toast("error", `That didn't work: ${e instanceof Error ? e.message : e}`);
     }
   }
 
