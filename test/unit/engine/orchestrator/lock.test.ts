@@ -120,6 +120,28 @@ describe("acquire", () => {
   });
 });
 
+describe("acquire — a lock stamped in the future", () => {
+  it("reaps a lock whose heldAt is further than the TTL in the future", () => {
+    // Clock skew plus a crash can leave `heldAt` ahead of every window's clock.
+    // A plain age check (`nowMs - heldAt > ttlMs`) then reads negative forever,
+    // so the lock is immortal and the orchestrator silently stops in every
+    // window until someone deletes the file by hand. Nobody can legitimately be
+    // holding a lock stamped that far ahead, so it is as dead as a stale one.
+    const { io, files } = fakeIo({ [lockPath(DIR)]: `${NOW + 2 * LOCK_TTL_MS}:win-ghost` });
+    expect(acquire(io, DIR, NOW, LOCK_TTL_MS, "win-a")).toBe(false);
+    expect(files[lockPath(DIR)]).toBeUndefined();
+    expect(acquire(io, DIR, NOW, LOCK_TTL_MS, "win-a")).toBe(true);
+  });
+
+  it("does not reap a lock within one TTL of the future — ordinary skew between two live windows", () => {
+    // Two machines a few seconds apart must not reap each other's live locks:
+    // only a stamp beyond the same strict boundary the past-facing check uses.
+    const { io, files } = fakeIo({ [lockPath(DIR)]: `${NOW + LOCK_TTL_MS}:win-b` });
+    expect(acquire(io, DIR, NOW, LOCK_TTL_MS, "win-a")).toBe(false);
+    expect(files[lockPath(DIR)]).toBeTruthy();
+  });
+});
+
 describe("renew", () => {
   it("pushes our own lock's deadline out, so the same holder survives its own TTL", () => {
     const { io, files } = fakeIo();
