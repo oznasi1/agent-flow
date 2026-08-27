@@ -66,9 +66,22 @@ export async function runSetup(
   // worktrees live inside each repo (.claude/worktrees/<KEY>), so there's no root
   // to configure.
   const cleanRoot = reposRoot.trim().replace(/\/+$/, "");
-  await commitSource();
-  await updateGlobal("reposRoot", cleanRoot);
-  await updateGlobal("workspaceDir", cleanRoot);
+  // The one block that writes. It can still fail after the last cancellable step
+  // — a read-only settings.json rejects `update()` — and letting that escape
+  // would leave a half-written config with SETUP_COMPLETE_KEY unset, no message,
+  // and an unhandled rejection. Failing the wizard loudly keeps the promise the
+  // comment above makes: setup either completes or is safely re-runnable.
+  try {
+    await commitSource();
+    await updateGlobal("reposRoot", cleanRoot);
+    await updateGlobal("workspaceDir", cleanRoot);
+  } catch (e) {
+    vscode.window.showWarningMessage(
+      `Agent Flow Deck: saving settings failed (${e instanceof Error ? e.message : e}). ` +
+        "Check that your settings.json is writable, then re-run setup.",
+    );
+    return abort(log, `settings write failed: ${e}`);
+  }
   // `info()` re-reads settings, so this sees the scope the commit above just wrote
   // (e.g. the Jira project key) — which is also why the commit runs first, not last:
   // generic wording since this file no longer knows the source, but the value itself

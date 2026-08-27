@@ -176,6 +176,50 @@ describe("runSetup", () => {
   });
 });
 
+describe("runSetup — settings write failure", () => {
+  it("resolves false and warns when persisting settings rejects (read-only settings.json)", async () => {
+    // A settings.json the editor cannot write (EROFS, managed machine, corrupt
+    // file) makes `getConfiguration().update` reject. The commit block must not
+    // escape as an unhandled rejection, must not mark setup complete, and must
+    // tell the user something failed instead of dying silently.
+    const commit = commitSpy();
+    const c = connector({ configure: vi.fn(async () => commit) });
+    stubInputBox("~/code");
+    vi.mocked(vscode.workspace.getConfiguration).mockImplementation(
+      () =>
+        ({
+          get: vi.fn(),
+          inspect: vi.fn((key: string) => ({ key })),
+          update: vi.fn(async () => {
+            throw Object.assign(new Error("EROFS: read-only file system"), { code: "EROFS" });
+          }),
+        }) as never,
+    );
+    const { context, globalState } = fakeContext();
+
+    await expect(runSetup(context, c, log)).resolves.toBe(false);
+    expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
+    expect(c.signIn).not.toHaveBeenCalled(); // don't collect credentials for settings that never landed
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1);
+    const [warning] = vi.mocked(vscode.window.showWarningMessage).mock.calls[0] as [string];
+    expect(warning).toContain("EROFS");
+  });
+
+  it("resolves false and warns when the connector's own commit thunk rejects", async () => {
+    const c = connector({
+      configure: vi.fn(async () => async () => {
+        throw new Error("boom from source commit");
+      }),
+    });
+    stubInputBox("~/code");
+    const { context, globalState } = fakeContext();
+
+    await expect(runSetup(context, c, log)).resolves.toBe(false);
+    expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("maybeRunSetup", () => {
   it("does nothing when setup is already complete", async () => {
     const { context } = fakeContext({ globalState: { [SETUP_COMPLETE_KEY]: true } });
