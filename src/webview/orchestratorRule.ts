@@ -25,6 +25,7 @@ import {
   Flow,
   FlowAction,
   FlowEdge,
+  JoinMode,
   LaunchDest,
   PlannedNode,
 } from "../engine/orchestrator/model";
@@ -59,18 +60,18 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   "command-succeeded": "the command succeeded",
 };
 
-/** Every condition kind that carries a parameter, and so cannot be built from a
- * picker that knows only a kind. One list, in one place, because FOUR things have
- * to agree about it and each used to say it for itself: `OFFERED_CONDS` and
- * `withCond` here, and both of flowList.tsx's pieces of picker state.
+/** Every condition kind that carries a parameter, and so needs a seed value the
+ * moment a picker names it. One list, in one place, because `withCond` and
+ * `CondParams.tsx`'s own controls have to agree about exactly which kinds have a
+ * parameter row at all.
  *
  * A `Record` over `Exclude<Condition["kind"], CondKind>` rather than a hand-typed
  * `Set`, so the list cannot fall behind the model: `CondKind` (model.ts) is by its
  * own definition every kind that needs NO parameter, which makes that `Exclude`
  * exactly the parameterised ones, and a `Record` over it must be exhaustive to
  * typecheck. Add a fifth parameterised kind to `Condition` and this object stops
- * compiling until it is named here — instead of silently becoming an
- * unconstructible picker entry. */
+ * compiling until it is named here — instead of silently becoming a picker entry
+ * `withCond` cannot construct. */
 const PARAMETERISED_CONDS: Record<Exclude<Condition["kind"], CondKind>, true> = {
   "agent-idle-over": true,
   "ticket-status-is": true,
@@ -78,33 +79,34 @@ const PARAMETERISED_CONDS: Record<Exclude<Condition["kind"], CondKind>, true> = 
 };
 
 /** Can `{ kind }` alone be a complete `Condition`? A type guard, not a bare
- * boolean, so `withCond` and the `OFFERED_CONDS` filter both get the narrowing
- * out of it rather than reaching for a cast. */
+ * boolean, so `withCond`'s seeding switch gets the narrowing out of it rather
+ * than reaching for a cast. It no longer filters `OFFERED_CONDS` — every kind is
+ * offered now, and the parameters are asked for inline. */
 export function isBareCond(kind: Condition["kind"]): kind is CondKind {
   return !(kind in PARAMETERISED_CONDS);
 }
 
-/** What either presentation offers in a condition picker. `agent-idle-over`,
- * `ticket-status-is` and `branch-ci-passed` each carry a parameter (a minute
- * count, a status name, a repo AND a branch) and this phase has no input for
- * any of them — offering them would create a rule waiting on a fixed 10
- * minutes, on the empty string, or on `undefined#undefined`, none of which
- * ever matches. They stay in `COND_LABEL` because a flow hand-edited on disk
- * can still hold one and its rule must still render, in both presentations.
- * `branch-ci-passed` is the one filtered kind whose absence a user can FEEL —
- * it is the condition that makes "wait for the build to pass on master, then
- * deploy to staging" expressible, and until a picker can ask for a repo and a
- * branch, the only way to write one is by hand in the flow file. An unusable
- * picker entry would be worse than none: it would silently produce a rule
- * that can never fire, on the one condition built to gate a deploy. A rule
- * hand-authored with one still RENDERS in either presentation's open picker —
- * see `condOffered`/`condOptionLabel` below, which exist so a `<select>` whose
- * value is not in this list does not come up blank.
+/** What either presentation offers in a condition picker: every kind the model
+ * has. The parameterised three used to be filtered out of this list because
+ * neither picker had anywhere to ask for a minute count, a status name or a repo
+ * and a branch — offering them then would have created a rule waiting on a fixed
+ * 10 minutes, on the empty string, or on `undefined#undefined`, none of which
+ * ever matches. `CondParams.tsx` is the input that was missing, so the filter is
+ * gone: `withCond` seeds each parameterised kind (see its own comment) and the
+ * param row asks for the rest.
+ *
+ * A blank parameter is still a rule that can never fire, and is still said out
+ * loud rather than left to be discovered: `condIncomplete` (model.ts) marks the
+ * field in the panel AND names the rule in the arm warning, so the honesty the
+ * old filter bought is kept without the capability it cost. `branch-ci-passed`
+ * is the kind this mattered most for — it is what makes "wait for the build to
+ * pass on master, then deploy to staging" expressible, and until now the only
+ * way to write one was by hand in the flow file.
  *
  * Not offered per SOURCE — that is `offeredConds` below, which every picker
  * should call instead. This list stays exported because it is the whole set,
- * and one of the two filters needs it. */
-export const OFFERED_CONDS: CondKind[] = (Object.keys(COND_LABEL) as Condition["kind"][]).filter(isBareCond);
+ * and that filter needs it. */
+export const OFFERED_CONDS: Condition["kind"][] = Object.keys(COND_LABEL) as Condition["kind"][];
 
 /** What a condition picker offers for a rule leaving `fromId` — the same list
  * as `OFFERED_CONDS`, split by the one thing that makes a condition answerable
@@ -130,7 +132,7 @@ export const OFFERED_CONDS: CondKind[] = (Object.keys(COND_LABEL) as Condition["
  * which is worse than merely wrong on the one function that decides what both
  * pickers offer: a reader trusting it would strip every condition from rules out
  * of planned work and break the chain this phase exists to support. */
-export function offeredConds(flow: Flow, fromId: string): CondKind[] {
+export function offeredConds(flow: Flow, fromId: string): Condition["kind"][] {
   const fromCommand = flow.nodes.find((n) => n.id === fromId)?.kind === "command";
   // One predicate, both directions: keep `command-succeeded` exactly when the
   // source IS a command node, and every other kind exactly when it is not.
@@ -138,14 +140,18 @@ export function offeredConds(flow: Flow, fromId: string): CondKind[] {
 }
 
 /** Is this rule's own condition one the picker for it offers? When it is not —
- * a parameterised kind, or `command-succeeded` on a rule out of a place — an
- * open `<select>` whose `value` matches none of its `<option>`s renders BLANK
- * (`selectedIndex` is -1), which is how a hand-authored `branch-ci-passed`
- * rule showed an empty Condition control in the inspector and the open row: the
- * one condition built to gate a deploy, displayed as nothing at all. Callers
- * pair this with `condOptionLabel` to add the missing option. */
+ * `command-succeeded` on a rule out of a place, or a place-shaped kind on a rule
+ * out of a command node — an open `<select>` whose `value` matches none of its
+ * `<option>`s renders BLANK (`selectedIndex` is -1). Callers pair this with
+ * `condOptionLabel` to add the missing option.
+ *
+ * No longer excludes parameterised kinds: they are offered now, and their
+ * parameters are shown by the row below rather than crammed into the option
+ * text. A rule whose kind IS offered therefore reads as its bare label here and
+ * says the branch it is about in its own field, which is where that fact is
+ * editable. */
 export function condOffered(flow: Flow, e: FlowEdge): boolean {
-  return isBareCond(e.cond.kind) && offeredConds(flow, e.from).includes(e.cond.kind);
+  return offeredConds(flow, e.from).includes(e.cond.kind);
 }
 
 /** A condition as one `<option>`'s text — including the parameters `COND_LABEL`
@@ -175,6 +181,30 @@ export function defaultCondFor(flow: Flow, fromId: string): Condition {
     ? { kind: "command-succeeded" }
     : { kind: "pr-merged" };
 }
+
+/** What a join mode means, in the words the panel says it in. "any one rule"
+ * rather than a bare "any", because the choice is between two readings of the
+ * SAME picture — several arrows into one node — and a one-word option leaves the
+ * user to supply the noun themselves. Keyed by `JoinMode` so the picker is built
+ * from the model rather than from a hand-typed pair that could fall behind it. */
+export const JOIN_LABEL: Record<JoinMode, string> = {
+  any: "any one rule",
+  all: "all rules",
+};
+
+/** How the node inspector names the kind it is about. A `Partial` over `string`
+ * rather than a `Record<FlowNode["kind"], string>` on purpose: `store.ts`'s
+ * `validNode` admits a kind this build does not know, so a flow written by a
+ * NEWER build still renders — and such a node reaching this panel must fall back
+ * to a neutral word rather than be typed away. That is the same trap `endLabel`
+ * below documents, where naming `notify` as the fallthrough had a command node
+ * read as one. */
+export const NODE_KIND_LABEL: Partial<Record<string, string>> = {
+  place: "Place",
+  planned: "Planned",
+  notify: "Notify",
+  command: "Command",
+};
 
 /** The verb (and, for `notify`, the whole rest of the clause) a rule's action
  * reads as. Both presentations' rule sentence spends the exact same four
@@ -313,6 +343,14 @@ function usableText(v: unknown): string | null {
  * with no not-set voice at all: the node read "command" in every sentence and
  * "runs a command" on the canvas, i.e. as though it were configured. */
 export const COMMAND_NOT_SET = "(no command set)";
+
+/** A command node's `cwdRepo` picker's first option — the MODEL'S OWN DEFAULT,
+ * spelled out. An absent `cwdRepo` means "the repo of the place the incoming
+ * edge came from" (see `CommandNode`), which is the common case and the one that
+ * needs no configuration; a picker that offered only repo names would make the
+ * default reachable exactly once, before anything was chosen. Worded as what it
+ * DOES rather than as "(default)", which says only that somebody else decided. */
+export const CWD_REPO_DEFAULT = "the repo the rule came from";
 
 /** How a command node names itself: its configured id, else the free text it
  * carries (elided), else `COMMAND_NOT_SET`. Never blank, and never the other
@@ -485,18 +523,109 @@ export function observationFallback(flow: Flow, e: FlowEdge): string {
     : "this rule waits on a command, but it does not come from one";
 }
 
-/** Set a rule's condition. Only bare kinds are ever reachable from either
- * presentation's picker (see `OFFERED_CONDS`), so the parameterised arms
- * cannot be constructed here without a value to put in them — this returns
- * `flow` UNCHANGED (the same reference, not an equal-looking copy) for that
- * case, which is what lets a caller skip `onSave` entirely by checking
- * `next !== flow` rather than re-deriving the same guard itself. */
+/** How long a freshly-picked `agent-idle-over` waits. A real number rather than
+ * a blank, because unlike a status name or a branch there is no wrong default
+ * here — every value is a working rule, and a picker that produced `0` would fire
+ * the instant a session stopped typing. Thirty minutes is the span at which a
+ * session that has gone quiet is worth acting on rather than waiting out; the
+ * control beside it is what a user who disagrees changes. Exported so the test
+ * and the control's own `min` do not each hand-type it. */
+export const DEFAULT_IDLE_MINUTES = 30;
+
+/** Set a rule's condition, seeding a parameterised kind with somewhere to start.
+ *
+ * Every kind is reachable from both pickers now (see `OFFERED_CONDS`), so this
+ * can no longer refuse the parameterised three — but a `{ kind }` alone would not
+ * even typecheck for them, and a value invented at random would be worse: a
+ * condition is what the rule WAITS on, and a wrong branch waits just as patiently
+ * as a blank one while looking configured. So the seeds split by whether a
+ * default can be RIGHT:
+ *
+ * - `agent-idle-over` gets a real span. Complete on arrival — see
+ *   `DEFAULT_IDLE_MINUTES`.
+ * - `ticket-status-is` gets `""`. There is no status every project shares, and
+ *   guessing "In Review" would produce a rule that silently watches for a status
+ *   the board may not have.
+ * - `branch-ci-passed` gets the SOURCE PLACE's own repo and a blank branch. The
+ *   repo is the one half a guess can get right: the rule is being drawn out of a
+ *   node that is already narrowed to a checkout, and that is nearly always the
+ *   checkout whose branch the user means to watch. The branch is not guessable —
+ *   "main" is a guess that reads as a configured answer — so it stays blank.
+ *
+ * A blank half is not left to be discovered. `condIncomplete` (model.ts) reports
+ * it, which is what marks the field in the panel and names the rule in the arm
+ * warning, so the seeding above never quietly ships a rule that cannot fire.
+ *
+ * Still returns `flow` UNCHANGED (the same reference) when nothing moved — an
+ * edge that is not there, or a re-pick of the kind it already has. That second
+ * case is new and it matters: without it, reselecting the open `<option>` would
+ * wipe the branch the user just typed back to the seed. Callers keep their
+ * `next !== flow` check and skip `onSave` on it, exactly as before. */
 export function withCond(flow: Flow, edgeId: string, kind: Condition["kind"]): Flow {
-  // `isBareCond`, not a hand-listed pair of kinds: this guard and `OFFERED_CONDS`
-  // must refuse exactly the same set, or a kind the picker somehow offers gets
-  // silently dropped here instead (or, worse, one it refuses gets built).
-  if (!isBareCond(kind)) return flow;
-  const cond: Condition = { kind };
+  const edge = flow.edges.find((x) => x.id === edgeId);
+  if (!edge || edge.cond.kind === kind) return flow;
+  const cond = seedCond(kind, sourceRepoOf(flow, edge));
+  return { ...flow, edges: flow.edges.map((x) => (x.id === edgeId ? { ...x, cond } : x)) };
+}
+
+/** A complete `Condition` from a kind alone — the seeds `withCond`'s own comment
+ * above describes, factored out because a SECOND picker builds a condition from
+ * nothing: flowList.tsx's new-rule bar, which has no edge for `withCond` to
+ * rewrite. Both must seed identically or the same choice would produce two
+ * different rules depending on which surface it was made from.
+ *
+ * `repo` is the checkout to seed a `branch-ci-passed` rule with — the source
+ * node's own, when it has one (`sourceRepoOf`) — and is ignored for every other
+ * kind. Absent leaves the repo blank, which `condIncomplete` then reports. */
+export function seedCond(kind: Condition["kind"], repo?: string): Condition {
+  if (isBareCond(kind)) return { kind };
+  if (kind === "agent-idle-over") return { kind, minutes: DEFAULT_IDLE_MINUTES };
+  if (kind === "ticket-status-is") return { kind, status: "" };
+  return { kind, repo: repo ?? "", branch: "" };
+}
+
+/** `sourceRepoOf`, addressed by node id rather than by edge — what flowList's
+ * new-rule bar has in hand, since its draft names a `from` before any edge
+ * exists. `withCond`'s path keeps the edge-shaped one above it. */
+export function sourceRepoOfNode(flow: Flow, fromId: string): string | undefined {
+  const from = flow.nodes.find((n) => n.id === fromId);
+  if (from?.kind === "place") return from.repo;
+  if (from?.kind === "planned" && from.repos.length === 1) return from.repos[0];
+  return undefined;
+}
+
+/** The checkout a rule's SOURCE node is narrowed to, when it has one. A place
+ * stores its `repo` outright; a planned node carries a whole list and only
+ * answers when that list names exactly one, because picking the first of several
+ * would be a guess dressed as a fact. Everything else — notify, command, a kind
+ * this build does not know — answers `undefined`, and the caller falls back to a
+ * blank the user fills in. */
+function sourceRepoOf(flow: Flow, e: FlowEdge): string | undefined {
+  return sourceRepoOfNode(flow, e.from);
+}
+
+/** Edit ONE parameter of a rule's condition, leaving its kind and its other
+ * parameters alone. One writer for all four fields rather than four near-identical
+ * ones, because every caller is the same shape — a control's `onChange` handing
+ * back the one value it owns — and four copies of this spread is four places for a
+ * `{ ...cond }` to be forgotten and a sibling parameter to be dropped.
+ *
+ * Refuses a patch whose keys do not belong to the condition it lands on, by
+ * construction rather than by checking: `Partial<Extract<Condition, { kind: K }>>`
+ * is resolved from the edge's OWN kind at the call site, so passing `{ branch }`
+ * to an `agent-idle-over` rule does not compile. That is the guard that matters
+ * here — a mismatched patch would not throw at runtime, it would quietly write a
+ * field nothing reads onto a condition that then still looks fine.
+ *
+ * Returns `flow` unchanged for a missing edge, matching `withCond`. */
+export function withCondParams<K extends Condition["kind"]>(
+  flow: Flow,
+  edgeId: string,
+  patch: Partial<Extract<Condition, { kind: K }>>,
+): Flow {
+  const edge = flow.edges.find((x) => x.id === edgeId);
+  if (!edge) return flow;
+  const cond = { ...edge.cond, ...patch } as Condition;
   return { ...flow, edges: flow.edges.map((x) => (x.id === edgeId ? { ...x, cond } : x)) };
 }
 
@@ -661,6 +790,72 @@ export function withNodeNotifyMessage(flow: Flow, nodeId: string, message: strin
     ...flow,
     nodes: flow.nodes.map((n) => (n.id === nodeId && n.kind === "notify" ? { ...n, message } : n)),
   };
+}
+
+/** Which repo's checkout a command node runs in. `""` CLEARS the field rather
+ * than storing an empty string, because absent is a meaning in the model — "the
+ * repo of the place the incoming edge came from", the common case that needs no
+ * configuration (see `CommandNode.cwdRepo`). Storing `""` instead would send
+ * `resolveCommand` looking for a checkout named the empty string, which is the
+ * one thing the default was written to avoid. The picker's own first option is
+ * what a user selects to get back here.
+ *
+ * `delete` on a copy rather than `{ ...n, cwdRepo: undefined }`: `writeFlow`
+ * serializes the node to JSON, where an explicit `undefined` and an absent key
+ * round-trip the same — but `store.ts` reads the record back with `in` checks in
+ * places, and a key that is present-but-undefined is a shape no other writer in
+ * this file produces. Keeping the record to the two shapes the model documents
+ * is cheaper than proving every reader tolerates a third. */
+export function withNodeCwdRepo(flow: Flow, nodeId: string, cwdRepo: string): Flow {
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) => {
+      if (n.id !== nodeId || n.kind !== "command") return n;
+      if (cwdRepo === "") {
+        const next = { ...n };
+        delete next.cwdRepo;
+        return next;
+      }
+      return { ...n, cwdRepo };
+    }),
+  };
+}
+
+/** What several incoming rules mean where they meet — "any one" fires on the
+ * first met, "all" waits for every one. Written on the TARGET node, which is
+ * where the model puts it and for the reason `JoinMode`'s own comment gives: it
+ * is a property of the junction, not of any one arrow into it. Every node kind
+ * carries the field, so this does not narrow by kind the way the writers above
+ * do — a place, a planned node, a notify terminal and a command node can each be
+ * a junction. */
+export function withNodeJoin(flow: Flow, nodeId: string, join: JoinMode): Flow {
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) => (n.id === nodeId ? { ...n, join } : n)),
+  };
+}
+
+/** Every checkout name the board can currently see, deduped and sorted. What the
+ * repo pickers offer — `branch-ci-passed`'s repo half and a command node's
+ * `cwdRepo` — and the reason both are a `<select>` rather than a text field: this
+ * is Agent Flow's own name for a checkout (`run.repos[].name`), not a GitHub
+ * `owner/name`, and a user typing the latter would get a rule that never fires
+ * and no hint as to why.
+ *
+ * Derived from what is on the board rather than from settings, because the board
+ * is what the conditions are answered against. It is therefore INCOMPLETE by
+ * nature — a repo with no card on the deck right now is a perfectly valid thing
+ * for a `branch-ci-passed` rule to name — which is why both callers pair it with
+ * the same extra-`<option>` pattern this file already uses for an unconfigured
+ * command or mode, rather than treating a name that is missing here as wrong.
+ *
+ * Sorted so the list does not reshuffle as cards come and go: the order of
+ * `runs` is the board's, and a picker whose options move between renders is one
+ * a user cannot build muscle memory for. */
+export function repoOptions(runs: { repos: { name: string }[] }[]): string[] {
+  const seen = new Set<string>();
+  for (const r of runs) for (const repo of r.repos) if (repo.name !== "") seen.add(repo.name);
+  return [...seen].sort((a, b) => a.localeCompare(b));
 }
 
 /** Name a configured command on this rule's target node. Written on the NODE, not

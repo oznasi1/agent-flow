@@ -383,6 +383,34 @@ export const ORCH_CSS = `
      follows. */
   .orch-savedline { margin-top: 6px; padding-left: 46px; font-size: var(--t-micro); color: var(--dim); }
 
+  /* A condition's own parameters (CondParams.tsx) — the repo and branch a
+     \`branch-ci-passed\` rule watches, the status a \`ticket-status-is\` rule waits
+     for, the span an idle rule counts. Two presentations render the same
+     fragment: the inspector wraps it in a \`.orch-clause\` of its own, and a
+     flowList row drops it straight into the flowing \`.fl-sentence\`. So these
+     rules style the PARTS and never the row — a wrapper here would be right in
+     one presentation and wrong in the other. */
+
+  /* The word before a field ("repo", "branch"). Lower-case and unspaced, unlike
+     \`.orch-kw\`: those three are the sentence's own skeleton and are shouted to
+     read as one, while these sit INSIDE a clause and would compete with it. Not
+     fixed-width either — two of them share a row, and a 40px column each would
+     push the fields past the panel. */
+  .orch-plabel { flex: none; font-size: var(--t-micro); color: var(--dim); }
+  /* A minute count is at most three characters. \`.orch-msg\`'s \`flex: 1\` and
+     120px floor would give it the width of a branch name and leave the label
+     stranded, so this is the same field sized to what it holds. */
+  .orch-num { width: 56px; flex: none; height: 22px; padding: 0 7px; border-radius: var(--r-chip);
+    border: 1px solid var(--edge); background: var(--vscode-input-background);
+    color: var(--vscode-foreground); font: inherit; font-size: var(--t-body); }
+  /* "no branch set" — a rule that can never fire, said where it is fixed. NOT
+     red: nothing has tried and failed, and red is spent in this codebase only on
+     a real failure (see \`.orch-obs .err\` and \`.orch-edge.bad\`). This is
+     unfinished work, which takes the same quiet voice \`.orch-savedline\` uses for
+     the other statement on this surface. Arming says it louder, once, because by
+     then it IS a consequence. */
+  .orch-unset { flex: none; font-size: var(--t-micro); color: var(--dim); font-style: italic; }
+
   .orch-obs { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--hair);
     font-size: var(--t-micro); color: var(--dim); display: flex; align-items: center; gap: 8px; }
   .orch-obs .sp { flex: 1; }

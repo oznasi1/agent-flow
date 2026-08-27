@@ -2,7 +2,7 @@
 // observe. Arming warns and names them rather than refusing: a flow with one dead
 // rule and three live ones is still worth arming, and silence is how a user ends up
 // waiting forever on something that can never happen.
-import { Condition, Flow, isSettled } from "./model";
+import { Condition, condIncomplete, Flow, isSettled } from "./model";
 
 /** The Deck toggles and forge fact a condition can depend on. */
 export interface SourceState {
@@ -17,7 +17,13 @@ export interface SourceState {
 
 export interface UnfirableRule {
   edgeId: string;
-  needs: "live-signal" | "pr-facts" | "forge-unsupported";
+  /** `unset-parameter` is the one reason here that is not about a toggle: the
+   * rule's own condition names a blank branch, repo or status, so no setting the
+   * user could turn on would let it fire. See `condIncomplete` (model.ts), which
+   * is also what marks the field in the inspector while the blank is being made
+   * — one predicate, so the panel and the arm warning cannot disagree about
+   * which rules are dead. */
+  needs: "live-signal" | "pr-facts" | "forge-unsupported" | "unset-parameter";
   /** The condition, in the words the drawer uses. */
   label: string;
 }
@@ -87,7 +93,14 @@ export function unfirableRules(flow: Flow, sources: SourceState): UnfirableRule[
     // a toggle for a rule whose real reason is a failure the drawer already shows.
     if (isSettled(e)) continue;
     const label = LABEL[e.cond.kind];
-    if (!sources.prFacts && NEEDS_PR.has(e.cond.kind)) out.push({ edgeId: e.id, needs: "pr-facts", label });
+    // Checked BEFORE every toggle reason, because it outranks them: a rule
+    // waiting on a blank status cannot fire with PR facts and the Live signal
+    // both on, so blaming a toggle for it would send the user to fix the one
+    // thing that would not help. Every branch here is an `else if` chain that
+    // reports one reason per edge, and this is the reason that is actually
+    // actionable when it applies.
+    if (condIncomplete(e.cond) !== undefined) out.push({ edgeId: e.id, needs: "unset-parameter", label });
+    else if (!sources.prFacts && NEEDS_PR.has(e.cond.kind)) out.push({ edgeId: e.id, needs: "pr-facts", label });
     // Ordered after pr-facts on purpose: with PR facts off, that is the bigger and
     // more actionable reason, and reporting both for one edge would list the same
     // rule in the warning twice.

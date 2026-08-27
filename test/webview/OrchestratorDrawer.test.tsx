@@ -1244,16 +1244,21 @@ describe("the inspector", () => {
     expect(saved.edges[0].cond).toEqual({ kind: "ci-failed" });
   });
 
-  it("does not offer a condition it has no input for", () => {
-    // agent-idle-over needs a minute count and ticket-status-is needs a status
-    // name; with no field for either, offering them would build a rule that waits
-    // on a hardcoded 10 minutes or on the empty string.
+  // The inverse of what this used to assert. The picker withheld the
+  // parameterised kinds for as long as there was nowhere to ask for a minute
+  // count, a status or a branch — offering one then would have built a rule
+  // waiting on a hardcoded 10 minutes or on the empty string. `CondParams` is
+  // that input, so the withholding is over; the tests below are what keep the
+  // honesty the filter used to buy (a seeded value, a marked blank, and an arm
+  // warning), which is the half that must not regress.
+  it("offers every condition kind, now that each has an input", () => {
     open();
     const values = Array.from(
       screen.getByLabelText("Condition").querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    expect(values).not.toContain("agent-idle-over");
-    expect(values).not.toContain("ticket-status-is");
+    expect(values).toContain("agent-idle-over");
+    expect(values).toContain("ticket-status-is");
+    expect(values).toContain("branch-ci-passed");
     expect(values).toContain("pr-merged");
   });
 
@@ -1291,10 +1296,13 @@ describe("the inspector", () => {
 
   // A `<select>` whose `value` matches none of its options has `selectedIndex`
   // -1 and renders BLANK — not "the first option", which is what the same
-  // mistake does to the Mode select. `branch-ci-passed` is not offered (no
-  // input for a repo and a branch yet), so a hand-authored rule using it showed
-  // an EMPTY Condition control: the one condition built to gate a deploy,
-  // displayed as nothing at all.
+  // mistake does to the Mode select. `branch-ci-passed` used to be withheld from
+  // the picker, so a hand-authored rule using it showed an EMPTY Condition
+  // control: the one condition built to gate a deploy, displayed as nothing at
+  // all. It is offered now, which fixes that at the root — this test stays
+  // because the OTHER half of the defect has not moved: the rule's own repo and
+  // branch must still be on screen, and they are, in the fields below the
+  // select rather than crammed into its option text.
   it("renders a hand-authored branch-CI condition instead of a blank select", () => {
     const branchRule = flow({
       nodes: wired().nodes,
@@ -1313,8 +1321,12 @@ describe("the inspector", () => {
     // defect either way (a blank select in Chrome, "PR is merged" under jsdom,
     // and in neither case the branch rule the user wrote).
     expect(select.value).toBe("branch-ci-passed");
-    // And it names the branch, which `COND_LABEL` — keyed by kind alone — cannot.
-    expect(select.selectedOptions[0].textContent).toBe("CI passed on agent-flow#main");
+    // And the repo and branch it names are on screen and EDITABLE. They used to
+    // be readable only as the select's own option text (`condOptionLabel`),
+    // which was the best a picker with no fields could do; now that the fields
+    // exist, the option reads as its bare kind and these hold the answer.
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).value).toBe("agent-flow");
+    expect((screen.getByLabelText("Branch") as HTMLInputElement).value).toBe("main");
   });
 
   it("lets a parameterised condition be swapped for one the picker can build", () => {

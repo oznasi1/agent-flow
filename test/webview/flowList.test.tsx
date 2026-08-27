@@ -903,7 +903,7 @@ describe("a migrated rule's mismatch notice", () => {
   });
 });
 
-describe("a condition the picker does not offer", () => {
+describe("a parameterised condition", () => {
   const branchRule = () =>
     flow({
       nodes: [
@@ -930,7 +930,13 @@ describe("a condition the picker does not offer", () => {
     // browser's blank control shows up here as the WRONG condition — the same
     // defect, and this is the assertion that catches both.
     expect(select.value).toBe("branch-ci-passed");
-    expect(select.selectedOptions[0].textContent).toBe("CI passed on agent-flow#main");
+    // The repo and branch moved out of the option text and into fields of their
+    // own — `CondParams`, the same component the canvas inspector renders. The
+    // fact this test guards is unchanged: an open row must not lose which branch
+    // the rule is about. A CLOSED row still reads it off `condOptionLabel`, which
+    // is what the test above asserts and what did not move.
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).value).toBe("agent-flow");
+    expect((screen.getByLabelText("Branch") as HTMLInputElement).value).toBe("main");
   });
 
   it("does not offer the command condition on a row out of a place", () => {
