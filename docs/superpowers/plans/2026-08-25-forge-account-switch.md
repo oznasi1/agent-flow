@@ -998,18 +998,18 @@ describe("switching the forge account", () => {
   // Without this the switch appears inert: every error entry survives, the board
   // re-renders identically, and the user concludes the feature is broken.
   it("forgets every run's stored PR entries, because they are the old identity's answers", async () => {
-    h.runs = [mkRun({ key: "ASM-1" }), mkRun({ key: "ASM-2" })];
+    h.runs = [mkRun({ key: "PROJ-1" }), mkRun({ key: "PROJ-2" })];
     ghAccounts(TWO);
     const p = await showAndWarm();
     h.removePrEntries.mockClear();
     window.showQuickPick.mockResolvedValueOnce({ label: "OznasiAb" });
     window.showWarningMessage.mockResolvedValueOnce("Switch");
     await p._fire({ type: "deck:switchAccount" });
-    expect(h.removePrEntries.mock.calls.map((c) => c[1])).toEqual(["ASM-1", "ASM-2"]);
+    expect(h.removePrEntries.mock.calls.map((c) => c[1])).toEqual(["PROJ-1", "PROJ-2"]);
   });
 
   it("leaves the stored entries alone when the switch fails, and says why", async () => {
-    h.runs = [mkRun({ key: "ASM-1" })];
+    h.runs = [mkRun({ key: "PROJ-1" })];
     ghAccounts(TWO, () => { throw new Error("no such account"); });
     const p = await showAndWarm();
     h.removePrEntries.mockClear();

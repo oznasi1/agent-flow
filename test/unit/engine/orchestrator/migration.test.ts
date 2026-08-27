@@ -32,8 +32,8 @@ const LEGACY = JSON.stringify({
   armed: false,
   createdAt: 1_000,
   nodes: [
-    { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-    { id: "n2", kind: "planned", x: 200, y: 0, join: "any", ticketKey: "ASM-2", repos: ["agent-flow"], mode: "plan", dest: "worktree" },
+    { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+    { id: "n2", kind: "planned", x: 200, y: 0, join: "any", ticketKey: "PROJ-2", repos: ["agent-flow"], mode: "plan", dest: "worktree" },
     { id: "n3", kind: "notify", x: 400, y: 0, join: "any", message: "landed" },
   ],
   edges: [
@@ -292,12 +292,12 @@ describe("a launch that promotes its target", () => {
     // Two rules into one planned node — the default `join: "any"`, so the first
     // condition met launches and the sibling is left unsettled.
     doc.nodes = [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-      { id: "n0", kind: "place", x: 0, y: 90, join: "any", runKey: "ASM-0", repo: "agent-flow" },
-      { id: "n2", kind: "planned", x: 200, y: 0, join: "any", ticketKey: "ASM-2", repos: ["agent-flow"], mode: "plan", dest: "worktree" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "n0", kind: "place", x: 0, y: 90, join: "any", runKey: "PROJ-0", repo: "agent-flow" },
+      { id: "n2", kind: "planned", x: 200, y: 0, join: "any", ticketKey: "PROJ-2", repos: ["agent-flow"], mode: "plan", dest: "worktree" },
     ];
     doc.edges = [
-      { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", firedAt: 500, firedNote: "launched ASM-2 in agent-flow", performed: true },
+      { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", firedAt: 500, firedNote: "launched PROJ-2 in agent-flow", performed: true },
       { id: "e2", from: "n0", to: "n2", cond: { kind: "ci-passed" }, action: "launch" },
     ];
     const io = fakeIo({ "/flows/fmsm1way7-7bbm.json": JSON.stringify(doc) });
@@ -309,17 +309,17 @@ describe("a launch that promotes its target", () => {
     // reads back as FIRED (a receipt, no error) rather than as a live `seed` rule that
     // would open an extra paid session the user never wrote.
     const io = fakeIo();
-    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow", NOW));
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "PROJ-2", "agent-flow", NOW));
     const e2 = readFlows(io, "/flows")[0].edges.find((e) => e.id === "e2")!;
     expect(e2.firedAt).toBe(NOW);
-    expect(e2.firedNote).toBe("ASM-2 was already launched by another rule");
+    expect(e2.firedNote).toBe("PROJ-2 was already launched by another rule");
     expect(e2.performed).toBeUndefined();
     expect(e2.error).toBeUndefined();
   });
 
   it("does not latch the untriggered sibling of the rule that launched", () => {
     const io = fakeIo();
-    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow", NOW));
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "PROJ-2", "agent-flow", NOW));
     const e2 = readFlows(io, "/flows")[0].edges.find((e) => e.id === "e2")!;
     // The user edited nothing, so nothing may be stamped on their behalf.
     expect(e2.error).toBeUndefined();
@@ -333,7 +333,7 @@ describe("a launch that promotes its target", () => {
     // without it. Promotion clears the field in memory; `writeFlow`'s
     // `e.action ?? derived` is what has to put the new value back on disk.
     const io = fakeIo();
-    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow", NOW));
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "PROJ-2", "agent-flow", NOW));
     const onDisk = JSON.parse(io.files["/flows/fmsm1way7-7bbm.json"]);
     expect(onDisk.edges.map((e: { action?: string }) => e.action)).toEqual(["seed", "seed"]);
   });
@@ -342,10 +342,10 @@ describe("a launch that promotes its target", () => {
     // Clearing the mirror is not clearing the latch: the rule that actually ran
     // must still read as fired, or the next pass launches the same ticket again.
     const io = fakeIo();
-    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "ASM-2", "agent-flow", NOW));
+    writeFlow(io, "/flows", promoteToPlace(fanIn(), "n2", "PROJ-2", "agent-flow", NOW));
     const e1 = readFlows(io, "/flows")[0].edges.find((e) => e.id === "e1")!;
     expect(e1.firedAt).toBe(500);
-    expect(e1.firedNote).toBe("launched ASM-2 in agent-flow");
+    expect(e1.firedNote).toBe("launched PROJ-2 in agent-flow");
     expect(e1.performed).toBe(true);
   });
 });

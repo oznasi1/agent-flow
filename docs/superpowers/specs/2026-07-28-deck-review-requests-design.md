@@ -268,7 +268,7 @@ already on disk keep working.
 
 Today `isTicketRun` infers "has a Jira ticket" from a non-empty `url`. A review
 run **has** a url — the PR's. Left alone, the Deck would poll Jira for
-`review-centaur-850` every 30 seconds and 404 forever, and `gh pr list --head`
+`review-webapp-850` every 30 seconds and 404 forever, and `gh pr list --head`
 would run against a branch that is somebody else's. So:
 
 - Jira polling and branch-based PR fetching gate on `kind`, not on `url`.

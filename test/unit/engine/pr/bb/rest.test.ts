@@ -9,7 +9,7 @@ import {
 const PR = {
   id: 42, title: "Add export", state: "OPEN", draft: false,
   links: { html: { href: "https://bitbucket.org/acme/api-service/pull-requests/42" } },
-  source: { branch: { name: "feat/ASM-1" } },
+  source: { branch: { name: "feat/PROJ-1" } },
   destination: { branch: { name: "main" } },
   participants: [] as unknown[],
 };

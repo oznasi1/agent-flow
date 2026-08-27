@@ -74,18 +74,18 @@ Add these three tests at the end of the `describe("ready")` block in `test/unit/
 
 ```ts
   // The panel's own title bar is the identity row. The fixture connector's scope
-  // value is "ASM" (CFG.project) and the Jira client stub's getMyself returns "Jane".
+  // value is "PROJ" (CFG.project) and the Jira client stub's getMyself returns "Jane".
   it("titles the panel with the project and the signed-in user", async () => {
     const { send, view } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(view.title).toBe("ASM");
+    expect(view.title).toBe("PROJ");
     expect(view.description).toBe("Jane");
   });
 
   it("drops the description when nobody is signed in", async () => {
     const { send, view } = setup({ authed: false });
     await send({ type: "ready" });
-    expect(view.title).toBe("ASM");
+    expect(view.title).toBe("PROJ");
     expect(view.description).toBeUndefined();
   });
 
@@ -103,7 +103,7 @@ Add these three tests at the end of the `describe("ready")` block in `test/unit/
 - [ ] **Step 3: Run them and confirm they fail**
 
 Run: `npx vitest run test/unit/tasksView.test.ts -t "titles the panel"`
-Expected: FAIL — `expected 'Tasks' to be 'ASM'`. The provider never touches `view.title`, so it still holds the literal's initial value.
+Expected: FAIL — `expected 'Tasks' to be 'PROJ'`. The provider never touches `view.title`, so it still holds the literal's initial value.
 
 - [ ] **Step 4: Set the title in `postState`**
 
@@ -239,8 +239,8 @@ In `test/webview/App.test.tsx`, replace the two tests at lines 61-76 — `it("re
   it("renders the task list, with the identity left to the view title bar", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "PROJ-1", summary: "Fix the bug" })] });
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
     expect(screen.getByText("Fix the bug")).toBeInTheDocument();
     expect(screen.queryByText("Jane")).not.toBeInTheDocument();
     expect(document.querySelector(".header")).toBeNull();
@@ -248,7 +248,7 @@ In `test/webview/App.test.tsx`, replace the two tests at lines 61-76 — `it("re
 
   it("keeps the gauge and Explore in the tab row on both tabs", () => {
     render(<App />);
-    host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
+    host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "PROJ", me: "Jane",
            prReviewStatus: "PR initiated", filters: ALL_FILTERS, liveCount: 2 });
     const trail = () => document.querySelector(".tabbar .tabbar-trail") as HTMLElement;
     expect(trail()).not.toBeNull();
@@ -265,7 +265,7 @@ In `test/webview/App.test.tsx`, replace the two tests at lines 61-76 — `it("re
   it("puts the tab row before the task list in the document", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
+    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "PROJ-1", summary: "Fix the bug" })] });
     const tabbar = document.querySelector(".tabbar")!;
     const lenses = document.querySelector(".lenses")!;
     // Node.DOCUMENT_POSITION_FOLLOWING === 4: `lenses` comes after `tabbar`.

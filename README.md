@@ -17,7 +17,7 @@ that ticket touches, with a coding tool already briefed — Claude Code, Copilot
 [![Install in VS Code](https://img.shields.io/badge/Install-VS%20Code-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect?url=vscode:extension/Oznasi1.oznasi1-agent-flow)
 [![Install in Cursor](https://img.shields.io/badge/Install-Cursor-0b0b0b?style=for-the-badge&logo=cursor&logoColor=white)](https://open-vsx.org/extension/Oznasi1/oznasi1-agent-flow)
 
-[Quick start](#quick-start) · [Full guide](docs/GUIDE.md) · [Settings](docs/SETTINGS.md) · [Privacy](docs/PRIVACY.md) · [Changelog](CHANGELOG.md)
+[Quick start](#quick-start) · [Full guide](docs/GUIDE.md) · [Settings](docs/SETTINGS.md) · [Privacy](docs/PRIVACY.md) · [Changelog](CHANGELOG.md) · [Report an issue](#feedback)
 
 <img src="media/screenshot.png" alt="The Agent Flow Deck panel in the VS Code sidebar: a Tasks / Notepad tab bar, segmented task, size and status lenses, a repo multiselect and a title search, then task cards with per-card Take and Address PR actions." width="420" />
 
@@ -155,6 +155,18 @@ never get committed.
 Full disclosure: [docs/PRIVACY.md](docs/PRIVACY.md). Anonymous usage telemetry is separate
 and described below.
 
+## Feedback
+
+Found something broken? [Open a bug report][bug] — the form asks for a **Doctor** report,
+which probes Jira and `gh` for real and is usually enough to find the fault on the first
+read. Want it to do something it does not? [Open a feature request][feat] and describe the
+workflow that is currently awkward rather than the button you think is missing. Security
+issues go through a [private advisory][sec], never a public issue.
+
+[bug]: https://github.com/oznasi1/agent-flow/issues/new?template=bug_report.yml
+[feat]: https://github.com/oznasi1/agent-flow/issues/new?template=feature_request.yml
+[sec]: https://github.com/oznasi1/agent-flow/security/advisories/new
+
 ## Develop
 
 ```bash
@@ -183,4 +195,4 @@ cloning not-yet-checked-out repos, multi-project.
 
 ## License
 
-[MIT](LICENSE) © 2026 Oz Nasi ([oznasi1](https://github.com/oznasi1)) and At-Bay.
+[MIT](LICENSE) © 2026 Oz Nasi ([oznasi1](https://github.com/oznasi1)).

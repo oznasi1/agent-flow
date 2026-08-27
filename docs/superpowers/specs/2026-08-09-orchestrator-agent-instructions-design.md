@@ -18,7 +18,7 @@ For `launch` the ticket description becomes the brief, so the ticket carries int
 
 `notifyLines`' output is posted as a webview toast (`deckView.ts:588-590`). Not a VS Code notification, not Slack. It appears only if the Deck panel is open and the user is looking at it. For a feature whose premise is unattended work on a six-second poll, that is the wrong delivery. The message *text* is not the problem — it lives on the notify node and is authored by the user.
 
-The same flaw applies to **failure receipts**, which matter more: `Couldn't create a git worktree in bite-me — not launching ASM-12` currently dies inside an unfocused panel.
+The same flaw applies to **failure receipts**, which matter more: `Couldn't create a git worktree in bite-me — not launching PROJ-12` currently dies inside an unfocused panel.
 
 ## Decisions
 

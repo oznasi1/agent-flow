@@ -972,7 +972,7 @@ Then add a nested describe with its own fixture, because the shared one has no f
       fs.writeFileSync(tfile, JSON.stringify({ type: "assistant", slug: "done", message: { stop_reason: "end_turn" } }) + "\n");
       fs.utimesSync(tfile, NOW / 1000, NOW / 1000);
       endRun = {
-        key: "ASM-10", summary: "finished", url: "https://x/ASM-10", createdAt: 1, mode: "per-window",
+        key: "PROJ-10", summary: "finished", url: "https://x/PROJ-10", createdAt: 1, mode: "per-window",
         repos: [{ name: "repo", path: repo, isGit: true, branch: "main" }], briefPaths: [],
       };
     });
@@ -1517,7 +1517,7 @@ describe("DeckApp card anatomy", () => {
     render(<DeckApp />);
     host(runsMsg([withPr(failingPr(), { column: "needs" })]));
     fireEvent.click(screen.getByRole("button", { name: "Resolve conflict" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
   });
 
   it("carries the failing check names as the ci action's detail", () => {
@@ -1525,7 +1525,7 @@ describe("DeckApp card anatomy", () => {
     host(runsMsg([withPr(failingPr(), { column: "needs" })]));
     fireEvent.click(screen.getByRole("button", { name: "Fix CI" }));
     expect(sent).toHaveBeenCalledWith({
-      type: "deck:seedPrWork", key: "ASM-1", reason: "ci", detail: "integration, lint",
+      type: "deck:seedPrWork", key: "PROJ-1", reason: "ci", detail: "integration, lint",
     });
   });
 
@@ -1563,7 +1563,7 @@ describe("DeckApp card anatomy", () => {
     render(<DeckApp />);
     const a = withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
     const b = withPr(healthyPr(), {
-      run: { ...mkStatus().run, key: "ASM-2" },
+      run: { ...mkStatus().run, key: "PROJ-2" },
       usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 },
     });
     host(runsMsg([a, b]));

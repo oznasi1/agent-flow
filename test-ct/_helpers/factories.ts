@@ -4,7 +4,7 @@ import type { FilterVisibility, NotepadItemView, Task } from "../../src/types";
 import type { SerializedCaps } from "../../src/tasks/provider";
 
 export function mkTask(over: Partial<Task> = {}): Task {
-  const key = over.key ?? "ASM-1";
+  const key = over.key ?? "PROJ-1";
   return {
     key, summary: key, status: "", statusCategory: "new", priority: "",
     assignee: "Unassigned", labels: [], components: [], sprint: null,

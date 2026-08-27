@@ -3,7 +3,7 @@ import { mapRollupState, mapGraphMergeable, parseSearch, REVIEW_SEARCH_Q, REVIEW
 
 const node = (over: Record<string, unknown> = {}) => ({
   number: 8491,
-  title: "[ASM-5752] isolate renew queue",
+  title: "[PROJ-5752] isolate renew queue",
   url: "https://github.com/CyberJackGit/aws-ops/pull/8491",
   isDraft: false,
   createdAt: "2026-07-23T07:28:26Z",

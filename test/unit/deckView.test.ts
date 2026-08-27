@@ -157,10 +157,10 @@ const h = vi.hoisted(() => ({
   gitState: vi.fn((name: string, path: string) => ({
     name, path, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0,
   })),
-  // Local cards (Task 11): the branch `currentBranch` reports for /r/centaur —
+  // Local cards (Task 11): the branch `currentBranch` reports for /r/webapp —
   // steerable per test, unlike repoRoot below, because the branch is exactly the
   // thing a local card's ticket inference and "no card twice" tests need to vary.
-  branch: "ASM-5641-team-table" as string | null,
+  branch: "PROJ-5641-team-table" as string | null,
   // Orchestrator flows (Task 3): the on-disk store, replaced wholesale so this
   // suite never touches a real ~/.agentflow/flows. writeFlow's default
   // implementation (set in beforeEach) actually updates `flows`, so a read
@@ -235,12 +235,12 @@ const h = vi.hoisted(() => ({
   // have something to show without a test having to name a task it never uses.
   taskList: vi.fn(async (_lens: string, _size: string, _max?: number): Promise<Task[]> => [
     {
-      key: "ASM-9", summary: "Ship the migration", status: "", statusCategory: "new", priority: "",
+      key: "PROJ-9", summary: "Ship the migration", status: "", statusCategory: "new", priority: "",
       assignee: "Unassigned", labels: [], components: [], sprint: null, inOpenSprint: false,
-      updated: "", url: "https://jira/browse/ASM-9", estimateSeconds: null,
+      updated: "", url: "https://jira/browse/PROJ-9", estimateSeconds: null,
     },
   ]),
-  // The branch for /r/automation_e2e (Task 4) — a second steerable path so a
+  // The branch for /r/e2e_suite (Task 4) — a second steerable path so a
   // multi-root workspace card's "first root's ticket wins" rule can be tested
   // against a real conflict, not just one root that has a ticket and one that
   // never can. Defaults to "main", same as every other path already did.
@@ -317,7 +317,7 @@ vi.mock("../../src/engine/git", () => ({
   taskChangedFiles: h.taskChangedFiles,
   repoRoot: (p: string) => (h.nonGitRoots.has(p) ? "" : h.repoRootRemap.get(p) ?? p),
   currentBranch: (p: string) =>
-    p === "/r/centaur" ? h.branch : p === "/r/automation_e2e" ? h.branch2 : p === "/r/third" ? h.branch3 : "main",
+    p === "/r/webapp" ? h.branch : p === "/r/e2e_suite" ? h.branch2 : p === "/r/third" ? h.branch3 : "main",
   prEligible: (r: { isGit: boolean; branch?: string }) => r.isGit && !!r.branch && r.branch !== "master",
   gitState: (name: string, path: string) => h.gitState(name, path),
 }));
@@ -477,7 +477,7 @@ vi.mock("../../src/config", async (importActual) => {
   return {
     ...actual,
     getConfig: () => ({
-      baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
+      baseUrl: "https://jira", project: "PROJ", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
       openAgents: h.openAgents,
       reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: ["vendored"],
       reviewRequestsAlwaysVisible: h.reviewRequestsAlwaysVisible,
@@ -581,7 +581,7 @@ describe("reviewProvenance", () => {
 // abandonment window, so the retire sweep would carry off every fixture that
 // has no ticket. A test about an old run gives its own createdAt.
 const mkRun = (over: Partial<Run> = {}): Run => ({
-  key: "ASM-1", summary: "do it", url: "https://jira/ASM-1", createdAt: Date.now(), mode: "per-window",
+  key: "PROJ-1", summary: "do it", url: "https://jira/PROJ-1", createdAt: Date.now(), mode: "per-window",
   repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }], briefPaths: [], ...over,
 });
 const statusFor = (run: Run, ticketCategory: string | null = null): RunStatus => ({
@@ -613,8 +613,8 @@ function fakeConnector(authed = false, label = "Jira"): TaskConnector {
     id: "jira",
     setupSteps: 2,
     info: () => ({
-      label, scopeNoun: "project", scopeValue: "ASM", endpoint: "https://jira",
-      exampleKey: "ASM-1234", endpointSetting: "agentFlow.jira.baseUrl", scopeSetting: "agentFlow.jira.project",
+      label, scopeNoun: "project", scopeValue: "PROJ", endpoint: "https://jira",
+      exampleKey: "PROJ-1234", endpointSetting: "agentFlow.jira.baseUrl", scopeSetting: "agentFlow.jira.project",
     }),
     isConfigured: () => true,
     configure: async () => async () => undefined,
@@ -746,7 +746,7 @@ beforeEach(() => {
   h.mergeWrites = false;
   h.mergeMethod = "squash";
   h.prMerge.mockClear().mockResolvedValue({ ok: true });
-  h.branch = "ASM-5641-team-table";
+  h.branch = "PROJ-5641-team-table";
   h.flows = [];
   h.idSeq = 0;
   // The honest default: every read sees whatever is "on disk" right now, including
@@ -781,9 +781,9 @@ beforeEach(() => {
   }));
   h.taskList.mockClear().mockResolvedValue([
     {
-      key: "ASM-9", summary: "Ship the migration", status: "", statusCategory: "new", priority: "",
+      key: "PROJ-9", summary: "Ship the migration", status: "", statusCategory: "new", priority: "",
       assignee: "Unassigned", labels: [], components: [], sprint: null, inOpenSprint: false,
-      updated: "", url: "https://jira/browse/ASM-9", estimateSeconds: null,
+      updated: "", url: "https://jira/browse/PROJ-9", estimateSeconds: null,
     },
   ]);
   h.branch2 = "main";
@@ -827,7 +827,7 @@ describe("DeckPanel", () => {
     const runsPost = posts(p).find((m) => m.type === "deck:runs");
     expect(runsPost).toBeTruthy();
     expect(runsPost.runs).toHaveLength(1);
-    expect(runsPost.runs[0].run.key).toBe("ASM-1");
+    expect(runsPost.runs[0].run.key).toBe("PROJ-1");
   });
 
   it("posts the configured PR-review status so cards can gate the button", async () => {
@@ -865,30 +865,30 @@ describe("DeckPanel", () => {
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
     const msg = posts(p).find((m) => m.type === "deck:runs");
-    // Asserting the count, not merely that ASM-1 is present, is what actually
+    // Asserting the count, not merely that PROJ-1 is present, is what actually
     // catches the filter being removed — buildRunStatus is a pass-through stub
     // that would happily produce a card for the review run too.
     expect(msg.runs).toHaveLength(1);
-    expect(msg.runs[0].run.key).toBe("ASM-1");
+    expect(msg.runs[0].run.key).toBe("PROJ-1");
   });
 
   it("inspect open re-opens the repo path via the editor", async () => {
     show();
-    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    await lastPanel()._fire({ type: "deck:inspect", key: "PROJ-1", action: "open" });
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
   });
 
   it("inspect open prefers the multi-root workspace file when present", async () => {
-    h.runs = [mkRun({ mode: "multiroot", workspaceFile: "/ws/ASM-1.code-workspace" })];
+    h.runs = [mkRun({ mode: "multiroot", workspaceFile: "/ws/PROJ-1.code-workspace" })];
     show();
-    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
-    expect(h.openInEditor).toHaveBeenCalledWith("/ws/ASM-1.code-workspace");
+    await lastPanel()._fire({ type: "deck:inspect", key: "PROJ-1", action: "open" });
+    expect(h.openInEditor).toHaveBeenCalledWith("/ws/PROJ-1.code-workspace");
   });
 
   it("opens without a success toast (silent focus)", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "open" });
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
     const successToast = posts(p).find((m) => m.type === "toast" && m.level === "success");
     expect(successToast).toBeUndefined();
@@ -898,7 +898,7 @@ describe("DeckPanel", () => {
     h.openInEditor.mockResolvedValueOnce(false);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "open" });
     const errorToast = posts(p).find((m) => m.type === "toast" && m.level === "error");
     expect(errorToast).toBeTruthy();
   });
@@ -906,7 +906,7 @@ describe("DeckPanel", () => {
   it("inspect diff on a repo with no changes toasts instead of opening a doc", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const toast = posts(p).find((m) => m.type === "toast");
     expect(toast.message).toMatch(/No changes to show/i);
     expect(workspace.openTextDocument).not.toHaveBeenCalled();
@@ -916,10 +916,10 @@ describe("DeckPanel", () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const call = commands.executeCommand.mock.calls.at(-1)!;
     expect(call[0]).toBe("vscode.changes");
-    expect(call[1]).toBe("Changes in ASM-1 — svc");
+    expect(call[1]).toBe("Changes in PROJ-1 — svc");
     expect(workspace.openTextDocument).not.toHaveBeenCalled();
   });
 
@@ -931,7 +931,7 @@ describe("DeckPanel", () => {
     commands.executeCommand.mockRejectedValueOnce(new Error("no such command"));
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     expect(workspace.openTextDocument).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.stringContaining("+committed"), language: "diff" }),
     );
@@ -949,7 +949,7 @@ describe("DeckPanel", () => {
     window.showQuickPick.mockImplementationOnce(async (items: unknown) => (items as unknown[])[0]);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const arg = workspace.openTextDocument.mock.calls.at(-1)![0] as { content: string };
     expect(arg.content).toContain("# svc");
     expect(arg.content).toContain("# web");
@@ -963,7 +963,7 @@ describe("DeckPanel", () => {
     commands.executeCommand.mockRejectedValueOnce(new Error("no such command"));
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const toast = posts(p).find((m) => m.type === "toast");
     expect(toast.message).toMatch(/No changes to show/i);
     expect(workspace.openTextDocument).not.toHaveBeenCalled();
@@ -973,7 +973,7 @@ describe("DeckPanel", () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "pic.bin", binary: true }]);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const toast = posts(p).find((m) => m.type === "toast");
     expect(toast.message).toMatch(/binary/i);
     expect(commands.executeCommand).not.toHaveBeenCalled();
@@ -987,7 +987,7 @@ describe("DeckPanel", () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff", repo: "web" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff", repo: "web" });
     expect(h.taskChangedFiles).toHaveBeenCalledWith("/r/web");
     expect(h.taskChangedFiles).not.toHaveBeenCalledWith("/r/svc");
   });
@@ -1009,7 +1009,7 @@ describe("DeckPanel", () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     pickRepo("web");
     show();
-    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await lastPanel()._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     expect(pickItems()).toEqual(["All repos", "svc", "web"]);
     expect(h.taskChangedFiles).toHaveBeenCalledWith("/r/web");
     expect(h.taskChangedFiles).not.toHaveBeenCalledWith("/r/svc");
@@ -1020,8 +1020,8 @@ describe("DeckPanel", () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     pickRepo("web");
     show();
-    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
-    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in ASM-1 — web");
+    await lastPanel()._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
+    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in PROJ-1 — web");
   });
 
   it("diffs every repo and names the workspace when All repos is picked", async () => {
@@ -1029,10 +1029,10 @@ describe("DeckPanel", () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     pickRepo("All repos");
     show();
-    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await lastPanel()._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     expect(h.taskChangedFiles).toHaveBeenCalledWith("/r/svc");
     expect(h.taskChangedFiles).toHaveBeenCalledWith("/r/web");
-    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in ASM-1 — pay-stack");
+    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in PROJ-1 — pay-stack");
   });
 
   it("offers the workspace's name as the All repos detail so the picker says what all means", async () => {
@@ -1040,7 +1040,7 @@ describe("DeckPanel", () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     pickRepo("All repos");
     show();
-    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await lastPanel()._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const items = window.showQuickPick.mock.calls.at(-1)![0] as { label: string; detail?: string }[];
     expect(items[0].detail).toContain("pay-stack");
   });
@@ -1048,18 +1048,18 @@ describe("DeckPanel", () => {
   it("does not ask when the run has only one repo", async () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     show();
-    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await lastPanel()._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     expect(window.showQuickPick).not.toHaveBeenCalled();
-    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in ASM-1 — svc");
+    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in PROJ-1 — svc");
   });
 
   it("does not ask when the card already acts on one repo", async () => {
     h.runs = [twoRepoRun()];
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     show();
-    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff", repo: "web" });
+    await lastPanel()._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff", repo: "web" });
     expect(window.showQuickPick).not.toHaveBeenCalled();
-    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in ASM-1 — web");
+    expect(commands.executeCommand.mock.calls.at(-1)![1]).toBe("Changes in PROJ-1 — web");
   });
 
   it("opens nothing and says nothing when the repo picker is dismissed", async () => {
@@ -1067,7 +1067,7 @@ describe("DeckPanel", () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.txt", binary: false }]);
     show(); // the mock's showQuickPick resolves undefined by default — a dismissal
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     expect(commands.executeCommand).not.toHaveBeenCalledWith("vscode.changes", expect.anything(), expect.anything());
     expect(workspace.openTextDocument).not.toHaveBeenCalled();
     expect(posts(p).find((m) => m.type === "toast")).toBeUndefined();
@@ -1082,7 +1082,7 @@ describe("DeckPanel", () => {
     commands.executeCommand.mockRejectedValueOnce(new Error("no such command"));
     pickRepo("web");
     show();
-    await lastPanel()._fire({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    await lastPanel()._fire({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const arg = workspace.openTextDocument.mock.calls.at(-1)![0] as { content: string };
     expect(arg.content).not.toContain("# web");
   });
@@ -1100,8 +1100,8 @@ describe("DeckPanel", () => {
   it("forgets a run and re-posts the board", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:forget", key: "ASM-1" });
-    expect(h.removeRun).toHaveBeenCalledWith("/runs", "ASM-1");
+    await p._fire({ type: "deck:forget", key: "PROJ-1" });
+    expect(h.removeRun).toHaveBeenCalledWith("/runs", "PROJ-1");
     expect(posts(p).some((m) => m.type === "deck:runs")).toBe(true);
   });
 
@@ -1122,7 +1122,7 @@ describe("DeckPanel", () => {
     // Asserted by argument, not by count: the constructor's unawaited first refresh
     // races this one, and whether the second finds a warm ticketCache depends on
     // microtask ordering. Which keys are looked up at all is the actual contract.
-    expect(h.getStatus).toHaveBeenCalledWith("ASM-1");
+    expect(h.getStatus).toHaveBeenCalledWith("PROJ-1");
     expect(h.getStatus).not.toHaveBeenCalledWith("explore-retry-logic");
   });
 
@@ -1140,7 +1140,7 @@ describe("DeckPanel", () => {
 
   it("opens an external url via the host (Open in Jira)", async () => {
     show();
-    await lastPanel()._fire({ type: "openExternal", url: "https://jira/ASM-1" });
+    await lastPanel()._fire({ type: "openExternal", url: "https://jira/PROJ-1" });
     expect(env.openExternal).toHaveBeenCalled();
   });
 
@@ -1163,7 +1163,7 @@ describe("DeckPanel", () => {
     h.runs = [mkRun({ repos: [] })];
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "open" });
     const toast = posts(p).find((m) => m.type === "toast" && /nothing to open/i.test(m.message));
     expect(toast).toBeTruthy();
     expect(h.openInEditor).not.toHaveBeenCalled();
@@ -1181,7 +1181,7 @@ describe("DeckPanel", () => {
     show(true);
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
-    expect(h.getStatus).toHaveBeenCalledWith("ASM-1");
+    expect(h.getStatus).toHaveBeenCalledWith("PROJ-1");
     expect(h.buildRunStatus).toHaveBeenCalledWith(expect.objectContaining({
       ticket: { status: "In Review", category: "indeterminate" },
       projectsRoot: expect.any(String), nowMs: expect.any(Number),
@@ -1231,7 +1231,7 @@ describe("DeckPanel", () => {
   it("brackets a forget with the busy indicator", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:forget", key: "ASM-1" });
+    await p._fire({ type: "deck:forget", key: "PROJ-1" });
     const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
     expect(loads).toContain(true);
     expect(loads.at(-1)).toBe(false);
@@ -1252,7 +1252,7 @@ describe("DeckPanel", () => {
   it("issues every run's Jira lookup at once rather than one at a time", async () => {
     // Serially, a cold board of six runs costs six round trips before anything
     // paints — and Forget waits on that whole pass.
-    h.runs = [mkRun(), mkRun({ key: "ASM-2", url: "https://jira/ASM-2" }), mkRun({ key: "ASM-3", url: "https://jira/ASM-3" })];
+    h.runs = [mkRun(), mkRun({ key: "PROJ-2", url: "https://jira/PROJ-2" }), mkRun({ key: "PROJ-3", url: "https://jira/PROJ-3" })];
     let inFlight = 0;
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -1318,46 +1318,46 @@ describe("DeckPanel", () => {
 
 describe("DeckPanel open agents", () => {
   it("attaches every open session in a run's repo to that run's card", async () => {
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "PROJ-1-x" }] })];
     h.openSessions = [sess(), sess({ pid: 2, sessionId: "s2", startedAt: 200, name: "svc-fa" })];
     show();
     await settled();
-    expect(builtFor("ASM-1").agents.map((a) => a.session.name)).toEqual(["svc-7e", "svc-fa"]);
+    expect(builtFor("PROJ-1").agents.map((a) => a.session.name)).toEqual(["svc-7e", "svc-fa"]);
   });
 
   it("gives a run with no session open an empty agents list", async () => {
-    h.runs = [mkRun({ key: "ASM-1" })];
+    h.runs = [mkRun({ key: "PROJ-1" })];
     h.openSessions = [];
     show();
     await settled();
-    expect(builtFor("ASM-1").agents).toEqual([]);
+    expect(builtFor("PROJ-1").agents).toEqual([]);
   });
 
   it("does not attach a session running somewhere else", async () => {
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
     h.openSessions = [sess({ cwd: "/r/other", name: "other-1" })];
     show();
     await settled();
-    expect(builtFor("ASM-1").agents).toEqual([]);
+    expect(builtFor("PROJ-1").agents).toEqual([]);
   });
 
   it("still lists an attached session when its transcript is unreadable", async () => {
     // The registry knows the session is open; only the transcript goes unread.
     // That is now the sole route to an unknown activity, and it must not drop the
     // session from the card.
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
     h.openSessions = [sess()];
     h.sessionActivity.mockReturnValue({ state: "unknown", lastActivityMs: null, slug: null });
     show();
     await settled();
-    const agents = builtFor("ASM-1").agents;
+    const agents = builtFor("PROJ-1").agents;
     expect(agents).toHaveLength(1);
     expect(agents[0].session.name).toBe("svc-7e");
     expect(agents[0].activity).toEqual({ state: "unknown", lastActivityMs: null, slug: null });
   });
 
   it("reads the session's own live activity when the live signal is on, keyed to that session", async () => {
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
     h.openSessions = [sess()];
     show();
     await settled();
@@ -1365,21 +1365,21 @@ describe("DeckPanel open agents", () => {
     // or the place key — a session started in a subdirectory has its transcript
     // filed under that subdirectory, which only the session's own cwd names.
     expect(h.sessionActivity).toHaveBeenCalledWith(expect.any(String), "/r/svc", "s1", expect.any(Number));
-    expect(builtFor("ASM-1").agents[0].activity).toEqual({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
+    expect(builtFor("PROJ-1").agents[0].activity).toEqual({ state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" });
   });
 
   it("reads no sessions at all with open agents off", async () => {
     h.openAgents = false;
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
     h.openSessions = [sess()];
     show();
     await settled();
-    expect(builtFor("ASM-1").agents).toEqual([]);
+    expect(builtFor("PROJ-1").agents).toEqual([]);
   });
 
   it("re-reads when the toggle comes back on", async () => {
     h.openAgents = false;
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
     h.openSessions = [sess()];
     show();
     await settled();
@@ -1387,15 +1387,15 @@ describe("DeckPanel open agents", () => {
     setConfig({ openAgents: true });
     fireConfigurationChanged("agentFlow.openAgents");
     await settled();
-    expect(builtFor("ASM-1").agents).toHaveLength(1);
+    expect(builtFor("PROJ-1").agents).toHaveLength(1);
   });
 
   it("tags each agent with the run repo whose directory it runs in", async () => {
     h.runs = [mkRun({
-      key: "ASM-9",
+      key: "PROJ-9",
       repos: [
-        { name: "api", path: "/repos/api", isGit: true, branch: "ASM-9-x" },
-        { name: "web", path: "/repos/web", isGit: true, branch: "ASM-9-x" },
+        { name: "api", path: "/repos/api", isGit: true, branch: "PROJ-9-x" },
+        { name: "web", path: "/repos/web", isGit: true, branch: "PROJ-9-x" },
       ],
     })];
     h.openSessions = [
@@ -1404,7 +1404,7 @@ describe("DeckPanel open agents", () => {
     ];
     show();
     await settled();
-    expect(builtFor("ASM-9").agents.map((a) => [a.session.sessionId, a.repo])).toEqual([
+    expect(builtFor("PROJ-9").agents.map((a) => [a.session.sessionId, a.repo])).toEqual([
       ["s-api", "api"],
       ["s-web", "web"],
     ]);
@@ -1412,7 +1412,7 @@ describe("DeckPanel open agents", () => {
 
   it("tags a local card's agent with the synthetic run's only repo name", async () => {
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show();
     await settled();
     const built = builtLocal();
@@ -1492,7 +1492,7 @@ describe("shelf", () => {
     h.runs = [mkRun()];
     show();
     await settled();
-    expect(shelfOf("ASM-1")).toBe("board");
+    expect(shelfOf("PROJ-1")).toBe("board");
   });
 
   it("closes an aged ticket run whose open ticket is the only thing left", async () => {
@@ -1503,7 +1503,7 @@ describe("shelf", () => {
     h.openSessions = [];
     show();
     await settled();
-    expect(shelfOf("ASM-1")).toBe("closed");
+    expect(shelfOf("PROJ-1")).toBe("closed");
   });
 
   it("keeps an aged ticket run with a live agent on the board", async () => {
@@ -1511,7 +1511,7 @@ describe("shelf", () => {
     h.openSessions = [sess({ sessionId: "s1", cwd: "/r/svc", startedAt: NOW - 10 * MIN })];
     show();
     await settled();
-    expect(shelfOf("ASM-1")).toBe("board");
+    expect(shelfOf("PROJ-1")).toBe("board");
   });
 
   it("closes a notepad run with no agent, no PR and a clean tree", async () => {
@@ -1541,7 +1541,7 @@ describe("shelf", () => {
     // Task runs rather than notepad ones: an in-place run ignores the checkout's
     // dirty state outright (the test below), so ownership only decides this for a
     // run that owns its branch — which is what `agentFlow.worktree: "never"` makes.
-    h.runs = [dirtyShare("ASM-old", NOW - 90 * MIN), dirtyShare("ASM-new", NOW - 10 * MIN)];
+    h.runs = [dirtyShare("PROJ-old", NOW - 90 * MIN), dirtyShare("PROJ-new", NOW - 10 * MIN)];
     h.openSessions = [];
     h.buildRunStatus.mockReset().mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
       ...statusFor(i.run, i.ticket?.category ?? null),
@@ -1549,8 +1549,8 @@ describe("shelf", () => {
     }));
     show();
     await settled();
-    expect(shelfOf("ASM-new")).toBe("board");   // newest holder owns the path
-    expect(shelfOf("ASM-old")).toBe("closed");
+    expect(shelfOf("PROJ-new")).toBe("board");   // newest holder owns the path
+    expect(shelfOf("PROJ-old")).toBe("closed");
   });
 
   it("closes an in-place run whose only claim is the checkout's dirty state", async () => {
@@ -1623,7 +1623,7 @@ describe("shelf", () => {
     // run owns its branch whether or not a url survived, so its dirty tree still
     // counts. Only the kind test separates this from an Explore session.
     h.runs = [mkRun({
-      key: "ASM-nourl", url: "", createdAt: NOW - 90 * MIN, summary: "s",
+      key: "PROJ-nourl", url: "", createdAt: NOW - 90 * MIN, summary: "s",
       repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "main" }],
     })];
     h.openSessions = [];
@@ -1633,7 +1633,7 @@ describe("shelf", () => {
     }));
     show();
     await settled();
-    expect(shelfOf("ASM-nourl")).toBe("board");
+    expect(shelfOf("PROJ-nourl")).toBe("board");
   });
 
   it("does not close a run merely because openAgents hides its agents", async () => {
@@ -1658,7 +1658,7 @@ describe("shelf", () => {
 
   it("puts a local card on the board — it exists only because a session is open", async () => {
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show();
     await settled();
     expect(lastRunsPost().runs.map((r: RunStatus) => r.shelf)).toEqual(["board"]);
@@ -1685,18 +1685,18 @@ describe("DeckPanel settings without a reload", () => {
 
   it("re-seeds openAgents from the setting", async () => {
     h.openAgents = false;
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
     h.openSessions = [sess()];
     show();
     await settled();
-    expect(builtFor("ASM-1").agents).toEqual([]);
+    expect(builtFor("PROJ-1").agents).toEqual([]);
 
     h.openAgents = true;
     setConfig({ openAgents: true });
     fireConfigurationChanged("agentFlow.openAgents");
     await settled();
 
-    expect(builtFor("ASM-1").agents).toHaveLength(1);
+    expect(builtFor("PROJ-1").agents).toHaveLength(1);
   });
 
   it("clears the review strip immediately when reviewRequests goes off", async () => {
@@ -1741,33 +1741,33 @@ describe("retire sweep", () => {
   };
 
   it("drops an unreachable run from the board and deletes its record and PR cache", async () => {
-    h.runs = [mkRun({ key: "ASM-GONE", repos: [{ name: "api", path: "/gone/api", isGit: true, branch: "b" }] })];
+    h.runs = [mkRun({ key: "PROJ-GONE", repos: [{ name: "api", path: "/gone/api", isGit: true, branch: "b" }] })];
     h.existsSync.mockImplementation((p: string) => !p.startsWith("/gone"));
     await sweep();
-    expect(lastRuns().map((r) => r.run.key)).not.toContain("ASM-GONE");
-    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "ASM-GONE");
-    expect(h.removePrEntries).toHaveBeenCalledWith(expect.any(String), "ASM-GONE");
+    expect(lastRuns().map((r) => r.run.key)).not.toContain("PROJ-GONE");
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "PROJ-GONE");
+    expect(h.removePrEntries).toHaveBeenCalledWith(expect.any(String), "PROJ-GONE");
   });
 
   it("stamps a landed run, keeps rendering it, and does not delete it", async () => {
-    h.runs = [mkRun({ key: "ASM-DONE" })];
+    h.runs = [mkRun({ key: "PROJ-DONE" })];
     h.getStatus.mockResolvedValue({ status: "Done", category: "done" });
     await sweep();
     expect(h.writeRun).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ key: "ASM-DONE", finishedAt: expect.any(Number) }),
+      expect.objectContaining({ key: "PROJ-DONE", finishedAt: expect.any(Number) }),
     );
     expect(h.removeRun).not.toHaveBeenCalled();
-    expect(lastRuns().map((r) => r.run.key)).toContain("ASM-DONE");
+    expect(lastRuns().map((r) => r.run.key)).toContain("PROJ-DONE");
   });
 
   it("retires a landed run once its stamp is older than the window", async () => {
     setConfig({ retireFinishedAfterHours: 1 });
-    h.runs = [mkRun({ key: "ASM-OLD", finishedAt: Date.now() - 2 * 3_600_000 })];
+    h.runs = [mkRun({ key: "PROJ-OLD", finishedAt: Date.now() - 2 * 3_600_000 })];
     h.getStatus.mockResolvedValue({ status: "Done", category: "done" });
     await sweep();
-    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "ASM-OLD");
-    expect(lastRuns().map((r) => r.run.key)).not.toContain("ASM-OLD");
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "PROJ-OLD");
+    expect(lastRuns().map((r) => r.run.key)).not.toContain("PROJ-OLD");
   });
 
   it("stamps closedAt on a run the board shelved as closed, and keeps rendering it", async () => {
@@ -1775,14 +1775,14 @@ describe("retire sweep", () => {
     // sight, so rule 2b — the rule under test — is only reachable for a run that
     // owns a worktree. The neighbouring shelf test proves an aged task run with no
     // agent and no PR shelves as closed, which is the state this needs.
-    h.runs = [mkRun({ key: "ASM-CLOSED", createdAt: Date.now() - 3_600_000 })];
+    h.runs = [mkRun({ key: "PROJ-CLOSED", createdAt: Date.now() - 3_600_000 })];
     await sweep();
     expect(h.writeRun).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ key: "ASM-CLOSED", closedAt: expect.any(Number) }),
+      expect.objectContaining({ key: "PROJ-CLOSED", closedAt: expect.any(Number) }),
     );
     expect(h.removeRun).not.toHaveBeenCalled();
-    expect(lastRuns().map((r) => r.run.key)).toContain("ASM-CLOSED");
+    expect(lastRuns().map((r) => r.run.key)).toContain("PROJ-CLOSED");
   });
 
   it("retires a finished Explore session on sight, the shipped default", async () => {
@@ -1831,23 +1831,23 @@ describe("retire sweep", () => {
   });
 
   it("clears the stamp when a run stops being finished", async () => {
-    h.runs = [mkRun({ key: "ASM-BACK", finishedAt: Date.now() - 3_600_000 })];
+    h.runs = [mkRun({ key: "PROJ-BACK", finishedAt: Date.now() - 3_600_000 })];
     await sweep();
     const written = h.writeRun.mock.calls.at(-1)![1] as Run;
-    expect(written.key).toBe("ASM-BACK");
+    expect(written.key).toBe("PROJ-BACK");
     expect("finishedAt" in written).toBe(false);
     expect(h.removeRun).not.toHaveBeenCalled();
   });
 
   it("still sees open sessions with the Open agents toggle off, so it cannot retire live work", async () => {
     h.openAgents = false;
-    h.runs = [mkRun({ key: "ASM-LIVE", repos: [{ name: "api", path: "/repos/api", isGit: true, branch: "b" }] })];
+    h.runs = [mkRun({ key: "PROJ-LIVE", repos: [{ name: "api", path: "/repos/api", isGit: true, branch: "b" }] })];
     h.openSessions = [sess({ pid: 3, sessionId: "s1", cwd: "/repos/api", startedAt: 1, name: "api-1a" })];
     h.existsSync.mockReturnValue(false); // rule 1 would fire but for the live session
     await sweep();
     expect(h.removeRun).not.toHaveBeenCalled();
     // The toggle still does its own job: no agents are attached to the card.
-    expect(builtFor("ASM-LIVE").agents).toEqual([]);
+    expect(builtFor("PROJ-LIVE").agents).toEqual([]);
   });
 
   it("never writes a record for a local card, which has none on disk", async () => {
@@ -1948,7 +1948,7 @@ describe("Clear stale", () => {
   };
 
   it("counts runs that would retire if both windows were ignored", async () => {
-    landedRun("ASM-DONE");
+    landedRun("PROJ-DONE");
     show(true);
     await settled();
     expect(lastRunsPost().staleCount).toBe(1);
@@ -1956,18 +1956,18 @@ describe("Clear stale", () => {
   });
 
   it("clears them on request, after the user confirms", async () => {
-    landedRun("ASM-DONE");
+    landedRun("PROJ-DONE");
     show(true);
     await settled();
     const p = lastPanel();
     (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce("Clear 1");
     await p._fire({ type: "deck:clearStale" });
     await settled();
-    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "ASM-DONE");
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "PROJ-DONE");
   });
 
   it("clears nothing when the user declines", async () => {
-    landedRun("ASM-DONE");
+    landedRun("PROJ-DONE");
     show(true);
     await settled();
     const p = lastPanel();
@@ -1978,7 +1978,7 @@ describe("Clear stale", () => {
   });
 
   it("still respects the veto — dirty work is never cleared in bulk", async () => {
-    landedRun("ASM-DIRTY");
+    landedRun("PROJ-DIRTY");
     h.buildRunStatus.mockImplementation((i: { run: Run; ticket: { category: string | null } | null }) => ({
       ...statusFor(i.run, i.ticket?.category ?? null),
       repos: [{ name: "svc", path: "/r/svc", branch: "b", dirty: true, ahead: 0, added: 1, removed: 0, files: 1 }],
@@ -2009,26 +2009,26 @@ describe("Clear stale", () => {
 describe("DeckPanel local cards", () => {
   it("makes a card for a place no tracked run owns", async () => {
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show();
     await settled();
     expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
-    expect(builtLocal().agents.map((a) => a.session.name)).toEqual(["centaur-7e"]);
+    expect(builtLocal().agents.map((a) => a.session.name)).toEqual(["webapp-7e"]);
   });
 
   it("infers the ticket a branch names, and polls Jira for it", async () => {
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show(true);
     await settled();
-    expect(builtLocal().run.url).toContain("/browse/ASM-5641");
-    expect(h.getStatus).toHaveBeenCalledWith("ASM-5641");
+    expect(builtLocal().run.url).toContain("/browse/PROJ-5641");
+    expect(h.getStatus).toHaveBeenCalledWith("PROJ-5641");
   });
 
   it("infers nothing from a default branch, and polls no Jira", async () => {
     h.runs = [];
     h.branch = "main";
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show(true);
     await settled();
     expect(builtLocal().run.url).toBe("");
@@ -2037,17 +2037,17 @@ describe("DeckPanel local cards", () => {
 
   it("sends the inferred ticket key on the wire, so the webview never has to parse a url itself", async () => {
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show(true);
     await settled();
     const local = lastRunsPost().runs.find((r: RunStatus) => r.run.kind === "local")!;
-    expect(local.inferredTicketKey).toBe("ASM-5641");
+    expect(local.inferredTicketKey).toBe("PROJ-5641");
   });
 
   it("omits the inferred ticket key when the branch names no ticket", async () => {
     h.runs = [];
     h.branch = "main";
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show(true);
     await settled();
     const local = lastRunsPost().runs.find((r: RunStatus) => r.run.kind === "local")!;
@@ -2055,7 +2055,7 @@ describe("DeckPanel local cards", () => {
   });
 
   it("does not make a second card for a place a tracked run already owns", async () => {
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "PROJ-1-x" }] })];
     h.openSessions = [sess()];
     show();
     await settled();
@@ -2065,7 +2065,7 @@ describe("DeckPanel local cards", () => {
   it("makes no local cards with the toggle off", async () => {
     h.openAgents = false;
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur" })];
+    h.openSessions = [sess({ cwd: "/r/webapp" })];
     show();
     await settled();
     expect(h.buildRunStatus).not.toHaveBeenCalled();
@@ -2075,7 +2075,7 @@ describe("DeckPanel local cards", () => {
     // The registry knows a session is open without its transcript being read, so
     // the card appears — its agent just reports unknown.
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     h.sessionActivity.mockReturnValue({ state: "unknown", lastActivityMs: null, slug: null });
     show();
     await settled();
@@ -2086,73 +2086,73 @@ describe("DeckPanel local cards", () => {
 
   it("opens a local card's directory", async () => {
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur" })];
+    h.openSessions = [sess({ cwd: "/r/webapp" })];
     show();
     await settled();
     const p = lastPanel();
     await p._fire({ type: "deck:inspect", key: builtLocal().run.key, action: "open" });
-    expect(h.openInEditor).toHaveBeenCalledWith("/r/centaur");
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/webapp");
   });
 
-  const WS = { identity: "/ws/centaur+e2e.code-workspace", kind: "workspace" as const,
-    roots: ["/r/centaur", "/r/automation_e2e"] };
+  const WS = { identity: "/ws/webapp+e2e.code-workspace", kind: "workspace" as const,
+    roots: ["/r/webapp", "/r/e2e_suite"] };
 
   it("makes one card for two sessions in the same workspace", async () => {
     h.runs = [];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" }),
-      sess({ sessionId: "s2", cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" }),
+      sess({ sessionId: "s2", cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show();
     await settled();
     expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
-    expect(builtLocal().agents.map((a) => a.session.name).sort()).toEqual(["centaur-7e", "e2e-3a"]);
+    expect(builtLocal().agents.map((a) => a.session.name).sort()).toEqual(["e2e-3a", "webapp-7e"]);
   });
 
   it("carries every workspace root, including one with no session in it", async () => {
     h.runs = [];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show();
     await settled();
-    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["centaur", "automation_e2e"]);
-    expect(builtLocal().run.workspaceFile).toBe("/ws/centaur+e2e.code-workspace");
+    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["webapp", "e2e_suite"]);
+    expect(builtLocal().run.workspaceFile).toBe("/ws/webapp+e2e.code-workspace");
   });
 
   it("tags each agent with the root it runs in, not the run's first repo", async () => {
     h.runs = [];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show();
     await settled();
-    expect(builtLocal().agents.map((a) => a.repo)).toEqual(["automation_e2e"]);
+    expect(builtLocal().agents.map((a) => a.repo)).toEqual(["e2e_suite"]);
   });
 
   it("falls through to a sibling root when the session's own root names no ticket", async () => {
-    // The session sits in /r/automation_e2e ("main" — no ticket); /r/centaur
+    // The session sits in /r/e2e_suite ("main" — no ticket); /r/webapp
     // names one. The session's own root gets first say (F1, human ruling), but
     // when it has nothing to say the remaining roots are still checked.
     h.runs = [];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show(true);
     await settled();
-    expect(builtLocal().run.url).toContain("/browse/ASM-5641");
+    expect(builtLocal().run.url).toContain("/browse/PROJ-5641");
   });
 
   it("prefers the session's own root's ticket over a sibling's, even one earlier in window order (F1, test 6)", async () => {
-    // /r/centaur is FIRST in WS.roots and names a ticket of its own — the old,
-    // window-order rule would pick it. The session sits in /r/automation_e2e,
+    // /r/webapp is FIRST in WS.roots and names a ticket of its own — the old,
+    // window-order rule would pick it. The session sits in /r/e2e_suite,
     // which also names a ticket: the human ruling says the session's own root
     // wins regardless of where it falls in the workspace's folder list.
     h.runs = [];
-    h.branch = "ASM-9999-sibling"; // /r/centaur — earlier in window order, but not the session's root
-    h.branch2 = "ASM-5641-team-table"; // /r/automation_e2e — the session's own root
+    h.branch = "PROJ-9999-sibling"; // /r/webapp — earlier in window order, but not the session's root
+    h.branch2 = "PROJ-5641-team-table"; // /r/e2e_suite — the session's own root
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show(true);
     await settled();
-    expect(builtLocal().run.url).toContain("/browse/ASM-5641");
-    expect(builtLocal().run.url).not.toContain("/browse/ASM-9999");
+    expect(builtLocal().run.url).toContain("/browse/PROJ-5641");
+    expect(builtLocal().run.url).not.toContain("/browse/PROJ-9999");
   });
 
   it("prefers an earlier sibling root's ticket over a later one, when the session's own root names nothing", async () => {
@@ -2162,53 +2162,53 @@ describe("DeckPanel local cards", () => {
     // hit wins" from "last hit wins": with only one of them able to carry a
     // ticket, .find and a `.filter(Boolean).at(-1)` mutation would agree.
     const WS3 = { identity: "/ws/three.code-workspace", kind: "workspace" as const,
-      roots: ["/r/centaur", "/r/automation_e2e", "/r/third"] };
+      roots: ["/r/webapp", "/r/e2e_suite", "/r/third"] };
     h.runs = [];
-    h.branch = "ASM-1111-first"; // /r/centaur
-    h.branch2 = "ASM-2222-second"; // /r/automation_e2e
+    h.branch = "PROJ-1111-first"; // /r/webapp
+    h.branch2 = "PROJ-2222-second"; // /r/e2e_suite
     h.liveWindows = [WS3];
     h.openSessions = [sess({ cwd: "/r/third", name: "third-1a" })];
     show(true);
     await settled();
-    expect(builtLocal().run.url).toContain("/browse/ASM-1111");
+    expect(builtLocal().run.url).toContain("/browse/PROJ-1111");
   });
 
   it("still makes a per-place card when the window record has no roots", async () => {
     h.runs = [];
-    h.liveWindows = [{ identity: "/ws/centaur+e2e.code-workspace", kind: "workspace" }];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.liveWindows = [{ identity: "/ws/webapp+e2e.code-workspace", kind: "workspace" }];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show();
     await settled();
-    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["centaur"]);
+    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["webapp"]);
     expect(builtLocal().run.workspaceFile).toBeUndefined();
   });
 
   it("does not fold a root a tracked run already owns into a local card", async () => {
-    // /r/centaur has a session too, but ASM-1 already tracks it — its diff and
-    // dirty state belong on ASM-1's own card. /r/automation_e2e's session is not
+    // /r/webapp has a session too, but PROJ-1 already tracks it — its diff and
+    // dirty state belong on PROJ-1's own card. /r/e2e_suite's session is not
     // owned by anything: it still gets a local card, and that card must name
-    // only the root nobody tracks, not the one ASM-1 already owns.
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-1-x" }] })];
+    // only the root nobody tracks, not the one PROJ-1 already owns.
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-1-x" }] })];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" }),
-      sess({ sessionId: "s2", cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" }),
+      sess({ sessionId: "s2", cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show();
     await settled();
     // Two cards on the board: the tracked run keeps its own, and a local card
     // for the leftover place — not one merged card carrying both roots.
     expect(h.buildRunStatus).toHaveBeenCalledTimes(2);
-    expect(h.buildRunStatus.mock.calls[0][0].run.key).toBe("ASM-1");
-    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["automation_e2e"]);
+    expect(h.buildRunStatus.mock.calls[0][0].run.key).toBe("PROJ-1");
+    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["e2e_suite"]);
   });
 
   it("makes no local card when a tracked run already owns every live root in the window", async () => {
-    h.runs = [mkRun({ key: "ASM-1", repos: [
-      { name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-1-x" },
-      { name: "automation_e2e", path: "/r/automation_e2e", isGit: true, branch: "ASM-1-x" },
+    h.runs = [mkRun({ key: "PROJ-1", repos: [
+      { name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-1-x" },
+      { name: "e2e_suite", path: "/r/e2e_suite", isGit: true, branch: "PROJ-1-x" },
     ] })];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" }),
-      sess({ sessionId: "s2", cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" }),
+      sess({ sessionId: "s2", cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show();
     await settled();
     // Both roots are claimed by the one tracked run: nothing is left over for a
@@ -2218,22 +2218,22 @@ describe("DeckPanel local cards", () => {
     // returns [] before the loop body (and that guard) ever runs. It stands on
     // its own merits regardless: no card for a place nothing is left to render.
     expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
-    expect(h.buildRunStatus.mock.calls[0][0].run.key).toBe("ASM-1");
+    expect(h.buildRunStatus.mock.calls[0][0].run.key).toBe("PROJ-1");
   });
 
   it("drops a non-git workspace root that has no session in it (F5)", async () => {
-    // /r/automation_e2e is a plain docs/ folder here (repoRoot answers ""), and
+    // /r/e2e_suite is a plain docs/ folder here (repoRoot answers ""), and
     // nobody is working in it — Spec §2 says `repos` is the roots that ARE git
     // repos, and a folder that is neither must not inflate the chip's "N repos"
     // count or spend four extra git calls on nothing. Steers the real repoRoot
     // seam (h.nonGitRoots), not localRunFor's injected `git` function.
     h.runs = [];
-    h.nonGitRoots.add("/r/automation_e2e");
+    h.nonGitRoots.add("/r/e2e_suite");
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show();
     await settled();
-    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["centaur"]);
+    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["webapp"]);
   });
 
   it("keeps a non-git workspace root that DOES have a live session in it (F5)", async () => {
@@ -2242,31 +2242,31 @@ describe("DeckPanel local cards", () => {
     // dropping every non-git folder unconditionally would delete it. That would
     // be a regression, not a cleanup.
     h.runs = [];
-    h.nonGitRoots.add("/r/automation_e2e");
+    h.nonGitRoots.add("/r/e2e_suite");
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" }),
-      sess({ sessionId: "s2", cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" }),
+      sess({ sessionId: "s2", cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show();
     await settled();
     const repos = builtLocal().run.repos;
-    expect(repos.map((r) => r.name)).toEqual(["centaur", "automation_e2e"]);
-    expect(repos.find((r) => r.name === "automation_e2e")?.isGit).toBe(false);
+    expect(repos.map((r) => r.name)).toEqual(["webapp", "e2e_suite"]);
+    expect(repos.find((r) => r.name === "e2e_suite")?.isGit).toBe(false);
   });
 
   it("normalizes a workspace root nested inside a repo to that repo's root, so a tracked run claims it (F5)", async () => {
-    // The exact double-count the human ruling was meant to prevent. ASM-1 owns
+    // The exact double-count the human ruling was meant to prevent. PROJ-1 owns
     // /r/monorepo, with its own live session cd'd exactly into it (that live
     // session is what puts /r/monorepo in `claimed` at all). A SEPARATE window
     // declares monorepo/packages/api — a folder nested INSIDE that same repo —
     // as one of its own roots, alongside an unrelated /r/other where a second,
-    // untracked session actually is. Comparing raw paths, ASM-1's claim would
+    // untracked session actually is. Comparing raw paths, PROJ-1's claim would
     // never match the nested path, and monorepo would render (and vote its
     // diff/dirty) a second time on the local card built for /r/other.
     // Normalizing first (repoRoot(nested) -> /r/monorepo) is what makes the
     // claimed-root filter actually catch it.
     const nested = "/r/monorepo/packages/api";
     h.repoRootRemap.set(nested, "/r/monorepo");
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "monorepo", path: "/r/monorepo", isGit: true, branch: "main" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "monorepo", path: "/r/monorepo", isGit: true, branch: "main" }] })];
     h.liveWindows = [{ identity: "/ws/mono+other.code-workspace", kind: "workspace", roots: [nested, "/r/other"] }];
     h.openSessions = [
       sess({ cwd: "/r/monorepo", name: "monorepo-7e" }),
@@ -2274,23 +2274,23 @@ describe("DeckPanel local cards", () => {
     ];
     show();
     await settled();
-    expect(h.buildRunStatus).toHaveBeenCalledTimes(2); // ASM-1's own card, and one local card
+    expect(h.buildRunStatus).toHaveBeenCalledTimes(2); // PROJ-1's own card, and one local card
     expect(builtLocal().run.repos.map((r) => r.path)).toEqual(["/r/other"]);
   });
 });
 
 describe("DeckPanel PR facts for a local grouped run (F2)", () => {
-  const WS = { identity: "/ws/centaur+e2e.code-workspace", kind: "workspace" as const,
-    roots: ["/r/centaur", "/r/automation_e2e"] };
+  const WS = { identity: "/ws/webapp+e2e.code-workspace", kind: "workspace" as const,
+    roots: ["/r/webapp", "/r/e2e_suite"] };
 
   it("does not enqueue a PR fetch for a sibling root with no live session", async () => {
     h.runs = [];
     h.liveWindows = [WS];
-    // Session only in /r/centaur — /r/automation_e2e is a sibling nobody is
+    // Session only in /r/webapp — /r/e2e_suite is a sibling nobody is
     // working in, carried on the card only because F5 keeps every git root.
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     await showAndWarm();
-    expect(h.prFetch).not.toHaveBeenCalledWith("/r/automation_e2e", expect.anything(), expect.anything());
+    expect(h.prFetch).not.toHaveBeenCalledWith("/r/e2e_suite", expect.anything(), expect.anything());
   });
 
   it("does not read a sibling root's cached PR facts back onto the card, even a merged one", async () => {
@@ -2305,10 +2305,10 @@ describe("DeckPanel PR facts for a local grouped run (F2)", () => {
       isDraft: false, ci: { passing: 1, pending: 0, failing: [] }, review: "approved", unresolved: 0,
       mergeable: "clean", ciAdvisory: false,
     };
-    h.prEntries = { automation_e2e: { facts: merged, fetchedAt: Date.now() } };
+    h.prEntries = { e2e_suite: { facts: merged, fetchedAt: Date.now() } };
     h.runs = [];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     await showAndWarm(true);
     expect(builtLocal().prs).toEqual({});
   });
@@ -2316,16 +2316,16 @@ describe("DeckPanel PR facts for a local grouped run (F2)", () => {
   it("still reads and fetches PR facts for the session's own root", async () => {
     h.runs = [];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     await showAndWarm(true);
-    expect(h.prFetch).toHaveBeenCalledWith("/r/centaur", "ASM-5641-team-table", "ASM-5641");
+    expect(h.prFetch).toHaveBeenCalledWith("/r/webapp", "PROJ-5641-team-table", "PROJ-5641");
   });
 });
 
 describe("DeckPanel track it", () => {
   /** Build one local card, track it, and hand back the record that was written. */
   const trackLocal = async (): Promise<Run> => {
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show();
     await settled();
     const p = lastPanel();
@@ -2337,17 +2337,17 @@ describe("DeckPanel track it", () => {
   it("writes an inferred ticket's key as a task run", async () => {
     h.runs = [];
     const written = await trackLocal();
-    expect(written).toMatchObject({ key: "ASM-5641", kind: "task" });
-    expect(written.url).toContain("/browse/ASM-5641");
+    expect(written).toMatchObject({ key: "PROJ-5641", kind: "task" });
+    expect(written.url).toContain("/browse/PROJ-5641");
   });
 
   it("keeps the local key when a tracked run already owns the inferred one", async () => {
-    // Writing ASM-5641.json here would silently replace a real launch record.
-    h.runs = [mkRun({ key: "ASM-5641" })];
+    // Writing PROJ-5641.json here would silently replace a real launch record.
+    h.runs = [mkRun({ key: "PROJ-5641" })];
     const written = await trackLocal();
     expect(written.key).toMatch(/^local-/);
     expect(written.kind).toBe("task");
-    expect(written.url).toContain("/browse/ASM-5641");
+    expect(written.url).toContain("/browse/PROJ-5641");
   });
 
   it("polls the real ticket, not the place-hash, for a record Track it saved under its local key", async () => {
@@ -2355,17 +2355,17 @@ describe("DeckPanel track it", () => {
     // this is a tracked run (`readRuns` would return it), so it is no longer
     // synthesized as a local card and `localTickets`-style bookkeeping never
     // sees it. The ticket must still come from its own url, not its key —
-    // otherwise every tick polls Jira for "local-centaur-1a2b3c4d", which 404s
+    // otherwise every tick polls Jira for "local-webapp-1a2b3c4d", which 404s
     // forever.
     h.runs = [mkRun({
-      key: "local-centaur-1a2b3c4d", url: "https://jira/browse/ASM-5641", kind: "task",
-      repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-5641-team-table" }],
+      key: "local-webapp-1a2b3c4d", url: "https://jira/browse/PROJ-5641", kind: "task",
+      repos: [{ name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-5641-team-table" }],
     })];
     show(true);
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" });
-    expect(h.getStatus).toHaveBeenCalledWith("ASM-5641");
-    expect(h.getStatus).not.toHaveBeenCalledWith("local-centaur-1a2b3c4d");
+    expect(h.getStatus).toHaveBeenCalledWith("PROJ-5641");
+    expect(h.getStatus).not.toHaveBeenCalledWith("local-webapp-1a2b3c4d");
   });
 
   it("writes a place with no ticket as an explore run", async () => {
@@ -2384,11 +2384,11 @@ describe("DeckPanel track it", () => {
   });
 
   it("ignores a track for a key that is not a local card", async () => {
-    h.runs = [mkRun({ key: "ASM-1" })];
+    h.runs = [mkRun({ key: "PROJ-1" })];
     h.openSessions = [];
     show();
     await settled();
-    await lastPanel()._fire({ type: "deck:track", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:track", key: "PROJ-1" });
     await settled();
     expect(h.writeRun).not.toHaveBeenCalled();
   });
@@ -2412,7 +2412,7 @@ describe("DeckPanel PR facts", () => {
   });
 
   it("still fetches a PR for a tracked run on its task branch", async () => {
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "PROJ-1-x" }] })];
     h.prEntries = {};
     await showAndWarm(true);
     expect(h.prFetch).toHaveBeenCalled();
@@ -2448,8 +2448,8 @@ describe("DeckPanel PR facts", () => {
 
   it("fetches a repo with no cached entry", async () => {
     await showAndWarm();
-    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "ASM-1");
-    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "ASM-1", "svc", expect.objectContaining({ facts: null, fetchedAt: expect.any(Number) }));
+    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "PROJ-1");
+    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "PROJ-1", "svc", expect.objectContaining({ facts: null, fetchedAt: expect.any(Number) }));
   });
 
   it("searches by the inferred ticket key, not the local place-hash, for an untracked place", async () => {
@@ -2458,9 +2458,9 @@ describe("DeckPanel PR facts", () => {
     // card's own key (a place-hash) could never match a PR title — the ticket
     // a branch names is the one string that stands a chance.
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     await showAndWarm(true);
-    expect(h.prFetch).toHaveBeenCalledWith("/r/centaur", "ASM-5641-team-table", "ASM-5641");
+    expect(h.prFetch).toHaveBeenCalledWith("/r/webapp", "PROJ-5641-team-table", "PROJ-5641");
   });
 
   it("does not refetch an entry inside its TTL", async () => {
@@ -2498,7 +2498,7 @@ describe("DeckPanel PR facts", () => {
     h.prEntries = { svc: { facts: stale, fetchedAt: Date.now() - 200_000 } };
     h.prFetch.mockResolvedValue({ ok: false });
     await showAndWarm();
-    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "ASM-1", "svc", expect.objectContaining({ facts: stale, error: true }));
+    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "PROJ-1", "svc", expect.objectContaining({ facts: stale, error: true }));
   });
 
   it("writes exactly what the provider returned on success, with no error flag", async () => {
@@ -2515,7 +2515,7 @@ describe("DeckPanel PR facts", () => {
     };
     h.prFetch.mockResolvedValue({ ok: true, facts });
     await showAndWarm();
-    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "ASM-1", "svc", { facts, fetchedAt: expect.any(Number) });
+    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "PROJ-1", "svc", { facts, fetchedAt: expect.any(Number) });
   });
 
   it("does not fetch a repo that is not a git checkout", async () => {
@@ -2540,7 +2540,7 @@ describe("DeckPanel PR facts", () => {
     h.runs = [mkRun(), mkRun({ key: "explore-retry-logic", url: "", repos: [{ name: "other", path: "/r/other", isGit: true, branch: "master" }] })];
     await showAndWarm();
     expect(h.prFetch).toHaveBeenCalledTimes(1);
-    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "ASM-1");
+    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "PROJ-1");
   });
 
   it("does not fetch a PR for a notepad run, whatever branch it sits on", async () => {
@@ -2583,7 +2583,7 @@ describe("DeckPanel PR facts", () => {
     await settled(); // first tick: only warms the gh probe, no fetch yet
     const p = lastPanel();
     await p._fire({ type: "deck:refresh" }); // second tick: the fetch is now in flight, unresolved
-    await p._fire({ type: "deck:forget", key: "ASM-1" }); // forgotten mid-flight
+    await p._fire({ type: "deck:forget", key: "PROJ-1" }); // forgotten mid-flight
     release(); // resolves *after* the run was forgotten
     await settled();
     expect(h.writePrEntry).not.toHaveBeenCalled();
@@ -2674,8 +2674,8 @@ describe("DeckPanel PR facts", () => {
   it("forgets a run's PR facts alongside its run record", async () => {
     show();
     await settled();
-    await lastPanel()._fire({ type: "deck:forget", key: "ASM-1" });
-    expect(h.removePrEntries).toHaveBeenCalledWith("/prfacts", "ASM-1");
+    await lastPanel()._fire({ type: "deck:forget", key: "PROJ-1" });
+    expect(h.removePrEntries).toHaveBeenCalledWith("/prfacts", "PROJ-1");
   });
 
   it("skips a repo with no known branch, without throwing", async () => {
@@ -2718,7 +2718,7 @@ describe("DeckPanel PR facts", () => {
     // the same repo forever.
     h.prFetch.mockRejectedValue(new Error("gh exploded"));
     await showAndWarm();
-    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "ASM-1", "svc", expect.objectContaining({ error: true }));
+    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "PROJ-1", "svc", expect.objectContaining({ error: true }));
   });
 
   it("drops a stored PR entry for a repo that has left the run (F4)", async () => {
@@ -4266,7 +4266,7 @@ describe("deck:mergePr", () => {
     unresolved: 0, mergeable: "clean", ciAdvisory: false,
   });
 
-  /** One tracked run — `mkRun()`'s ASM-1, whose single repo `svc` is checked out at
+  /** One tracked run — `mkRun()`'s PROJ-1, whose single repo `svc` is checked out at
    * /r/svc — with `facts` cached against it. `readPrEntries` is mocked to ignore its
    * arguments and hand back `h.prEntries`, so seeding the store IS assigning that
    * field; there is no temp directory in this suite.
@@ -4285,7 +4285,7 @@ describe("deck:mergePr", () => {
   it("does nothing when mergeWrites is off, however green the PR", async () => {
     h.mergeWrites = false;
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).not.toHaveBeenCalled();
     expect(window.showWarningMessage).not.toHaveBeenCalled();
   });
@@ -4326,7 +4326,7 @@ describe("deck:mergePr", () => {
     // say review_required; a hand-crafted (or merely stale) message says merge.
     h.mergeWrites = true;
     const p = await openWith({ ...greenFacts(), review: "review_required" });
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).not.toHaveBeenCalled();
     expect(window.showWarningMessage).not.toHaveBeenCalled();
   });
@@ -4334,7 +4334,7 @@ describe("deck:mergePr", () => {
   it("refuses when the message names a different repo or number than the re-check found", async () => {
     h.mergeWrites = true;
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 999 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 999 });
     expect(h.prMerge).not.toHaveBeenCalled();
     expect(window.showWarningMessage).not.toHaveBeenCalled();
   });
@@ -4349,7 +4349,7 @@ describe("deck:mergePr", () => {
     h.prEntries = { svc: { facts: greenFacts(), fetchedAt: Date.now() } };
     show();
     await settled();
-    await lastPanel()._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await lastPanel()._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).not.toHaveBeenCalled();
     expect(window.showWarningMessage).not.toHaveBeenCalled();
   });
@@ -4362,12 +4362,12 @@ describe("deck:mergePr", () => {
   // gates are independently removable, and one combined case would let four of them
   // regress silently behind the fifth.
   const CANCELLED = (over: { key?: string; number?: number } = {}) =>
-    ({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 124, outcome: "cancelled", ...over });
+    ({ type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 124, outcome: "cancelled", ...over });
 
   it("releases the button when mergeWrites is off", async () => {
     h.mergeWrites = false;
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(posts(p)).toContainEqual(CANCELLED());
   });
 
@@ -4380,7 +4380,7 @@ describe("deck:mergePr", () => {
     h.mergeWrites = true;
     h.prFacts = false;
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).not.toHaveBeenCalled();
     expect(window.showWarningMessage).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(CANCELLED());
@@ -4414,7 +4414,7 @@ describe("deck:mergePr", () => {
   it("releases the button, on the message's own triple, when the re-check disagrees", async () => {
     h.mergeWrites = true;
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 999 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 999 });
     expect(posts(p)).toContainEqual(CANCELLED({ number: 999 }));
   });
 
@@ -4425,7 +4425,7 @@ describe("deck:mergePr", () => {
     show();
     await settled();
     const p = lastPanel();
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(posts(p)).toContainEqual(CANCELLED());
   });
 
@@ -4434,7 +4434,7 @@ describe("deck:mergePr", () => {
     h.mergeMethod = "squash";
     vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
 
     const [message, opts] = vi.mocked(window.showWarningMessage).mock.calls[0] as [string, unknown];
     expect(message).toContain("svc#124");
@@ -4456,7 +4456,7 @@ describe("deck:mergePr", () => {
     h.mergeMethod = method;
     vi.mocked(window.showWarningMessage).mockResolvedValue(label);
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     const [message] = vi.mocked(window.showWarningMessage).mock.calls[0] as [string, unknown];
     expect(message).toBe(expected);
     expect(h.prMerge).toHaveBeenCalledWith("/r/svc", 124, method);
@@ -4467,7 +4467,7 @@ describe("deck:mergePr", () => {
     h.mergeMethod = "rebase";
     vi.mocked(window.showWarningMessage).mockResolvedValue("Rebase and merge");
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).toHaveBeenCalledWith("/r/svc", 124, "rebase");
   });
 
@@ -4475,10 +4475,10 @@ describe("deck:mergePr", () => {
     h.mergeWrites = true;
     vi.mocked(window.showWarningMessage).mockResolvedValue(undefined);
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(
-      expect.objectContaining({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 124, outcome: "cancelled" }),
+      expect.objectContaining({ type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 124, outcome: "cancelled" }),
     );
   });
 
@@ -4487,7 +4487,7 @@ describe("deck:mergePr", () => {
     vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
     h.prMerge.mockResolvedValue({ ok: false, message: "Pull request is not mergeable" });
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(posts(p)).toContainEqual(
       expect.objectContaining({
         type: "toast", level: "error",
@@ -4510,9 +4510,9 @@ describe("deck:mergePr", () => {
     h.mergeWrites = true;
     vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.writePrEntry).toHaveBeenCalledWith(
-      "/prfacts", "ASM-1", "svc",
+      "/prfacts", "PROJ-1", "svc",
       { facts: expect.objectContaining({ number: 124 }), fetchedAt: 0 },
     );
     expect(posts(p)).toContainEqual(expect.objectContaining({ type: "deck:mergeDone", outcome: "ok" }));
@@ -4530,10 +4530,10 @@ describe("deck:mergePr", () => {
       throw new Error("prfacts is read-only");
     });
     const p = await openWith(greenFacts());
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     expect(h.prMerge).toHaveBeenCalledTimes(1);
     expect(posts(p)).toContainEqual(
-      expect.objectContaining({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 124, outcome: "failed" }),
+      expect.objectContaining({ type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 124, outcome: "failed" }),
     );
   });
 
@@ -4547,8 +4547,8 @@ describe("deck:mergePr", () => {
     let release!: () => void;
     h.prMerge.mockImplementation(() => new Promise((res) => { release = () => res({ ok: true }); }));
     const p = await openWith(greenFacts());
-    const first = p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
-    await p._fire({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 124 });
+    const first = p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     release();
     await first;
     expect(h.prMerge).toHaveBeenCalledTimes(1);
@@ -4560,7 +4560,7 @@ describe("deck:mergePr", () => {
     const dones = posts(p).filter((m) => m.type === "deck:mergeDone");
     expect(dones).toHaveLength(1);
     expect(dones).toEqual([
-      { type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 124, outcome: "ok" },
+      { type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 124, outcome: "ok" },
     ]);
   });
 
@@ -4591,14 +4591,14 @@ describe("DeckPanel — Address PR", () => {
   it("writes one plan matching the repo window for a per-window run", async () => {
     h.runs = [mkRun()];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(h.writePlanFile).toHaveBeenCalledWith({
-      key: "ASM-1",
+      key: "PROJ-1",
       createdAt: expect.any(Number),
       seedAgent: true,
       matches: [{
         matchPath: "/r/svc",
-        prompt: "Assess the PR for {key}.{files} [key=ASM-1 brief=(relative)]",
+        prompt: "Assess the PR for {key}.{files} [key=PROJ-1 brief=(relative)]",
       }],
     });
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
@@ -4607,18 +4607,18 @@ describe("DeckPanel — Address PR", () => {
   it("matches the workspace file and the launch's own brief for a multiroot run", async () => {
     h.runs = [mkRun({
       mode: "multiroot",
-      workspaceFile: "/ws/ASM-1.code-workspace",
+      workspaceFile: "/ws/PROJ-1.code-workspace",
       briefPaths: ["/r/svc/.pick-task/TASK.md"],
     })];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(h.writePlanFile).toHaveBeenCalledWith(expect.objectContaining({
       matches: [{
-        matchPath: "/ws/ASM-1.code-workspace",
-        prompt: "Assess the PR for {key}.{files} [key=ASM-1 brief=/r/svc/.pick-task/TASK.md]",
+        matchPath: "/ws/PROJ-1.code-workspace",
+        prompt: "Assess the PR for {key}.{files} [key=PROJ-1 brief=/r/svc/.pick-task/TASK.md]",
       }],
     }));
-    expect(h.openInEditor).toHaveBeenCalledWith("/ws/ASM-1.code-workspace");
+    expect(h.openInEditor).toHaveBeenCalledWith("/ws/PROJ-1.code-workspace");
   });
 
   it("seeds every window of a multi-repo per-window run", async () => {
@@ -4629,7 +4629,7 @@ describe("DeckPanel — Address PR", () => {
       ],
     })];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { matchPath: string }[] };
     expect(plan.matches.map((m) => m.matchPath)).toEqual(["/r/svc", "/r/ui"]);
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
@@ -4640,7 +4640,7 @@ describe("DeckPanel — Address PR", () => {
     h.prReviewAutoFix = true;
     h.runs = [mkRun()];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { prompt: string }[] };
     expect(plan.matches[0].prompt).toContain(PR_REVIEW_AUTOFIX_CLAUSE);
   });
@@ -4657,7 +4657,7 @@ describe("DeckPanel — Address PR", () => {
       repos: [{ name: "svc", path: "/r/svc", branch: "b", dirty: true, ahead: 1, added: 1, removed: 0, files: 1 }],
     }));
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     // A positive assertion that the handler actually ran: without it, deleting
     // addressPr outright would still leave writeRun uncalled, and the test below
     // would pass for the wrong reason.
@@ -4665,14 +4665,14 @@ describe("DeckPanel — Address PR", () => {
     expect(h.writeRun).not.toHaveBeenCalled();
     // The record itself still carries its original launched-at — the whole
     // point of not routing through openWorkspace (which stamps a fresh one).
-    expect(h.runs.find((r) => r.key === "ASM-1")?.createdAt).toBe(1_700_000_000_000);
+    expect(h.runs.find((r) => r.key === "PROJ-1")?.createdAt).toBe(1_700_000_000_000);
   });
 
   it("opens the window but writes no plan when seedAgent is off", async () => {
     h.seedAgent = false;
     h.runs = [mkRun()];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
   });
@@ -4681,10 +4681,10 @@ describe("DeckPanel — Address PR", () => {
     h.runs = [];
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:addressPr", key: "ASM-9" });
+    await p._fire({ type: "deck:addressPr", key: "PROJ-9" });
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(
-      expect.objectContaining({ type: "toast", level: "error", message: "No run record for ASM-9." }),
+      expect.objectContaining({ type: "toast", level: "error", message: "No run record for PROJ-9." }),
     );
   });
 
@@ -4692,10 +4692,10 @@ describe("DeckPanel — Address PR", () => {
     h.runs = [mkRun({ repos: [] })];
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await p._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(
-      expect.objectContaining({ type: "toast", level: "error", message: "Nothing to open for ASM-1." }),
+      expect.objectContaining({ type: "toast", level: "error", message: "Nothing to open for PROJ-1." }),
     );
   });
 
@@ -4704,9 +4704,9 @@ describe("DeckPanel — Address PR", () => {
     h.openInEditor.mockResolvedValueOnce(false);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await p._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(posts(p)).toContainEqual(
-      expect.objectContaining({ type: "toast", level: "error", message: "Couldn't open ASM-1." }),
+      expect.objectContaining({ type: "toast", level: "error", message: "Couldn't open PROJ-1." }),
     );
   });
 
@@ -4720,11 +4720,11 @@ describe("DeckPanel — Address PR", () => {
     h.openInEditor.mockResolvedValue(false);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await p._fire({ type: "deck:addressPr", key: "PROJ-1" });
     const toasts = posts(p).filter((m) => m.type === "toast" && m.level === "error");
     // One toast, not one per failing window — and it names both.
     expect(toasts).toHaveLength(1);
-    expect(toasts[0].message).toBe("Couldn't open ASM-1 (svc, ui).");
+    expect(toasts[0].message).toBe("Couldn't open PROJ-1 (svc, ui).");
   });
 
   it("uses the real Jira key for the prompt and the plan file, not a promoted local card's place-hash", async () => {
@@ -4732,14 +4732,14 @@ describe("DeckPanel — Address PR", () => {
     // inferred Jira key already belongs to another run — kind: "task", so it
     // still reaches the PR-review status and shows the button — but the ticket
     // itself only lives in its url. run.key here is exactly that hash.
-    h.runs = [mkRun({ key: "local-api-1a2b3c4d", url: "https://jira/browse/ASM-7" })];
+    h.runs = [mkRun({ key: "local-api-1a2b3c4d", url: "https://jira/browse/PROJ-7" })];
     show();
     await lastPanel()._fire({ type: "deck:addressPr", key: "local-api-1a2b3c4d" });
     const plan = h.writePlanFile.mock.calls.at(-1)![0] as { key: string; matches: { prompt: string }[] };
     // The mock agentPrompt encodes the ticket key it was given as "[key=...]".
-    expect(plan.matches[0].prompt).toContain("[key=ASM-7 ");
+    expect(plan.matches[0].prompt).toContain("[key=PROJ-7 ");
     expect(plan.matches[0].prompt).not.toContain("local-api-1a2b3c4d");
-    expect(plan.key).toBe("ASM-7");
+    expect(plan.key).toBe("PROJ-7");
   });
 
   it("ignores an addressPr for a local card, even though run(key) can resolve one from localRuns", async () => {
@@ -4747,7 +4747,7 @@ describe("DeckPanel — Address PR", () => {
     // run(key) falls back to the in-memory localRuns map regardless of kind, so
     // the guard has to be enforced here too, not just trusted to the webview.
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show();
     await settled();
     const localKey = builtLocal().run.key;
@@ -4763,7 +4763,7 @@ describe("DeckPanel — Address PR", () => {
     h.runs = [mkRun()];
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await p._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
     expect(posts(p)).toContainEqual(
       expect.objectContaining({ type: "toast", level: "info", message: expect.stringContaining("agentFlow.seedAgent") }),
@@ -4788,13 +4788,13 @@ describe("DeckPanel — seedPrWork", () => {
     h.runs = [mkRun()];
     show();
     await lastPanel()._fire({
-      type: "deck:seedPrWork", key: "ASM-1", reason: "ci", detail: "integration, lint",
+      type: "deck:seedPrWork", key: "PROJ-1", reason: "ci", detail: "integration, lint",
     });
     const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { matchPath: string; prompt: string }[] };
     expect(plan.matches).toEqual([{
       matchPath: "/r/svc",
       prompt: "CI is failing on this PR (integration, lint). Find out why and make it pass.\n\n"
-        + "Assess the PR for {key}.{files} [key=ASM-1 brief=(relative)]",
+        + "Assess the PR for {key}.{files} [key=PROJ-1 brief=(relative)]",
     }]);
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
   });
@@ -4802,15 +4802,15 @@ describe("DeckPanel — seedPrWork", () => {
   it("produces the plain review template for reason: \"review\", byte-identical to deck:addressPr", async () => {
     h.runs = [mkRun()];
     show();
-    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "review" });
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "review" });
     const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { prompt: string }[] };
-    expect(plan.matches[0].prompt).toBe("Assess the PR for {key}.{files} [key=ASM-1 brief=(relative)]");
+    expect(plan.matches[0].prompt).toBe("Assess the PR for {key}.{files} [key=PROJ-1 brief=(relative)]");
   });
 
   it("carries the conflict clause from reason: \"conflict\" into the seeded prompt", async () => {
     h.runs = [mkRun()];
     show();
-    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
     const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { prompt: string }[] };
     expect(plan.matches[0].prompt).toContain(
       "This PR conflicts with its base branch. Rebase it onto the base and resolve the conflicts.",
@@ -4829,7 +4829,7 @@ describe("DeckPanel — PR-work destination", () => {
   const fire = async (reason = "conflict") => {
     h.runs = [mkRun({ briefPaths: ["/r/svc/.pick-task/TASK.md"] })];
     show();
-    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason });
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason });
     return lastPanel();
   };
 
@@ -4838,7 +4838,7 @@ describe("DeckPanel — PR-work destination", () => {
     await fire();
     expect(window.showQuickPick).toHaveBeenCalledWith(
       expect.anything(),
-      expect.objectContaining({ title: "Resolve conflict for ASM-1 — open where?" }),
+      expect.objectContaining({ title: "Resolve conflict for PROJ-1 — open where?" }),
     );
   });
 
@@ -4879,7 +4879,7 @@ describe("DeckPanel — PR-work destination", () => {
     expect(plan()!.matches).toEqual([{ matchPath: "/repos/bite-me", prompt: expect.any(String) }]);
     expect(h.openInEditor).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(expect.objectContaining({
-      type: "toast", message: "Resolve conflict for ASM-1 — seeded in this window.",
+      type: "toast", message: "Resolve conflict for PROJ-1 — seeded in this window.",
     }));
   });
 
@@ -4917,7 +4917,7 @@ describe("DeckPanel — PR-work destination", () => {
       { name: "web", path: "/r/web", isGit: true, branch: "b" },
     ] })];
     show();
-    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
     const items = window.showQuickPick.mock.calls[0][0] as { detail: string }[];
     expect(items[0].detail).toBe("svc, web — one window each");
     expect(plan()!.matches.map((m) => m.matchPath)).toEqual(["/r/svc", "/r/web"]);
@@ -4930,7 +4930,7 @@ describe("DeckPanel — PR-work destination", () => {
       { name: "web", path: "/r/web", isGit: true, branch: "b" },
     ] })];
     show();
-    await lastPanel()._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    await lastPanel()._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
     expect(plan()!.matches).toEqual([{
       matchPath: "/ws/team.code-workspace",
       prompt: expect.stringContaining("brief=/r/svc/.pick-task/TASK.md"),
@@ -4941,10 +4941,10 @@ describe("DeckPanel — PR-work destination", () => {
     h.runs = [mkRun({ repos: [] })];
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    await p._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(expect.objectContaining({
-      type: "toast", level: "error", message: "Nothing to open for ASM-1.",
+      type: "toast", level: "error", message: "Nothing to open for PROJ-1.",
     }));
   });
 });
@@ -5122,7 +5122,7 @@ describe("orchestrator flows", () => {
     const { send } = await openPanel();
     const edited: Flow = {
       ...mkFlow("f1", "n"),
-      nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" }],
+      nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" }],
     };
     await send({ type: "flow:save", flow: edited });
     expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).nodes).toHaveLength(1);
@@ -5184,9 +5184,9 @@ describe("orchestrator flows", () => {
     };
 
     const TASK = {
-      key: "ASM-9", summary: "Ship the migration", status: "", statusCategory: "new" as const, priority: "",
+      key: "PROJ-9", summary: "Ship the migration", status: "", statusCategory: "new" as const, priority: "",
       assignee: "Unassigned", labels: [], components: [], sprint: null, inOpenSprint: false,
-      updated: "", url: "https://jira/browse/ASM-9", estimateSeconds: null,
+      updated: "", url: "https://jira/browse/PROJ-9", estimateSeconds: null,
     };
     const REPO = { name: "aws-ops", path: "/repos/aws-ops", isGit: true };
     // The real default, unset by any test — resolveModes falls back to it with
@@ -5216,7 +5216,7 @@ describe("orchestrator flows", () => {
       const saved = h.writeFlow.mock.calls.at(-1)![2] as Flow;
       expect(saved.nodes).toHaveLength(1);
       expect(saved.nodes[0]).toMatchObject({
-        kind: "planned", join: "any", ticketKey: "ASM-9", repos: ["aws-ops"], mode: MODE.id, dest: "worktree",
+        kind: "planned", join: "any", ticketKey: "PROJ-9", repos: ["aws-ops"], mode: MODE.id, dest: "worktree",
       });
     });
 
@@ -5363,7 +5363,7 @@ describe("orchestrator flows", () => {
       h.flows = [{
         ...mkFlow("f1", "n"),
         nodes: [
-          { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+          { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
           { id: "n2", kind: "notify", x: 24, y: 112, join: "any", message: "hi" },
         ],
       }];
@@ -5544,7 +5544,7 @@ describe("an armed flow advances on refresh", () => {
     ...mkFlow("f1", "Ship the migration"),
     armed: true,
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -5562,10 +5562,10 @@ describe("an armed flow advances on refresh", () => {
     // Warm the resume gate first (Task 4): a first pass that finds nothing
     // ready clears it without ever needing an approval, leaving the very next
     // pass to fire in the ordinary way this test is actually about.
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     const { p, send } = await openPanel();
     await settle();
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     await send({ type: "deck:refresh" });
     const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { flows: Flow[] } | undefined;
     expect(msg?.flows[0]?.edges[0]?.firedAt).toBeTypeOf("number");
@@ -5578,11 +5578,11 @@ describe("an armed flow advances on refresh", () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
     // Warm the resume gate first (Task 4) — see the test above.
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     const { p, send } = await openPanel();
     await settle();
-    // The status the evaluator will see: ASM-1's aws-ops PR is merged.
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    // The status the evaluator will see: PROJ-1's aws-ops PR is merged.
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     await send({ type: "deck:refresh" });
     const written = h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
     expect(written?.edges[0].firedAt).toBeTypeOf("number");
@@ -5597,10 +5597,10 @@ describe("an armed flow advances on refresh", () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
     // Warm the resume gate first (Task 4) — see the test above.
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     const { send } = await openPanel();
     await settle();
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     await send({ type: "deck:refresh" });
     // The store now returns the stamped flow, as it would on disk.
     h.flows = [h.writeFlow.mock.calls.at(-1)![2] as Flow];
@@ -5614,7 +5614,7 @@ describe("an armed flow advances on refresh", () => {
   it("does nothing for a disarmed flow whose condition is met", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow({ armed: false })];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     await openPanel();
     await settle();
     expect(h.writeFlow).not.toHaveBeenCalled();
@@ -5623,7 +5623,7 @@ describe("an armed flow advances on refresh", () => {
   it("does nothing when the setting is off, even for an armed flow", async () => {
     setConfig({ orchestrator: false });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     await openPanel();
     await settle();
     expect(h.writeFlow).not.toHaveBeenCalled();
@@ -5632,7 +5632,7 @@ describe("an armed flow advances on refresh", () => {
   it("does not fire when the condition is not met", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     await openPanel();
     await settle();
     expect(h.writeFlow).not.toHaveBeenCalled();
@@ -5657,11 +5657,11 @@ describe("an armed flow advances on refresh", () => {
     setConfig({ orchestrator: true });
     const withTarget = (kind: "planned" | "notify"): Flow => armedFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         kind === "planned"
           ? {
               id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-              ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+              ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
             }
           : { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
       ],
@@ -5675,10 +5675,10 @@ describe("an armed flow advances on refresh", () => {
     // would pass without ever reaching the perform path it means to guard —
     // nothing is performed for a HELD flow either, gate or no gate, so that
     // would prove nothing about the launch/seed guard specifically.
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     const { p, send } = await openPanel();
     await settle();
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     h.writeFlow.mockClear();
     // Read 1 of the pass is evaluation's own — planned work, so `launch`. Every
     // read after it (the `fresh` copy this pass acts and gates against, the
@@ -5731,10 +5731,10 @@ describe("an armed flow advances on refresh", () => {
     /** Warm the resume gate with an unmet condition, then arm the met one — the
      * same two-pass idiom every firing test in this file uses. */
     const warmed = async () => {
-      h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+      h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
       const opened = await openPanel();
       await settle();
-      h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+      h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
       return opened;
     };
 
@@ -5764,7 +5764,7 @@ describe("an armed flow advances on refresh", () => {
       const twoRules = (): Flow => ({
         ...armedFlow(),
         nodes: [
-          { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+          { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
           { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
           { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "ci went red" },
         ],
@@ -5813,7 +5813,7 @@ describe("an armed flow advances on refresh", () => {
       const twoRules = (over: { e1Fired?: boolean } = {}): Flow => ({
         ...armedFlow(),
         nodes: [
-          { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+          { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
           { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
           { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "also merged" },
         ],
@@ -5850,12 +5850,12 @@ describe("an armed flow advances on refresh", () => {
     h.flows = [brokenFlow, armedFlow()];
     // Warm f1's resume gate first (Task 4) so this test isolates the throwing
     // flow's effect on its sibling, not the resume gate holding f1 anyway.
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     const log = vi.fn();
     DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
     await settled();
     await settle();
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     await lastPanel()._fire({ type: "deck:refresh" });
     await settle();
     expect(log).toHaveBeenCalledWith(expect.stringContaining("bad"));
@@ -5883,10 +5883,10 @@ describe("a met launch rule acts", () => {
     armed: true,
     launchConfirmedAt: 500,
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       {
         id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-        ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
       },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
@@ -5919,10 +5919,10 @@ describe("a met launch rule acts", () => {
   const warmed = async (flows: Flow[], log?: (m: string) => void, warm?: RunStatus) => {
     setConfig({ orchestrator: true });
     h.flows = flows;
-    h.buildRunStatus.mockReturnValue(warm ?? openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(warm ?? openStatus("PROJ-1", "aws-ops"));
     const opened = await openPanel(log);
     await settle();
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     h.writeFlow.mockClear();
     return opened;
   };
@@ -5944,13 +5944,13 @@ describe("a met launch rule acts", () => {
     // The observable effect of a launch, not a mock shape: the launcher was
     // called, and for the ticket the planned node names.
     expect(h.launchPlanned).toHaveBeenCalledTimes(1);
-    expect((h.launchPlanned.mock.calls.at(-1)![0] as { node: { ticketKey: string } }).node.ticketKey).toBe("ASM-12");
+    expect((h.launchPlanned.mock.calls.at(-1)![0] as { node: { ticketKey: string } }).node.ticketKey).toBe("PROJ-12");
     // And it is recorded as the launch it was, so `applyFired`'s stamp agrees
     // with what this pass actually performed.
     const w = lastWrite();
     expect(w.edges[0].firedAt).toBeTypeOf("number");
     expect(w.edges[0].error).toBeUndefined();
-    expect(w.edges[0].firedNote).toContain("ASM-12");
+    expect(w.edges[0].firedNote).toContain("PROJ-12");
   });
 
   // ── the receipt's agent name ────────────────────────────────────────────────
@@ -6016,7 +6016,7 @@ describe("a met launch rule acts", () => {
     const log = vi.fn();
     setConfig({ orchestrator: true });
     h.flows = [launchFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
     await settled();
     h.release.mockClear();
@@ -6109,7 +6109,7 @@ describe("a met launch rule acts", () => {
     const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
     await send({ type: "deck:refresh" });
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
-    expect(call[0]).toContain("ASM-12");
+    expect(call[0]).toContain("PROJ-12");
     expect(call[0]).toContain("aws-ops");
     expect(call[0]).toContain("Implementation"); // the configured mode's label
     expect(call[1]).toMatchObject({ modal: true });
@@ -6159,7 +6159,7 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
     expect(call[0]).toBe(
-      'Ship the migration is ready to launch ASM-12 in aws-ops with the "Implementation" prompt, unattended. It will keep launching and seeding on its own from now on. It will still ask before it runs a shell command.',
+      'Ship the migration is ready to launch PROJ-12 in aws-ops with the "Implementation" prompt, unattended. It will keep launching and seeding on its own from now on. It will still ask before it runs a shell command.',
     );
   });
 
@@ -6175,7 +6175,7 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     const call = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
     expect(call[0]).toBe(
-      'Ship the migration is ready to launch ASM-12 in aws-ops with the "Implementation" prompt, unattended. It will keep launching and seeding on its own from now on. It will still ask before it runs a shell command.',
+      'Ship the migration is ready to launch PROJ-12 in aws-ops with the "Implementation" prompt, unattended. It will keep launching and seeding on its own from now on. It will still ask before it runs a shell command.',
     );
   });
 
@@ -6245,12 +6245,12 @@ describe("a met launch rule acts", () => {
     expect(h.writeFlow).toHaveBeenCalledTimes(1); // a crash between the two is impossible
     const w = lastWrite();
     expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({
-      kind: "place", runKey: "ASM-12", repo: "aws-ops", x: 0, y: 0, join: "any",
+      kind: "place", runKey: "PROJ-12", repo: "aws-ops", x: 0, y: 0, join: "any",
     });
     expect(w.edges[0].firedAt).toBeTypeOf("number");
     expect(w.edges[0].error).toBeUndefined();
-    expect(w.edges[0].firedNote).toContain("ASM-12");
-    expect(posts(p).some((m) => m.type === "toast" && /ASM-12/.test(m.message ?? ""))).toBe(true);
+    expect(w.edges[0].firedNote).toContain("PROJ-12");
+    expect(posts(p).some((m) => m.type === "toast" && /PROJ-12/.test(m.message ?? ""))).toBe(true);
   });
 
   it("does not notify for a successful launch — the opened window already announces it", async () => {
@@ -6268,10 +6268,10 @@ describe("a met launch rule acts", () => {
   it("asks the launcher for the node, the ticket, the repos and the resolved prompt", async () => {
     const { send } = await warmed([launchFlow()]);
     await send({ type: "deck:refresh" });
-    expect(h.getDetail).toHaveBeenCalledWith("ASM-12");
+    expect(h.getDetail).toHaveBeenCalledWith("PROJ-12");
     const req = h.launchPlanned.mock.calls.at(-1)![0] as any;
-    expect(req.node).toMatchObject({ kind: "planned", ticketKey: "ASM-12" });
-    expect(req.detail).toMatchObject({ key: "ASM-12", summary: "do it", descriptionText: "the description" });
+    expect(req.node).toMatchObject({ kind: "planned", ticketKey: "PROJ-12" });
+    expect(req.detail).toMatchObject({ key: "PROJ-12", summary: "do it", descriptionText: "the description" });
     expect(req.repos).toEqual(h.repos);
     // …discovered with the reposRoot as the root and the blocklist as the blocklist.
     // Asserting the ARGUMENTS, not just the return: the mock ignores them, so passing
@@ -6320,7 +6320,7 @@ describe("a met launch rule acts", () => {
     // No toast claims a launch that never happened…
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(false);
     // …but the failure — "Couldn't create a git worktree in aws-ops — not
-    // launching ASM-12" is exactly the class of message that must not die
+    // launching PROJ-12" is exactly the class of message that must not die
     // inside an unfocused panel — reaches the human as a notification too. It
     // goes through showErrorMessage specifically, not showInformationMessage —
     // red is reserved for a rule that tried and actually failed (the same
@@ -6340,10 +6340,10 @@ describe("a met launch rule acts", () => {
     // A user who deleted a mode must not get an agent seeded with someone else's prompt.
     const { send } = await warmed([launchFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         {
           id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "deleted-mode", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "deleted-mode", dest: "worktree",
         },
       ],
     })]);
@@ -6378,7 +6378,7 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned).toHaveBeenCalledTimes(1);
     expect(lastWrite().edges[0].firedAt).toBeTypeOf("number");
-    expect(lastWrite().nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "ASM-12" });
+    expect(lastWrite().nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "PROJ-12" });
   });
 
   it("writes nothing and says nothing when EVERY rule defers", async () => {
@@ -6388,14 +6388,14 @@ describe("a met launch rule acts", () => {
     h.getDetail.mockRejectedValue(new Error("Jira said 503"));
     const { p, send } = await warmed([launchFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         {
           id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
         {
           id: "n3", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-13", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-13", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
       ],
       edges: [
@@ -6417,10 +6417,10 @@ describe("a met launch rule acts", () => {
     h.getDetail.mockRejectedValue(new Error("Jira said 503"));
     const { send } = await warmed([launchFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         {
           id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
         { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
       ],
@@ -6443,19 +6443,19 @@ describe("a met launch rule acts", () => {
     // and nothing to launch, so it must never reach launchPlanned, however its own
     // rule resolves. The full seed behavior (success, and every latch) has its own
     // describe block below, with its own fixtures — a place's run/repo has to be
-    // resolvable against the statuses this pass built, which this file's `ASM-1`
+    // resolvable against the statuses this pass built, which this file's `PROJ-1`
     // fixture (repo "aws-ops" only) does not model for a second place.
     const { send } = await warmed([launchFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
-        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-9", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-9", repo: "aws-ops" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "seed", mode: "implementation" }],
     })]);
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned).not.toHaveBeenCalled();
     expect(h.openWorkspace).not.toHaveBeenCalled();
-    // ASM-9 is not in the statuses this pass built (only ASM-1 is), so this
+    // PROJ-9 is not in the statuses this pass built (only PROJ-1 is), so this
     // particular rule happens to latch on the missing-run guard — proven properly,
     // with its own message assertion, below.
     expect(lastWrite().edges[0].error).toBeTypeOf("string");
@@ -6466,7 +6466,7 @@ describe("a met launch rule acts", () => {
     const { send } = await warmed([launchFlow({
       launchConfirmedAt: undefined,
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -6484,10 +6484,10 @@ describe("a met launch rule acts", () => {
     // worktrees and pay for two sessions on one ticket.
     const { send } = await warmed([launchFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         {
           id: "n2", kind: "planned", x: 0, y: 0, join: "all",
-          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
       ],
       edges: [
@@ -6510,10 +6510,10 @@ describe("a met launch rule acts", () => {
    * user wires "when it lands, start the next ticket". */
   const twoRulesOneTarget = (over: Partial<Flow> = {}): Flow => launchFlow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       {
         id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-        ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
       },
     ],
     edges: [
@@ -6528,7 +6528,7 @@ describe("a met launch rule acts", () => {
     // edge into a non-all target as performing, so acting per edge here would open two
     // worktrees and pay for two sessions on one ticket — and promote the same node
     // twice, the second runKey orphaning the run the first launch actually created.
-    const { p, send } = await warmed([twoRulesOneTarget()], undefined, redStatus("ASM-1", "aws-ops"));
+    const { p, send } = await warmed([twoRulesOneTarget()], undefined, redStatus("PROJ-1", "aws-ops"));
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned).toHaveBeenCalledTimes(1);
     const w = lastWrite();
@@ -6542,9 +6542,9 @@ describe("a met launch rule acts", () => {
     expect(w.edges.find((e) => e.id === "e2")!.firedNote).toBe("another edge into this target already acted");
     expect(w.edges.find((e) => e.id === "e2")!.error).toBeUndefined();
     // Promoted exactly once, to the run the one launch returned.
-    expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "ASM-12" });
+    expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "PROJ-12" });
     // And said out loud once, not twice.
-    expect(posts(p).filter((m) => m.type === "toast" && /launched ASM-12/.test(m.message ?? ""))).toHaveLength(1);
+    expect(posts(p).filter((m) => m.type === "toast" && /launched PROJ-12/.test(m.message ?? ""))).toHaveLength(1);
   });
 
   it("settles a fan-in sibling whose condition never held, instead of leaving it live as a seed", async () => {
@@ -6553,7 +6553,7 @@ describe("a met launch rule acts", () => {
     // stops the false latch, but left live it becomes a `seed` rule, and its own
     // condition coming true later opens an ADDITIONAL paid agent session the user
     // never wrote — under a consent stamped for a launch. In a `join: "any"` fan-in
-    // the sibling means "this is another reason to get ASM-12 running", and ASM-12 is
+    // the sibling means "this is another reason to get PROJ-12 running", and PROJ-12 is
     // running.
     //
     // `review-approved` is never met by this fixture (its PR carries no review), so
@@ -6572,7 +6572,7 @@ describe("a met launch rule acts", () => {
     // Satisfied, with a receipt that says why — visible in the drawer, and Resettable
     // if the user genuinely wanted a seed out of this wire.
     expect(e2.firedAt).toBeTypeOf("number");
-    expect(e2.firedNote).toBe("ASM-12 was already launched by another rule");
+    expect(e2.firedNote).toBe("PROJ-12 was already launched by another rule");
     // It ran nothing, so it must not read as a performer…
     expect(e2.performed).toBeUndefined();
     // …and nothing failed, so it is not an error either.
@@ -6592,7 +6592,7 @@ describe("a met launch rule acts", () => {
     // that would spend exactly what the defer avoided. Nothing about this target is
     // stamped either, so the next pass retries the target as a whole.
     h.getDetail.mockRejectedValue(new Error("Jira said 503"));
-    const { p, send } = await warmed([twoRulesOneTarget()], undefined, redStatus("ASM-1", "aws-ops"));
+    const { p, send } = await warmed([twoRulesOneTarget()], undefined, redStatus("PROJ-1", "aws-ops"));
     const toastsBefore = toastCount(p);
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned).not.toHaveBeenCalled();
@@ -6610,7 +6610,7 @@ describe("a met launch rule acts", () => {
     // node that is already a place — which the next pass then latches as "must point
     // at planned work".
     h.getDetail.mockImplementation(async (key: string) => {
-      if (key === "ASM-12") throw new Error("Jira said 503");
+      if (key === "PROJ-12") throw new Error("Jira said 503");
       return {
         key, summary: "do it", url: `https://jira/browse/${key}`, descriptionText: "the description",
         labels: [], components: [], status: null, statusCategory: null,
@@ -6618,14 +6618,14 @@ describe("a met launch rule acts", () => {
     });
     const { p, send } = await warmed([launchFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         {
           id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
         {
           id: "n3", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-13", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-13", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
       ],
       edges: [
@@ -6637,13 +6637,13 @@ describe("a met launch rule acts", () => {
     const w = lastWrite();
     // The one that worked: stamped, promoted, announced.
     expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeTypeOf("number");
-    expect(w.nodes.find((n) => n.id === "n3")).toMatchObject({ kind: "place", runKey: "ASM-13" });
-    expect(posts(p).some((m) => m.type === "toast" && /launched ASM-13/.test(m.message ?? ""))).toBe(true);
+    expect(w.nodes.find((n) => n.id === "n3")).toMatchObject({ kind: "place", runKey: "PROJ-13" });
+    expect(posts(p).some((m) => m.type === "toast" && /launched PROJ-13/.test(m.message ?? ""))).toBe(true);
     // The one that deferred: untouched in every respect.
     expect(w.edges.find((e) => e.id === "e1")!.firedAt).toBeUndefined();
     expect(w.edges.find((e) => e.id === "e1")!.error).toBeUndefined();
     expect(w.nodes.find((n) => n.id === "n2")!.kind).toBe("planned");
-    expect(posts(p).some((m) => m.type === "toast" && /ASM-12/.test(m.message ?? ""))).toBe(false);
+    expect(posts(p).some((m) => m.type === "toast" && /PROJ-12/.test(m.message ?? ""))).toBe(false);
   });
 
   it("still launches at most three per pass, and the rest on the next one", async () => {
@@ -6652,10 +6652,10 @@ describe("a met launch rule acts", () => {
     const many = (): Flow => ({
       ...launchFlow(),
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         ...[1, 2, 3, 4, 5].map((i) => ({
           id: `p${i}`, kind: "planned" as const, x: 0, y: 0, join: "any" as const,
-          ticketKey: `ASM-2${i}`, repos: ["aws-ops"], mode: "implementation", dest: "worktree" as const,
+          ticketKey: `PROJ-2${i}`, repos: ["aws-ops"], mode: "implementation", dest: "worktree" as const,
         })),
       ],
       edges: [1, 2, 3, 4, 5].map((i) => ({
@@ -6666,14 +6666,14 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned).toHaveBeenCalledTimes(3);
     const keys = h.launchPlanned.mock.calls.map((c) => (c[0] as any).node.ticketKey);
-    expect(keys).toEqual(["ASM-21", "ASM-22", "ASM-23"]);
+    expect(keys).toEqual(["PROJ-21", "PROJ-22", "PROJ-23"]);
     // Each promoted to its own run, not all collapsed onto one.
     const w = lastWrite();
     expect(w.nodes.filter((n) => n.kind === "place").map((n: any) => n.runKey))
-      .toEqual(["ASM-1", "ASM-21", "ASM-22", "ASM-23"]);
+      .toEqual(["PROJ-1", "PROJ-21", "PROJ-22", "PROJ-23"]);
     h.launchPlanned.mockClear();
     await send({ type: "deck:refresh" });
-    expect(h.launchPlanned.mock.calls.map((c) => (c[0] as any).node.ticketKey)).toEqual(["ASM-24", "ASM-25"]);
+    expect(h.launchPlanned.mock.calls.map((c) => (c[0] as any).node.ticketKey)).toEqual(["PROJ-24", "PROJ-25"]);
   });
 
   it("stops a later acting edge in the same pass once the flow is disarmed mid-pass", async () => {
@@ -6684,10 +6684,10 @@ describe("a met launch rule acts", () => {
     const many = (): Flow => ({
       ...launchFlow(),
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         ...[1, 2, 3].map((i) => ({
           id: `p${i}`, kind: "planned" as const, x: 0, y: 0, join: "any" as const,
-          ticketKey: `ASM-2${i}`, repos: ["aws-ops"], mode: "implementation", dest: "worktree" as const,
+          ticketKey: `PROJ-2${i}`, repos: ["aws-ops"], mode: "implementation", dest: "worktree" as const,
         })),
       ],
       edges: [1, 2, 3].map((i) => ({
@@ -6781,8 +6781,8 @@ describe("a met launch rule acts", () => {
   it("chains a promotion into the next hop: pass 2 sees the new place and fires out of it", async () => {
     // The phase's headline behavior, end to end rather than in its two separate,
     // already-unit-tested halves (a launch promotes its target; a place-node
-    // condition evaluates against a run). "ASM-1 merged -> launch ASM-12 ->
-    // ASM-12 merged -> notify" is the design doc's own worked example for why
+    // condition evaluates against a run). "PROJ-1 merged -> launch PROJ-12 ->
+    // PROJ-12 merged -> notify" is the design doc's own worked example for why
     // the planned-to-place rewrite exists at all — nothing here proves the chain
     // actually completes across two real passes.
     const chain = (): Flow => ({
@@ -6790,10 +6790,10 @@ describe("a met launch rule acts", () => {
       armed: true,
       launchConfirmedAt: 500,
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         {
           id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
         { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "chain complete" },
       ],
@@ -6807,7 +6807,7 @@ describe("a met launch rule acts", () => {
     // e1 fired: n2 is now a place, bound to the run the launch returned.
     let w = lastWrite();
     expect(w.edges.find((e) => e.id === "e1")!.firedAt).toBeTypeOf("number");
-    expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "ASM-12" });
+    expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "PROJ-12" });
     // e2 has NOT fired — n2 was still planned work when THIS pass evaluated, so
     // there was no run for its condition to read yet.
     expect(w.edges.find((e) => e.id === "e2")!.firedAt).toBeUndefined();
@@ -6815,9 +6815,9 @@ describe("a met launch rule acts", () => {
     // The run a real launch's `writeRun` would have recorded now exists —
     // `launchPlanned` is mocked here, so this is that record's stand-in — and its
     // PR is already merged.
-    h.runs.push(mkRun({ key: "ASM-12", repos: [{ name: "aws-ops", path: "/r/aws-ops", isGit: true, branch: "b" }] }));
+    h.runs.push(mkRun({ key: "PROJ-12", repos: [{ name: "aws-ops", path: "/r/aws-ops", isGit: true, branch: "b" }] }));
     h.buildRunStatus.mockImplementation((i: { run: Run }) =>
-      (i.run.key === "ASM-12" ? mergedStatus("ASM-12", "aws-ops") : mergedStatus("ASM-1", "aws-ops")));
+      (i.run.key === "PROJ-12" ? mergedStatus("PROJ-12", "aws-ops") : mergedStatus("PROJ-1", "aws-ops")));
     h.writeFlow.mockClear();
     await send({ type: "deck:refresh" });
     w = lastWrite();
@@ -6850,12 +6850,12 @@ describe("an edge whose target changes kind between evaluation and the write", (
     armed: true,
     launchConfirmedAt: 500,
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       target === "notify"
         ? { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "it happened" }
         : {
             id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-            ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+            ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
           },
     ],
     // No stored `action`: the record's mirror decides nothing, and a fixture
@@ -6869,13 +6869,13 @@ describe("an edge whose target changes kind between evaluation and the write", (
   const warmed = async (first: Flow) => {
     setConfig({ orchestrator: true });
     h.flows = [first];
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     show();
     await settled();
     const p = lastPanel();
     const send = async (m: unknown) => { await p._fire(m); await settled(); };
     await settle();
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     h.writeFlow.mockClear();
     return { p, send };
   };
@@ -6972,7 +6972,7 @@ describe("a met seed rule acts", () => {
    * only ever narrow it to one entry each. */
   const seedRunStatus = (prState: "OPEN" | "MERGED"): RunStatus => ({
     run: {
-      key: "ASM-1", summary: "ship the migration", url: "https://jira/ASM-1", createdAt: 1, mode: "multiroot",
+      key: "PROJ-1", summary: "ship the migration", url: "https://jira/PROJ-1", createdAt: 1, mode: "multiroot",
       repos: [
         { name: "aws-ops", path: "/r/aws-ops", isGit: true },
         { name: "bite-me", path: "/r/bite-me", isGit: true },
@@ -6998,7 +6998,7 @@ describe("a met seed rule acts", () => {
   });
 
   /** A place watching `aws-ops`, wired to seed another agent into `bite-me` — both
-   * places belong to the same run, `ASM-1`. `launchConfirmedAt` is set by default,
+   * places belong to the same run, `PROJ-1`. `launchConfirmedAt` is set by default,
    * exactly as `launchFlow` does above: most cases here are about what an
    * already-approved flow does, and the first-spend question has its own cases in
    * "the resume gate"/gate-widening tests below. */
@@ -7007,8 +7007,8 @@ describe("a met seed rule acts", () => {
     armed: true,
     launchConfirmedAt: 500,
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
-      { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "bite-me" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "bite-me" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "seed", mode: "implementation" }],
     ...over,
@@ -7037,9 +7037,9 @@ describe("a met seed rule acts", () => {
    * `seed` can find no place to seed. */
   const seedFlowTargeting = (kind: "place" | "notify", over: Partial<Flow> = {}): Flow => seedFlow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       kind === "place"
-        ? { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "bite-me" }
+        ? { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "bite-me" }
         : { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "not a place" },
     ],
     ...over,
@@ -7076,7 +7076,7 @@ describe("a met seed rule acts", () => {
     expect(w.edges[0].firedNote).toContain("bite-me");
     // The place already existed — nothing was promoted, and the node is
     // byte-identical to what it was before this pass.
-    expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "ASM-1", repo: "bite-me" });
+    expect(w.nodes.find((n) => n.id === "n2")).toMatchObject({ kind: "place", runKey: "PROJ-1", repo: "bite-me" });
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success" && /bite-me/.test(m.message ?? ""))).toBe(true);
   });
 
@@ -7147,14 +7147,14 @@ describe("a met seed rule acts", () => {
   it("latches when the place's run is no longer on the board, naming the run", async () => {
     const { send } = await warmed([seedFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
-        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-GONE", repo: "bite-me" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-GONE", repo: "bite-me" },
       ],
     })]);
     await send({ type: "deck:refresh" });
     expect(h.openWorkspace).not.toHaveBeenCalled();
     const w = lastWrite();
-    expect(w.edges[0].error).toContain("ASM-GONE");
+    expect(w.edges[0].error).toContain("PROJ-GONE");
     expect(w.edges[0].firedAt).toBeUndefined();
     // Deterministic, so it is not retried on the next pass either.
     h.openWorkspace.mockClear();
@@ -7165,8 +7165,8 @@ describe("a met seed rule acts", () => {
   it("latches when the place's repo is no longer one of that run's repos, naming the repo", async () => {
     const { send } = await warmed([seedFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
-        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "not-in-this-run" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "not-in-this-run" },
       ],
     })]);
     await send({ type: "deck:refresh" });
@@ -7436,7 +7436,7 @@ describe("a met run rule acts", () => {
    * gate rather than about running a command. */
   const runStatus = (prState: "OPEN" | "MERGED", ciGreen = true): RunStatus => ({
     run: {
-      key: "ASM-1", summary: "ship the migration", url: "https://jira/ASM-1", createdAt: 1, mode: "multiroot",
+      key: "PROJ-1", summary: "ship the migration", url: "https://jira/PROJ-1", createdAt: 1, mode: "multiroot",
       repos: [
         { name: "aws-ops", path: "/r/aws-ops", isGit: true },
         { name: "bite-me", path: "/r/bite-me", isGit: true },
@@ -7476,7 +7476,7 @@ describe("a met run rule acts", () => {
     launchConfirmedAt: 500,
     commandConfirmedAt: 500,
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run" }],
@@ -7488,7 +7488,7 @@ describe("a met run rule acts", () => {
    * here vary only it. */
   const withCommandNode = (node: Partial<CommandNode>, over: Partial<Flow> = {}): Flow => cmdFlow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       { id: "n2", kind: "command", x: 0, y: 0, join: "any", ...node },
     ],
     ...over,
@@ -7550,7 +7550,7 @@ describe("a met run rule acts", () => {
     // unreachable in `performEdge`.
     const { send } = await warmed([cmdFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n2", kind: "webhook", x: 0, y: 0, join: "any" } as unknown as FlowNode,
       ],
     })]);
@@ -7574,7 +7574,7 @@ describe("a met run rule acts", () => {
   it("splices the rule's note into the command at {note}", async () => {
     const { send } = await warmed([cmdFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh --env={note}" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run", note: "staging" }],
@@ -7762,7 +7762,7 @@ describe("a met run rule acts", () => {
     const { send } = await warmed([cmdFlow({
       commandConfirmedAt: undefined,
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh --env={note}" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run", note: "prod" }],
@@ -7867,10 +7867,10 @@ describe("a met run rule acts", () => {
       launchConfirmedAt: undefined,
       commandConfirmedAt: 500,
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         {
           id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
@@ -7886,10 +7886,10 @@ describe("a met run rule acts", () => {
       launchConfirmedAt: undefined,
       commandConfirmedAt: undefined,
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         {
           id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
@@ -7907,10 +7907,10 @@ describe("a met run rule acts", () => {
       launchConfirmedAt: undefined,
       commandConfirmedAt: 500,
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         {
           id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
@@ -7969,7 +7969,7 @@ describe("a met run rule acts", () => {
     const asCommand = () => cmdFlow();
     const asNotify = () => cmdFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "not a command" },
       ],
     });
@@ -7988,7 +7988,7 @@ describe("a met run rule acts", () => {
    * pass stamps nothing until both are done. */
   const twoCommandFlow = (): Flow => cmdFlow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
       { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh staging" },
     ],
@@ -8059,7 +8059,7 @@ describe("a met run rule acts", () => {
       id: "f2",
       name: "Second flow",
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -8092,7 +8092,7 @@ describe("a met run rule acts", () => {
       name: "Second flow",
       commandConfirmedAt: undefined,
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "publish.sh" },
       ],
     };
@@ -8118,7 +8118,7 @@ describe("a met run rule acts", () => {
     h.renew.mockReturnValue(false);
     const { send } = await warmed([cmdFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
         { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "deployed" },
       ],
@@ -8208,7 +8208,7 @@ describe("a met run rule acts", () => {
    * into — and the second command's source is a command node, not a place. */
   const chainedFlow = (): Flow => cmdFlow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
       { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh staging" },
     ],
@@ -8268,8 +8268,8 @@ describe("a met run rule acts", () => {
         // FIRST in flow order, and the branch that never fires: this fixture's run
         // carries `bite-me` as a second checkout with no pull request of its own, so
         // no place-shaped condition on it is ever met.
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "bite-me" },
-        { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "bite-me" },
+        { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
         { id: "n4", kind: "command", x: 0, y: 88, join: "any", run: "smoke.sh staging" },
       ],
@@ -8342,7 +8342,7 @@ describe("a met run rule acts", () => {
     // deferring on it is the invisible forever-loop this fix removes.
     const chainRootGone = (): Flow => cmdFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-GONE", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-GONE", repo: "aws-ops" },
         { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
         { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh staging" },
       ],
@@ -8366,7 +8366,7 @@ describe("a met run rule acts", () => {
     expect(h.exec).not.toHaveBeenCalled();
     const e = lastWrite().edges[1];
     expect(e.firedAt).toBeUndefined();
-    expect(e.error).toContain("ASM-GONE");
+    expect(e.error).toContain("PROJ-GONE");
     expect(e.error).toContain("cwdRepo");
   });
 
@@ -8378,7 +8378,7 @@ describe("a met run rule acts", () => {
     const lines: string[] = [];
     const moved = () => cmdFlow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "gone-repo" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "gone-repo" },
         { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
       ],
     });
@@ -8389,7 +8389,7 @@ describe("a met run rule acts", () => {
     expect(h.exec).not.toHaveBeenCalled();
     // No stamp of any kind, so a corrected flow retries cleanly.
     expect(h.writeFlow).not.toHaveBeenCalled();
-    expect(lines.some((l) => /deferred — gone-repo is not among run ASM-1's repos/.test(l))).toBe(true);
+    expect(lines.some((l) => /deferred — gone-repo is not among run PROJ-1's repos/.test(l))).toBe(true);
   });
 });
 
@@ -8409,7 +8409,7 @@ describe("the resume gate", () => {
     ...mkFlow("f1", "Ship the migration"),
     armed: true,
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -8424,7 +8424,7 @@ describe("the resume gate", () => {
   it("does not act on the first pass — it reports what is ready", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { p } = await openPanel();
     await settle();
     expect(h.writeFlow).not.toHaveBeenCalled();
@@ -8448,12 +8448,12 @@ describe("the resume gate", () => {
         armedFlow().nodes[0],
         {
           id: "n2", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
     }];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { p } = await openPanel();
     await settle();
     expect(lastFlowsPost(p).pendingResume).toEqual([
@@ -8464,7 +8464,7 @@ describe("the resume gate", () => {
   it("fires on the pass after approval", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { send } = await openPanel();
     await settle();
     await send({ type: "flow:resumeApprove", id: "f1" });
@@ -8475,7 +8475,7 @@ describe("the resume gate", () => {
   it("disarms instead, if that is what you choose", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { send } = await openPanel();
     await settle();
     await send({ type: "flow:resumeDisarm", id: "f1" });
@@ -8492,7 +8492,7 @@ describe("the resume gate", () => {
   it("holds the gate across several passes until you answer", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { send } = await openPanel();
     await settle();
     // Three genuine, separate polls — not three microtask drains of the same
@@ -8506,7 +8506,7 @@ describe("the resume gate", () => {
   it("does not gate a flow with nothing ready — there is nothing to approve", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     const { p } = await openPanel();
     await settle();
     expect(lastFlowsPost(p).pendingResume).toEqual([]);
@@ -8516,10 +8516,10 @@ describe("the resume gate", () => {
     // The gate protects the moment you come back, not every future firing.
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     const { send } = await openPanel();
     await settle();
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     // A real second pass: the brief's own bare `await settle()` here never asks
     // the panel for one (nothing here advances its real 6s timer), so
     // `h.writeFlow.mock.calls.at(-1)` would still be the FIRST pass's call — or,
@@ -8532,7 +8532,7 @@ describe("the resume gate", () => {
   it("ignores an approval for an id it is not holding", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { p, send } = await openPanel();
     await settle();
     const loadsBefore = posts(p).filter((m) => m.type === "deck:loading").length;
@@ -8551,7 +8551,7 @@ describe("the resume gate", () => {
   it("flow:resumeDisarm ignores an id that is not in the store", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { send } = await openPanel();
     await settle();
     await send({ type: "flow:resumeDisarm", id: "nope" });
@@ -8694,12 +8694,12 @@ describe("arm, disarm and reset", () => {
       ...mkFlow("f1", "n"),
       armed: true,
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "done" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
     }];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { p, send } = await openPanel();
     await settle();
     const held = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { pendingResume: unknown[] };
@@ -8769,7 +8769,7 @@ describe("arm, disarm and reset", () => {
       ...mkFlow("f1", "n"),
       commandConfirmedAt: 1,
       nodes: [
-        { id: "a", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "a", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "z", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh --env={note}" },
       ],
       edges: [{
@@ -8819,10 +8819,10 @@ describe("arm, disarm and reset", () => {
     h.flows = [{
       ...mkFlow("f1", "n"),
       nodes: [
-        { id: "a", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "a", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         {
           id: "z", kind: "planned", x: 0, y: 0, join: "any",
-          ticketKey: "ASM-2", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+          ticketKey: "PROJ-2", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
         },
       ],
       // A `notify` pointing at planned work: the ordinary leftover shape, since
@@ -8864,7 +8864,7 @@ describe("arm, disarm and reset", () => {
     }];
     const stale: Flow = {
       ...mkFlow("f1", "n"),
-      nodes: [{ id: "n1", kind: "place", x: 99, y: 99, join: "any", runKey: "ASM-1", repo: "r" }],
+      nodes: [{ id: "n1", kind: "place", x: 99, y: 99, join: "any", runKey: "PROJ-1", repo: "r" }],
       edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify" }],
     };
     const { send } = await openPanel();
@@ -8930,7 +8930,7 @@ describe("arm, disarm and reset", () => {
     const stale: Flow = {
       ...mkFlow("f1", "n"),
       armed: true,
-      nodes: [{ id: "n1", kind: "place", x: 12, y: 12, join: "any", runKey: "ASM-1", repo: "r" }],
+      nodes: [{ id: "n1", kind: "place", x: 12, y: 12, join: "any", runKey: "PROJ-1", repo: "r" }],
     };
     const { send } = await openPanel();
     await send({ type: "flow:save", flow: stale });
@@ -8950,7 +8950,7 @@ describe("arm, disarm and reset", () => {
     setConfig({ orchestrator: true });
     h.flows = [{ ...mkFlow("f1", "n"), launchConfirmedAt: 111, commandConfirmedAt: 222 }];
     const { send } = await openPanel();
-    await send({ type: "flow:save", flow: { ...mkFlow("f1", "n"), nodes: [{ id: "n1", kind: "place", x: 3, y: 4, join: "any", runKey: "ASM-1", repo: "r" }] } });
+    await send({ type: "flow:save", flow: { ...mkFlow("f1", "n"), nodes: [{ id: "n1", kind: "place", x: 3, y: 4, join: "any", runKey: "PROJ-1", repo: "r" }] } });
     const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
     expect(w.launchConfirmedAt).toBe(111);
     expect(w.commandConfirmedAt).toBe(222);
@@ -8989,13 +8989,13 @@ describe("arm, disarm and reset", () => {
     const shape: Flow = {
       ...mkFlow("f1", "Ship the migration"),
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
         { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
     };
     h.flows = [{ ...shape, armed: true }];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { send } = await openPanel();
     await settle();
     await send({ type: "flow:resumeDisarm", id: "f1" });
@@ -9017,7 +9017,7 @@ describe("arm, disarm and reset", () => {
     const stale: Flow = {
       ...mkFlow("f1", "clobbered"),
       createdAt: 9_999,
-      nodes: [{ id: "n1", kind: "place", x: 48, y: 48, join: "any", runKey: "ASM-1", repo: "r" }],
+      nodes: [{ id: "n1", kind: "place", x: 48, y: 48, join: "any", runKey: "PROJ-1", repo: "r" }],
     };
     const { send } = await openPanel();
     await send({ type: "flow:save", flow: stale });
@@ -9037,7 +9037,7 @@ describe("arm, disarm and reset", () => {
     h.flows = [{ ...mkFlow("f1", "Ship the migration"), launchConfirmedAt: 500 }];
     const stale: Flow = {
       ...mkFlow("f1", "Ship the migration"),
-      nodes: [{ id: "n1", kind: "place", x: 48, y: 48, join: "any", runKey: "ASM-1", repo: "r" }],
+      nodes: [{ id: "n1", kind: "place", x: 48, y: 48, join: "any", runKey: "PROJ-1", repo: "r" }],
     };
     const { send } = await openPanel();
     await send({ type: "flow:save", flow: stale });
@@ -9168,7 +9168,7 @@ describe("the poll and the close confirmation", () => {
   // the private `sweepTargets`/`sweepUsage` methods.
   it("keeps the usage sweep covering a local run, not just tracked ones", async () => {
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     const { p } = await openPanel();
     // The panel's construction already ran one sweep (before this local card
     // existed) and one buildAll (which just minted it) — from here, only the
@@ -9256,7 +9256,7 @@ describe("branch-CI verdicts for an armed flow", () => {
     ...mkFlow("f1", "Deploy to staging"),
     armed: true,
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: REPO },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: REPO },
       ...edges.map((e) => ({ id: e.to, kind: "notify" as const, x: 0, y: 0, join: "any" as const, message: `${e.id} fired` })),
     ],
     edges,
@@ -9270,7 +9270,7 @@ describe("branch-CI verdicts for an armed flow", () => {
   const passes = async (n: number, statuses?: () => void) => {
     setConfig({ orchestrator: true });
     if (statuses) statuses();
-    else h.buildRunStatus.mockReturnValue(openStatus("ASM-1", REPO));
+    else h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", REPO));
     const log = vi.fn();
     DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
     await settled();
@@ -9463,7 +9463,7 @@ describe("branch-CI verdicts for an armed flow", () => {
       ...mkFlow("f1", "Deploy to staging"),
       armed: true,
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: REPO },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: REPO },
         { id: "z", kind: "notify", x: 0, y: 0, join: "all", message: "shipped" },
       ],
       edges: [
@@ -9487,7 +9487,7 @@ describe("branch-CI verdicts for an armed flow", () => {
 
     // Now the sibling arrives. A retained green verdict would close the junction
     // here; a dropped one cannot.
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", REPO));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", REPO));
     await poll(3);
     expect(firedIds()).toEqual([]);
 
@@ -9506,13 +9506,13 @@ describe("branch-CI verdicts for an armed flow", () => {
     // worktree's PATH, so a board with two tasks on one repo has two `aws-ops`
     // entries. They share a remote, so either answers; refusing here would make this
     // condition unusable in the setup this product creates constantly.
-    h.runs = [mkRun(), mkRun({ key: "ASM-2" })];
+    h.runs = [mkRun(), mkRun({ key: "PROJ-2" })];
     h.flows = [branchFlow(branchRule("e1", "master"))];
     await passes(3, () => {
       h.buildRunStatus.mockImplementation((i: { run: Run }) =>
-        i.run.key === "ASM-2"
-          ? atPath(openStatus("ASM-2", REPO), `/r/${REPO}/.claude/worktrees/ASM-2`)
-          : openStatus("ASM-1", REPO));
+        i.run.key === "PROJ-2"
+          ? atPath(openStatus("PROJ-2", REPO), `/r/${REPO}/.claude/worktrees/PROJ-2`)
+          : openStatus("PROJ-1", REPO));
     });
     expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(1);
     expect(firedIds()).toEqual(["e1"]);
@@ -9523,13 +9523,13 @@ describe("branch-CI verdicts for an armed flow", () => {
     // in, so ~/work/api and ~/repos/api both present as "api". Answering a deploy gate
     // from the wrong remote — a fork's green master opening the gate for upstream — is
     // the mistake this condition's whole posture exists to prevent, so it refuses.
-    h.runs = [mkRun(), mkRun({ key: "ASM-2" })];
+    h.runs = [mkRun(), mkRun({ key: "PROJ-2" })];
     h.flows = [branchFlow(branchRule("e1", "master"))];
     const { log } = await passes(4, () => {
       h.buildRunStatus.mockImplementation((i: { run: Run }) =>
-        i.run.key === "ASM-2"
-          ? atPath(openStatus("ASM-2", REPO), `/elsewhere/${REPO}`)
-          : openStatus("ASM-1", REPO));
+        i.run.key === "PROJ-2"
+          ? atPath(openStatus("PROJ-2", REPO), `/elsewhere/${REPO}`)
+          : openStatus("PROJ-1", REPO));
     });
     expect(h.ghRun.mock.calls.filter((c) => c[1].includes("graphql"))).toHaveLength(0);
     expect(firedIds()).toEqual([]);
@@ -9634,15 +9634,15 @@ describe("DeckPanel review destination", () => {
 
   it("offers the windows already open, and focuses the one picked", async () => {
     setConfig({ reviewOpenIn: "ask" });
-    h.liveWindows = [{ identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1 }];
+    h.liveWindows = [{ identity: "/repos/webapp", kind: "folder", label: "webapp", folders: 1 }];
     window.showQuickPick.mockImplementationOnce(async (items: unknown) => {
-      const row = (items as { label: string }[]).find((i) => i.label.includes("centaur"));
+      const row = (items as { label: string }[]).find((i) => i.label.includes("webapp"));
       expect(row).toBeTruthy();
       return row;
     });
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
-    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "new", existingFolder: "/repos/centaur" });
+    expect(launched()?.openTarget).toEqual({ mode: "per-window", openIn: "new", existingFolder: "/repos/webapp" });
   });
 
   it("says where the session landed when no window opened", async () => {
@@ -9696,7 +9696,7 @@ describe("latestCandidates", () => {
     // above cannot tell apart from this. A local card has no run record to
     // hold a mocked status by key, so the stub keys off `run.kind` instead.
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     h.buildRunStatus.mockReset().mockImplementation(
       (i: { run: Run; ticket: { category: string | null } | null }) =>
         i.run.kind === "local"
@@ -9724,14 +9724,14 @@ describe("latestCandidates", () => {
       mergeable: "clean", ciAdvisory: false,
     };
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     h.buildRunStatus.mockReset().mockImplementation(
       (i: { run: Run; ticket: { category: string | null } | null }) =>
         i.run.kind === "local"
           ? {
               ...statusFor(i.run, i.ticket?.category ?? null),
               agent: { state: "needs-you" as const, lastActivityMs: null, slug: null },
-              prs: { centaur: { facts, fetchedAt: Date.now() } },
+              prs: { webapp: { facts, fetchedAt: Date.now() } },
             }
           : statusFor(i.run, i.ticket?.category ?? null),
     );
@@ -9740,7 +9740,7 @@ describe("latestCandidates", () => {
     const published = DeckPanel.latestCandidates();
     expect(published?.candidates.length).toBe(1);
     const [local] = published!.candidates;
-    expect(local.prs.centaur?.facts?.state).toBe("MERGED");
+    expect(local.prs.webapp?.facts?.state).toBe("MERGED");
     expect(attentionKeys(published!.candidates)).toEqual([]);
   });
 });
@@ -9774,15 +9774,15 @@ describe("latestCandidates: the tracked half", () => {
     // literal drops the key from attentionKeys as well as failing the field
     // assertion.
     h.inflightShowAll = false;
-    h.runs = [mkRun({ key: "ASM-7", createdAt: Date.now() - 60 * 60_000 })];
+    h.runs = [mkRun({ key: "PROJ-7", createdAt: Date.now() - 60 * 60_000 })];
     h.openSessions = [];
     needsYou([dirtyRepo()]);
     show(true);
     await settled();
     const published = DeckPanel.latestCandidates();
-    expect(published!.candidates.map((c) => c.key)).toContain("ASM-7");
-    expect(attentionKeys(published!.candidates)).toContain("ASM-7");
-    const c = published!.candidates.find((x) => x.key === "ASM-7")!;
+    expect(published!.candidates.map((c) => c.key)).toContain("PROJ-7");
+    expect(attentionKeys(published!.candidates)).toContain("PROJ-7");
+    const c = published!.candidates.find((x) => x.key === "PROJ-7")!;
     expect({ hasWorkToLose: c.hasWorkToLose, justLaunched: c.justLaunched, showAll: c.showAll })
       .toEqual({ hasWorkToLose: true, justLaunched: false, showAll: false });
     expect(c.agentState).toBe("needs-you");
@@ -9792,50 +9792,50 @@ describe("latestCandidates: the tracked half", () => {
     // The other direction of the same pair: a clean, brand-new run is on the
     // board on the strength of `justLaunched` alone.
     h.inflightShowAll = false;
-    h.runs = [mkRun({ key: "ASM-8", createdAt: Date.now() })];
+    h.runs = [mkRun({ key: "PROJ-8", createdAt: Date.now() })];
     h.openSessions = [];
     needsYou([dirtyRepo({ dirty: false, added: 0, files: 0 })]);
     show(true);
     await settled();
-    const c = DeckPanel.latestCandidates()!.candidates.find((x) => x.key === "ASM-8")!;
+    const c = DeckPanel.latestCandidates()!.candidates.find((x) => x.key === "PROJ-8")!;
     expect({ hasWorkToLose: c.hasWorkToLose, justLaunched: c.justLaunched })
       .toEqual({ hasWorkToLose: false, justLaunched: true });
-    expect(attentionKeys([c])).toEqual(["ASM-8"]);
+    expect(attentionKeys([c])).toEqual(["PROJ-8"]);
   });
 
   it("passes agentFlow.inflightShowAll through to the tracked candidate", async () => {
     // `h.inflightShowAll`, not setConfig: this suite's getConfig mock reads the
     // flag off the harness (see its `inflightShowAll: h.inflightShowAll`).
     h.inflightShowAll = true;
-    h.runs = [mkRun({ key: "ASM-9", createdAt: Date.now() - 60 * 60_000 })];
+    h.runs = [mkRun({ key: "PROJ-9", createdAt: Date.now() - 60 * 60_000 })];
     h.openSessions = [];
     needsYou([dirtyRepo({ dirty: false, added: 0, files: 0 })]);
     show(true);
     await settled();
-    expect(DeckPanel.latestCandidates()!.candidates.find((x) => x.key === "ASM-9")!.showAll).toBe(true);
+    expect(DeckPanel.latestCandidates()!.candidates.find((x) => x.key === "PROJ-9")!.showAll).toBe(true);
   });
 
   it("labels a tracked run with its ticket key, which is what the toast says", async () => {
     // `label ?? key` in attentionJob.ts: a task run's key IS its ticket key, so
-    // this label leaves the released wording ("ASM-7 is waiting on you")
+    // this label leaves the released wording ("PROJ-7 is waiting on you")
     // untouched — the field exists for the keys that are hashes.
-    h.runs = [mkRun({ key: "ASM-7", summary: "isolate the renew queue", createdAt: Date.now() - 60 * 60_000 })];
+    h.runs = [mkRun({ key: "PROJ-7", summary: "isolate the renew queue", createdAt: Date.now() - 60 * 60_000 })];
     h.openSessions = [];
     needsYou([dirtyRepo()]);
     show(true);
     await settled();
-    expect(DeckPanel.latestCandidates()!.candidates.find((x) => x.key === "ASM-7")!.label).toBe("ASM-7");
+    expect(DeckPanel.latestCandidates()!.candidates.find((x) => x.key === "PROJ-7")!.label).toBe("PROJ-7");
   });
 
   it("labels a local card with a name, never with localKey's hash", async () => {
     // The toast a first-time user of the setting actually sees. Without the
-    // label it read "local-centaur-<sha1> is waiting on you". This fixture's
+    // label it read "local-webapp-<sha1> is waiting on you". This fixture's
     // place is on a branch the fake connector infers a ticket from, so the name
     // is that ticket key — the same rule the tracked half follows. A place whose
     // branch names no ticket falls back to the card's own summary, which is what
     // the gatherer's local candidates always use (attentionFs.test.ts).
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     h.buildRunStatus.mockReset().mockImplementation(
       (i: { run: Run; ticket: { category: string | null } | null }) =>
         i.run.kind === "local"
@@ -9846,7 +9846,7 @@ describe("latestCandidates: the tracked half", () => {
     await settled();
     const [local] = DeckPanel.latestCandidates()!.candidates;
     expect(local.key).toContain("local-");
-    expect(local.label).toBe("ASM-5641");
+    expect(local.label).toBe("PROJ-5641");
     expect(local.label).not.toBe(local.key);
   });
 
@@ -9855,7 +9855,7 @@ describe("latestCandidates: the tracked half", () => {
     // ordinary branch, whose key is `local-<slug>-<sha1>`.
     h.branch = "main";
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     h.buildRunStatus.mockReset().mockImplementation(
       (i: { run: Run; ticket: { category: string | null } | null }) =>
         i.run.kind === "local"
@@ -9865,8 +9865,8 @@ describe("latestCandidates: the tracked half", () => {
     show(true);
     await settled();
     const [local] = DeckPanel.latestCandidates()!.candidates;
-    expect(local.key).toMatch(/^local-centaur-[0-9a-f]{8}$/);
-    expect(local.label).toBe("centaur");
+    expect(local.key).toMatch(/^local-webapp-[0-9a-f]{8}$/);
+    expect(local.label).toBe("webapp");
   });
 });
 
@@ -10013,14 +10013,14 @@ describe("switching the forge account", () => {
   // Without this the switch appears inert: every error entry survives, the board
   // re-renders identically, and the user concludes the feature is broken.
   it("forgets every run's stored PR entries, because they are the old identity's answers", async () => {
-    h.runs = [mkRun({ key: "ASM-1" }), mkRun({ key: "ASM-2" })];
+    h.runs = [mkRun({ key: "PROJ-1" }), mkRun({ key: "PROJ-2" })];
     ghAccounts(TWO);
     const p = await showAndWarm();
     h.removePrEntries.mockClear();
     window.showQuickPick.mockResolvedValueOnce({ label: "OznasiAb" });
     window.showWarningMessage.mockResolvedValueOnce("Switch");
     await p._fire({ type: "deck:switchAccount" });
-    expect(h.removePrEntries.mock.calls.map((c) => c[1])).toEqual(["ASM-1", "ASM-2"]);
+    expect(h.removePrEntries.mock.calls.map((c) => c[1])).toEqual(["PROJ-1", "PROJ-2"]);
   });
 
   // Fix wave, IMPORTANT 1: a local (untracked) card has no record in
@@ -10031,7 +10031,7 @@ describe("switching the forge account", () => {
   // `error: true` entries survived a switch and the success toast lied to it.
   it("forgets a local card's stored PR entries too, since it has no record in readRuns", async () => {
     h.runs = [];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     ghAccounts(TWO);
     const p = await showAndWarm();
     const localKey = builtLocal().run.key;
@@ -10044,7 +10044,7 @@ describe("switching the forge account", () => {
   });
 
   it("leaves the stored entries alone when the switch fails, and says why", async () => {
-    h.runs = [mkRun({ key: "ASM-1" })];
+    h.runs = [mkRun({ key: "PROJ-1" })];
     ghAccounts(TWO, () => { throw new Error("no such account"); });
     const p = await showAndWarm();
     h.removePrEntries.mockClear();
@@ -10083,7 +10083,7 @@ describe("switching the forge account", () => {
   // fetch below would write its answer instead of being silently dropped.
   it("discards a fetch that was already in flight under the old account when it lands after the switch", async () => {
     const releases: Array<() => void> = [];
-    h.runs = [mkRun({ key: "ASM-1" })];
+    h.runs = [mkRun({ key: "PROJ-1" })];
     h.prFetch.mockImplementation(() => new Promise((res) => { releases.push(() => res({ ok: true, facts: null })); }));
     ghAccounts(TWO);
     show();
@@ -10093,7 +10093,7 @@ describe("switching the forge account", () => {
     expect(releases).toHaveLength(1);
     window.showQuickPick.mockResolvedValueOnce({ label: "OznasiAb" });
     window.showWarningMessage.mockResolvedValueOnce("Switch");
-    await p._fire({ type: "deck:switchAccount" }); // bumps ASM-1's epoch and re-enqueues a fresh fetch
+    await p._fire({ type: "deck:switchAccount" }); // bumps PROJ-1's epoch and re-enqueues a fresh fetch
     h.writePrEntry.mockClear();
     releases[0](); // the pre-switch fetch lands now, epoch mismatched
     await settled();

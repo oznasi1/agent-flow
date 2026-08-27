@@ -30,7 +30,7 @@ const cardAgent = (state: AgentState, lastActivityMs: number | null, repo?: stri
 });
 
 const run: Run = {
-  key: "ASM-1", summary: "s", url: "https://j/browse/ASM-1", createdAt: 1,
+  key: "PROJ-1", summary: "s", url: "https://j/browse/PROJ-1", createdAt: 1,
   mode: "multiroot", repos: [{ name: REPO, path: `/r/${REPO}`, isGit: true }], briefPaths: [],
 };
 

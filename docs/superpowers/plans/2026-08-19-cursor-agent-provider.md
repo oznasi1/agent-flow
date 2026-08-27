@@ -270,7 +270,7 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
 
   it("opens a Cursor composer with the prompt pre-filled and unsubmitted", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson());
     commands.getCommands.mockResolvedValue([CHAT_CMD]);
     const { context } = fakeContext();
@@ -288,10 +288,10 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
     // Cursor's handler calls createComposer({ openInNewTab: true }), so N calls give
     // N tabs. Copilot's panel is single-instance and bails to the briefs instead.
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-1-2.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-1-2.json"] as never);
     readFileSync
-      .mockReturnValueOnce(planJson({ seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] }))
-      .mockReturnValueOnce(planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }));
+      .mockReturnValueOnce(planJson({ seq: 0, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "first" }] }))
+      .mockReturnValueOnce(planJson({ key: "PROJ-2", seq: 1, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "second" }] }));
     commands.getCommands.mockResolvedValue([CHAT_CMD]);
     const { context } = fakeContext();
 
@@ -306,7 +306,7 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
   it("runs cursor-agent on the terminal surface", async () => {
     setConfig({ agentProvider: "cursor", agentSurface: "terminal" });
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson({ matches: [{ matchPath: "/repo", prompt: "do it" }] }));
     workspace.workspaceFile = undefined;
     workspace.workspaceFolders = [{ uri: { fsPath: "/repo" } }];
@@ -315,7 +315,7 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
     await maybeSeedAgent(context, () => {});
 
     expect(window.createTerminal).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Cursor · ASM-1" }),
+      expect.objectContaining({ name: "Cursor · PROJ-1" }),
     );
     const terminal = window.createTerminal.mock.results[0].value;
     expect(terminal.sendText).toHaveBeenCalledWith("cursor-agent", true);
@@ -323,7 +323,7 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
 
   it("refuses Remote Control under cursor, as it does under copilot", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson({ remoteControl: true }));
     commands.getCommands.mockResolvedValue([CHAT_CMD]);
     const { context } = fakeContext();
@@ -675,7 +675,7 @@ describe("hostProviders", () => {
 it("a plan's own provider beats a conflicting live setting", async () => {
   setConfig({ agentProvider: "claude-code" });
   withWorkspaceFile();
-  readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+  readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
   readFileSync.mockReturnValue(planJson({ provider: "cursor" }));
   commands.getCommands.mockResolvedValue(["workbench.action.chat.open", CLAUDE_OPEN_CMD]);
   const { context } = fakeContext();
@@ -695,7 +695,7 @@ it("degrades a bare ask setting to Claude Code at seed time", async () => {
   // re-read here. Degrading beats prompting in a window nobody expected a dialog in.
   setConfig({ agentProvider: "ask" });
   withWorkspaceFile();
-  readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+  readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
   readFileSync.mockReturnValue(planJson()); // no `provider` field
   commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
   const { context } = fakeContext();

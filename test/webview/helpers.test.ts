@@ -286,12 +286,12 @@ describe("ticketKind", () => {
 
 describe("keyLabel", () => {
   const run = (over: Partial<Run> = {}): Run => ({
-    key: "ASM-1", summary: "s", url: "https://jira/ASM-1", createdAt: 1, mode: "per-window",
+    key: "PROJ-1", summary: "s", url: "https://jira/PROJ-1", createdAt: 1, mode: "per-window",
     repos: [], briefPaths: [], ...over,
   });
 
   it("names a ticket run by its key", () => {
-    expect(keyLabel(run())).toBe("ASM-1");
+    expect(keyLabel(run())).toBe("PROJ-1");
   });
 
   // A notepad key is a slug plus two random segments — 64 characters of nothing a
@@ -315,13 +315,13 @@ describe("keyLabel", () => {
   // Untracked but none of the known shapes: the key is all there is to name it by,
   // and relabelling it as something it is not would be a lie.
   it("keeps the key of an untracked run it has no short word for", () => {
-    expect(keyLabel(run({ key: "ASM-1", url: "" }))).toBe("ASM-1");
+    expect(keyLabel(run({ key: "PROJ-1", url: "" }))).toBe("PROJ-1");
   });
 
   // A review run carries a PR url, so isTicketRun says no — but its key is a real
   // "review-<slug>" identifier, not a random slug, and the card prints it verbatim.
   it("keeps a review run's key", () => {
-    expect(keyLabel(run({ key: "review-centaur-850", url: "https://gh/pr/850", kind: "review" })))
-      .toBe("review-centaur-850");
+    expect(keyLabel(run({ key: "review-webapp-850", url: "https://gh/pr/850", kind: "review" })))
+      .toBe("review-webapp-850");
   });
 });

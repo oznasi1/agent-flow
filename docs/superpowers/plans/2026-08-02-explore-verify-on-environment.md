@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **This repo is public OSS.** No At-Bay-specific environment names, tenant ids, vendor/MCP tool names, or internal URLs in any default, description, or prompt. Default environments are `dev`, `staging`, `production`; the prompt says "the observability tools available to you".
+- **This repo is public OSS.** No organization-specific environment names, tenant ids, vendor/MCP tool names, or internal URLs in any default, description, or prompt. Default environments are `dev`, `staging`, `production`; the prompt says "the observability tools available to you".
 - **Settings must be editable in the VS Code settings page.** Prompts are `string` + `"editPresentation": "multilineText"`; the environment list is `array` of `string`. Never an array-of-objects — VS Code renders those as a bare "Edit in settings.json" link.
 - **Manifest defaults must be byte-identical to their `config.ts` constants.** `test/unit/config.test.ts` asserts this. Drift makes `explore_prompts_customized` fire for every user.
 - **`EXPLORE_MODES` in `src/telemetry/settingsSnapshot.ts` must equal `agentFlow.exploreMode`'s manifest `enum`.** A parity test in `test/unit/telemetry/settingsSnapshot.test.ts` enforces it — the manifest and this constant change in the *same* task or the suite goes red.
@@ -547,7 +547,7 @@ Add these to the existing `describe("explore", ...)` block in `test/unit/tasksVi
 ```ts
   it("asks for an environment and fills {env} and {services} for the verify action", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
-    const repos = mkRepos(["account-service", "centaur"]);
+    const repos = mkRepos(["account-service", "webapp"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
     vi.mocked(window.showQuickPick)
@@ -557,7 +557,7 @@ Add these to the existing `describe("explore", ...)` block in `test/unit/tasksVi
     await send({ type: "explore" });
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
-        promptTemplate: "VER {summary} on staging for account-service, centaur{files}",
+        promptTemplate: "VER {summary} on staging for account-service, webapp{files}",
         ticket: expect.objectContaining({ key: "verify-staging-retry-banner", summary: "retry banner on staging" }),
       }),
     );

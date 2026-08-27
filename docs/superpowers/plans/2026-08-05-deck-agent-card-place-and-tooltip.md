@@ -40,15 +40,15 @@ Add to `test/webview/DeckApp.test.tsx`, inside the existing `describe("DeckApp",
       run: {
         ...mkStatus().run,
         mode: "multiroot",
-        workspaceFile: "/Users/x/.agentflow/workspaces/ASM-1+2.code-workspace",
+        workspaceFile: "/Users/x/.agentflow/workspaces/PROJ-1+2.code-workspace",
         repos: [
-          { name: "svc-api", path: "/r/svc-api", isGit: true, branch: "ASM-1-x" },
-          { name: "svc-web", path: "/r/svc-web", isGit: true, branch: "ASM-1-x" },
+          { name: "svc-api", path: "/r/svc-api", isGit: true, branch: "PROJ-1-x" },
+          { name: "svc-web", path: "/r/svc-web", isGit: true, branch: "PROJ-1-x" },
         ],
       },
       agents: [mkAgent("agent-flow-2e", "working", 100)],
     })]));
-    expect(screen.getByTitle(/Claude Code session in ASM-1\+2/)).toBeInTheDocument();
+    expect(screen.getByTitle(/Claude Code session in PROJ-1\+2/)).toBeInTheDocument();
     expect(screen.queryByTitle(/Claude Code session in svc-api/)).not.toBeInTheDocument();
   });
 
@@ -66,7 +66,7 @@ Add to `test/webview/DeckApp.test.tsx`, inside the existing `describe("DeckApp",
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npx vitest run test/webview/DeckApp.test.tsx -t "falls back to the workspace name"`
-Expected: FAIL — the first new test fails because the current code renders `title="Claude Code session in svc-api"` (the first repo), not `ASM-1+2`. The second new test passes already (it's the pre-existing behavior); that's fine, it's there to pin the no-regression case for Task 1's change.
+Expected: FAIL — the first new test fails because the current code renders `title="Claude Code session in svc-api"` (the first repo), not `PROJ-1+2`. The second new test passes already (it's the pre-existing behavior); that's fine, it's there to pin the no-regression case for Task 1's change.
 
 - [ ] **Step 3: Write minimal implementation**
 
@@ -80,7 +80,7 @@ Immediately above the `Card` function (currently `src/webview/DeckApp.tsx:175`),
 
 ```ts
 /** The run's `.code-workspace` file's name, extension stripped — e.g.
- * "ASM-1+2.code-workspace" → "ASM-1+2". `undefined` for a single-repo
+ * "PROJ-1+2.code-workspace" → "PROJ-1+2". `undefined` for a single-repo
  * (per-window) run, which has no workspace file at all. */
 function workspaceLabel(run: Run): string | undefined {
   return run.workspaceFile?.split("/").pop()?.replace(/\.code-workspace$/, "");

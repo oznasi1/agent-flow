@@ -1,5 +1,6 @@
 import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
+import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
@@ -34,8 +35,11 @@ import {
   notifyMessageOf,
   observationFallback,
   observationOf,
+  ruleOneLine,
   offeredConds,
   OFFERED_DESTS,
+  verdictLabel,
+  verdictWhy,
   withCommandId,
   withCommandRun,
   withCond,
@@ -346,6 +350,20 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * fresh session should land on the canvas, not silently reopen on whichever
    * view a past session happened to be reading. */
   const [view, setView] = React.useState<"canvas" | "list">("canvas");
+  // The dry run is a READ, so it is component state and nothing else: never
+  // persisted, never posted, and deliberately not remembered across a reopen —
+  // a verdict is about the board as it is right now, and one restored from a
+  // previous session would be about a board that has moved.
+  const [dryRun, setDryRun] = React.useState(false);
+
+  // Computed on every render while the panel is open, and deliberately NOT
+  // memoised. `previewFlow` is two passes over a graph of a dozen edges, so there
+  // is nothing to save — and a memo would have to key on time to be correct,
+  // since a condition like `agent-idle-over` is answered against `Date.now()`.
+  // A stale-by-one-render verdict beside a `waiting` reason line that reads a
+  // fresh clock (`observationOf`, below) is two answers about one rule.
+  const dry = dryRun && flow ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : [];
+  const firing = dry.filter((v) => v.verdict === "fire").length;
   const [picking, setPicking] = React.useState(false);
   const [over, setOver] = React.useState(false);
   const [overGraph, setOverGraph] = React.useState(false);
@@ -1176,6 +1194,21 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               everything a flow does, so it is the only thing here allowed to
               be filled — armed is a state, not an invitation, so the fill goes
               away and this becomes the quiet way back out (see .orch-arm.on). */}
+          {/* The dry run sits immediately before Arm because that is the decision
+              it serves: arming is the consent point for everything a flow does,
+              and until now the only thing standing behind it was a hold-on-first-
+              look. Quiet `orch-mini` like every other control on this header —
+              Arm stays the surface's one filled control (see below) — and
+              `aria-pressed` for its on/off state, the App.tsx idiom the Expand
+              button beside it already follows. */}
+          <button
+            type="button"
+            className="orch-mini"
+            aria-pressed={dryRun}
+            onClick={() => setDryRun((v) => !v)}
+          >
+            What would fire?
+          </button>
           <button
             type="button"
             className={`orch-arm${flow.armed ? " on" : ""}`}
@@ -1210,6 +1243,65 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <button type="button" className="orch-mini" onClick={() => p.onResumeApprove(flow.id)}>Go</button>
               <button type="button" className="orch-mini" onClick={() => p.onResumeDisarm(flow.id)}>Disarm</button>
             </div>
+          </div>
+        )}
+        {dryRun && (
+          // Between the resume gate and the graph, and above BOTH views on
+          // purpose: a verdict about the graph should not cost you sight of it,
+          // and it is the same answer whether you are editing on the canvas or in
+          // the list. Recomputed on every render rather than fetched — every
+          // input is already a prop (`flow`, `p.runs`, `p.branchCi`), so the
+          // panel tracks your edits live instead of answering about a graph you
+          // have since changed. See `previewFlow`: pure, and it acts on nothing.
+          <div className="orch-dry" data-testid="orch-dryrun">
+            <div className="hd">
+              <span>If you armed this now</span>
+              <div className="sp" />
+              {dry.length === 0
+                ? <span>no rules left to judge</span>
+                : (
+                  <span className={firing > 0 ? "n on" : "n"}>
+                    {firing} of {dry.length} {dry.length === 1 ? "rule" : "rules"}
+                  </span>
+                )}
+            </div>
+            {/* The rows scroll, the footer below does NOT. A flow with six rules
+                already overflows this panel's height, and the footer is the one
+                line that must never fall below a fold: it is what keeps the
+                verdict from being read as a promise. */}
+            <div className="rows">
+            {dry.length === 0 ? (
+              // Every rule has fired or failed — there is nothing an arm would do.
+              // Said plainly rather than shown as an empty list, which reads as a
+              // panel that failed to load.
+              <div className="why">Nothing is pending. Reset a rule to run it again.</div>
+            ) : dry.map((v) => {
+              const e = flow.edges.find((x) => x.id === v.edgeId);
+              if (!e) return null;
+              // A `waiting` rule's reason is what its source place looks like
+              // right now, which is the inspector's own question — asked through
+              // the same pair, not a second phrasing of it.
+              const why = v.verdict === "waiting"
+                ? (observationOf(flow, e, p.runs, p.branchCi) ?? observationFallback(flow, e))
+                : verdictWhy(v);
+              return (
+                <div className="r" key={v.edgeId} data-testid={`orch-dryrun-${v.edgeId}`}>
+                  <span className={`v ${v.verdict}`}><span className="d" />{verdictLabel(v)}</span>
+                  <span className="s">
+                    {ruleOneLine(flow, e)}
+                    {why !== null && <span className="why"> · {why}</span>}
+                  </span>
+                </div>
+              );
+            })}
+            </div>
+            {/* The honesty line, and not decoration. `previewFlow` answers for
+                `evaluateFlow` alone, which knows nothing about deckView's
+                per-target dedupe, its resume gate, or the ask on a flow's first
+                spend — so this panel is what the DECISION function says, not a
+                promise about the pass. Saying so is what keeps a dry run from
+                becoming the thing a user trusts instead of the gates. */}
+            <div className="ft">Arming re-checks this every 6s. The first spend still asks.</div>
           </div>
         )}
         {view === "list" ? (
@@ -1562,7 +1654,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 <>
                   <span style={{ fontSize: "var(--t-body)" }}>{ACTION_LABEL[derived]}</span>
                   {/* The target's name — an identifier, so mono — is part of the
-                      sentence for launch and seed ("THEN launch ASM-12"). Notify
+                      sentence for launch and seed ("THEN launch PROJ-12"). Notify
                       already reads complete on its own, and a `run`'s target is
                       named by the USING picker right below, which is a control
                       rather than a label: printing it here too would give one

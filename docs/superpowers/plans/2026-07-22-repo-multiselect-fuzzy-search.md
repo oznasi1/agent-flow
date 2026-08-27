@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- **fuse.js must resolve from the public npm registry.** This repo is public OSS; the user's global `~/.npmrc` points npm at At-Bay CodeArtifact, which rewrites `package-lock.json` `resolved` URLs and makes CI fail with `E401`. Always install with `--registry https://registry.npmjs.org` and verify the lockfile entry resolves to `registry.npmjs.org`.
+- **fuse.js must resolve from the public npm registry.** This repo is public OSS; the user's global `~/.npmrc` points npm at a private CodeArtifact registry, which rewrites `package-lock.json` `resolved` URLs and makes CI fail with `E401`. Always install with `--registry https://registry.npmjs.org` and verify the lockfile entry resolves to `registry.npmjs.org`.
 - **Settings default to `true`** (control shown), read with a `?? true` fallback — matches every existing `agentFlow.filters.*` setting. Additive only; no migration.
 - **Repo trigger label copy is exactly `Filter repos`** (no ellipsis); the combo's inner filter input keeps the placeholder `Filter repos…` (with ellipsis); the fuzzy box placeholder is exactly `Search title…`.
 - **Repos combine as OR** (a task passes if it touches any selected repo); the three filter *types* (repo, text, status) combine as AND.
@@ -331,9 +331,9 @@ describe("repo multiselect", () => {
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "ASM-1", summary: "alpha", services: ["billing"] }),
-        mkTask({ key: "ASM-2", summary: "bravo", services: ["web"] }),
-        mkTask({ key: "ASM-3", summary: "charlie", services: ["billing", "worker"] }),
+        mkTask({ key: "PROJ-1", summary: "alpha", services: ["billing"] }),
+        mkTask({ key: "PROJ-2", summary: "bravo", services: ["web"] }),
+        mkTask({ key: "PROJ-3", summary: "charlie", services: ["billing", "worker"] }),
       ],
     });
 
@@ -361,9 +361,9 @@ describe("repo multiselect", () => {
     threeRepos();
     fireEvent.click(screen.getByText("Filter repos"));
     fireEvent.mouseDown(screen.getByText("billing").closest(".repo-opt")!);
-    expect(screen.getByText("ASM-1")).toBeInTheDocument(); // billing
-    expect(screen.getByText("ASM-3")).toBeInTheDocument(); // billing + worker
-    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument(); // web only
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument(); // billing
+    expect(screen.getByText("PROJ-3")).toBeInTheDocument(); // billing + worker
+    expect(screen.queryByText("PROJ-2")).not.toBeInTheDocument(); // web only
   });
 
   it("Clear resets the selection and restores the full list", () => {
@@ -371,18 +371,18 @@ describe("repo multiselect", () => {
     authed();
     threeRepos();
     fireEvent.click(screen.getByText("Filter repos"));
-    fireEvent.mouseDown(screen.getByText("web").closest(".repo-opt")!); // only ASM-2 touches web
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    fireEvent.mouseDown(screen.getByText("web").closest(".repo-opt")!); // only PROJ-2 touches web
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
     fireEvent.mouseDown(screen.getByText("Clear"));
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
-    expect(screen.getByText("ASM-3")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-3")).toBeInTheDocument();
   });
 
   it("hides the multiselect when filters.repo is off", () => {
     render(<App />);
     authed("PR initiated", { size: true, status: true, repo: false, search: true });
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", services: ["web"] })] });
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", services: ["web"] })] });
     expect(document.querySelector(".repo-select")).toBeNull();
   });
 });
@@ -644,9 +644,9 @@ describe("fuzzy title search", () => {
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "ASM-1", summary: "Fix rate limiter dropping bursts", services: ["api"] }),
-        mkTask({ key: "ASM-2", summary: "Billing webhook retries", services: ["billing"] }),
-        mkTask({ key: "ASM-3", summary: "Rate-limit config per tenant", services: ["api"] }),
+        mkTask({ key: "PROJ-1", summary: "Fix rate limiter dropping bursts", services: ["api"] }),
+        mkTask({ key: "PROJ-2", summary: "Billing webhook retries", services: ["billing"] }),
+        mkTask({ key: "PROJ-3", summary: "Rate-limit config per tenant", services: ["api"] }),
       ],
     });
 
@@ -655,8 +655,8 @@ describe("fuzzy title search", () => {
     authed();
     pool();
     fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "ratelim" } });
-    expect(keys()).toEqual(expect.arrayContaining(["ASM-1", "ASM-3"]));
-    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument();
+    expect(keys()).toEqual(expect.arrayContaining(["PROJ-1", "PROJ-3"]));
+    expect(screen.queryByText("PROJ-2")).not.toBeInTheDocument();
   });
 
   it("shows a text-specific empty state when nothing matches", () => {
@@ -674,8 +674,8 @@ describe("fuzzy title search", () => {
     fireEvent.click(screen.getByText("Filter repos"));
     fireEvent.mouseDown(screen.getByText("api").closest(".repo-opt")!);
     fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "rate" } });
-    expect(keys()).toEqual(expect.arrayContaining(["ASM-1", "ASM-3"]));
-    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument(); // billing filtered out by repo
+    expect(keys()).toEqual(expect.arrayContaining(["PROJ-1", "PROJ-3"]));
+    expect(screen.queryByText("PROJ-2")).not.toBeInTheDocument(); // billing filtered out by repo
   });
 
   it("hides the search box when filters.search is off", () => {

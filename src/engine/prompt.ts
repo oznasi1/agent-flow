@@ -151,7 +151,7 @@ export function prWorkClause(reason: PrWorkReason, detail?: string): string {
  * when that click asks where to open.
  *
  * One definition, because the two are read seconds apart: the button says "Resolve
- * conflict", and the picker it raises has to say "Resolve conflict for ASM-1 — open
+ * conflict", and the picker it raises has to say "Resolve conflict for PROJ-1 — open
  * where?" rather than a second wording of the same job. Lives here, beside the clause
  * that seeds the prompt, so a new `PrWorkReason` cannot be given a clause and left
  * without a verb.

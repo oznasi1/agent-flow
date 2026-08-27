@@ -107,7 +107,7 @@
 
 <div class="callout">
   <div class="t">What changed since v1</div>
-  v1 leaned on a <em>manual smoke checklist</em> for the bits that cross into the OS and the Claude Code extension. You want <b>zero manual steps</b>. So: the checklist is gone, host-driven E2E is promoted from "deferred" to the <b>core</b> layer, and a <b>screenshot-backed "verify feature" report</b> (the pattern you used at At-Bay) is added and wired as an automated release gate.
+  v1 leaned on a <em>manual smoke checklist</em> for the bits that cross into the OS and the Claude Code extension. You want <b>zero manual steps</b>. So: the checklist is gone, host-driven E2E is promoted from "deferred" to the <b>core</b> layer, and a <b>screenshot-backed "verify feature" report</b> (the pattern you used at work) is added and wired as an automated release gate.
 </div>
 
 <div class="card">
@@ -139,7 +139,7 @@
 <ul>
   <li><b>No manual testing, ever</b>, before a feature ships. The release-on-merge flow gets an automated proof step, not a checklist.</li>
   <li><b>Prove the feature in a real host</b> — a real window opens, the real Claude Code panel receives its seed — not a mock's approximation.</li>
-  <li><b>Screenshots + a report</b> as first-class output: an auto-generated "verify feature" artifact, deliverable to Slack / At-Bay / CI, mirroring the MCP flow you already use.</li>
+  <li><b>Screenshots + a report</b> as first-class output: an auto-generated "verify feature" artifact, deliverable to Slack / an internal endpoint / CI, mirroring the MCP flow you already use.</li>
   <li><b>Deterministic enough to gate on</b> — the whole thing is only worth it if it's green when the product is good and red when it isn't.</li>
 </ul>
 </section>
@@ -169,7 +169,7 @@
   <div class="arrow">→</div>
   <div class="step"><div class="n">05</div><div class="h">Assert + shoot</div><div class="s">DOM / fs / fake-Jira assertions + labelled screenshots</div></div>
   <div class="arrow">→</div>
-  <div class="step"><div class="n">06</div><div class="h">Report</div><div class="s">verify-feature HTML + trace/video → Slack / At-Bay / artifact</div></div>
+  <div class="step"><div class="n">06</div><div class="h">Report</div><div class="s">verify-feature HTML + trace/video → Slack / an internal endpoint / artifact</div></div>
   <div class="arrow">→</div>
   <div class="step"><div class="n">07</div><div class="h">Gate</div><div class="s">green → release proceeds · red → blocked</div></div>
 </div>
@@ -212,9 +212,9 @@
 <p>Playwright already captures a screenshot/video/trace per step. Layer C curates them into the artifact you're used to: for each feature, an ordered strip of <b>labelled screenshots</b> ("1 · pool loaded", "2 · task picked", "3 · window opened", "4 · panel seeded"), a pass/fail verdict, and the run's metadata. Options, in priority order:</p>
 <ul>
   <li><span class="badge b-ok">baseline</span> Playwright's built-in HTML report + trace viewer (zero extra code) as the CI artifact.</li>
-  <li><span class="badge b-accent">the "verify feature" analog</span> a thin generator that lays the labelled screenshots into a single self-contained HTML report per feature — matching the At-Bay flow.</li>
+  <li><span class="badge b-accent">the "verify feature" analog</span> a thin generator that lays the labelled screenshots into a single self-contained HTML report per feature — matching that same flow.</li>
   <li><span class="badge b-warn">optional</span> visual-regression via Playwright's <code>toHaveScreenshot()</code> (pixel-diff against committed baselines) for pages where a rendering regression is the risk. Adds baseline-maintenance cost — opt in per surface.</li>
-  <li><span class="badge b-accent">delivery</span> post the report + verdict to <b>Slack</b> (MCP available) and/or the <b>At-Bay verify endpoint</b>; keep the full artifact in CI. <em>Which destination is an open decision — see §10.</em></li>
+  <li><span class="badge b-accent">delivery</span> post the report + verdict to <b>Slack</b> (MCP available) and/or an <b>internal verify endpoint</b>; keep the full artifact in CI. <em>Which destination is an open decision — see §10.</em></li>
 </ul>
 </section>
 
@@ -280,7 +280,7 @@
 <table>
 <thead><tr><th>#</th><th>Decision</th><th>My recommendation</th></tr></thead>
 <tbody>
-<tr><td>1</td><td><b>Report destination</b> — where the verify-feature report lands</td><td>CI artifact always + a <b>Slack</b> summary (MCP is available); wire the At-Bay verify endpoint too if it's reachable as an MCP/HTTP target</td></tr>
+<tr><td>1</td><td><b>Report destination</b> — where the verify-feature report lands</td><td>CI artifact always + a <b>Slack</b> summary (MCP is available); wire an internal verify endpoint too if it's reachable as an MCP/HTTP target</td></tr>
 <tr><td>2</td><td><b>Cursor lane</b> — build it now or later</td><td>ship the VS Code gate first; add a non-blocking Cursor lane once green and stable</td></tr>
 <tr><td>3</td><td><b>Visual regression</b> — pixel-diff baselines or assertions-only</td><td>assertions + screenshots-as-evidence first; add <code>toHaveScreenshot</code> only on surfaces where rendering is the risk</td></tr>
 <tr><td>4</td><td><b>Gate strictness</b> — block merge on Layer B, or block only the publish</td><td>block <b>merge</b> for the core 3 journeys; keep newer journeys in an advisory lane until proven stable</td></tr>

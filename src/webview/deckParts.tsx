@@ -180,7 +180,7 @@ export function AgentsRow({ agents, defaultOpen = false }: { agents: CardAgent[]
 }
 
 /** The run's `.code-workspace` file's name, extension stripped — e.g.
- * "ASM-1+2.code-workspace" → "ASM-1+2". `undefined` for a single-repo
+ * "PROJ-1+2.code-workspace" → "PROJ-1+2". `undefined` for a single-repo
  * (per-window) run, which has no workspace file at all. */
 export function workspaceLabel(run: Run): string | undefined {
   return run.workspaceFile?.split(/[\\/]/).pop()?.replace(/\.code-workspace$/, "");

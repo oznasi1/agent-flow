@@ -48,9 +48,9 @@ const props = (over: Partial<React.ComponentProps<typeof FlowList>> = {}) => ({
 const threeRules = () =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" },
-      { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "ASM-2", repo: "r" },
-      { id: "n3", kind: "place", x: 0, y: 176, join: "any", runKey: "ASM-3", repo: "r" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" },
+      { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "PROJ-2", repo: "r" },
+      { id: "n3", kind: "place", x: 0, y: 176, join: "any", runKey: "PROJ-3", repo: "r" },
       { id: "n4", kind: "notify", x: 320, y: 88, join: "any", message: "done" },
     ],
     edges: [
@@ -65,10 +65,10 @@ const threeRules = () =>
 const placeAndPlanned = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       {
         id: "n2", kind: "planned", x: 320, y: 0, join: "any",
-        ticketKey: "ASM-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
+        ticketKey: "PROJ-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
       },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", ...edgeOver }],
@@ -82,7 +82,7 @@ const placeAndPlanned = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
 const placeAndNotify = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "landed" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, ...edgeOver }],
@@ -92,8 +92,8 @@ const placeAndNotify = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
 const twoPlaces = (edgeOver: Partial<Flow["edges"][number]> = {}) =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-      { id: "n2", kind: "place", x: 320, y: 0, join: "any", runKey: "ASM-2", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "n2", kind: "place", x: 320, y: 0, join: "any", runKey: "PROJ-2", repo: "agent-flow" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", ...edgeOver }],
   });
@@ -108,7 +108,7 @@ const placeAndCommand = (
 ) =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       { id: "n2", kind: "command", x: 320, y: 0, join: "any", ...nodeOver },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, ...edgeOver }],
@@ -152,7 +152,7 @@ describe("rows", () => {
     const row = screen.getByTestId("flowlist-row-e1");
     expect(row.textContent).toContain("PR is merged"); // the condition
     expect(row.textContent).toContain("launch"); // the action
-    expect(row.textContent).toContain("ASM-12"); // the target
+    expect(row.textContent).toContain("PROJ-12"); // the target
   });
 
   it("reads notify's clause as complete on its own, with no bare target after it", () => {
@@ -208,7 +208,7 @@ describe("rows", () => {
     render(<FlowList {...props({ flow: placeAndPlanned({ action: undefined }) })} />);
     const row = screen.getByTestId("flowlist-row-e1");
     expect(row.textContent).toContain("launch"); // the derived action
-    expect(row.textContent).toContain("ASM-12"); // the target identifier, not suppressed
+    expect(row.textContent).toContain("PROJ-12"); // the target identifier, not suppressed
     expect(row.textContent).not.toContain("notify me");
   });
 
@@ -721,7 +721,7 @@ describe("a fired rule", () => {
   const firedFlow = () =>
     flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "landed" },
       ],
       edges: [{
@@ -761,7 +761,7 @@ describe("a fired rule", () => {
   it("a non-current row's Reset is not a Tab stop; the current row's is", () => {
     const twoFired = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "landed" },
       ],
       edges: [
@@ -833,7 +833,7 @@ describe("a rule described by its target, not by a stale stored action", () => {
   it("says the action cannot be determined for a target of an unknown kind", () => {
     const fromTheFuture = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "portal", x: 320, y: 0, join: "any" } as unknown as Flow["nodes"][number],
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
@@ -853,8 +853,8 @@ describe("a rule described by its target, not by a stale stored action", () => {
 const twoPlacesNoEdge = () =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-      { id: "n2", kind: "place", x: 320, y: 0, join: "any", runKey: "ASM-2", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "n2", kind: "place", x: 320, y: 0, join: "any", runKey: "PROJ-2", repo: "agent-flow" },
     ],
   });
 
@@ -863,10 +863,10 @@ const twoPlacesNoEdge = () =>
 const placeAndPlannedNoEdge = () =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       {
         id: "n2", kind: "planned", x: 320, y: 0, join: "any",
-        ticketKey: "ASM-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
+        ticketKey: "PROJ-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
       },
     ],
   });
@@ -896,7 +896,7 @@ describe("a migrated rule's mismatch notice", () => {
 
   it("still paints a rule that actually failed red", () => {
     const { container } = render(
-      <FlowList {...props({ flow: twoPlaces({ error: "Couldn't seed ASM-2: no worktree" }) })} />,
+      <FlowList {...props({ flow: twoPlaces({ error: "Couldn't seed PROJ-2: no worktree" }) })} />,
     );
     fireEvent.click(screen.getByTestId("flowlist-row-e1"));
     expect(container.querySelector(".fl-receipt .err")!.textContent).toContain("Couldn't seed");
@@ -907,7 +907,7 @@ describe("a condition the picker does not offer", () => {
   const branchRule = () =>
     flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "deploy" },
       ],
       edges: [{
@@ -996,7 +996,7 @@ describe("adding a rule from the keyboard", () => {
     const onSave = vi.fn();
     const withCommand = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "command", x: 320, y: 0, join: "any", commandId: "deploy" },
         { id: "n3", kind: "notify", x: 320, y: 88, join: "any", message: "deployed" },
       ],
@@ -1051,9 +1051,9 @@ describe("adding a rule from the keyboard", () => {
   it("the To list excludes the chosen From node and any node it already has a rule to", () => {
     const wired = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" },
-        { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "ASM-2", repo: "r" },
-        { id: "n3", kind: "place", x: 0, y: 176, join: "any", runKey: "ASM-3", repo: "r" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" },
+        { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "PROJ-2", repo: "r" },
+        { id: "n3", kind: "place", x: 0, y: 176, join: "any", runKey: "PROJ-3", repo: "r" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
     });
@@ -1140,10 +1140,10 @@ describe("adding a rule from the keyboard", () => {
     const onSave = vi.fn();
     const untouched = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         {
           id: "n2", kind: "planned", x: 320, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["agent-flow"], mode: "careful", dest: "new-window",
+          ticketKey: "PROJ-12", repos: ["agent-flow"], mode: "careful", dest: "new-window",
         },
       ],
     });
@@ -1169,14 +1169,14 @@ describe("adding a rule from the keyboard", () => {
     const onSave = vi.fn();
     const twoPlanned = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         {
           id: "n2", kind: "planned", x: 320, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["agent-flow"], mode: "careful", dest: "new-window",
+          ticketKey: "PROJ-12", repos: ["agent-flow"], mode: "careful", dest: "new-window",
         },
         {
           id: "n3", kind: "planned", x: 320, y: 88, join: "any",
-          ticketKey: "ASM-13", repos: ["agent-flow"], mode: "quick", dest: "current-window",
+          ticketKey: "PROJ-13", repos: ["agent-flow"], mode: "quick", dest: "current-window",
         },
       ],
     });
@@ -1217,10 +1217,10 @@ describe("adding a rule from the keyboard", () => {
     const onSave = vi.fn();
     const goneMode = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         {
           id: "n2", kind: "planned", x: 320, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["agent-flow"], mode: "gone-mode", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["agent-flow"], mode: "gone-mode", dest: "worktree",
         },
       ],
     });
@@ -1267,7 +1267,7 @@ describe("adding a rule from the keyboard", () => {
   it("a rule wired to a notify terminal gets no mode or destination clause", () => {
     const placeAndFreeNotify = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "notify", x: 320, y: 0, join: "any", message: "landed" },
       ],
     });
@@ -1295,7 +1295,7 @@ describe("adding a rule from the keyboard", () => {
     const onSave = vi.fn();
     const placeAndCommandNoEdge = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "command", x: 320, y: 0, join: "any", commandId: "deploy-staging" },
       ],
     });

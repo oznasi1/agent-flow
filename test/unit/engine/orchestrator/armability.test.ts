@@ -89,7 +89,7 @@ describe("unfirableRules", () => {
     // and no `firedAt` is never evaluated again either, so naming it here would
     // blame the PR-facts toggle for a rule whose real reason is a failure the
     // drawer already shows and offers a Reset for.
-    const flow = flowOf({ ...edge("e1", { kind: "pr-merged" }), error: "Couldn't launch ASM-12: no worktree" });
+    const flow = flowOf({ ...edge("e1", { kind: "pr-merged" }), error: "Couldn't launch PROJ-12: no worktree" });
     expect(unfirableRules(flow, { liveSignal: true, prFacts: false })).toEqual([]);
   });
 

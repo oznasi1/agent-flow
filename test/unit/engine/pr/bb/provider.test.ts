@@ -41,8 +41,8 @@ const provider = (run: Runner, apiMode: boolean) =>
   new BbProvider(run, () => BB, async () => apiMode);
 
 const PROJECTED_ROW = {
-  id: 42, title: "ASM-1 add export", state: "OPEN",
-  author: "Ada", source: "feat/ASM-1", destination: "main",
+  id: 42, title: "PROJ-1 add export", state: "OPEN",
+  author: "Ada", source: "feat/PROJ-1", destination: "main",
 };
 
 /** A second projected row that matches the KEY selector but not the BRANCH one,
@@ -61,9 +61,9 @@ const PROJECTED_OTHER_BRANCH = { ...PROJECTED_ROW, id: 99, source: "other" };
  * and `isDraft: false` no matter the truth. Both belong in `shown()` below, which
  * is the only response that has them. */
 const LIST_ROW = {
-  id: 42, title: "ASM-1 add export", state: "OPEN",
+  id: 42, title: "PROJ-1 add export", state: "OPEN",
   links: { html: { href: "https://bitbucket.org/acme/api-service/pull-requests/42" } },
-  source: { branch: { name: "feat/ASM-1" } },
+  source: { branch: { name: "feat/PROJ-1" } },
   destination: { branch: { name: "main" } },
 };
 
@@ -113,7 +113,7 @@ describe("BbProvider.fetch — projected mode", () => {
       "pipeline": JSON.stringify([{ build_number: 7, state: "SUCCESSFUL" }]),
       "pr": JSON.stringify([PROJECTED_OTHER_BRANCH, PROJECTED_ROW]),
     });
-    const res = await provider(run, false).fetch("/repos/api-service", "feat/ASM-1", "ASM-1");
+    const res = await provider(run, false).fetch("/repos/api-service", "feat/PROJ-1", "PROJ-1");
     // #42 is the BRANCH match; #99 shares the task key in its title and would win
     // the key selector outright, since `pickBbPr` breaks a tie by newest id. So
     // this number is the branch matcher's own signature — neuter that filter and
@@ -143,13 +143,13 @@ describe("BbProvider.fetch — projected mode", () => {
         PROJECTED_ROW,
       ]),
     });
-    const res = await provider(run, false).fetch("/repos/api-service", "some/other-branch", "ASM-1");
+    const res = await provider(run, false).fetch("/repos/api-service", "some/other-branch", "PROJ-1");
     expect(res).toMatchObject({ ok: true, facts: { number: 42 } });
   });
 
   it("reports no PR — not a failure — when nothing matches", async () => {
     const { run } = routed({ "remote.origin.url": REMOTE, "pr": JSON.stringify([]) });
-    await expect(provider(run, false).fetch("/r", "feat/x", "ASM-9")).resolves.toEqual({ ok: true, facts: null });
+    await expect(provider(run, false).fetch("/r", "feat/x", "PROJ-9")).resolves.toEqual({ ok: true, facts: null });
   });
 });
 
@@ -163,7 +163,7 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
       "pullrequests/42": shown(),
     });
-    const res = await provider(run, true).fetch("/repos/api-service", "feat/ASM-1", "ASM-1");
+    const res = await provider(run, true).fetch("/repos/api-service", "feat/PROJ-1", "PROJ-1");
     expect(res).toMatchObject({
       ok: true,
       facts: {
@@ -179,7 +179,7 @@ describe("BbProvider.fetch — passthrough mode", () => {
     expect(calls[1].args[1]).toBe("api");
     // The branch VALUE is percent-encoded (its `/` becomes `%2F`); the filter's
     // own `=`, `"` and the trailing `&state=OPEN&pagelen=10` clause stay literal.
-    expect(calls[1].args[2]).toContain('/2.0/repositories/acme/api-service/pullrequests?q=source.branch.name="feat%2FASM-1"&state=OPEN&pagelen=10');
+    expect(calls[1].args[2]).toContain('/2.0/repositories/acme/api-service/pullrequests?q=source.branch.name="feat%2FPROJ-1"&state=OPEN&pagelen=10');
   });
 
   it("encodes a branch's `&` as a value, so the filter's own `&state=OPEN` clause survives intact", async () => {
@@ -193,7 +193,7 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
       "pullrequests/42": shown(),
     });
-    await provider(run, true).fetch("/repos/api-service", "feat/a&b", "ASM-1");
+    await provider(run, true).fetch("/repos/api-service", "feat/a&b", "PROJ-1");
     expect(calls[1].args[2]).toContain('q=source.branch.name="feat%2Fa%26b"&state=OPEN&pagelen=10');
   });
 
@@ -211,14 +211,14 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "title~": JSON.stringify({ values: [LIST_ROW] }),
       "pullrequests/42": shown(),
     });
-    const res = await provider(run, true).fetch("/repos/api-service", "feat/ASM-1", "ASM-1&2");
+    const res = await provider(run, true).fetch("/repos/api-service", "feat/PROJ-1", "PROJ-1&2");
 
     expect(res).toMatchObject({ ok: true, facts: { number: 42 } });
     const search = calls.find((c) => c.args.some((a) => a.includes("title~")))!;
     // Unescaped, the key's `&` would inject a bogus query param and truncate
     // `&state=OPEN&pagelen=10` off the end — the search would then return PRs of
     // ANY state. The filter's own `=`, `~` and `"` stay literal.
-    expect(search.args[2]).toContain('q=title~"ASM-1%262"&state=OPEN&pagelen=10');
+    expect(search.args[2]).toContain('q=title~"PROJ-1%262"&state=OPEN&pagelen=10');
   });
 
   it("does not run the key search at all when the branch search already found the PR", async () => {
@@ -230,7 +230,7 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
       "pullrequests/42": shown(),
     });
-    await provider(run, true).fetch("/repos/api-service", "feat/ASM-1", "ASM-1");
+    await provider(run, true).fetch("/repos/api-service", "feat/PROJ-1", "PROJ-1");
     expect(calls.some((c) => c.args.some((a) => a.includes("title~")))).toBe(false);
   });
 
@@ -256,7 +256,7 @@ describe("BbProvider.fetch — passthrough mode", () => {
         ],
       }),
     });
-    const res = await provider(run, true).fetch("/repos/api-service", "feat/ASM-1", "ASM-1");
+    const res = await provider(run, true).fetch("/repos/api-service", "feat/PROJ-1", "PROJ-1");
 
     // The premise, pinned: neither field is on a list row, ever.
     expect(LIST_ROW).not.toHaveProperty("participants");
@@ -276,7 +276,7 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
       "pullrequests/42": shown(),
     });
-    await expect(provider(run, true).fetch("/r", "feat/ASM-1", "ASM-1")).resolves.toMatchObject({
+    await expect(provider(run, true).fetch("/r", "feat/PROJ-1", "PROJ-1")).resolves.toMatchObject({
       ok: true,
       facts: { number: 42, mergeable: "unknown", unresolved: null, ci: { passing: 0, pending: 0, failing: [] } },
     });
@@ -297,12 +297,12 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
       "pullrequests/42": new Error("500"),
     });
-    await expect(provider(run, true).fetch("/r", "feat/ASM-1", "ASM-1")).resolves.toEqual({
+    await expect(provider(run, true).fetch("/r", "feat/PROJ-1", "PROJ-1")).resolves.toEqual({
       ok: true,
       facts: {
         number: 42,
         url: "https://bitbucket.org/acme/api-service/pull-requests/42",
-        title: "ASM-1 add export",
+        title: "PROJ-1 add export",
         state: "OPEN",
         isDraft: false,
         ci: { passing: 0, pending: 0, failing: [] },
@@ -321,7 +321,7 @@ describe("BbProvider.fetch — passthrough mode", () => {
     ["an error object", '{"type":"error","error":{"message":"Not found"}}'],
     ["a null body", "null"],
     ["an array", "[]"],
-    ["a record with no identity", '{"title":"ASM-1 add export"}'],
+    ["a record with no identity", '{"title":"PROJ-1 add export"}'],
     // An empty href is no url: `toRestFacts` rejects on `!href`, so a guard that
     // accepted any string here would hand it a record it then turns into null.
     ["a record whose html href is empty", '{"id":42,"links":{"html":{"href":""}}}'],
@@ -334,9 +334,9 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "source.branch.name": JSON.stringify({ values: [LIST_ROW] }),
       "pullrequests/42": body,
     });
-    await expect(provider(run, true).fetch("/r", "feat/ASM-1", "ASM-1")).resolves.toMatchObject({
+    await expect(provider(run, true).fetch("/r", "feat/PROJ-1", "PROJ-1")).resolves.toMatchObject({
       ok: true,
-      facts: { number: 42, title: "ASM-1 add export", url: "https://bitbucket.org/acme/api-service/pull-requests/42" },
+      facts: { number: 42, title: "PROJ-1 add export", url: "https://bitbucket.org/acme/api-service/pull-requests/42" },
     });
   });
 });

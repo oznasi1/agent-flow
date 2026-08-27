@@ -103,8 +103,8 @@ Per the approved mockup (card style A):
 ```
 ● working · 12s ago                      agent-flow-2e
 Improve loading page design
-ASM-5111 · centaur  automation_e2e
-⎇ ASM-5111-improve-loading-page-design
+PROJ-5111 · webapp  e2e_suite
+⎇ PROJ-5111-improve-loading-page-design
 pr #398   ✓ 4 passing   review pending
                               [Open] [Diff] [⋯]
 ```
@@ -178,10 +178,10 @@ worth naming:
 
 | record | age | state |
 |---|---|---|
-| `ASM-5809` | Jul 23 | both worktrees deleted from disk; still Jira-polled every 30s |
-| `ASM-5111` | Aug 3 | one of two worktrees gone |
-| `explore-make-verify-feature-command-generic` | Jul 21 | points at the main `centaur` checkout on `master` — nothing about it can ever change, so it can never leave the board on its own |
-| `ASM-5885` | Aug 3 | live work; carries a stray repo entry named `ASM-5111` from a re-take |
+| `PROJ-5809` | Jul 23 | both worktrees deleted from disk; still Jira-polled every 30s |
+| `PROJ-5111` | Aug 3 | one of two worktrees gone |
+| `explore-make-verify-feature-command-generic` | Jul 21 | points at the main `webapp` checkout on `master` — nothing about it can ever change, so it can never leave the board on its own |
+| `PROJ-5885` | Aug 3 | live work; carries a stray repo entry named `PROJ-5111` from a re-take |
 | `review-technology-service-117` | Jul 29 | review-kind; never renders a card, worktree lingers |
 
 A run record is a pointer. Retiring one deletes that pointer and its PR-facts
@@ -212,14 +212,14 @@ Rule 1 has no gate at all.
    there is nothing left to `Open` or `Diff` and no work that could be lost.
    `workspaceFile` is deliberately not consulted — three of the seven records
    share one `.code-workspace`, so its existence says nothing about any single
-   run. → retires `ASM-5809`.
+   run. → retires `PROJ-5809`.
 2. **Finished** — either every PR-bearing repo has merged, or `jiraCategory ===
    "done"` and **no entry in `prs` has `state === "OPEN"`** — and that has been
    true for ≥ `retireFinishedAfterHours`. Deliberately *not*
    `prSignals(prs).open`, which excludes drafts: a draft PR is unmerged work, and
    its worktree must keep its pointer. The no-open-PR clause matters at all
    because a ticket closed while its PR is still in review must not delete the
-   pointer to the worktree that PR came from. → retires `ASM-5111` a day after its
+   pointer to the worktree that PR came from. → retires `PROJ-5111` a day after its
    ticket closes and its PR lands.
 3. **Abandoned** — age ≥ `retireAbandonedAfterDays`, `!isTicketRun(run)`,
    `Object.keys(prs).length === 0`, and every repo clean. **Skipped entirely when
@@ -335,8 +335,8 @@ Gates before any commit: `npm run typecheck`, `npm test`, `npm run test:cov`
 - Any change to how runs are *launched*, or to the runs-store format.
 - Cross-linking sibling cards of one run (hover-highlighting, grouping rules).
   Accepted redundancy; revisit only if the repetition proves annoying in use.
-- Fixing the stray repo entry a re-take can leave in a record — `ASM-5885` holds
-  one named `ASM-5111` pointing into another run's worktree. The retire rules
+- Fixing the stray repo entry a re-take can leave in a record — `PROJ-5885` holds
+  one named `PROJ-5111` pointing into another run's worktree. The retire rules
   tolerate it correctly (a foreign worktree that still exists blocks rule 1, and
   dirty work in it vetoes rules 2 and 3 — both fail safe), so this stays a
   separate pre-existing bug.

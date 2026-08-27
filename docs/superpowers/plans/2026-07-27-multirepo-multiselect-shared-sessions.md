@@ -19,8 +19,8 @@
 - **No new settings.** Do not touch `contributes.configuration` in `package.json`.
 - **Do not bump the version or build a `.vsix`.** That happens at merge time, separately.
 - **Comment style:** this codebase explains *why*, not *what*, in prose sentences above the code. Match it. Do not add comments that restate the line below them.
-- **Worktree folder name format:** `` `${key}-${repoName}` `` — e.g. `ASM-1-api`. Exact, no spaces (it is what `@`-mentions resolve against).
-- **Shared workspace filename format:** `` `${keys[0]}+${keys.length - 1}.code-workspace` `` — e.g. `ASM-1+2.code-workspace`.
+- **Worktree folder name format:** `` `${key}-${repoName}` `` — e.g. `PROJ-1-api`. Exact, no spaces (it is what `@`-mentions resolve against).
+- **Shared workspace filename format:** `` `${keys[0]}+${keys.length - 1}.code-workspace` `` — e.g. `PROJ-1+2.code-workspace`.
 - **Seed stagger:** `SEED_STAGGER_MS = 400`.
 
 ---
@@ -101,20 +101,20 @@ Replace the test named `"hides checkboxes again once a second repo is added"` wi
     const repoList = document.querySelector(".repo-list") as HTMLElement;
     fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
     fireEvent.mouseDown(within(repoList).getByText("billing").closest(".repo-opt")!);
-    expect(checks().length).toBe(3); // ASM-1, ASM-2 (api) + ASM-3 (billing)
+    expect(checks().length).toBe(3); // PROJ-1, PROJ-2 (api) + PROJ-3 (billing)
   });
 ```
 
 In the test named `"launches the checked, visible tasks with the filtered repo name"`, change the final assertion to:
 
 ```tsx
-    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1", "ASM-2"], repos: ["api"] });
+    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["PROJ-1", "PROJ-2"], repos: ["api"] });
 ```
 
 In the test named `"drops a checked task from the launch once a search filter hides it"`, change the final assertion to:
 
 ```tsx
-    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1"], repos: ["api"] });
+    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["PROJ-1"], repos: ["api"] });
 ```
 
 - [ ] **Step 2: Add a test for the multi-repo launch payload**
@@ -130,12 +130,12 @@ Append inside the same `describe` block:
     const repoList = document.querySelector(".repo-list") as HTMLElement;
     fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
     fireEvent.mouseDown(within(repoList).getByText("billing").closest(".repo-opt")!);
-    fireEvent.click(checks()[0]); // ASM-1 (api)
-    fireEvent.click(checks()[2]); // ASM-3 (billing)
+    fireEvent.click(checks()[0]); // PROJ-1 (api)
+    fireEvent.click(checks()[2]); // PROJ-3 (billing)
     fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
     expect(sent).toHaveBeenCalledWith({
       type: "takeBatch",
-      keys: ["ASM-1", "ASM-3"],
+      keys: ["PROJ-1", "PROJ-3"],
       repos: ["api", "billing"],
     });
   });
@@ -235,11 +235,11 @@ In `test/unit/engine/workspace.test.ts`, inside `describe("maybeSeedAgent")`, ap
 ```ts
   it("seeds every plan matching this window, in (createdAt, seq) order", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-2-1.json", "ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-2-1.json", "PROJ-1-1.json"] as never);
     readFileSync.mockImplementation((p) =>
-      String(p).includes("ASM-1")
-        ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
-        : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+      String(p).includes("PROJ-1")
+        ? planJson({ key: "PROJ-1", seq: 0, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "first" }] })
+        : planJson({ key: "PROJ-2", seq: 1, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "second" }] }),
     );
     commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
     const { context } = fakeContext();
@@ -256,11 +256,11 @@ In `test/unit/engine/workspace.test.ts`, inside `describe("maybeSeedAgent")`, ap
 
   it("uses the new-tab command when seeding more than one session", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
     readFileSync.mockImplementation((p) =>
-      String(p).includes("ASM-1")
-        ? planJson({ key: "ASM-1", seq: 0 })
-        : planJson({ key: "ASM-2", seq: 1 }),
+      String(p).includes("PROJ-1")
+        ? planJson({ key: "PROJ-1", seq: 0 })
+        : planJson({ key: "PROJ-2", seq: 1 }),
     );
     commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
     const { context } = fakeContext();
@@ -277,9 +277,9 @@ In `test/unit/engine/workspace.test.ts`, inside `describe("maybeSeedAgent")`, ap
 
   it("falls back to the primary-editor command when the new-tab command is unregistered", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
     readFileSync.mockImplementation((p) =>
-      String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+      String(p).includes("PROJ-1") ? planJson({ key: "PROJ-1", seq: 0 }) : planJson({ key: "PROJ-2", seq: 1 }),
     );
     commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
     const { context } = fakeContext();
@@ -295,15 +295,15 @@ In `test/unit/engine/workspace.test.ts`, inside `describe("maybeSeedAgent")`, ap
 
   it("seeds the remaining plans when one is already consumed", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
     readFileSync.mockImplementation((p) =>
-      String(p).includes("ASM-1")
-        ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
-        : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+      String(p).includes("PROJ-1")
+        ? planJson({ key: "PROJ-1", seq: 0, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "first" }] })
+        : planJson({ key: "PROJ-2", seq: 1, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "second" }] }),
     );
     commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
     const { context } = fakeContext({
-      globalState: { "seeded:ASM-1:/ws/ASM-1.code-workspace": true },
+      globalState: { "seeded:PROJ-1:/ws/PROJ-1.code-workspace": true },
     });
 
     vi.useFakeTimers();
@@ -318,9 +318,9 @@ In `test/unit/engine/workspace.test.ts`, inside `describe("maybeSeedAgent")`, ap
 
   it("skips the clipboard fallback when seeding several sessions", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
     readFileSync.mockImplementation((p) =>
-      String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+      String(p).includes("PROJ-1") ? planJson({ key: "PROJ-1", seq: 0 }) : planJson({ key: "PROJ-2", seq: 1 }),
     );
     commands.getCommands.mockResolvedValue([]); // no Claude command at all
     env.openExternal.mockResolvedValue(false); // URI handler fails too
@@ -594,16 +594,16 @@ beforeEach(() => {
 const baseReq = (over: Partial<SharedOpenRequest> = {}): SharedOpenRequest => ({
   tasks: [
     {
-      ticket: { key: "ASM-1", summary: "one", url: "https://jira/ASM-1" },
+      ticket: { key: "PROJ-1", summary: "one", url: "https://jira/PROJ-1" },
       planMd: "## Plan\n\na",
       descriptionText: "",
-      services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+      services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-1", isGit: true }],
     },
     {
-      ticket: { key: "ASM-2", summary: "two", url: "https://jira/ASM-2" },
+      ticket: { key: "PROJ-2", summary: "two", url: "https://jira/PROJ-2" },
       planMd: "## Plan\n\nb",
       descriptionText: "",
-      services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-2", isGit: true }],
+      services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-2", isGit: true }],
     },
   ],
   promptTemplate: "Start {key} — brief at {brief}{files}",
@@ -621,8 +621,8 @@ describe("openSharedWorkspace", () => {
     const result = await openSharedWorkspace(baseReq());
     const briefs = writes((p) => p.endsWith("TASK.md"));
     expect(briefs.map((c) => String(c[0]))).toEqual([
-      "/repos/api/.claude/worktrees/ASM-1/.pick-task/TASK.md",
-      "/repos/api/.claude/worktrees/ASM-2/.pick-task/TASK.md",
+      "/repos/api/.claude/worktrees/PROJ-1/.pick-task/TASK.md",
+      "/repos/api/.claude/worktrees/PROJ-2/.pick-task/TASK.md",
     ]);
     expect(result.briefs).toHaveLength(2);
   });
@@ -631,34 +631,34 @@ describe("openSharedWorkspace", () => {
     await openSharedWorkspace(baseReq());
     const ws = JSON.parse(String(writes((p) => p.endsWith(".code-workspace"))[0][1]));
     expect(ws.folders).toEqual([
-      { name: "ASM-1-api", path: "/repos/api/.claude/worktrees/ASM-1" },
-      { name: "ASM-2-api", path: "/repos/api/.claude/worktrees/ASM-2" },
+      { name: "PROJ-1-api", path: "/repos/api/.claude/worktrees/PROJ-1" },
+      { name: "PROJ-2-api", path: "/repos/api/.claude/worktrees/PROJ-2" },
     ]);
   });
 
   it("names the workspace file after the first key and the remaining count", async () => {
     const result = await openSharedWorkspace(baseReq());
-    expect(result.workspaceFile).toBe("/ws/ASM-1+1.code-workspace");
+    expect(result.workspaceFile).toBe("/ws/PROJ-1+1.code-workspace");
   });
 
   it("writes one plan and one run per task, all pointing at the same window", async () => {
     await openSharedWorkspace(baseReq());
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
-    expect(plans.map((p) => p.key)).toEqual(["ASM-1", "ASM-2"]);
+    expect(plans.map((p) => p.key)).toEqual(["PROJ-1", "PROJ-2"]);
     expect(plans.map((p) => p.seq)).toEqual([0, 1]);
-    expect(plans.every((p) => p.matches[0].matchPath === "/ws/ASM-1+1.code-workspace")).toBe(true);
+    expect(plans.every((p) => p.matches[0].matchPath === "/ws/PROJ-1+1.code-workspace")).toBe(true);
 
     const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
-    expect(runs.map((r) => r.key)).toEqual(["ASM-1", "ASM-2"]);
-    expect(runs.every((r) => r.workspaceFile === "/ws/ASM-1+1.code-workspace")).toBe(true);
+    expect(runs.map((r) => r.key)).toEqual(["PROJ-1", "PROJ-2"]);
+    expect(runs.every((r) => r.workspaceFile === "/ws/PROJ-1+1.code-workspace")).toBe(true);
     expect(runs.every((r) => r.mode === "multiroot")).toBe(true);
   });
 
   it("seeds each prompt with that task's absolute brief path", async () => {
     await openSharedWorkspace(baseReq());
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
-    expect(plans[0].matches[0].prompt).toContain("/repos/api/.claude/worktrees/ASM-1/.pick-task/TASK.md");
-    expect(plans[1].matches[0].prompt).toContain("/repos/api/.claude/worktrees/ASM-2/.pick-task/TASK.md");
+    expect(plans[0].matches[0].prompt).toContain("/repos/api/.claude/worktrees/PROJ-1/.pick-task/TASK.md");
+    expect(plans[1].matches[0].prompt).toContain("/repos/api/.claude/worktrees/PROJ-2/.pick-task/TASK.md");
   });
 
   it("qualifies file mentions with the folder name so they resolve to the right root", async () => {
@@ -667,16 +667,16 @@ describe("openSharedWorkspace", () => {
       baseReq({
         tasks: [
           {
-            ticket: { key: "ASM-1", summary: "one", url: "" },
+            ticket: { key: "PROJ-1", summary: "one", url: "" },
             planMd: "p",
             descriptionText: "look at `src/foo.ts`",
-            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-1", isGit: true }],
           },
         ],
       }),
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
-    expect(plan.matches[0].prompt).toContain("@ASM-1-api/src/foo.ts");
+    expect(plan.matches[0].prompt).toContain("@PROJ-1-api/src/foo.ts");
   });
 
   it("writes no plan file when seeding is off", async () => {
@@ -689,8 +689,8 @@ describe("openSharedWorkspace", () => {
     readFileSync.mockReturnValue(JSON.stringify({ folders: [{ path: "/repos/web" }] }));
     const result = await openSharedWorkspace(baseReq({ target: { kind: "existing", file: "/ws/team.code-workspace" } }));
     expect(result.workspaceFile).toBe("/ws/team.code-workspace");
-    expect(result.mergedFolders).toEqual(["ASM-1-api", "ASM-2-api"]);
-    expect(writes((p) => p === "/ws/ASM-1+1.code-workspace")).toHaveLength(0);
+    expect(result.mergedFolders).toEqual(["PROJ-1-api", "PROJ-2-api"]);
+    expect(writes((p) => p === "/ws/PROJ-1+1.code-workspace")).toHaveLength(0);
   });
 
   it("reports mergeFailed and writes nothing when the existing workspace is unparseable", async () => {
@@ -703,7 +703,7 @@ describe("openSharedWorkspace", () => {
   it("adds no folders to a live folder window and reports them unadded", async () => {
     const result = await openSharedWorkspace(baseReq({ target: { kind: "live-folder", folder: "/repos/web" } }));
     expect(result.workspaceFile).toBeUndefined();
-    expect(result.unaddedFolders).toEqual(["ASM-1-api", "ASM-2-api"]);
+    expect(result.unaddedFolders).toEqual(["PROJ-1-api", "PROJ-2-api"]);
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
     expect(plans.every((p) => p.matches[0].matchPath === "/repos/web")).toBe(true);
   });
@@ -711,7 +711,7 @@ describe("openSharedWorkspace", () => {
   it("opens the destination exactly once", async () => {
     await openSharedWorkspace(baseReq());
     expect(exec).toHaveBeenCalledTimes(1);
-    expect(String(exec.mock.calls[0][0])).toContain("/ws/ASM-1+1.code-workspace");
+    expect(String(exec.mock.calls[0][0])).toContain("/ws/PROJ-1+1.code-workspace");
   });
 });
 ```
@@ -957,7 +957,7 @@ Update the routing test's payload:
   it("routes the takeBatch message through onMessage to the handler", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { send } = setup();
-    await send({ type: "takeBatch", keys: ["ASM-1"], repos: ["api"] });
+    await send({ type: "takeBatch", keys: ["PROJ-1"], repos: ["api"] });
     expect(openWorkspace).toHaveBeenCalled();
   });
 ```
@@ -971,7 +971,7 @@ Rename and rewrite the two guard tests, which no longer abort:
       { name: "docs", path: "/repos/docs", isGit: false },
     ]);
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api", "docs"]);
+    await provider.takeBatch(["PROJ-1"], ["api", "docs"]);
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(vi.mocked(createWorktrees).mock.calls[0][0]).toEqual([expect.objectContaining({ name: "api" })]);
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "info" }));
@@ -980,7 +980,7 @@ Rename and rewrite the two guard tests, which no longer abort:
   it("errors when no selected repo resolves to a git repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"], { isGit: false }));
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
@@ -1005,7 +1005,7 @@ In the top-level `beforeEach`, give it a default resolution:
 
 ```ts
   vi.mocked(openSharedWorkspace).mockResolvedValue({
-    workspaceFile: "/ws/ASM-1+1.code-workspace",
+    workspaceFile: "/ws/PROJ-1+1.code-workspace",
     opened: true,
     briefs: [],
     seeded: 2,
@@ -1020,15 +1020,15 @@ Append inside `describe("takeBatch")`:
   it("gives each task the repos it touches, intersected with the filter set", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing", "web"]));
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "fix the billing api",
       descriptionText: "desc",
       labels: [],
       components: [],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["api", "billing"]);
+    await provider.takeBatch(["PROJ-1"], ["api", "billing"]);
     const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
     expect(picked.sort()).toEqual(["api", "billing"]);
     expect(picked).not.toContain("web"); // outside the filter set, even if inferred
@@ -1037,15 +1037,15 @@ Append inside `describe("takeBatch")`:
   it("falls back to the whole filter set when a task infers no repo in it", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing"]));
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "nothing recognisable here",
       descriptionText: "",
       labels: [],
       components: [],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["api", "billing"]);
+    await provider.takeBatch(["PROJ-1"], ["api", "billing"]);
     const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
     expect(picked.sort()).toEqual(["api", "billing"]);
   });
@@ -1093,7 +1093,7 @@ Append inside `describe("takeBatch")`:
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
   });
@@ -1118,13 +1118,13 @@ Append inside `describe("takeBatch")`:
       workspaceFile: undefined,
       opened: true,
       briefs: [],
-      unaddedFolders: ["ASM-1-api", "ASM-2-api"],
+      unaddedFolders: ["PROJ-1-api", "PROJ-2-api"],
       seeded: 2,
     });
     const { provider, posted } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
-    expect(toast.message).toContain("ASM-1-api");
+    expect(toast.message).toContain("PROJ-1-api");
   });
 ```
 

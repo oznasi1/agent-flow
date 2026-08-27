@@ -424,6 +424,66 @@ export const ORCH_CSS = `
   .orch-resume ul { margin: 0 0 8px; padding-left: 18px; font-size: var(--t-micro); color: var(--dim); }
   .orch-resume .row { display: flex; gap: 6px; }
 
+  /* The dry run. Deliberately NOT the resume gate's amber-washed card: that
+     block is a thing to act on and this one is a thing to read, so it takes the
+     quietest container this sheet has — a hairline and a 3% wash, no accent
+     border. Capped and scrolling rather than growing: a flow with twenty rules
+     must not push the graph it is describing off the bottom of the drawer. */
+  .orch-dry { flex: none; margin-bottom: 12px; padding: 9px 11px;
+    display: flex; flex-direction: column; max-height: 210px;
+    border: 1px solid var(--hair); border-radius: var(--r-card);
+    background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent); }
+  /* The rows are the only part that scrolls: the eyebrow above and the footer
+     below are both claims about the whole panel, and a footer that scrolls out of
+     sight is a disclaimer nobody reads (see the JSX's own comment). */
+  .orch-dry .rows { flex: 1; min-height: 0; overflow: auto; }
+  .orch-dry .hd { display: flex; align-items: center; gap: 7px; margin-bottom: 7px;
+    font-size: var(--t-micro); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
+  .orch-dry .hd .sp { flex: 1; }
+  /* The count carries no case or tracking of its own — it is a number, not a
+     label, and reads as one beside the eyebrow it shares a row with. Emphasis,
+     never hue, and for the same measured reason the verdict words gave it up
+     (see the block below): weight survives a theme, 3.75:1 green on a Light+
+     ground does not. It emphasises only once something would actually happen —
+     "0 of 4 rules" in full foreground would put the answer "nothing" in the
+     panel's loudest voice. */
+  .orch-dry .hd .n { text-transform: none; letter-spacing: 0; }
+  .orch-dry .hd .n.on { color: var(--vscode-foreground); font-weight: 600; }
+  .orch-dry .r { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: var(--t-body); }
+  .orch-dry .s { flex: 1; min-width: 0; }
+  .orch-dry .why { color: var(--dim); font-size: var(--t-micro); }
+  .orch-dry .ft { margin-top: 8px; padding-top: 7px; border-top: 1px solid var(--hair);
+    font-size: var(--t-micro); color: var(--dim); }
+
+  /* One hue per verdict, carried by the DOT and never by the word. Measured, not
+     assumed: on a Light+ ground these three hues run 2.17-3.75:1 as 10.5px text
+     (\`--c-attn\` is a fixed hex, so its 2.17 is every theme's), against the 4.5:1
+     a label that small needs. The same hues on a 5px dot are graphical, where the
+     bar is 3:1 — and the words stay legible on any theme a user brings, including
+     one whose \`charts.*\` overrides nobody here has seen. The drawer's own footer
+     dot (\`.orch-ft .live .d\`) already reads this way: hue on the mark, plain text
+     beside it.
+
+     No red anywhere in this panel: nothing here has FAILED — that is
+     \`.orch-obs .err\`'s licence, on a rule that tried. A dry run describes rules
+     that have not run at all.
+       fire    --c-done, the one thing that would actually happen
+       defer   --c-idle, met and merely queued behind the cap
+       blocked --c-attn, the same hue the resume gate spends on "needs you"
+       waiting --dim, the resting state and the commonest, so it recedes
+
+     The word carries a two-level hierarchy instead, which needs no hue at all:
+     "would fire" at full foreground because it is what you opened the panel to
+     find, and every not-now verdict at --dim. */
+  .orch-dry .v { flex: none; width: 84px; display: inline-flex; align-items: center; gap: 5px;
+    font-size: var(--t-micro); white-space: nowrap; color: var(--dim); }
+  .orch-dry .v .d { width: 5px; height: 5px; border-radius: 50%; flex: none;
+    background: color-mix(in srgb, var(--dim) 55%, transparent); }
+  .orch-dry .v.fire { color: var(--vscode-foreground); font-weight: 600; }
+  .orch-dry .v.fire .d { background: var(--c-done); }
+  .orch-dry .v.defer .d { background: var(--c-idle); }
+  .orch-dry .v.blocked .d { background: var(--c-attn); }
+
   /* The keyboard path onto the same rules the canvas draws (flowList.tsx).
      Fills the body the same way the tray+graph+inspector block does when
      Canvas is selected, so switching views never changes the drawer's own

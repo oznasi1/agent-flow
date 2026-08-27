@@ -15,10 +15,10 @@ describe("readOpenSessions", () => {
       JSON.stringify({
         pid,
         sessionId: `sess-${pid}`,
-        cwd: "/Users/dev/projects/centaur",
+        cwd: "/Users/dev/projects/webapp",
         startedAt: 1_700_000_000_000,
         kind: "interactive",
-        name: `centaur-${pid}`,
+        name: `webapp-${pid}`,
         ...over,
       }),
     );
@@ -35,9 +35,9 @@ describe("readOpenSessions", () => {
       {
         pid: process.pid,
         sessionId: `sess-${process.pid}`,
-        cwd: "/Users/dev/projects/centaur",
+        cwd: "/Users/dev/projects/webapp",
         startedAt: 1_700_000_000_000,
-        name: `centaur-${process.pid}`,
+        name: `webapp-${process.pid}`,
       },
     ]);
   });

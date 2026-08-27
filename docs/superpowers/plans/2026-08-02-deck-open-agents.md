@@ -233,7 +233,7 @@ describe("defaultBranch & prEligible", () => {
 
   it("says a feature branch can own a PR", () => {
     const work = clone("elig");
-    expect(prEligible({ path: work, isGit: true, branch: "ASM-1-x" })).toBe(true);
+    expect(prEligible({ path: work, isGit: true, branch: "PROJ-1-x" })).toBe(true);
   });
 
   it("says the default branch cannot", () => {
@@ -246,12 +246,12 @@ describe("defaultBranch & prEligible", () => {
   it("says a repo with no origin cannot", () => {
     const solo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-elig-solo-"));
     execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", solo]);
-    expect(prEligible({ path: solo, isGit: true, branch: "ASM-1-x" })).toBe(false);
+    expect(prEligible({ path: solo, isGit: true, branch: "PROJ-1-x" })).toBe(false);
     fs.rmSync(solo, { recursive: true, force: true });
   });
 
   it("says a non-git service cannot, and one with no branch cannot", () => {
-    expect(prEligible({ path: "/svc", isGit: false, branch: "ASM-1-x" })).toBe(false);
+    expect(prEligible({ path: "/svc", isGit: false, branch: "PROJ-1-x" })).toBe(false);
     expect(prEligible({ path: "/svc", isGit: true })).toBe(false);
   });
 });
@@ -274,8 +274,8 @@ Add to `src/engine/git.ts`, below `defaultRemoteRef`:
 const rootMemo = new Map<string, string>();
 const defaultBranchMemo = new Map<string, string>();
 
-/** The git repo root containing `cwd`, so a session started in `centaur/src`
- * resolves to the same place as one started in `centaur` — and so a place
+/** The git repo root containing `cwd`, so a session started in `webapp/src`
+ * resolves to the same place as one started in `webapp` — and so a place
  * compares equal to a run record's repo path, which is always a root. "" when
  * `cwd` is in no repo at all. */
 export function repoRoot(cwd: string): string {
@@ -357,7 +357,7 @@ git commit -m "feat(git): repo root, current branch, default branch and PR eligi
 describe("readSessionActivity", () => {
   const NOW = 1_800_000_000_000;
   let root: string;
-  const cwd = "/Users/dev/projects/centaur";
+  const cwd = "/Users/dev/projects/webapp";
 
   const write = (id: string, lines: object[], mtimeMs: number): void => {
     const dir = path.join(root, encodeProjectDir(cwd));
@@ -483,10 +483,10 @@ describe("readOpenSessions", () => {
       JSON.stringify({
         pid,
         sessionId: `sess-${pid}`,
-        cwd: "/Users/dev/projects/centaur",
+        cwd: "/Users/dev/projects/webapp",
         startedAt: 1_700_000_000_000,
         kind: "interactive",
-        name: `centaur-${pid}`,
+        name: `webapp-${pid}`,
         ...over,
       }),
     );
@@ -503,9 +503,9 @@ describe("readOpenSessions", () => {
       {
         pid: process.pid,
         sessionId: `sess-${process.pid}`,
-        cwd: "/Users/dev/projects/centaur",
+        cwd: "/Users/dev/projects/webapp",
         startedAt: 1_700_000_000_000,
-        name: `centaur-${process.pid}`,
+        name: `webapp-${process.pid}`,
       },
     ]);
   });
@@ -756,7 +756,7 @@ Add to `src/engine/sessions.ts` (and `import { canon } from "./paths";`, `import
 ```ts
 /**
  * Sessions grouped by the git repo root containing their cwd, so one started in
- * `centaur/src` groups with one started in `centaur` — and so a place compares
+ * `webapp/src` groups with one started in `webapp` — and so a place compares
  * equal to a run record's repo path, which is always a root. A cwd in no repo
  * groups under itself. Keys are canonicalised, so /var and /private/var
  * spellings of one directory land in one group.
@@ -810,59 +810,59 @@ import { describe, it, expect } from "vitest";
 import { inferTicket, localKey, localRunFor } from "../../../src/engine/localRuns";
 import type { OpenSession } from "../../../src/engine/sessions";
 
-const BASE = "https://at-bay.atlassian.net";
+const BASE = "https://example.atlassian.net";
 const NOW = 1_800_000_000_000;
 const sess = (over: Partial<OpenSession> = {}): OpenSession => ({
-  pid: 1, sessionId: "s1", cwd: "/r/centaur", startedAt: 500, name: "centaur-7e", ...over,
+  pid: 1, sessionId: "s1", cwd: "/r/webapp", startedAt: 500, name: "webapp-7e", ...over,
 });
 
 describe("inferTicket", () => {
   it("reads a key and a summary out of a task branch", () => {
-    expect(inferTicket("ASM-5641-team-table-new-design", "ASM", BASE)).toEqual({
-      key: "ASM-5641",
-      url: `${BASE}/browse/ASM-5641`,
+    expect(inferTicket("PROJ-5641-team-table-new-design", "PROJ", BASE)).toEqual({
+      key: "PROJ-5641",
+      url: `${BASE}/browse/PROJ-5641`,
       summary: "team table new design",
     });
   });
 
   it("accepts a bare key with no tail", () => {
-    expect(inferTicket("ASM-5772", "ASM", BASE)).toEqual({
-      key: "ASM-5772", url: `${BASE}/browse/ASM-5772`, summary: "ASM-5772",
+    expect(inferTicket("PROJ-5772", "PROJ", BASE)).toEqual({
+      key: "PROJ-5772", url: `${BASE}/browse/PROJ-5772`, summary: "PROJ-5772",
     });
   });
 
   it("upper-cases a lower-cased key", () => {
-    expect(inferTicket("asm-1-x", "ASM", BASE)?.key).toBe("ASM-1");
+    expect(inferTicket("proj-1-x", "PROJ", BASE)?.key).toBe("PROJ-1");
   });
 
   it("refuses a branch that names another project", () => {
     // The gate is the project the user actually works in, so a guess can only
     // ever name an issue that could exist for them.
-    expect(inferTicket("PROJ-12-x", "ASM", BASE)).toBeNull();
+    expect(inferTicket("PROJ-12-x", "PROJ", BASE)).toBeNull();
   });
 
   it("refuses a branch with no key, a default branch, and no branch at all", () => {
-    expect(inferTicket("feature/x", "ASM", BASE)).toBeNull();
-    expect(inferTicket("main", "ASM", BASE)).toBeNull();
-    expect(inferTicket(null, "ASM", BASE)).toBeNull();
+    expect(inferTicket("feature/x", "PROJ", BASE)).toBeNull();
+    expect(inferTicket("main", "PROJ", BASE)).toBeNull();
+    expect(inferTicket(null, "PROJ", BASE)).toBeNull();
   });
 
   it("refuses when no project is configured", () => {
-    expect(inferTicket("ASM-1-x", "", BASE)).toBeNull();
+    expect(inferTicket("PROJ-1-x", "", BASE)).toBeNull();
   });
 
   it("does not double a trailing slash on the base url", () => {
-    expect(inferTicket("ASM-1", "ASM", `${BASE}/`)?.url).toBe(`${BASE}/browse/ASM-1`);
+    expect(inferTicket("PROJ-1", "PROJ", `${BASE}/`)?.url).toBe(`${BASE}/browse/PROJ-1`);
   });
 });
 
 describe("localKey", () => {
   it("is stable for the same place", () => {
-    expect(localKey("/r/centaur")).toBe(localKey("/r/centaur"));
+    expect(localKey("/r/webapp")).toBe(localKey("/r/webapp"));
   });
 
   it("differs for two places sharing a basename", () => {
-    expect(localKey("/a/centaur")).not.toBe(localKey("/b/centaur"));
+    expect(localKey("/a/webapp")).not.toBe(localKey("/b/webapp"));
   });
 
   it("keeps the basename greppable and stays filename-safe", () => {
@@ -876,15 +876,15 @@ describe("localKey", () => {
 });
 
 describe("localRunFor", () => {
-  const git = { isGit: true, branch: "ASM-1-x" };
-  const ticket = { key: "ASM-1", url: `${BASE}/browse/ASM-1`, summary: "a thing" };
+  const git = { isGit: true, branch: "PROJ-1-x" };
+  const ticket = { key: "PROJ-1", url: `${BASE}/browse/PROJ-1`, summary: "a thing" };
 
   it("carries the ticket's summary and url when one was inferred", () => {
-    const r = localRunFor("/r/centaur", [sess()], git, ticket, NOW);
+    const r = localRunFor("/r/webapp", [sess()], git, ticket, NOW);
     expect(r).toMatchObject({
-      key: localKey("/r/centaur"),
+      key: localKey("/r/webapp"),
       summary: "a thing",
-      url: `${BASE}/browse/ASM-1`,
+      url: `${BASE}/browse/PROJ-1`,
       kind: "local",
       mode: "per-window",
       briefPaths: [],
@@ -892,14 +892,14 @@ describe("localRunFor", () => {
   });
 
   it("falls back to the directory basename with no ticket", () => {
-    const r = localRunFor("/r/centaur", [sess()], { isGit: true, branch: "main" }, null, NOW);
-    expect(r.summary).toBe("centaur");
+    const r = localRunFor("/r/webapp", [sess()], { isGit: true, branch: "main" }, null, NOW);
+    expect(r.summary).toBe("webapp");
     expect(r.url).toBe("");
   });
 
   it("describes the place as a single repo", () => {
-    expect(localRunFor("/r/centaur", [sess()], git, ticket, NOW).repos).toEqual([
-      { name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-1-x" },
+    expect(localRunFor("/r/webapp", [sess()], git, ticket, NOW).repos).toEqual([
+      { name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-1-x" },
     ]);
   });
 
@@ -909,12 +909,12 @@ describe("localRunFor", () => {
   });
 
   it("starts at the earliest session", () => {
-    const r = localRunFor("/r/centaur", [sess({ startedAt: 900 }), sess({ startedAt: 400 })], git, ticket, NOW);
+    const r = localRunFor("/r/webapp", [sess({ startedAt: 900 }), sess({ startedAt: 400 })], git, ticket, NOW);
     expect(r.createdAt).toBe(400);
   });
 
   it("falls back to now when no session records a start", () => {
-    const r = localRunFor("/r/centaur", [sess({ startedAt: 0 })], git, ticket, NOW);
+    const r = localRunFor("/r/webapp", [sess({ startedAt: 0 })], git, ticket, NOW);
     expect(r.createdAt).toBe(NOW);
   });
 });
@@ -970,7 +970,7 @@ function escapeRe(s: string): string {
 /**
  * The ticket a branch names, or null. Gated on the project key the user actually
  * works in, so a guess can only ever name an issue that could exist for them —
- * `feature/x` names nothing, and `PROJ-12-x` in an ASM shop is somebody else's
+ * `feature/x` names nothing, and `PROJ-12-x` in an PROJ shop is somebody else's
  * convention. The summary is the branch's own tail, never fetched: reading the
  * real one would mean a Jira round trip before the card could be built at all,
  * to improve a line the branch already says.
@@ -1269,27 +1269,27 @@ const sess = (over: Partial<OpenSession> = {}): OpenSession => ({
 });
 
 it("attaches every open session in a run's repo to that run's card", async () => {
-  h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }] })];
+  h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "PROJ-1-x" }] })];
   h.openSessions = [sess(), sess({ pid: 2, sessionId: "s2", startedAt: 200, name: "svc-fa" })];
   show();
   await settled();
-  expect(builtFor("ASM-1").agents.map((a) => a.session.name)).toEqual(["svc-7e", "svc-fa"]);
+  expect(builtFor("PROJ-1").agents.map((a) => a.session.name)).toEqual(["svc-7e", "svc-fa"]);
 });
 
 it("gives a run with no session open an empty agents list", async () => {
-  h.runs = [mkRun({ key: "ASM-1" })];
+  h.runs = [mkRun({ key: "PROJ-1" })];
   h.openSessions = [];
   show();
   await settled();
-  expect(builtFor("ASM-1").agents).toEqual([]);
+  expect(builtFor("PROJ-1").agents).toEqual([]);
 });
 
 it("does not attach a session running somewhere else", async () => {
-  h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+  h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
   h.openSessions = [sess({ cwd: "/r/other", name: "other-1" })];
   show();
   await settled();
-  expect(builtFor("ASM-1").agents).toEqual([]);
+  expect(builtFor("PROJ-1").agents).toEqual([]);
 });
 ```
 
@@ -1419,7 +1419,7 @@ it("fetches a PR for an Explore run whose agent made a branch", async () => {
 });
 
 it("still fetches a PR for a tracked run on its task branch", async () => {
-  h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }] })];
+  h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "PROJ-1-x" }] })];
   h.prEntries = {};
   await showAndWarm(true);
   expect(h.prFetch).toHaveBeenCalled();
@@ -1493,23 +1493,23 @@ git commit -m "fix(deck): look for a PR by branch, not by whether there is a tic
 
 it("reads no sessions at all with open agents off", async () => {
   h.openAgents = false;
-  h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+  h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
   h.openSessions = [sess()];
   show();
   await settled();
-  expect(builtFor("ASM-1").agents).toEqual([]);
+  expect(builtFor("PROJ-1").agents).toEqual([]);
 });
 
 it("re-reads when the toggle comes back on", async () => {
   h.openAgents = false;
-  h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+  h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
   h.openSessions = [sess()];
   show();
   await settled();
   const p = lastPanel();
   await p._fire({ type: "deck:setOpenAgents", on: true });
   await settled();
-  expect(builtFor("ASM-1").agents).toHaveLength(1);
+  expect(builtFor("PROJ-1").agents).toHaveLength(1);
 });
 
 it("tells the webview which way the toggle is set", async () => {
@@ -1625,13 +1625,13 @@ git commit -m "feat(deck): an Open agents toggle and its setting"
 // test/unit/deckView.test.ts
 //
 // 1. The hoisted block gains a branch the tests can steer:
-//      branch: "ASM-5641-team-table" as string | null,
+//      branch: "PROJ-5641-team-table" as string | null,
 // 2. The existing src/engine/git mock gains:
-//      currentBranch: (p: string) => (p === "/r/centaur" ? h.branch : "main"),
+//      currentBranch: (p: string) => (p === "/r/webapp" ? h.branch : "main"),
 //      repoRoot: (p: string) => p,
-// 3. beforeEach: h.branch = "ASM-5641-team-table";
+// 3. beforeEach: h.branch = "PROJ-5641-team-table";
 // 4. The config mock already supplies `project`/`baseUrl` — confirm they are
-//    "ASM" and a jira base url, or set them in the mock.
+//    "PROJ" and a jira base url, or set them in the mock.
 //
 // Every local card's key is a hash, so read it off the built input rather than
 // hard-coding one:
@@ -1640,26 +1640,26 @@ const builtLocal = () =>
 
 it("makes a card for a place no tracked run owns", async () => {
   h.runs = [];
-  h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+  h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
   show();
   await settled();
   expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
-  expect(builtLocal().agents.map((a) => a.session.name)).toEqual(["centaur-7e"]);
+  expect(builtLocal().agents.map((a) => a.session.name)).toEqual(["webapp-7e"]);
 });
 
 it("infers the ticket a branch names, and polls Jira for it", async () => {
   h.runs = [];
-  h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+  h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
   show(true);
   await settled();
-  expect(builtLocal().run.url).toContain("/browse/ASM-5641");
-  expect(h.getStatus).toHaveBeenCalledWith("ASM-5641");
+  expect(builtLocal().run.url).toContain("/browse/PROJ-5641");
+  expect(h.getStatus).toHaveBeenCalledWith("PROJ-5641");
 });
 
 it("infers nothing from a default branch, and polls no Jira", async () => {
   h.runs = [];
   h.branch = "main";
-  h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+  h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
   show(true);
   await settled();
   expect(builtLocal().run.url).toBe("");
@@ -1667,7 +1667,7 @@ it("infers nothing from a default branch, and polls no Jira", async () => {
 });
 
 it("does not make a second card for a place a tracked run already owns", async () => {
-  h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }] })];
+  h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "PROJ-1-x" }] })];
   h.openSessions = [sess()];
   show();
   await settled();
@@ -1677,7 +1677,7 @@ it("does not make a second card for a place a tracked run already owns", async (
 it("makes no local cards with the toggle off", async () => {
   h.openAgents = false;
   h.runs = [];
-  h.openSessions = [sess({ cwd: "/r/centaur" })];
+  h.openSessions = [sess({ cwd: "/r/webapp" })];
   show();
   await settled();
   expect(h.buildRunStatus).not.toHaveBeenCalled();
@@ -1687,7 +1687,7 @@ it("still makes local cards with the live signal off", async () => {
   // The registry knows a session is open without any transcript being read, so
   // the card appears — its agents just report unknown.
   h.runs = [];
-  h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+  h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
   show();
   await settled();
   const p = lastPanel();
@@ -1700,12 +1700,12 @@ it("still makes local cards with the live signal off", async () => {
 
 it("opens a local card's directory", async () => {
   h.runs = [];
-  h.openSessions = [sess({ cwd: "/r/centaur" })];
+  h.openSessions = [sess({ cwd: "/r/webapp" })];
   show();
   await settled();
   const p = lastPanel();
   await p._fire({ type: "deck:inspect", key: builtLocal().run.key, action: "open" });
-  expect(h.openInEditor).toHaveBeenCalledWith("/r/centaur");
+  expect(h.openInEditor).toHaveBeenCalledWith("/r/webapp");
 });
 ```
 
@@ -1794,7 +1794,7 @@ git commit -m "feat(deck): a card for every place an agent is open in"
 
 /** Build one local card, track it, and hand back the record that was written. */
 const trackLocal = async (): Promise<Run> => {
-  h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+  h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
   show();
   await settled();
   const p = lastPanel();
@@ -1806,17 +1806,17 @@ const trackLocal = async (): Promise<Run> => {
 it("writes an inferred ticket's key as a task run", async () => {
   h.runs = [];
   const written = await trackLocal();
-  expect(written).toMatchObject({ key: "ASM-5641", kind: "task" });
-  expect(written.url).toContain("/browse/ASM-5641");
+  expect(written).toMatchObject({ key: "PROJ-5641", kind: "task" });
+  expect(written.url).toContain("/browse/PROJ-5641");
 });
 
 it("keeps the local key when a tracked run already owns the inferred one", async () => {
-  // Writing ASM-5641.json here would silently replace a real launch record.
-  h.runs = [mkRun({ key: "ASM-5641" })];
+  // Writing PROJ-5641.json here would silently replace a real launch record.
+  h.runs = [mkRun({ key: "PROJ-5641" })];
   const written = await trackLocal();
   expect(written.key).toMatch(/^local-/);
   expect(written.kind).toBe("task");
-  expect(written.url).toContain("/browse/ASM-5641");
+  expect(written.url).toContain("/browse/PROJ-5641");
 });
 
 it("writes a place with no ticket as an explore run", async () => {
@@ -1835,11 +1835,11 @@ it("drops the local key's cached PR facts, which the new key refetches", async (
 });
 
 it("ignores a track for a key that is not a local card", async () => {
-  h.runs = [mkRun({ key: "ASM-1" })];
+  h.runs = [mkRun({ key: "PROJ-1" })];
   h.openSessions = [];
   show();
   await settled();
-  await lastPanel()._fire({ type: "deck:track", key: "ASM-1" });
+  await lastPanel()._fire({ type: "deck:track", key: "PROJ-1" });
   await settled();
   expect(h.writeRun).not.toHaveBeenCalled();
 });
@@ -2053,9 +2053,9 @@ git commit -m "feat(deck): a card lists the agents open in it"
 ```tsx
 // test/webview/DeckApp.test.tsx
 const mkLocal = (over: Partial<RunStatus> = {}) => mkStatus({
-  run: { key: "local-centaur-1a2b3c4d", summary: "team table new design",
-    url: "https://jira/browse/ASM-5641", createdAt: 1, kind: "local", mode: "per-window",
-    repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-5641-team-table" }], briefPaths: [] },
+  run: { key: "local-webapp-1a2b3c4d", summary: "team table new design",
+    url: "https://jira/browse/PROJ-5641", createdAt: 1, kind: "local", mode: "per-window",
+    repos: [{ name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-5641-team-table" }], briefPaths: [] },
   ...over,
 });
 
@@ -2064,14 +2064,14 @@ it("marks a local card and flags an inferred key", () => {
   host(runsMsg([mkLocal()]));
   expect(screen.getByText("local")).toBeTruthy();
   expect(screen.getByText("~inferred")).toBeTruthy();
-  expect(screen.getByText("ASM-5641")).toBeTruthy();
+  expect(screen.getByText("PROJ-5641")).toBeTruthy();
 });
 
 it("shows the place's name when nothing was inferred", () => {
   render(<DeckApp />);
-  host(runsMsg([mkLocal({ run: { ...mkLocal().run, url: "", summary: "centaur" } })]));
+  host(runsMsg([mkLocal({ run: { ...mkLocal().run, url: "", summary: "webapp" } })]));
   expect(screen.queryByText("~inferred")).toBeNull();
-  expect(screen.getByText("centaur")).toBeTruthy();
+  expect(screen.getByText("webapp")).toBeTruthy();
 });
 
 it("offers Track it and no Forget", () => {
@@ -2087,7 +2087,7 @@ it("posts deck:track", () => {
   host(runsMsg([mkLocal()]));
   fireEvent.click(screen.getByRole("button", { name: "⋯" }));
   fireEvent.click(screen.getByRole("button", { name: "Track it" }));
-  expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-centaur-1a2b3c4d" });
+  expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-webapp-1a2b3c4d" });
 });
 
 it("still offers Forget on a tracked card", () => {
@@ -2207,7 +2207,7 @@ the ones it launched — read from `~/.claude/sessions`, the registry Claude Cod
 keeps of its running sessions. Sessions attach to the card that owns their
 directory, so a worktree with two agents in it says so and lists both; a place
 with no tracked run gets a card of its own, marked `local`. A local card reads
-its branch for a ticket key (`ASM-5641-team-table` → `ASM-5641`, marked
+its branch for a ticket key (`PROJ-5641-team-table` → `PROJ-5641`, marked
 `~inferred`) and for its pull request, so a worktree Claude Code made on its own
 lands on the board as complete as a `Take`n one. It disappears when you close its
 last agent — `⋯` → **Track it** pins it to the runs store first, after which it

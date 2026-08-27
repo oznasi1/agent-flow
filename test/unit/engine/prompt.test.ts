@@ -2,22 +2,22 @@ import { describe, it, expect } from "vitest";
 import { renderPrompt, injectSlackDm, insertBeforeFiles, SLACK_DM_SENTENCE, applyExploreVars, prReviewTemplate, PR_REVIEW_AUTOFIX_CLAUSE, composeAgentPrompt, prWorkClause, prWorkLabel, type PromptVars } from "../../../src/engine/prompt";
 
 const V: PromptVars = {
-  key: "ASM-5412",
+  key: "PROJ-5412",
   summary: "Wizer export",
-  url: "https://x/ASM-5412",
+  url: "https://x/PROJ-5412",
   brief: ".pick-task/TASK.md",
 };
 
 describe("renderPrompt", () => {
   it("substitutes all placeholders", () => {
     expect(renderPrompt("{key}: {summary} @ {brief} — {url}", V, [])).toBe(
-      "ASM-5412: Wizer export @ .pick-task/TASK.md — https://x/ASM-5412",
+      "PROJ-5412: Wizer export @ .pick-task/TASK.md — https://x/PROJ-5412",
     );
   });
 
   it("expands {files} into a relevant-files block when mentions exist", () => {
-    expect(renderPrompt("do it{files}", V, ["@centaur/a.ts", "@centaur/b.ts"])).toBe(
-      "do it\n\nRelevant files: @centaur/a.ts @centaur/b.ts",
+    expect(renderPrompt("do it{files}", V, ["@webapp/a.ts", "@webapp/b.ts"])).toBe(
+      "do it\n\nRelevant files: @webapp/a.ts @webapp/b.ts",
     );
   });
 
@@ -26,16 +26,16 @@ describe("renderPrompt", () => {
   });
 
   it("replaces every occurrence of a repeated placeholder", () => {
-    expect(renderPrompt("{key} {key} — {key}", V, [])).toBe("ASM-5412 ASM-5412 — ASM-5412");
+    expect(renderPrompt("{key} {key} — {key}", V, [])).toBe("PROJ-5412 PROJ-5412 — PROJ-5412");
   });
 
   it("leaves unknown placeholders untouched", () => {
-    expect(renderPrompt("{key} {nope}", V, [])).toBe("ASM-5412 {nope}");
+    expect(renderPrompt("{key} {nope}", V, [])).toBe("PROJ-5412 {nope}");
   });
 
   it("renders a custom (debug-style) template", () => {
     expect(renderPrompt("Debug {key}: reproduce then fix. {url}", V, [])).toBe(
-      "Debug ASM-5412: reproduce then fix. https://x/ASM-5412",
+      "Debug PROJ-5412: reproduce then fix. https://x/PROJ-5412",
     );
   });
 

@@ -65,18 +65,18 @@ describe("DeckPanel settings without a reload", () => {
 
   it("re-seeds openAgents from the setting", async () => {
     h.openAgents = false;
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
     h.openSessions = [sess()];
     show();
     await settled();
-    expect(builtFor("ASM-1").agents).toEqual([]);
+    expect(builtFor("PROJ-1").agents).toEqual([]);
 
     h.openAgents = true;
     setConfig({ openAgents: true });
     fireConfigurationChanged("agentFlow.openAgents");
     await settled();
 
-    expect(builtFor("ASM-1").agents).toHaveLength(1);
+    expect(builtFor("PROJ-1").agents).toHaveLength(1);
   });
 
   it("clears the review strip immediately when reviewRequests goes off", async () => {
@@ -226,13 +226,13 @@ In `test/unit/deckView.test.ts`:
     // The registry knows the session is open; only the transcript goes unread.
     // That is now the sole route to an unknown activity, and it must not drop the
     // session from the card.
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "b" }] })];
     h.openSessions = [sess()];
     h.sessionActivity.mockReturnValue({ state: "unknown", lastActivityMs: null, slug: null });
     show();
     await settled();
 
-    const agents = builtFor("ASM-1").agents;
+    const agents = builtFor("PROJ-1").agents;
     expect(agents).toHaveLength(1);
     expect(agents[0].session.name).toBe("svc-7e");
     expect(agents[0].activity).toEqual({ state: "unknown", lastActivityMs: null, slug: null });

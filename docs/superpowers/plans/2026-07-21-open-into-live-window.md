@@ -506,8 +506,8 @@ describe("openWorkspace — existing folder window", () => {
     expect(result.mode).toBe("per-window");
     expect(result.workspaceFile).toBeUndefined();
     expect(result.opened).toEqual(["/repos/account-service"]);
-    // account-service IS the open folder; centaur can't be added as a root.
-    expect(result.unaddedRepos).toEqual(["centaur"]);
+    // account-service IS the open folder; webapp can't be added as a root.
+    expect(result.unaddedRepos).toEqual(["webapp"]);
 
     const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
     const plan = JSON.parse(String(planWrite![1]));
@@ -519,7 +519,7 @@ describe("openWorkspace — existing folder window", () => {
     await openWorkspace(baseReq({ services: mkRepos(["solo"]), existingFolder: "/other/open-window" }));
     const brief = writeArg((p) => p === "/other/open-window/.pick-task/TASK.md");
     expect(brief).toBeTruthy();
-    expect(String(brief![1])).toContain("ASM-1");
+    expect(String(brief![1])).toContain("PROJ-1");
   });
 });
 ```
@@ -682,7 +682,7 @@ describe("live-window open targets", () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "existing", file: "/ws/team.code-workspace" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("PROJ-1", ["account-service"]);
 
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ existingWorkspaceFile: "/ws/team.code-workspace", mode: "multiroot", openIn: "new" }),
@@ -697,7 +697,7 @@ describe("live-window open targets", () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/account-service" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("PROJ-1", ["account-service"]);
 
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ existingFolder: "/repos/account-service", mode: "per-window", openIn: "new" }),
@@ -709,16 +709,16 @@ describe("live-window open targets", () => {
     vi.mocked(windowIdentity).mockReturnValue({ identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1 });
     vi.mocked(readLiveWindows).mockReturnValue([
       { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, updatedAt: 9 },
-      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 8 },
+      { pid: 2, identity: "/repos/webapp", kind: "folder", label: "webapp", folders: 1, updatedAt: 8 },
     ]);
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("PROJ-1", ["account-service"]);
 
     const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string }[];
     const labels = items.map((i) => i.label);
-    expect(labels.some((l) => l.includes("centaur"))).toBe(true);
+    expect(labels.some((l) => l.includes("webapp"))).toBe(true);
     expect(labels.some((l) => l.includes("account-service"))).toBe(false); // current window excluded
   });
 
@@ -727,7 +727,7 @@ describe("live-window open targets", () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("PROJ-1", ["account-service"]);
 
     expect(readLiveWindows).not.toHaveBeenCalled();
   });
@@ -924,17 +924,17 @@ describe("explore — open target", () => {
   it("opens an Explore session into a live folder window", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, updatedAt: 9 },
+      { pid: 1, identity: "/repos/webapp", kind: "folder", label: "webapp", folders: 1, updatedAt: 9 },
     ]);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("poke around");
     vi.mocked(window.showQuickPick)
-      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never)
-      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/centaur" } } as never);
+      .mockResolvedValueOnce([{ repo: mkRepos(["webapp"])[0] }] as never)
+      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/webapp" } } as never);
 
     await runExplore();
 
     expect(openWorkspace).toHaveBeenCalledWith(
-      expect.objectContaining({ existingFolder: "/repos/centaur", mode: "per-window", openIn: "new" }),
+      expect.objectContaining({ existingFolder: "/repos/webapp", mode: "per-window", openIn: "new" }),
     );
   });
 });

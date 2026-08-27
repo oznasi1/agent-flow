@@ -81,22 +81,22 @@ function fetchFrom(tree: Record<string, { key: string; summary: string }[]>) {
 
 describe("buildTree", () => {
   it("returns no leaves for a ticket with no children", async () => {
-    const out = await buildTree("ASM-1", fetchFrom({}));
+    const out = await buildTree("PROJ-1", fetchFrom({}));
     expect(out).toEqual({ leaves: [], dropped: [] });
   });
 
   it("never treats the root itself as a leaf", async () => {
-    const out = await buildTree("ASM-1", fetchFrom({}));
-    expect(out.leaves.map((l) => l.key)).not.toContain("ASM-1");
+    const out = await buildTree("PROJ-1", fetchFrom({}));
+    expect(out.leaves.map((l) => l.key)).not.toContain("PROJ-1");
   });
 
   it("returns direct children as leaves at depth 1", async () => {
-    const out = await buildTree("ASM-1", fetchFrom({
-      "ASM-1": [{ key: "ASM-2", summary: "a" }, { key: "ASM-3", summary: "b" }],
+    const out = await buildTree("PROJ-1", fetchFrom({
+      "PROJ-1": [{ key: "PROJ-2", summary: "a" }, { key: "PROJ-3", summary: "b" }],
     }));
     expect(out.leaves).toEqual([
-      { key: "ASM-2", summary: "a", depth: 1, parentKey: "ASM-1" },
-      { key: "ASM-3", summary: "b", depth: 1, parentKey: "ASM-1" },
+      { key: "PROJ-2", summary: "a", depth: 1, parentKey: "PROJ-1" },
+      { key: "PROJ-3", summary: "b", depth: 1, parentKey: "PROJ-1" },
     ]);
   });
 
@@ -365,34 +365,34 @@ describe("createWorktrees with a baseRef", () => {
   });
 
   it("branches the new worktree off the given ref", () => {
-    const [repo] = mkRepos(["centaur"]);
-    createWorktrees([repo], "ASM-2", "child work", log, { baseRef: "ASM-1-parent" });
+    const [repo] = mkRepos(["webapp"]);
+    createWorktrees([repo], "PROJ-2", "child work", log, { baseRef: "PROJ-1-parent" });
     expect(execFileSync).toHaveBeenCalledWith(
       "git",
-      ["-C", repo.path, "worktree", "add", "/repos/centaur/.claude/worktrees/ASM-2",
-       "-b", "ASM-2-child-work", "ASM-1-parent"],
+      ["-C", repo.path, "worktree", "add", "/repos/webapp/.claude/worktrees/PROJ-2",
+       "-b", "PROJ-2-child-work", "PROJ-1-parent"],
       expect.anything(),
     );
   });
 
   it("produces the pre-baseRef argv when the option is omitted", () => {
-    const [repo] = mkRepos(["centaur"]);
-    createWorktrees([repo], "ASM-2", "child work", log);
+    const [repo] = mkRepos(["webapp"]);
+    createWorktrees([repo], "PROJ-2", "child work", log);
     expect(execFileSync).toHaveBeenCalledWith(
       "git",
-      ["-C", repo.path, "worktree", "add", "/repos/centaur/.claude/worktrees/ASM-2",
-       "-b", "ASM-2-child-work"],
+      ["-C", repo.path, "worktree", "add", "/repos/webapp/.claude/worktrees/PROJ-2",
+       "-b", "PROJ-2-child-work"],
       expect.anything(),
     );
   });
 
   it("produces the pre-baseRef argv for an empty options object", () => {
-    const [repo] = mkRepos(["centaur"]);
-    createWorktrees([repo], "ASM-2", "child work", log, {});
+    const [repo] = mkRepos(["webapp"]);
+    createWorktrees([repo], "PROJ-2", "child work", log, {});
     expect(execFileSync).toHaveBeenLastCalledWith(
       "git",
-      ["-C", repo.path, "worktree", "add", "/repos/centaur/.claude/worktrees/ASM-2",
-       "-b", "ASM-2-child-work"],
+      ["-C", repo.path, "worktree", "add", "/repos/webapp/.claude/worktrees/PROJ-2",
+       "-b", "PROJ-2-child-work"],
       expect.anything(),
     );
   });
@@ -403,11 +403,11 @@ describe("createWorktrees with a baseRef", () => {
     execFileSync.mockImplementationOnce(() => {
       throw new Error("branch already exists");
     });
-    const [repo] = mkRepos(["centaur"]);
-    createWorktrees([repo], "ASM-2", "child work", log, { baseRef: "ASM-1-parent" });
+    const [repo] = mkRepos(["webapp"]);
+    createWorktrees([repo], "PROJ-2", "child work", log, { baseRef: "PROJ-1-parent" });
     expect(execFileSync).toHaveBeenLastCalledWith(
       "git",
-      ["-C", repo.path, "worktree", "add", "/repos/centaur/.claude/worktrees/ASM-2", "ASM-2-child-work"],
+      ["-C", repo.path, "worktree", "add", "/repos/webapp/.claude/worktrees/PROJ-2", "PROJ-2-child-work"],
       expect.anything(),
     );
   });
@@ -421,11 +421,11 @@ describe("ensureBranch", () => {
   it("leaves an existing branch exactly where it is", () => {
     // rev-parse resolves: the branch is there, nothing else runs.
     execFileSync.mockReturnValueOnce(Buffer.from("abc123\n"));
-    expect(ensureBranch("/repos/centaur", "ASM-1-parent")).toBe(true);
+    expect(ensureBranch("/repos/webapp", "PROJ-1-parent")).toBe(true);
     expect(execFileSync).toHaveBeenCalledTimes(1);
     expect(execFileSync).toHaveBeenCalledWith(
       "git",
-      ["-C", "/repos/centaur", "rev-parse", "--verify", "--quiet", "refs/heads/ASM-1-parent"],
+      ["-C", "/repos/webapp", "rev-parse", "--verify", "--quiet", "refs/heads/PROJ-1-parent"],
       expect.anything(),
     );
   });
@@ -434,10 +434,10 @@ describe("ensureBranch", () => {
     execFileSync.mockImplementationOnce(() => {
       throw new Error("not a valid ref");
     });
-    expect(ensureBranch("/repos/centaur", "ASM-1-parent")).toBe(true);
+    expect(ensureBranch("/repos/webapp", "PROJ-1-parent")).toBe(true);
     expect(execFileSync).toHaveBeenLastCalledWith(
       "git",
-      ["-C", "/repos/centaur", "branch", "ASM-1-parent"],
+      ["-C", "/repos/webapp", "branch", "PROJ-1-parent"],
       expect.anything(),
     );
   });
@@ -446,10 +446,10 @@ describe("ensureBranch", () => {
     execFileSync.mockImplementationOnce(() => {
       throw new Error("not a valid ref");
     });
-    ensureBranch("/repos/centaur", "ASM-1-parent", "origin/main");
+    ensureBranch("/repos/webapp", "PROJ-1-parent", "origin/main");
     expect(execFileSync).toHaveBeenLastCalledWith(
       "git",
-      ["-C", "/repos/centaur", "branch", "ASM-1-parent", "origin/main"],
+      ["-C", "/repos/webapp", "branch", "PROJ-1-parent", "origin/main"],
       expect.anything(),
     );
   });
@@ -459,7 +459,7 @@ describe("ensureBranch", () => {
       throw new Error("boom");
     };
     execFileSync.mockImplementationOnce(boom).mockImplementationOnce(boom);
-    expect(ensureBranch("/repos/centaur", "ASM-1-parent")).toBe(false);
+    expect(ensureBranch("/repos/webapp", "PROJ-1-parent")).toBe(false);
   });
 });
 ```
@@ -594,8 +594,8 @@ describe("children capability", () => {
         of: async (key) => [{ key: `${key}-1`, summary: "child", type: "Sub-task", statusCategory: "new" }],
       },
     };
-    expect(await caps.children!.of("ASM-1")).toEqual([
-      { key: "ASM-1-1", summary: "child", type: "Sub-task", statusCategory: "new" },
+    expect(await caps.children!.of("PROJ-1")).toEqual([
+      { key: "PROJ-1-1", summary: "child", type: "Sub-task", statusCategory: "new" },
     ]);
   });
 
@@ -705,27 +705,27 @@ import { childrenJql, jqlKey } from "../../../../src/tasks/jira/childJql";
 
 describe("jqlKey", () => {
   it("passes an ordinary key through", () => {
-    expect(jqlKey("ASM-1234")).toBe("ASM-1234");
+    expect(jqlKey("PROJ-1234")).toBe("PROJ-1234");
   });
 
   it("strips the characters that would end the JQL literal early", () => {
-    expect(jqlKey('ASM-1" OR key = "ASM-2')).toBe("ASM-1 OR key = ASM-2");
-    expect(jqlKey("ASM-1\\")).toBe("ASM-1");
+    expect(jqlKey('PROJ-1" OR key = "PROJ-2')).toBe("PROJ-1 OR key = PROJ-2");
+    expect(jqlKey("PROJ-1\\")).toBe("PROJ-1");
   });
 });
 
 describe("childrenJql", () => {
   it("asks `parent` first, then the older Epic Link spelling", () => {
-    expect(childrenJql("ASM-1")).toEqual([
-      'parent = "ASM-1" ORDER BY key ASC',
-      '"Epic Link" = "ASM-1" ORDER BY key ASC',
+    expect(childrenJql("PROJ-1")).toEqual([
+      'parent = "PROJ-1" ORDER BY key ASC',
+      '"Epic Link" = "PROJ-1" ORDER BY key ASC',
     ]);
   });
 
   it("quotes the key through jqlKey", () => {
-    expect(childrenJql('ASM-1"')).toEqual([
-      'parent = "ASM-1" ORDER BY key ASC',
-      '"Epic Link" = "ASM-1" ORDER BY key ASC',
+    expect(childrenJql('PROJ-1"')).toEqual([
+      'parent = "PROJ-1" ORDER BY key ASC',
+      '"Epic Link" = "PROJ-1" ORDER BY key ASC',
     ]);
   });
 });
@@ -738,52 +738,52 @@ describe("childrenOf", () => {
   it("maps issues to child refs", async () => {
     // Stub one POST to /rest/api/3/search/jql answering with two issues.
     const issues = [
-      { key: "ASM-2", fields: { summary: "one", issuetype: { name: "Sub-task" }, status: { statusCategory: { key: "new" } } } },
-      { key: "ASM-3", fields: { summary: "two", issuetype: { name: "Sub-task" }, status: { statusCategory: { key: "done" } } } },
+      { key: "PROJ-2", fields: { summary: "one", issuetype: { name: "Sub-task" }, status: { statusCategory: { key: "new" } } } },
+      { key: "PROJ-3", fields: { summary: "two", issuetype: { name: "Sub-task" }, status: { statusCategory: { key: "done" } } } },
     ];
     // …arrange with this file's own helper…
-    expect(await client.childrenOf("ASM-1")).toEqual([
-      { key: "ASM-2", summary: "one", type: "Sub-task", statusCategory: "new" },
-      { key: "ASM-3", summary: "two", type: "Sub-task", statusCategory: "done" },
+    expect(await client.childrenOf("PROJ-1")).toEqual([
+      { key: "PROJ-2", summary: "one", type: "Sub-task", statusCategory: "new" },
+      { key: "PROJ-3", summary: "two", type: "Sub-task", statusCategory: "done" },
     ]);
   });
 
   it("asks only for the three fields a child row needs", async () => {
-    await client.childrenOf("ASM-1");
+    await client.childrenOf("PROJ-1");
     const body = JSON.parse(lastRequestBody());
     expect(body.fields).toEqual(["summary", "issuetype", "status"]);
-    expect(body.jql).toBe('parent = "ASM-1" ORDER BY key ASC');
+    expect(body.jql).toBe('parent = "PROJ-1" ORDER BY key ASC');
   });
 
   it("falls through to the Epic Link candidate when `parent` answers empty", async () => {
     // First response: { issues: [] }. Second: one issue.
-    const out = await client.childrenOf("ASM-1");
-    expect(out.map((c) => c.key)).toEqual(["ASM-9"]);
+    const out = await client.childrenOf("PROJ-1");
+    expect(out.map((c) => c.key)).toEqual(["PROJ-9"]);
     expect(jqlsAsked()).toEqual([
-      'parent = "ASM-1" ORDER BY key ASC',
-      '"Epic Link" = "ASM-1" ORDER BY key ASC',
+      'parent = "PROJ-1" ORDER BY key ASC',
+      '"Epic Link" = "PROJ-1" ORDER BY key ASC',
     ]);
   });
 
   it("returns [] when every candidate answers empty", async () => {
-    expect(await client.childrenOf("ASM-1")).toEqual([]);
+    expect(await client.childrenOf("PROJ-1")).toEqual([]);
   });
 
   it("moves to the next candidate when one is rejected, and throws only if all fail", async () => {
     // Both responses 400.
-    await expect(client.childrenOf("ASM-1")).rejects.toThrow();
+    await expect(client.childrenOf("PROJ-1")).rejects.toThrow();
   });
 
   it("rethrows an auth failure immediately instead of trying the next candidate", async () => {
     // First response 401.
-    await expect(client.childrenOf("ASM-1")).rejects.toBeInstanceOf(JiraAuthError);
+    await expect(client.childrenOf("PROJ-1")).rejects.toBeInstanceOf(JiraAuthError);
     expect(jqlsAsked()).toHaveLength(1);
   });
 
   it("tolerates an issue with no summary, type or status", async () => {
-    // One issue: { key: "ASM-4" } with no `fields` at all.
-    expect(await client.childrenOf("ASM-1")).toEqual([
-      { key: "ASM-4", summary: "", type: "", statusCategory: null },
+    // One issue: { key: "PROJ-4" } with no `fields` at all.
+    expect(await client.childrenOf("PROJ-1")).toEqual([
+      { key: "PROJ-4", summary: "", type: "", statusCategory: null },
     ]);
   });
 });
@@ -795,13 +795,13 @@ Append to `test/unit/tasks/jira/provider.test.ts`:
 describe("caps.children", () => {
   it("is present and delegates to the client when the client can answer", async () => {
     const childrenOf = vi.fn(async () => [
-      { key: "ASM-2", summary: "child", type: "Sub-task", statusCategory: "new" as const },
+      { key: "PROJ-2", summary: "child", type: "Sub-task", statusCategory: "new" as const },
     ]);
     const provider = new JiraProvider({ ...clientStub, childrenOf } as never);
-    expect(await provider.caps.children!.of("ASM-1")).toEqual([
-      { key: "ASM-2", summary: "child", type: "Sub-task", statusCategory: "new" },
+    expect(await provider.caps.children!.of("PROJ-1")).toEqual([
+      { key: "PROJ-2", summary: "child", type: "Sub-task", statusCategory: "new" },
     ]);
-    expect(childrenOf).toHaveBeenCalledWith("ASM-1");
+    expect(childrenOf).toHaveBeenCalledWith("PROJ-1");
   });
 
   it("is absent when the client has no childrenOf — a partial client must not claim the capability", () => {
@@ -946,10 +946,10 @@ Append to `test/unit/engine/brief.test.ts`:
 
 ```ts
 describe("briefMarkdown with children", () => {
-  const detail = { key: "ASM-1", summary: "parent work", descriptionText: "do the thing" };
+  const detail = { key: "PROJ-1", summary: "parent work", descriptionText: "do the thing" };
   const children = [
-    { key: "ASM-2", summary: "first bit", path: ".claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
-    { key: "ASM-3", summary: "second bit", path: ".claude/worktrees/ASM-3", branch: "ASM-3-second-bit" },
+    { key: "PROJ-2", summary: "first bit", path: ".claude/worktrees/PROJ-2", branch: "PROJ-2-first-bit" },
+    { key: "PROJ-3", summary: "second bit", path: ".claude/worktrees/PROJ-3", branch: "PROJ-3-second-bit" },
   ];
 
   it("is byte-identical to the childless brief when no orchestration is passed", () => {
@@ -957,33 +957,33 @@ describe("briefMarkdown with children", () => {
   });
 
   it("adds nothing for an empty child list", () => {
-    expect(briefMarkdown(detail, "Claude Code", { children: [], parentBranch: "ASM-1-parent-work" }))
+    expect(briefMarkdown(detail, "Claude Code", { children: [], parentBranch: "PROJ-1-parent-work" }))
       .toBe(briefMarkdown(detail, "Claude Code"));
   });
 
   it("renders a row per child", () => {
-    const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "ASM-1-parent-work" });
+    const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "PROJ-1-parent-work" });
     expect(md).toContain("## Children — one subagent each");
     expect(md).toContain("| Ticket | Summary | Worktree | Branch |");
-    expect(md).toContain("| ASM-2 | first bit | `.claude/worktrees/ASM-2` | `ASM-2-first-bit` |");
-    expect(md).toContain("| ASM-3 | second bit | `.claude/worktrees/ASM-3` | `ASM-3-second-bit` |");
+    expect(md).toContain("| PROJ-2 | first bit | `.claude/worktrees/PROJ-2` | `PROJ-2-first-bit` |");
+    expect(md).toContain("| PROJ-3 | second bit | `.claude/worktrees/PROJ-3` | `PROJ-3-second-bit` |");
   });
 
   it("names the parent branch as the merge target", () => {
-    const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "ASM-1-parent-work" });
-    expect(md).toContain("Merge finished children into `ASM-1-parent-work`; never into main.");
+    const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "PROJ-1-parent-work" });
+    expect(md).toContain("Merge finished children into `PROJ-1-parent-work`; never into main.");
   });
 
   it("escapes a pipe in a summary so the table survives it", () => {
     const md = briefMarkdown(detail, "Claude Code", {
-      children: [{ key: "ASM-4", summary: "a | b", path: "p", branch: "br" }],
-      parentBranch: "ASM-1-parent-work",
+      children: [{ key: "PROJ-4", summary: "a | b", path: "p", branch: "br" }],
+      parentBranch: "PROJ-1-parent-work",
     });
-    expect(md).toContain("| ASM-4 | a \\| b | `p` | `br` |");
+    expect(md).toContain("| PROJ-4 | a \\| b | `p` | `br` |");
   });
 
   it("keeps the ticket description above the children", () => {
-    const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "ASM-1-parent-work" });
+    const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "PROJ-1-parent-work" });
     expect(md.indexOf("do the thing")).toBeLessThan(md.indexOf("## Children"));
   });
 });
@@ -1099,13 +1099,13 @@ describe("openWorkspace: parent and children on the run record", () => {
   });
 
   it("stamps parentKey when the take came from a parent's tree", async () => {
-    await openWorkspace({ ...baseRequest(), parentKey: "ASM-1" });
-    expect(lastWrittenRun().parentKey).toBe("ASM-1");
+    await openWorkspace({ ...baseRequest(), parentKey: "PROJ-1" });
+    expect(lastWrittenRun().parentKey).toBe("PROJ-1");
   });
 
   it("stores the child worktrees an orchestrator run owns", async () => {
     const children = [
-      { key: "ASM-2", summary: "first", repo: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-2", branch: "ASM-2-first" },
+      { key: "PROJ-2", summary: "first", repo: "webapp", path: "/repos/webapp/.claude/worktrees/PROJ-2", branch: "PROJ-2-first" },
     ];
     await openWorkspace({ ...baseRequest(), children });
     expect(lastWrittenRun().children).toEqual(children);
@@ -1124,13 +1124,13 @@ Append to `test/unit/engine/batchWorkspace.test.ts`:
 describe("openSharedWorkspace: parentKey on each run", () => {
   it("stamps the parentKey a batch task carries", async () => {
     await openSharedWorkspace(sharedRequestWith([
-      { ...task("ASM-2"), parentKey: "ASM-1" },
+      { ...task("PROJ-2"), parentKey: "PROJ-1" },
     ]));
-    expect(lastWrittenRun().parentKey).toBe("ASM-1");
+    expect(lastWrittenRun().parentKey).toBe("PROJ-1");
   });
 
   it("omits the field for an ordinary batch", async () => {
-    await openSharedWorkspace(sharedRequestWith([task("ASM-2")]));
+    await openSharedWorkspace(sharedRequestWith([task("PROJ-2")]));
     expect("parentKey" in lastWrittenRun()).toBe(false);
   });
 });
@@ -1229,7 +1229,7 @@ Append to `test/unit/tasksView.test.ts`. Reuse that file's `setup()`, `clientStu
 ```ts
 describe("takeTask: a ticket with children", () => {
   const tree = {
-    "ASM-1": [{ key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "new" }],
+    "PROJ-1": [{ key: "PROJ-2", summary: "first bit", type: "Sub-task", statusCategory: "new" }],
   } as Record<string, { key: string; summary: string; type: string; statusCategory: string }[]>;
 
   beforeEach(() => {
@@ -1239,7 +1239,7 @@ describe("takeTask: a ticket with children", () => {
   it("does not probe at all when the source has no children capability", async () => {
     delete (clientStub as { childrenOf?: unknown }).childrenOf;
     const { view } = setup({ authed: true });
-    await view.takeTask("ASM-1", "card");
+    await view.takeTask("PROJ-1", "card");
     // The old flow: prompt mode asked, no tree pickers.
     expect(quickPickTitles()).not.toContain(expect.stringContaining("how do you want to work them"));
   });
@@ -1247,14 +1247,14 @@ describe("takeTask: a ticket with children", () => {
   it("asks how to work the leaves when there are some", async () => {
     const { view } = setup({ authed: true });
     answerQuickPick("cancel"); // bail at the mode picker
-    await view.takeTask("ASM-1", "card");
-    expect(quickPickTitles()).toContain("ASM-1 — 1 leaf under it. How do you want to work them?");
+    await view.takeTask("PROJ-1", "card");
+    expect(quickPickTitles()).toContain("PROJ-1 — 1 leaf under it. How do you want to work them?");
   });
 
   it("takes nothing when the mode picker is cancelled", async () => {
     const { view } = setup({ authed: true });
     answerQuickPick("cancel");
-    await view.takeTask("ASM-1", "card");
+    await view.takeTask("PROJ-1", "card");
     expect(execFileSync).not.toHaveBeenCalled();
   });
 
@@ -1262,17 +1262,17 @@ describe("takeTask: a ticket with children", () => {
     const { view } = setup({ authed: true });
     answerQuickPick({ label: "A session per child" });
     answerQuickPick("cancel");
-    await view.takeTask("ASM-1", "card");
+    await view.takeTask("PROJ-1", "card");
     const items = lastQuickPickItems();
     expect(items.every((i) => !i.picked)).toBe(true);
-    expect(items[0].label).toBe("ASM-2 — first bit");
+    expect(items[0].label).toBe("PROJ-2 — first bit");
   });
 
   it("falls back to the ordinary single take when no leaf is selected", async () => {
     const { view } = setup({ authed: true });
     answerQuickPick({ label: "A session per child" });
     answerQuickPick([]); // picked nothing
-    await view.takeTask("ASM-1", "card");
+    await view.takeTask("PROJ-1", "card");
     expect(takeBatchSpy).not.toHaveBeenCalled();
     expect(openWorkspaceMock).toHaveBeenCalled(); // the plain path ran
   });
@@ -1280,11 +1280,11 @@ describe("takeTask: a ticket with children", () => {
   it("routes fan-out into takeBatch with the parent branch as the base", async () => {
     const { view } = setup({ authed: true });
     answerQuickPick({ label: "A session per child" });
-    answerQuickPick([{ label: "ASM-2 — first bit" }]);
-    await view.takeTask("ASM-1", "card");
-    expect(takeBatchSpy).toHaveBeenCalledWith(["ASM-2"], [], {
-      key: "ASM-1",
-      branch: "ASM-1-summary-of-asm-1", // whatever branchName(detail) yields for the stub
+    answerQuickPick([{ label: "PROJ-2 — first bit" }]);
+    await view.takeTask("PROJ-1", "card");
+    expect(takeBatchSpy).toHaveBeenCalledWith(["PROJ-2"], [], {
+      key: "PROJ-1",
+      branch: "PROJ-1-summary-of-proj-1", // whatever branchName(detail) yields for the stub
     });
   });
 
@@ -1293,21 +1293,21 @@ describe("takeTask: a ticket with children", () => {
       throw new Error("500");
     });
     const { view } = setup({ authed: true });
-    await view.takeTask("ASM-1", "card");
+    await view.takeTask("PROJ-1", "card");
     expect(takeBatchSpy).not.toHaveBeenCalled();
     expect(openWorkspaceMock).toHaveBeenCalled();
   });
 
   it("logs what the tree dropped", async () => {
     clientStub.childrenOf = vi.fn(async (key: string) =>
-      key === "ASM-1"
+      key === "PROJ-1"
         ? Array.from({ length: 25 }, (_, i) => ({ key: `K-${i}`, summary: "x", type: "Sub-task", statusCategory: "new" }))
         : [],
     );
     const { view, logLines } = setup({ authed: true });
     answerQuickPick({ label: "A session per child" });
     answerQuickPick([{ label: "K-0 — x" }]);
-    await view.takeTask("ASM-1", "card");
+    await view.takeTask("PROJ-1", "card");
     expect(logLines().join("\n")).toContain("dropped 5");
   });
 });
@@ -1315,40 +1315,40 @@ describe("takeTask: a ticket with children", () => {
 describe("takeBatch with a parent", () => {
   it("makes the parent branch before the child worktree, then branches off it", async () => {
     const { view } = setup({ authed: true });
-    await view.takeBatch(["ASM-2"], [], { key: "ASM-1", branch: "ASM-1-parent" });
-    expect(ensureBranchMock).toHaveBeenCalledWith(expect.any(String), "ASM-1-parent");
+    await view.takeBatch(["PROJ-2"], [], { key: "PROJ-1", branch: "PROJ-1-parent" });
+    expect(ensureBranchMock).toHaveBeenCalledWith(expect.any(String), "PROJ-1-parent");
     expect(createWorktreesMock).toHaveBeenCalledWith(
-      expect.anything(), "ASM-2", expect.any(String), expect.any(Function), { baseRef: "ASM-1-parent" },
+      expect.anything(), "PROJ-2", expect.any(String), expect.any(Function), { baseRef: "PROJ-1-parent" },
     );
   });
 
   it("fails that child rather than branching off main when the parent branch cannot be made", async () => {
     ensureBranchMock.mockReturnValue(false);
     const { view, toasts } = setup({ authed: true });
-    await view.takeBatch(["ASM-2"], [], { key: "ASM-1", branch: "ASM-1-parent" });
+    await view.takeBatch(["PROJ-2"], [], { key: "PROJ-1", branch: "PROJ-1-parent" });
     expect(createWorktreesMock).not.toHaveBeenCalled();
-    expect(toasts().join("\n")).toContain("ASM-1-parent");
+    expect(toasts().join("\n")).toContain("PROJ-1-parent");
   });
 
   it("stamps parentKey on the batch task", async () => {
     const { view } = setup({ authed: true });
-    await view.takeBatch(["ASM-2"], [], { key: "ASM-1", branch: "ASM-1-parent" });
+    await view.takeBatch(["PROJ-2"], [], { key: "PROJ-1", branch: "PROJ-1-parent" });
     const task = openSharedWorkspaceMock.mock.calls[0][0].tasks[0];
-    expect(task.parentKey).toBe("ASM-1");
+    expect(task.parentKey).toBe("PROJ-1");
   });
 
   it("passes an empty options object when there is no parent", async () => {
     const { view } = setup({ authed: true });
-    await view.takeBatch(["ASM-2"], []);
+    await view.takeBatch(["PROJ-2"], []);
     expect(ensureBranchMock).not.toHaveBeenCalled();
     expect(createWorktreesMock).toHaveBeenCalledWith(
-      expect.anything(), "ASM-2", expect.any(String), expect.any(Function), {},
+      expect.anything(), "PROJ-2", expect.any(String), expect.any(Function), {},
     );
   });
 });
 ```
 
-**The parent-branch literal.** `"ASM-1-summary-of-asm-1"` in these tests (and in Task 8's) is a stand-in: the real value is `branchName("ASM-1", <the summary this file's ticket fixture actually carries>)`. Compute it in the test from `branchName` and the fixture, or read the fixture and write the true slug — never hardcode a guessed one.
+**The parent-branch literal.** `"PROJ-1-summary-of-proj-1"` in these tests (and in Task 8's) is a stand-in: the real value is `branchName("PROJ-1", <the summary this file's ticket fixture actually carries>)`. Compute it in the test from `branchName` and the fixture, or read the fixture and write the true slug — never hardcode a guessed one.
 
 Names like `answerQuickPick`, `lastQuickPickItems`, `quickPickTitles`, `takeBatchSpy`, `ensureBranchMock`, `createWorktreesMock`, `openSharedWorkspaceMock`, `toasts`, `logLines` must be wired to whatever that file already uses for the same jobs — read its top 260 lines and reuse its helpers verbatim rather than adding parallel ones. `createWorktrees`/`ensureBranch` are imported values in `tasksView.ts`, so mock the module (`vi.mock("../../src/engine/worktree")`) the way the file already mocks `../../src/engine/workspace`.
 
@@ -1551,28 +1551,28 @@ Append to `test/unit/tasksView.test.ts`:
 describe("takeTask: orchestrator mode", () => {
   beforeEach(() => {
     clientStub.childrenOf = vi.fn(async (key: string) =>
-      key === "ASM-1"
-        ? [{ key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
-           { key: "ASM-3", summary: "second bit", type: "Sub-task", statusCategory: "new" }]
+      key === "PROJ-1"
+        ? [{ key: "PROJ-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
+           { key: "PROJ-3", summary: "second bit", type: "Sub-task", statusCategory: "new" }]
         : [],
     );
   });
 
-  async function takeOrchestrated(pick: string[] = ["ASM-2 — first bit", "ASM-3 — second bit"]) {
+  async function takeOrchestrated(pick: string[] = ["PROJ-2 — first bit", "PROJ-3 — second bit"]) {
     const { view, ...rest } = setup({ authed: true });
     answerQuickPick({ label: "One orchestrator session, children as subagents" });
     answerQuickPick(pick.map((label) => ({ label })));
-    await view.takeTask("ASM-1", "card");
+    await view.takeTask("PROJ-1", "card");
     return rest;
   }
 
   it("creates one worktree per selected leaf, each off the parent branch", async () => {
     await takeOrchestrated();
     expect(createWorktreesMock).toHaveBeenCalledWith(
-      expect.anything(), "ASM-2", "first bit", expect.any(Function), { baseRef: "ASM-1-summary-of-asm-1" },
+      expect.anything(), "PROJ-2", "first bit", expect.any(Function), { baseRef: "PROJ-1-summary-of-proj-1" },
     );
     expect(createWorktreesMock).toHaveBeenCalledWith(
-      expect.anything(), "ASM-3", "second bit", expect.any(Function), { baseRef: "ASM-1-summary-of-asm-1" },
+      expect.anything(), "PROJ-3", "second bit", expect.any(Function), { baseRef: "PROJ-1-summary-of-proj-1" },
     );
   });
 
@@ -1586,43 +1586,43 @@ describe("takeTask: orchestrator mode", () => {
     await takeOrchestrated();
     const calls = openWorkspaceMock.mock.calls;
     expect(calls).toHaveLength(1);
-    expect(calls[0][0].ticket.key).toBe("ASM-1");
+    expect(calls[0][0].ticket.key).toBe("PROJ-1");
   });
 
   it("names every child worktree in the parent's brief", async () => {
     await takeOrchestrated();
     const { planMd } = openWorkspaceMock.mock.calls[0][0];
     expect(planMd).toContain("## Children — one subagent each");
-    expect(planMd).toContain("| ASM-2 | first bit |");
-    expect(planMd).toContain("| ASM-3 | second bit |");
-    expect(planMd).toContain("Merge finished children into `ASM-1-summary-of-asm-1`");
+    expect(planMd).toContain("| PROJ-2 | first bit |");
+    expect(planMd).toContain("| PROJ-3 | second bit |");
+    expect(planMd).toContain("Merge finished children into `PROJ-1-summary-of-proj-1`");
   });
 
   it("records the child worktrees on the parent's run", async () => {
     await takeOrchestrated();
     const { children } = openWorkspaceMock.mock.calls[0][0];
     expect(children).toEqual([
-      expect.objectContaining({ key: "ASM-2", branch: "ASM-2-first-bit" }),
-      expect.objectContaining({ key: "ASM-3", branch: "ASM-3-second-bit" }),
+      expect.objectContaining({ key: "PROJ-2", branch: "PROJ-2-first-bit" }),
+      expect.objectContaining({ key: "PROJ-3", branch: "PROJ-3-second-bit" }),
     ]);
   });
 
   it("writes a brief into each child worktree from that child's own detail", async () => {
     await takeOrchestrated();
     const written = writeFileSyncMock.mock.calls.map(([p]) => String(p));
-    expect(written.some((p) => p.includes("ASM-2") && p.endsWith(".pick-task/TASK.md"))).toBe(true);
-    expect(written.some((p) => p.includes("ASM-3") && p.endsWith(".pick-task/TASK.md"))).toBe(true);
+    expect(written.some((p) => p.includes("PROJ-2") && p.endsWith(".pick-task/TASK.md"))).toBe(true);
+    expect(written.some((p) => p.includes("PROJ-3") && p.endsWith(".pick-task/TASK.md"))).toBe(true);
   });
 
   it("skips a child whose worktree could not be made, and says so", async () => {
-    // createWorktrees returns the input ref → creation failed for ASM-3.
+    // createWorktrees returns the input ref → creation failed for PROJ-3.
     createWorktreesMock.mockImplementation((services, key) =>
-      key === "ASM-3" ? services : services.map((s: ServiceRef) => ({ ...s, path: `${s.path}/.claude/worktrees/${key}` })),
+      key === "PROJ-3" ? services : services.map((s: ServiceRef) => ({ ...s, path: `${s.path}/.claude/worktrees/${key}` })),
     );
     const { toasts } = await takeOrchestrated();
     const { children } = openWorkspaceMock.mock.calls[0][0];
-    expect(children.map((c: { key: string }) => c.key)).toEqual(["ASM-2"]);
-    expect(toasts().join("\n")).toContain("ASM-3");
+    expect(children.map((c: { key: string }) => c.key)).toEqual(["PROJ-2"]);
+    expect(toasts().join("\n")).toContain("PROJ-3");
   });
 
   it("refuses the whole take when the parent branch cannot be made", async () => {
@@ -1630,7 +1630,7 @@ describe("takeTask: orchestrator mode", () => {
     const { toasts } = await takeOrchestrated();
     expect(createWorktreesMock).not.toHaveBeenCalled();
     expect(openWorkspaceMock).not.toHaveBeenCalled();
-    expect(toasts().join("\n")).toContain("ASM-1-summary-of-asm-1");
+    expect(toasts().join("\n")).toContain("PROJ-1-summary-of-proj-1");
   });
 });
 ```
@@ -1854,47 +1854,47 @@ Append to `test/webview/DeckDetail.test.tsx`, using that file's existing render 
 ```ts
 describe("child worktrees", () => {
   const children = [
-    { key: "ASM-2", summary: "first bit", repo: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
-    { key: "ASM-3", summary: "second bit", repo: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-3", branch: "ASM-3-second-bit" },
+    { key: "PROJ-2", summary: "first bit", repo: "webapp", path: "/repos/webapp/.claude/worktrees/PROJ-2", branch: "PROJ-2-first-bit" },
+    { key: "PROJ-3", summary: "second bit", repo: "webapp", path: "/repos/webapp/.claude/worktrees/PROJ-3", branch: "PROJ-3-second-bit" },
   ];
 
   it("renders nothing for a run with no children field", () => {
-    renderDetail(cardFor({ key: "ASM-1" }));
+    renderDetail(cardFor({ key: "PROJ-1" }));
     expect(screen.queryByText("Children")).not.toBeInTheDocument();
   });
 
   it("renders nothing for a run with an empty children array", () => {
     // Distinct from the case above, and the one that pins the `.length` guard: a
     // truthiness check would render an empty Children section here.
-    renderDetail(cardFor({ key: "ASM-1", children: [] }));
+    renderDetail(cardFor({ key: "PROJ-1", children: [] }));
     expect(screen.queryByText("Children")).not.toBeInTheDocument();
   });
 
   it("lists a row per child worktree", () => {
-    renderDetail(cardFor({ key: "ASM-1", children }));
+    renderDetail(cardFor({ key: "PROJ-1", children }));
     expect(screen.getByText("Children")).toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
     expect(screen.getByText("first bit")).toBeInTheDocument();
-    expect(screen.getByTitle("/repos/centaur/.claude/worktrees/ASM-2")).toBeInTheDocument();
+    expect(screen.getByTitle("/repos/webapp/.claude/worktrees/PROJ-2")).toBeInTheDocument();
   });
 
   it("names the branch each child is on", () => {
-    renderDetail(cardFor({ key: "ASM-1", children }));
-    expect(screen.getByText("⎇ ASM-2-first-bit")).toBeInTheDocument();
+    renderDetail(cardFor({ key: "PROJ-1", children }));
+    expect(screen.getByText("⎇ PROJ-2-first-bit")).toBeInTheDocument();
   });
 
   it("copies a child's worktree path on click", async () => {
-    renderDetail(cardFor({ key: "ASM-1", children }));
-    await userEvent.click(screen.getByRole("button", { name: "Copy ASM-2 worktree path" }));
-    expect(copySpy).toHaveBeenCalledWith("/repos/centaur/.claude/worktrees/ASM-2");
+    renderDetail(cardFor({ key: "PROJ-1", children }));
+    await userEvent.click(screen.getByRole("button", { name: "Copy PROJ-2 worktree path" }));
+    expect(copySpy).toHaveBeenCalledWith("/repos/webapp/.claude/worktrees/PROJ-2");
   });
 
   it("renders one row per repo when a child spans two", () => {
-    renderDetail(cardFor({ key: "ASM-1", children: [
+    renderDetail(cardFor({ key: "PROJ-1", children: [
       ...children.slice(0, 1),
-      { ...children[0], repo: "frontend", path: "/repos/frontend/.claude/worktrees/ASM-2" },
+      { ...children[0], repo: "frontend", path: "/repos/frontend/.claude/worktrees/PROJ-2" },
     ] }));
-    expect(screen.getAllByText("ASM-2")).toHaveLength(2);
+    expect(screen.getAllByText("PROJ-2")).toHaveLength(2);
   });
 });
 ```
@@ -1985,7 +1985,7 @@ In `test/unit/tasksView.test.ts`, append to the tree describe blocks — reuse t
     // tree pickers, one openWorkspace — rather than by spying on probeTree.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: false });
     const { view } = setup({ authed: true });
-    await view.takeTask("ASM-1", "card");
+    await view.takeTask("PROJ-1", "card");
     expect(clientStub.childrenOf).not.toHaveBeenCalled();
     expect(quickPickTitles()).not.toContain(expect.stringContaining("How do you want to work them"));
     expect(openWorkspace).toHaveBeenCalledTimes(1);
@@ -1995,8 +1995,8 @@ In `test/unit/tasksView.test.ts`, append to the tree describe blocks — reuse t
     vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: true });
     const { view } = setup({ authed: true });
     answerQuickPick("cancel");
-    await view.takeTask("ASM-1", "card");
-    expect(clientStub.childrenOf).toHaveBeenCalledWith("ASM-1");
+    await view.takeTask("PROJ-1", "card");
+    expect(clientStub.childrenOf).toHaveBeenCalledWith("PROJ-1");
   });
 ```
 

@@ -62,11 +62,11 @@ import {
 } from "../../../../src/engine/orchestrator/model";
 
 const place = (id: string, over: Partial<PlaceNode> = {}): PlaceNode => ({
-  id, kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow", ...over,
+  id, kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow", ...over,
 });
 const planned = (id: string, over: Partial<PlannedNode> = {}): PlannedNode => ({
   id, kind: "planned", x: 0, y: 0, join: "any",
-  ticketKey: "ASM-12", repos: ["bite-me"], mode: "tdd", dest: "worktree", ...over,
+  ticketKey: "PROJ-12", repos: ["bite-me"], mode: "tdd", dest: "worktree", ...over,
 });
 const notify = (id: string, over: Partial<NotifyNode> = {}): NotifyNode => ({
   id, kind: "notify", x: 0, y: 0, join: "any", message: "landed", ...over,
@@ -320,7 +320,7 @@ const cardAgent = (state: AgentState, lastActivityMs: number | null, repo?: stri
 });
 
 const run: Run = {
-  key: "ASM-1", summary: "s", url: "https://j/browse/ASM-1", createdAt: 1,
+  key: "PROJ-1", summary: "s", url: "https://j/browse/PROJ-1", createdAt: 1,
   mode: "multiroot", repos: [{ name: REPO, path: `/r/${REPO}`, isGit: true }], briefPaths: [],
 };
 
@@ -867,7 +867,7 @@ const status = (key: string, over: { merged?: boolean; agents?: CardAgent[]; unk
 const place = (id: string, runKey: string, join: JoinMode = "any"): PlaceNode =>
   ({ id, kind: "place", x: 0, y: 0, join, runKey, repo: `repo-${runKey}` });
 const planned = (id: string, join: JoinMode = "any"): PlannedNode =>
-  ({ id, kind: "planned", x: 0, y: 0, join, ticketKey: "ASM-99", repos: ["r"], mode: "tdd", dest: "worktree" });
+  ({ id, kind: "planned", x: 0, y: 0, join, ticketKey: "PROJ-99", repos: ["r"], mode: "tdd", dest: "worktree" });
 const notify = (id: string, join: JoinMode = "any"): NotifyNode =>
   ({ id, kind: "notify", x: 0, y: 0, join, message: "done" });
 
@@ -882,35 +882,35 @@ const run = (flow: Flow, statuses: RunStatus[], maxLaunches?: number) =>
 
 describe("evaluateFlow — arming and the latch", () => {
   it("yields nothing for a disarmed flow, even when the condition is met", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z")], false);
-    expect(run(flow, [status("ASM-1", { merged: true })])).toEqual({ fired: [], blocked: [], deferred: 0 });
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z")], false);
+    expect(run(flow, [status("PROJ-1", { merged: true })])).toEqual({ fired: [], blocked: [], deferred: 0 });
   });
 
   it("fires a met edge exactly once", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z")]);
-    const first = run(flow, [status("ASM-1", { merged: true })]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z")]);
+    const first = run(flow, [status("PROJ-1", { merged: true })]);
     expect(first.fired.map((f) => f.edge.id)).toEqual(["e1"]);
 
     // The runner stamps firedAt; the next pass must skip it.
     flow.edges[0].firedAt = NOW;
-    expect(run(flow, [status("ASM-1", { merged: true })]).fired).toEqual([]);
+    expect(run(flow, [status("PROJ-1", { merged: true })]).fired).toEqual([]);
   });
 
   it("never re-evaluates an edge whose action errored", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z", { error: "worktree exists" })]);
-    expect(run(flow, [status("ASM-1", { merged: true })]).fired).toEqual([]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z", { error: "worktree exists" })]);
+    expect(run(flow, [status("PROJ-1", { merged: true })]).fired).toEqual([]);
   });
 
   it("does not fire an unmet edge", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z")]);
-    expect(run(flow, [status("ASM-1", { merged: false })]).fired).toEqual([]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z")]);
+    expect(run(flow, [status("PROJ-1", { merged: false })]).fired).toEqual([]);
   });
 });
 
 describe("evaluateFlow — nodes it cannot evaluate", () => {
   it("blocks an edge whose source run is gone", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z")]);
-    const r = run(flow, []); // no status for ASM-1 — the run was forgotten
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z")]);
+    const r = run(flow, []); // no status for PROJ-1 — the run was forgotten
     expect(r.fired).toEqual([]);
     expect(r.blocked).toEqual([{ nodeId: "a", reason: "gone" }]);
   });
@@ -921,64 +921,64 @@ describe("evaluateFlow — nodes it cannot evaluate", () => {
   });
 
   it("blocks an agent condition when the agent state is unknown", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z")],
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
       [edge("e1", "a", "z", { cond: { kind: "agent-ended-turn" } })]);
-    const r = run(flow, [status("ASM-1", { unknownAgent: true })]);
+    const r = run(flow, [status("PROJ-1", { unknownAgent: true })]);
     expect(r.fired).toEqual([]);
     expect(r.blocked).toEqual([{ nodeId: "a", reason: "agent-state-unknown" }]);
   });
 
   it("does not block a non-agent condition when the agent state is unknown", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z")]);
-    const r = run(flow, [status("ASM-1", { merged: true, unknownAgent: true })]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z")]);
+    const r = run(flow, [status("PROJ-1", { merged: true, unknownAgent: true })]);
     expect(r.blocked).toEqual([]);
     expect(r.fired.map((f) => f.edge.id)).toEqual(["e1"]);
   });
 
   it("reports a gone node once, not once per edge leaving it", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("y"), notify("z")],
+    const flow = flowWith([place("a", "PROJ-1"), notify("y"), notify("z")],
       [edge("e1", "a", "y"), edge("e2", "a", "z")]);
     expect(run(flow, []).blocked).toEqual([{ nodeId: "a", reason: "gone" }]);
   });
 
   it("ignores an edge whose target does not exist", () => {
-    const flow = flowWith([place("a", "ASM-1")], [edge("e1", "a", "missing")]);
-    expect(run(flow, [status("ASM-1", { merged: true })]).fired).toEqual([]);
+    const flow = flowWith([place("a", "PROJ-1")], [edge("e1", "a", "missing")]);
+    expect(run(flow, [status("PROJ-1", { merged: true })]).fired).toEqual([]);
   });
 });
 
 describe("evaluateFlow — join", () => {
   const twoIn = (join: "any" | "all") =>
-    flowWith([place("a", "ASM-1"), place("b", "ASM-2"), notify("z", join)],
+    flowWith([place("a", "PROJ-1"), place("b", "PROJ-2"), notify("z", join)],
       [edge("e1", "a", "z"), edge("e2", "b", "z")]);
 
   it("with join any, each met edge fires on its own", () => {
-    const r = run(twoIn("any"), [status("ASM-1", { merged: true }), status("ASM-2", { merged: false })]);
+    const r = run(twoIn("any"), [status("PROJ-1", { merged: true }), status("PROJ-2", { merged: false })]);
     expect(r.fired.map((f) => f.edge.id)).toEqual(["e1"]);
   });
 
   it("with join all, one met edge fires nothing", () => {
-    const r = run(twoIn("all"), [status("ASM-1", { merged: true }), status("ASM-2", { merged: false })]);
+    const r = run(twoIn("all"), [status("PROJ-1", { merged: true }), status("PROJ-2", { merged: false })]);
     expect(r.fired).toEqual([]);
   });
 
   it("with join all, every edge fires once the last one is met", () => {
-    const r = run(twoIn("all"), [status("ASM-1", { merged: true }), status("ASM-2", { merged: true })]);
+    const r = run(twoIn("all"), [status("PROJ-1", { merged: true }), status("PROJ-2", { merged: true })]);
     expect(r.fired.map((f) => f.edge.id)).toEqual(["e1", "e2"]);
   });
 
   it("with join all, an already-fired edge counts as met", () => {
     const flow = twoIn("all");
     flow.edges[0].firedAt = NOW - 1;
-    const r = run(flow, [status("ASM-1", { merged: false }), status("ASM-2", { merged: true })]);
+    const r = run(flow, [status("PROJ-1", { merged: false }), status("PROJ-2", { merged: true })]);
     expect(r.fired.map((f) => f.edge.id)).toEqual(["e2"]);
   });
 
   it("with join all, the action performed is the first incoming edge's", () => {
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2"), planned("z", "all")],
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2"), planned("z", "all")],
       [edge("e1", "a", "z", { action: "launch", mode: "tdd" }),
        edge("e2", "b", "z", { action: "seed", mode: "plan" })]);
-    const r = run(flow, [status("ASM-1", { merged: true }), status("ASM-2", { merged: true })]);
+    const r = run(flow, [status("PROJ-1", { merged: true }), status("PROJ-2", { merged: true })]);
     expect(r.fired.map((f) => ({ id: f.edge.id, perform: f.perform }))).toEqual([
       { id: "e1", perform: true },
       { id: "e2", perform: false },
@@ -986,8 +986,8 @@ describe("evaluateFlow — join", () => {
   });
 
   it("join is irrelevant to a target with a single incoming edge", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "all")], [edge("e1", "a", "z")]);
-    expect(run(flow, [status("ASM-1", { merged: true })]).fired.map((f) => f.edge.id)).toEqual(["e1"]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "all")], [edge("e1", "a", "z")]);
+    expect(run(flow, [status("PROJ-1", { merged: true })]).fired.map((f) => f.edge.id)).toEqual(["e1"]);
   });
 });
 
@@ -996,10 +996,10 @@ describe("evaluateFlow — the launch cap", () => {
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
     for (let i = 0; i < n; i++) {
-      nodes.push(place(`a${i}`, `ASM-${i}`), planned(`p${i}`));
+      nodes.push(place(`a${i}`, `PROJ-${i}`), planned(`p${i}`));
       edges.push(edge(`e${i}`, `a${i}`, `p${i}`, { action: "launch", mode: "tdd" }));
     }
-    return { flow: flowWith(nodes, edges), statuses: Array.from({ length: n }, (_, i) => status(`ASM-${i}`, { merged: true })) };
+    return { flow: flowWith(nodes, edges), statuses: Array.from({ length: n }, (_, i) => status(`PROJ-${i}`, { merged: true })) };
   };
 
   it("caps acting edges at the default and counts the rest as deferred", () => {
@@ -1027,10 +1027,10 @@ describe("evaluateFlow — the launch cap", () => {
     const nodes: FlowNode[] = [];
     const edges: FlowEdge[] = [];
     for (let i = 0; i < MAX_LAUNCHES_PER_PASS + 3; i++) {
-      nodes.push(place(`a${i}`, `ASM-${i}`), notify(`z${i}`));
+      nodes.push(place(`a${i}`, `PROJ-${i}`), notify(`z${i}`));
       edges.push(edge(`e${i}`, `a${i}`, `z${i}`));
     }
-    const statuses = Array.from({ length: MAX_LAUNCHES_PER_PASS + 3 }, (_, i) => status(`ASM-${i}`, { merged: true }));
+    const statuses = Array.from({ length: MAX_LAUNCHES_PER_PASS + 3 }, (_, i) => status(`PROJ-${i}`, { merged: true }));
     const r = run(flowWith(nodes, edges), statuses);
     expect(r.fired).toHaveLength(MAX_LAUNCHES_PER_PASS + 3);
     expect(r.deferred).toBe(0);
@@ -1038,10 +1038,10 @@ describe("evaluateFlow — the launch cap", () => {
 
   it("counts a capped all-join's non-performing edges against nothing", () => {
     // Only the performing edge of an "all" junction consumes a launch slot.
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2"), planned("z", "all")],
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2"), planned("z", "all")],
       [edge("e1", "a", "z", { action: "launch", mode: "tdd" }),
        edge("e2", "b", "z", { action: "launch", mode: "tdd" })]);
-    const r = run(flow, [status("ASM-1", { merged: true }), status("ASM-2", { merged: true })], 1);
+    const r = run(flow, [status("PROJ-1", { merged: true }), status("PROJ-2", { merged: true })], 1);
     expect(r.fired.map((f) => f.edge.id)).toEqual(["e1", "e2"]);
     expect(r.deferred).toBe(0);
   });
@@ -1051,12 +1051,12 @@ describe("evaluateFlow — the launch cap", () => {
     // its siblings are stamped fired. That must resolve on a later pass, not leave
     // a junction that is fully stamped and never acted on.
     const flow = flowWith(
-      [place("a", "ASM-1"), planned("p", "any"),
-       place("b", "ASM-2"), place("c", "ASM-3"), planned("z", "all")],
+      [place("a", "PROJ-1"), planned("p", "any"),
+       place("b", "PROJ-2"), place("c", "PROJ-3"), planned("z", "all")],
       [edge("e0", "a", "p", { action: "launch", mode: "tdd" }),
        edge("e1", "b", "z", { action: "launch", mode: "tdd" }),
        edge("e2", "c", "z", { action: "launch", mode: "tdd" })]);
-    const statuses = [status("ASM-1", { merged: true }), status("ASM-2", { merged: true }), status("ASM-3", { merged: true })];
+    const statuses = [status("PROJ-1", { merged: true }), status("PROJ-2", { merged: true }), status("PROJ-3", { merged: true })];
 
     const first = run(flow, statuses, 1);
     expect(first.fired.filter((f) => f.perform).map((f) => f.edge.id)).toEqual(["e0"]);

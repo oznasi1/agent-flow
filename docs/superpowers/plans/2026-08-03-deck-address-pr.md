@@ -291,14 +291,14 @@ describe("DeckPanel — Address PR", () => {
   it("writes one plan matching the repo window for a per-window run", async () => {
     h.runs = [mkRun()];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(h.writePlanFile).toHaveBeenCalledWith({
-      key: "ASM-1",
+      key: "PROJ-1",
       createdAt: expect.any(Number),
       seedAgent: true,
       matches: [{
         matchPath: "/r/svc",
-        prompt: "Assess the PR for {key}.{files} [key=ASM-1 brief=(relative)]",
+        prompt: "Assess the PR for {key}.{files} [key=PROJ-1 brief=(relative)]",
       }],
     });
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
@@ -307,18 +307,18 @@ describe("DeckPanel — Address PR", () => {
   it("matches the workspace file and the launch's own brief for a multiroot run", async () => {
     h.runs = [mkRun({
       mode: "multiroot",
-      workspaceFile: "/ws/ASM-1.code-workspace",
+      workspaceFile: "/ws/PROJ-1.code-workspace",
       briefPaths: ["/r/svc/.pick-task/TASK.md"],
     })];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(h.writePlanFile).toHaveBeenCalledWith(expect.objectContaining({
       matches: [{
-        matchPath: "/ws/ASM-1.code-workspace",
-        prompt: "Assess the PR for {key}.{files} [key=ASM-1 brief=/r/svc/.pick-task/TASK.md]",
+        matchPath: "/ws/PROJ-1.code-workspace",
+        prompt: "Assess the PR for {key}.{files} [key=PROJ-1 brief=/r/svc/.pick-task/TASK.md]",
       }],
     }));
-    expect(h.openInEditor).toHaveBeenCalledWith("/ws/ASM-1.code-workspace");
+    expect(h.openInEditor).toHaveBeenCalledWith("/ws/PROJ-1.code-workspace");
   });
 
   it("seeds every window of a multi-repo per-window run", async () => {
@@ -329,7 +329,7 @@ describe("DeckPanel — Address PR", () => {
       ],
     })];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { matchPath: string }[] };
     expect(plan.matches.map((m) => m.matchPath)).toEqual(["/r/svc", "/r/ui"]);
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
@@ -340,7 +340,7 @@ describe("DeckPanel — Address PR", () => {
     h.prReviewAutoFix = true;
     h.runs = [mkRun()];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     const plan = h.writePlanFile.mock.calls.at(-1)![0] as { matches: { prompt: string }[] };
     expect(plan.matches[0].prompt).toContain(PR_REVIEW_AUTOFIX_CLAUSE);
   });
@@ -348,7 +348,7 @@ describe("DeckPanel — Address PR", () => {
   it("leaves the run record untouched — the card keeps its launched-at", async () => {
     h.runs = [mkRun({ createdAt: 1_700_000_000_000 })];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(h.writeRun).not.toHaveBeenCalled();
   });
 
@@ -356,7 +356,7 @@ describe("DeckPanel — Address PR", () => {
     h.seedAgent = false;
     h.runs = [mkRun()];
     show();
-    await lastPanel()._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
   });
@@ -365,10 +365,10 @@ describe("DeckPanel — Address PR", () => {
     h.runs = [];
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:addressPr", key: "ASM-9" });
+    await p._fire({ type: "deck:addressPr", key: "PROJ-9" });
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(
-      expect.objectContaining({ type: "toast", level: "error", message: "No run record for ASM-9." }),
+      expect.objectContaining({ type: "toast", level: "error", message: "No run record for PROJ-9." }),
     );
   });
 
@@ -376,10 +376,10 @@ describe("DeckPanel — Address PR", () => {
     h.runs = [mkRun({ repos: [] })];
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await p._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(
-      expect.objectContaining({ type: "toast", level: "error", message: "Nothing to open for ASM-1." }),
+      expect.objectContaining({ type: "toast", level: "error", message: "Nothing to open for PROJ-1." }),
     );
   });
 
@@ -388,9 +388,9 @@ describe("DeckPanel — Address PR", () => {
     h.openInEditor.mockResolvedValueOnce(false);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:addressPr", key: "ASM-1" });
+    await p._fire({ type: "deck:addressPr", key: "PROJ-1" });
     expect(posts(p)).toContainEqual(
-      expect.objectContaining({ type: "toast", level: "error", message: "Couldn't open ASM-1." }),
+      expect.objectContaining({ type: "toast", level: "error", message: "Couldn't open PROJ-1." }),
     );
   });
 });
@@ -585,7 +585,7 @@ describe("DeckApp — Address PR", () => {
     render(<DeckApp />);
     host(runsMsg([prCard()]));
     fireEvent.click(screen.getByRole("button", { name: "Address PR" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:addressPr", key: "ASM-1" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:addressPr", key: "PROJ-1" });
   });
 
   it("leads the action row, before Open", () => {

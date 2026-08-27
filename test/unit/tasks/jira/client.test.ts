@@ -15,13 +15,13 @@ beforeEach(async () => {
 });
 
 const BASE = "https://jira.test";
-const client = (auth = fakeAuth()) => new mod.JiraClient(BASE, "ASM", auth);
+const client = (auth = fakeAuth()) => new mod.JiraClient(BASE, "PROJ", auth);
 
 /** The greenhopper Sprint field descriptor `/rest/api/3/field` returns. */
 const FIELD_LIST = [{ id: "customfield_10020", schema: { custom: "com.pyxis.greenhopper.jira:gh-sprint" } }];
 
 const rawIssue = (over: Record<string, any> = {}) => ({
-  key: "ASM-1",
+  key: "PROJ-1",
   fields: {
     summary: "Do the thing",
     status: { name: "In Progress", statusCategory: { key: "indeterminate" } },
@@ -44,12 +44,12 @@ const urlOf = (fetchMock: ReturnType<typeof installFetch>, callIdx: number) =>
 describe("request — error & response mapping", () => {
   it("throws JiraAuthError on 401", async () => {
     installFetch([textResponse("", 401)]);
-    await expect(client().getTransitions("ASM-1")).rejects.toBeInstanceOf(mod.JiraAuthError);
+    await expect(client().getTransitions("PROJ-1")).rejects.toBeInstanceOf(mod.JiraAuthError);
   });
 
   it("throws JiraAuthError on 403", async () => {
     installFetch([textResponse("", 403)]);
-    await expect(client().getTransitions("ASM-1")).rejects.toBeInstanceOf(mod.JiraAuthError);
+    await expect(client().getTransitions("PROJ-1")).rejects.toBeInstanceOf(mod.JiraAuthError);
   });
 
   it("throws a JiraApiError carrying the parsed envelope on other non-2xx", async () => {
@@ -59,7 +59,7 @@ describe("request — error & response mapping", () => {
         400,
       ),
     ]);
-    const err = await client().getTransitions("ASM-1").catch((e) => e);
+    const err = await client().getTransitions("PROJ-1").catch((e) => e);
     expect(err).toBeInstanceOf(mod.JiraApiError);
     expect(err.status).toBe(400);
     expect(err.messages).toEqual(["Ticket cannot be closed unless Resolution will be provided"]);
@@ -68,12 +68,12 @@ describe("request — error & response mapping", () => {
 
   it("does not leak a non-JSON error body into the message", async () => {
     installFetch([textResponse("server boom", 500)]);
-    await expect(client().getTransitions("ASM-1")).rejects.toThrow("Jira is having trouble (500) — try again shortly.");
+    await expect(client().getTransitions("PROJ-1")).rejects.toThrow("Jira is having trouble (500) — try again shortly.");
   });
 
   it("throws JiraAuthError (without fetching) when not signed in", async () => {
     const fetchMock = installFetch([]);
-    await expect(client(fakeAuth({ authed: false })).getTransitions("ASM-1")).rejects.toBeInstanceOf(
+    await expect(client(fakeAuth({ authed: false })).getTransitions("PROJ-1")).rejects.toBeInstanceOf(
       mod.JiraAuthError,
     );
     expect(fetchMock).not.toHaveBeenCalled();
@@ -81,12 +81,12 @@ describe("request — error & response mapping", () => {
 
   it("treats a 204/empty body as null (no JSON parse)", async () => {
     installFetch([emptyResponse(204)]);
-    await expect(client().transition("ASM-1", "31")).resolves.toBeUndefined();
+    await expect(client().transition("PROJ-1", "31")).resolves.toBeUndefined();
   });
 
   it("sends the Authorization header from the auth provider", async () => {
     const fetchMock = installFetch([jsonResponse({ transitions: [] })]);
-    await client(fakeAuth({ header: "Basic Zm9v" })).getTransitions("ASM-1");
+    await client(fakeAuth({ header: "Basic Zm9v" })).getTransitions("PROJ-1");
     expect(fetchMock.mock.calls[0][1].headers).toMatchObject({ Authorization: "Basic Zm9v" });
   });
 
@@ -98,7 +98,7 @@ describe("request — error & response mapping", () => {
   // and classifyFailure alike.
   it("marks an unreachable-host failure as a plain, Jira-origin-tagged Error (not JiraApiError/JiraAuthError)", async () => {
     installFetch([]); // the mocked fetch rejects — see installFetch's own doc comment
-    const err = await client().getTransitions("ASM-1").catch((e) => e);
+    const err = await client().getTransitions("PROJ-1").catch((e) => e);
     expect(err).toBeInstanceOf(Error);
     expect(err).not.toBeInstanceOf(mod.JiraApiError);
     expect(err).not.toBeInstanceOf(mod.JiraAuthError);
@@ -110,7 +110,7 @@ describe("request — error & response mapping", () => {
   it("marks a timeout (AbortError) failure the same way, with code ETIMEDOUT", async () => {
     const fetchMock = vi.fn().mockRejectedValueOnce(Object.assign(new Error("The operation was aborted"), { name: "AbortError" }));
     (globalThis as { fetch: unknown }).fetch = fetchMock;
-    const err = await client().getTransitions("ASM-1").catch((e) => e);
+    const err = await client().getTransitions("PROJ-1").catch((e) => e);
     expect(err).not.toBeInstanceOf(mod.JiraApiError);
     expect(err).not.toBeInstanceOf(mod.JiraAuthError);
     expect(isTaskNetworkError(err)).toBe(true);
@@ -158,7 +158,7 @@ describe("fetchTasks", () => {
     // the resolved custom field is requested alongside the list fields
     expect(bodyOf(fetchMock, 1).fields).toContain("customfield_10020");
     expect(tasks).toHaveLength(1);
-    expect(tasks[0]).toMatchObject({ key: "ASM-1", summary: "Do the thing", url: `${BASE}/browse/ASM-1` });
+    expect(tasks[0]).toMatchObject({ key: "PROJ-1", summary: "Do the thing", url: `${BASE}/browse/PROJ-1` });
   });
 
   it("caches the sprint field across calls (fetches /field only once)", async () => {
@@ -214,7 +214,7 @@ describe("fetchTasks", () => {
     expect(tasks).toHaveLength(1);
     expect(bodyOf(fetchMock, 1).jql).toContain("ORDER BY priority DESC");
     expect(bodyOf(fetchMock, 2).jql).toBe(
-      "project = ASM AND statusCategory != Done AND assignee = currentUser() ORDER BY updated DESC",
+      "project = PROJ AND statusCategory != Done AND assignee = currentUser() ORDER BY updated DESC",
     );
   });
 
@@ -247,7 +247,7 @@ describe("normalize (via fetchTasks)", () => {
   it("maps a fully-populated issue", async () => {
     const t = await one(rawIssue());
     expect(t).toEqual({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "Do the thing",
       status: "In Progress",
       statusCategory: "indeterminate",
@@ -258,14 +258,14 @@ describe("normalize (via fetchTasks)", () => {
       sprint: null,
       inOpenSprint: false,
       updated: "2026-07-01T00:00:00.000Z",
-      url: `${BASE}/browse/ASM-1`,
+      url: `${BASE}/browse/PROJ-1`,
       estimateSeconds: 3600,
       type: "Story",
     });
   });
 
   it("applies null-safe defaults for a sparse issue", async () => {
-    const t = await one({ key: "ASM-2", fields: {} });
+    const t = await one({ key: "PROJ-2", fields: {} });
     expect(t).toMatchObject({
       summary: "",
       status: "",
@@ -369,32 +369,32 @@ describe("getDetail", () => {
   it("maps fields and flattens the ADF description", async () => {
     installFetch([
       jsonResponse({
-        key: "ASM-9",
+        key: "PROJ-9",
         fields: {
           summary: "Detail summary",
           description: { type: "doc", content: [{ type: "text", text: "the body" }] },
           labels: ["l1"],
-          components: [{ name: "centaur" }],
+          components: [{ name: "webapp" }],
           status: { name: "In Review", statusCategory: { key: "indeterminate" } },
         },
       }),
     ]);
-    const d = await client().getDetail("ASM-9");
+    const d = await client().getDetail("PROJ-9");
     expect(d).toEqual({
-      key: "ASM-9",
+      key: "PROJ-9",
       summary: "Detail summary",
       descriptionText: "the body",
       labels: ["l1"],
-      components: ["centaur"],
-      url: `${BASE}/browse/ASM-9`,
+      components: ["webapp"],
+      url: `${BASE}/browse/PROJ-9`,
       status: "In Review",
       statusCategory: "indeterminate",
     });
   });
 
   it("maps status to null when the ticket has none", async () => {
-    installFetch([jsonResponse({ key: "ASM-9", fields: { summary: "s" } })]);
-    const d = await client().getDetail("ASM-9");
+    installFetch([jsonResponse({ key: "PROJ-9", fields: { summary: "s" } })]);
+    const d = await client().getDetail("PROJ-9");
     expect(d.status).toBeNull();
     expect(d.statusCategory).toBeNull();
   });
@@ -403,12 +403,12 @@ describe("getDetail", () => {
 describe("getStatus", () => {
   it("returns the status name and category", async () => {
     installFetch([jsonResponse({ fields: { status: { name: "In Progress", statusCategory: { key: "indeterminate" } } } })]);
-    expect(await client().getStatus("ASM-9")).toEqual({ status: "In Progress", category: "indeterminate" });
+    expect(await client().getStatus("PROJ-9")).toEqual({ status: "In Progress", category: "indeterminate" });
   });
 
   it("degrades to nulls when status is absent", async () => {
     installFetch([jsonResponse({ fields: {} })]);
-    expect(await client().getStatus("ASM-9")).toEqual({ status: null, category: null });
+    expect(await client().getStatus("PROJ-9")).toEqual({ status: null, category: null });
   });
 });
 
@@ -419,14 +419,14 @@ describe("getTransitions", () => {
         transitions: [{ id: "31", name: "Start Progress", to: { name: "In Progress", statusCategory: { key: "indeterminate" } } }],
       }),
     ]);
-    expect(await client().getTransitions("ASM-1")).toEqual([
+    expect(await client().getTransitions("PROJ-1")).toEqual([
       { id: "31", name: "Start Progress", toName: "In Progress", toCategory: "indeterminate", fields: {} },
     ]);
   });
 
   it("returns an empty list when there are no transitions", async () => {
     installFetch([jsonResponse({ transitions: [] })]);
-    expect(await client().getTransitions("ASM-1")).toEqual([]);
+    expect(await client().getTransitions("PROJ-1")).toEqual([]);
   });
 });
 
@@ -456,39 +456,39 @@ describe("getActiveSprintId", () => {
 describe("write methods", () => {
   it("transition posts the transition id", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().transition("ASM-1", "31");
-    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/ASM-1/transitions`);
+    await client().transition("PROJ-1", "31");
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/PROJ-1/transitions`);
     expect(fetchMock.mock.calls[0][1].method).toBe("POST");
     expect(bodyOf(fetchMock, 0)).toEqual({ transition: { id: "31" } });
   });
 
   it("addLabel PUTs an additive label update", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().addLabel("ASM-1", "claude-code");
+    await client().addLabel("PROJ-1", "claude-code");
     expect(fetchMock.mock.calls[0][1].method).toBe("PUT");
     expect(bodyOf(fetchMock, 0)).toEqual({ update: { labels: [{ add: "claude-code" }] } });
   });
 
   it("addIssueToSprint posts the issue key to the sprint", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().addIssueToSprint(99, "ASM-1");
+    await client().addIssueToSprint(99, "PROJ-1");
     expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/agile/1.0/sprint/99/issue`);
-    expect(bodyOf(fetchMock, 0)).toEqual({ issues: ["ASM-1"] });
+    expect(bodyOf(fetchMock, 0)).toEqual({ issues: ["PROJ-1"] });
   });
 
   it("assignIssue PUTs the account id", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().assignIssue("ASM-1", "acc-1");
-    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/ASM-1/assignee`);
+    await client().assignIssue("PROJ-1", "acc-1");
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/PROJ-1/assignee`);
     expect(bodyOf(fetchMock, 0)).toEqual({ accountId: "acc-1" });
   });
 
   it("removeIssueFromSprint posts the key to the backlog", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().removeIssueFromSprint("ASM-1");
+    await client().removeIssueFromSprint("PROJ-1");
     expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/agile/1.0/backlog/issue`);
     expect(fetchMock.mock.calls[0][1].method).toBe("POST");
-    expect(bodyOf(fetchMock, 0)).toEqual({ issues: ["ASM-1"] });
+    expect(bodyOf(fetchMock, 0)).toEqual({ issues: ["PROJ-1"] });
   });
 });
 
@@ -513,38 +513,38 @@ describe("transitions", () => {
 
   it("asks Jira to expand the transition screen fields", async () => {
     const fetchMock = installFetch([jsonResponse(TRANSITIONS)]);
-    await client().getTransitions("ASM-1");
-    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/ASM-1/transitions?expand=transitions.fields`);
+    await client().getTransitions("PROJ-1");
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/PROJ-1/transitions?expand=transitions.fields`);
   });
 
   it("surfaces the field metadata alongside the status names", async () => {
     installFetch([jsonResponse(TRANSITIONS)]);
-    const [t] = await client().getTransitions("ASM-1");
+    const [t] = await client().getTransitions("PROJ-1");
     expect(t).toMatchObject({ id: "41", name: "Resolve", toName: "Done", toCategory: "done" });
     expect(t.fields.resolution.allowedValues).toEqual([{ id: "10000", name: "Done" }]);
   });
 
   it("defaults fields to an empty record when Jira omits them", async () => {
     installFetch([jsonResponse({ transitions: [{ id: "31", name: "Start", to: { name: "In Progress" } }] })]);
-    const [t] = await client().getTransitions("ASM-1");
+    const [t] = await client().getTransitions("PROJ-1");
     expect(t.fields).toEqual({});
   });
 
   it("posts only the transition id when there are no fields", async () => {
     const fetchMock = installFetch([emptyResponse(204)]);
-    await client().transition("ASM-1", "41");
+    await client().transition("PROJ-1", "41");
     expect(bodyOf(fetchMock, 0)).toEqual({ transition: { id: "41" } });
   });
 
   it("omits an empty fields object rather than sending `fields: {}`", async () => {
     const fetchMock = installFetch([emptyResponse(204)]);
-    await client().transition("ASM-1", "41", {});
+    await client().transition("PROJ-1", "41", {});
     expect(bodyOf(fetchMock, 0)).toEqual({ transition: { id: "41" } });
   });
 
   it("includes collected fields in the transition body", async () => {
     const fetchMock = installFetch([emptyResponse(204)]);
-    await client().transition("ASM-1", "41", { resolution: { id: "10000" } });
+    await client().transition("PROJ-1", "41", { resolution: { id: "10000" } });
     expect(bodyOf(fetchMock, 0)).toEqual({ transition: { id: "41" }, fields: { resolution: { id: "10000" } } });
   });
 });
@@ -599,9 +599,9 @@ describe("probeMyself — the non-swallowing credential probe", () => {
 
 describe("getProject", () => {
   it("maps a resolved project to key and name", async () => {
-    const fetchMock = installFetch([jsonResponse({ id: "10001", key: "ASM", name: "Assembly" })]);
-    await expect(client().getProject("ASM")).resolves.toEqual({ id: "10001", key: "ASM", name: "Assembly" });
-    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/ASM`);
+    const fetchMock = installFetch([jsonResponse({ id: "10001", key: "PROJ", name: "Assembly" })]);
+    await expect(client().getProject("PROJ")).resolves.toEqual({ id: "10001", key: "PROJ", name: "Assembly" });
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/PROJ`);
   });
 
   it("throws a 404 JiraApiError for a key Jira can't see", async () => {
@@ -622,7 +622,7 @@ describe("listComponents", () => {
   it("GETs the project's components and returns their names", async () => {
     const fetchMock = installFetch([jsonResponse([{ id: "1", name: "billing-service" }, { id: "2", name: "Infra" }])]);
     await expect(client().listComponents()).resolves.toEqual(["billing-service", "Infra"]);
-    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/ASM/components`);
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/project/PROJ/components`);
   });
 
   // Two separate cases on purpose. The cache is module-level and keyed by project,
@@ -651,15 +651,15 @@ describe("listComponents", () => {
 
   it("does not serve one site's components to another site with the same project key", async () => {
     // The cache was keyed by project key alone, so two Jira sites that both define a
-    // `ASM` project shared one entry for five minutes and the second site was answered
+    // `PROJ` project shared one entry for five minutes and the second site was answered
     // with the first's component names — names its own project would then reject on a
     // write. Keyed by site+project, each gets its own read.
     const fetchMock = installFetch([
       jsonResponse([{ name: "billing-service" }]),
       jsonResponse([{ name: "totally-different" }]),
     ]);
-    await new mod.JiraClient("https://a.test", "ASM", fakeAuth()).listComponents();
-    await expect(new mod.JiraClient("https://b.test", "ASM", fakeAuth()).listComponents())
+    await new mod.JiraClient("https://a.test", "PROJ", fakeAuth()).listComponents();
+    await expect(new mod.JiraClient("https://b.test", "PROJ", fakeAuth()).listComponents())
       .resolves.toEqual(["totally-different"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -698,21 +698,21 @@ describe("listComponents", () => {
 describe("updateComponents", () => {
   it("PUTs an additive add", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().updateComponents("ASM-1", { add: ["billing-service"] });
-    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/ASM-1`);
+    await client().updateComponents("PROJ-1", { add: ["billing-service"] });
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/PROJ-1`);
     expect(fetchMock.mock.calls[0][1].method).toBe("PUT");
     expect(bodyOf(fetchMock, 0)).toEqual({ update: { components: [{ add: { name: "billing-service" } }] } });
   });
 
   it("PUTs a remove", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().updateComponents("ASM-1", { remove: ["pricing-api"] });
+    await client().updateComponents("PROJ-1", { remove: ["pricing-api"] });
     expect(bodyOf(fetchMock, 0)).toEqual({ update: { components: [{ remove: { name: "pricing-api" } }] } });
   });
 
   it("PUTs adds before removes in one call", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().updateComponents("ASM-1", { add: ["a"], remove: ["b"] });
+    await client().updateComponents("PROJ-1", { add: ["a"], remove: ["b"] });
     expect(bodyOf(fetchMock, 0)).toEqual({
       update: { components: [{ add: { name: "a" } }, { remove: { name: "b" } }] },
     });
@@ -720,15 +720,15 @@ describe("updateComponents", () => {
 
   it("never uses the destructive set verb (which would drop components with no local repo)", async () => {
     const fetchMock = installFetch([emptyResponse()]);
-    await client().updateComponents("ASM-1", { add: ["a"] });
+    await client().updateComponents("PROJ-1", { add: ["a"] });
     expect(JSON.stringify(bodyOf(fetchMock, 0))).not.toContain("set");
     expect(bodyOf(fetchMock, 0)).not.toHaveProperty("fields");
   });
 
   it("makes no request at all when there is nothing to change", async () => {
     const fetchMock = installFetch([]);
-    await client().updateComponents("ASM-1", {});
-    await client().updateComponents("ASM-1", { add: [], remove: [] });
+    await client().updateComponents("PROJ-1", {});
+    await client().updateComponents("PROJ-1", { add: [], remove: [] });
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -739,7 +739,7 @@ describe("loadShape", () => {
   it("reads the project's boards and reports a scrum project", async () => {
     const fetchMock = installFetch([jsonResponse(BOARDS)]);
     expect(await client().loadShape()).toEqual({ boardId: 2, hasSprints: true, boardCount: 2 });
-    expect(urlOf(fetchMock, 0)).toContain("/rest/agile/1.0/board?projectKeyOrId=ASM");
+    expect(urlOf(fetchMock, 0)).toContain("/rest/agile/1.0/board?projectKeyOrId=PROJ");
   });
 
   it("reports a kanban-only project as sprintless", async () => {
@@ -769,7 +769,7 @@ describe("loadShape", () => {
       jsonResponse(BOARDS),
       jsonResponse({ values: [{ id: 5, type: "kanban" }] }),
     ]);
-    await new mod.JiraClient(BASE, "ASM", fakeAuth()).loadShape();
+    await new mod.JiraClient(BASE, "PROJ", fakeAuth()).loadShape();
     expect(await new mod.JiraClient(BASE, "OTHER", fakeAuth()).loadShape())
       .toEqual({ boardId: 5, hasSprints: false, boardCount: 1 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
@@ -874,45 +874,45 @@ describe("shapeSnapshot", () => {
 describe("childrenOf", () => {
   it("maps issues to child refs", async () => {
     const issues = [
-      { key: "ASM-2", fields: { summary: "one", issuetype: { name: "Sub-task" }, status: { statusCategory: { key: "new" } } } },
-      { key: "ASM-3", fields: { summary: "two", issuetype: { name: "Sub-task" }, status: { statusCategory: { key: "done" } } } },
+      { key: "PROJ-2", fields: { summary: "one", issuetype: { name: "Sub-task" }, status: { statusCategory: { key: "new" } } } },
+      { key: "PROJ-3", fields: { summary: "two", issuetype: { name: "Sub-task" }, status: { statusCategory: { key: "done" } } } },
     ];
     installFetch([jsonResponse({ issues })]);
-    expect(await client().childrenOf("ASM-1")).toEqual([
-      { key: "ASM-2", summary: "one", type: "Sub-task", statusCategory: "new" },
-      { key: "ASM-3", summary: "two", type: "Sub-task", statusCategory: "done" },
+    expect(await client().childrenOf("PROJ-1")).toEqual([
+      { key: "PROJ-2", summary: "one", type: "Sub-task", statusCategory: "new" },
+      { key: "PROJ-3", summary: "two", type: "Sub-task", statusCategory: "done" },
     ]);
   });
 
   it("asks only for the three fields a child row needs", async () => {
-    const fetchMock = installFetch([jsonResponse({ issues: [{ key: "ASM-9" }] })]);
-    await client().childrenOf("ASM-1");
+    const fetchMock = installFetch([jsonResponse({ issues: [{ key: "PROJ-9" }] })]);
+    await client().childrenOf("PROJ-1");
     const body = bodyOf(fetchMock, 0);
     expect(body.fields).toEqual(["summary", "issuetype", "status"]);
-    expect(body.jql).toBe('parent = "ASM-1" ORDER BY key ASC');
+    expect(body.jql).toBe('parent = "PROJ-1" ORDER BY key ASC');
   });
 
   it("falls through to the Epic Link candidate when `parent` answers empty", async () => {
     const fetchMock = installFetch([
       jsonResponse({ issues: [] }),
-      jsonResponse({ issues: [{ key: "ASM-9" }] }),
+      jsonResponse({ issues: [{ key: "PROJ-9" }] }),
     ]);
-    const out = await client().childrenOf("ASM-1");
-    expect(out.map((c) => c.key)).toEqual(["ASM-9"]);
+    const out = await client().childrenOf("PROJ-1");
+    expect(out.map((c) => c.key)).toEqual(["PROJ-9"]);
     expect(fetchMock.mock.calls.map((c) => JSON.parse((c[1] as { body: string }).body).jql)).toEqual([
-      'parent = "ASM-1" ORDER BY key ASC',
-      '"Epic Link" = "ASM-1" ORDER BY key ASC',
+      'parent = "PROJ-1" ORDER BY key ASC',
+      '"Epic Link" = "PROJ-1" ORDER BY key ASC',
     ]);
   });
 
   it("returns [] when every candidate answers empty", async () => {
     installFetch([jsonResponse({ issues: [] }), jsonResponse({ issues: [] })]);
-    expect(await client().childrenOf("ASM-1")).toEqual([]);
+    expect(await client().childrenOf("PROJ-1")).toEqual([]);
   });
 
   it("attempts every candidate and throws when all of them are rejected", async () => {
     const fetchMock = installFetch([textResponse("", 400), textResponse("", 400)]);
-    await expect(client().childrenOf("ASM-1")).rejects.toThrow();
+    await expect(client().childrenOf("PROJ-1")).rejects.toThrow();
     // Both candidates must actually have been attempted — without this the test
     // passes even if the ladder gave up after the first rejection.
     expect(fetchMock.mock.calls).toHaveLength(2);
@@ -923,10 +923,10 @@ describe("childrenOf", () => {
     // then `Epic Link` 400s because the field does not exist on that site. Nothing
     // failed to be read, so this must not throw.
     const fetchMock = installFetch([jsonResponse({ issues: [] }), textResponse("", 400)]);
-    expect(await client().childrenOf("ASM-1")).toEqual([]);
+    expect(await client().childrenOf("PROJ-1")).toEqual([]);
     expect(fetchMock.mock.calls.map((c) => JSON.parse((c[1] as { body: string }).body).jql)).toEqual([
-      'parent = "ASM-1" ORDER BY key ASC',
-      '"Epic Link" = "ASM-1" ORDER BY key ASC',
+      'parent = "PROJ-1" ORDER BY key ASC',
+      '"Epic Link" = "PROJ-1" ORDER BY key ASC',
     ]);
   });
 
@@ -935,20 +935,20 @@ describe("childrenOf", () => {
     // an empty answer from a LATER candidate is still an answer, so this must NOT throw
     // — the ladder read the tree, and the tree is empty.
     const fetchMock = installFetch([textResponse("", 400), jsonResponse({ issues: [] })]);
-    expect(await client().childrenOf("ASM-1")).toEqual([]);
+    expect(await client().childrenOf("PROJ-1")).toEqual([]);
     expect(fetchMock.mock.calls).toHaveLength(2);
   });
 
   it("rethrows an auth failure immediately instead of trying the next candidate", async () => {
     const fetchMock = installFetch([textResponse("", 401)]);
-    await expect(client().childrenOf("ASM-1")).rejects.toBeInstanceOf(mod.JiraAuthError);
+    await expect(client().childrenOf("PROJ-1")).rejects.toBeInstanceOf(mod.JiraAuthError);
     expect(fetchMock.mock.calls).toHaveLength(1);
   });
 
   it("tolerates an issue with no summary, type or status", async () => {
-    installFetch([jsonResponse({ issues: [{ key: "ASM-4" }] })]);
-    expect(await client().childrenOf("ASM-1")).toEqual([
-      { key: "ASM-4", summary: "", type: "", statusCategory: null },
+    installFetch([jsonResponse({ issues: [{ key: "PROJ-4" }] })]);
+    expect(await client().childrenOf("PROJ-1")).toEqual([
+      { key: "PROJ-4", summary: "", type: "", statusCategory: null },
     ]);
   });
 });

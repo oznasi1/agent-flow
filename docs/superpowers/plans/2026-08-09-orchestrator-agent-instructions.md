@@ -211,7 +211,7 @@ Mutation-check the notify-clears-the-note behaviour and the show/hide-by-action 
 Two changes, both in the acting block:
 
 1. **`notify` → `vscode.window.showInformationMessage`** instead of posting a webview toast. The message text is unchanged; only delivery moves. It then persists in the Notifications bell, so a rule firing while the user is in another editor stays discoverable.
-2. **A failed action also notifies.** `Couldn't create a git worktree in bite-me — not launching ASM-12` is the class of message that must not be missed, and today it dies inside an unfocused panel. **A successful action stays a Deck toast** — a successful launch already announces itself by opening a window, so a notification on top is noise.
+2. **A failed action also notifies.** `Couldn't create a git worktree in bite-me — not launching PROJ-12` is the class of message that must not be missed, and today it dies inside an unfocused panel. **A successful action stays a Deck toast** — a successful launch already announces itself by opening a window, so a notification on top is noise.
 
 Follow the existing idiom in this file for non-modal notifications; several already exist. Do not make these modal — a modal steals focus, and an unattended flow that blocks the editor until acknowledged would be worse than the toast it replaces.
 

@@ -198,7 +198,7 @@ describe("readFlows — a store it cannot trust", () => {
           { id: "n4", x: 24, y: 24, join: "any" }, // no kind
           { kind: "place", x: 24, y: 24, join: "any" }, // no id
           undefined,
-          { id: "keeper", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+          { id: "keeper", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" },
         ],
       }),
     });

@@ -24,12 +24,12 @@ describe("RepoPicker", () => {
   });
 
   it("opens the combo on click and lists every repo", () => {
-    open(["centaur", "account-service"]);
+    open(["webapp", "account-service"]);
     expect(screen.getAllByRole("option")).toHaveLength(2);
   });
 
   it("filters as you type", () => {
-    const { input } = open(["centaur", "account-service"]);
+    const { input } = open(["webapp", "account-service"]);
     fireEvent.change(input, { target: { value: "acc" } });
     const options = screen.getAllByRole("option");
     expect(options).toHaveLength(1);
@@ -37,34 +37,34 @@ describe("RepoPicker", () => {
   });
 
   it("shows an empty state when nothing matches", () => {
-    const { input } = open(["centaur"]);
+    const { input } = open(["webapp"]);
     fireEvent.change(input, { target: { value: "zzz" } });
     expect(screen.queryAllByRole("option")).toHaveLength(0);
     expect(screen.getByText(/No repos match/i)).toBeInTheDocument();
   });
 
   it("chooses the first match on Enter", () => {
-    const { onAdd, input } = open(["centaur", "account-service"]);
+    const { onAdd, input } = open(["webapp", "account-service"]);
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onAdd).toHaveBeenCalledWith("centaur");
+    expect(onAdd).toHaveBeenCalledWith("webapp");
   });
 
   it("moves the active row with ArrowDown before Enter", () => {
-    const { onAdd, input } = open(["centaur", "account-service"]);
+    const { onAdd, input } = open(["webapp", "account-service"]);
     fireEvent.keyDown(input, { key: "ArrowDown" });
     fireEvent.keyDown(input, { key: "Enter" });
     expect(onAdd).toHaveBeenCalledWith("account-service");
   });
 
   it("clamps ArrowUp at the top of the list", () => {
-    const { onAdd, input } = open(["centaur", "account-service"]);
+    const { onAdd, input } = open(["webapp", "account-service"]);
     fireEvent.keyDown(input, { key: "ArrowUp" }); // already at 0
     fireEvent.keyDown(input, { key: "Enter" });
-    expect(onAdd).toHaveBeenCalledWith("centaur");
+    expect(onAdd).toHaveBeenCalledWith("webapp");
   });
 
   it("chooses a repo on row mousedown and clears the query", () => {
-    const { onAdd, input } = open(["centaur", "account-service"]);
+    const { onAdd, input } = open(["webapp", "account-service"]);
     fireEvent.change(input, { target: { value: "acc" } });
     fireEvent.mouseDown(screen.getByText("account-service"));
     expect(onAdd).toHaveBeenCalledWith("account-service");
@@ -72,7 +72,7 @@ describe("RepoPicker", () => {
   });
 
   it("closes on Escape", () => {
-    const { input } = open(["centaur"]);
+    const { input } = open(["webapp"]);
     fireEvent.keyDown(input, { key: "Escape" });
     expect(screen.queryByPlaceholderText(/Filter repos/i)).not.toBeInTheDocument();
     expect(screen.getByText(/add repo/i)).toBeInTheDocument();

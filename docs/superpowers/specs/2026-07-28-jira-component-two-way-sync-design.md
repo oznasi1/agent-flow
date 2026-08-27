@@ -164,15 +164,15 @@ A state-A chip keeps the current appearance. States B and C get a dashed border,
 which reads as "not on the ticket" without a word of explanation, plus a `title`
 that says which it is:
 
-- **B** — "not on `ASM-1` in Jira — `↑` adds it". The `↑` sits left of the `×`, its
-  own title reading "Add `Pricing-Api` to `ASM-1`" — the component's spelling, not
+- **B** — "not on `PROJ-1` in Jira — `↑` adds it". The `↑` sits left of the `×`, its
+  own title reading "Add `Pricing-Api` to `PROJ-1`" — the component's spelling, not
   the repo's, since that's what Jira actually receives.
-- **C** — "no `ASM` component named `scratch-tool` — this selection stays local".
+- **C** — "no `PROJ` component named `scratch-tool` — this selection stays local".
 
 When `mappable` is `null` — the project's component list could not be read — there is
 a fourth rendering, and it is the *absence* of a claim. Every chip takes the plain
-solid form with no `↑` and a generic `Remove`, titled "couldn't read `ASM`'s
-components — can't tell which are on `ASM-1`". The dashed border is what asserts "not
+solid form with no `↑` and a generic `Remove`, titled "couldn't read `PROJ`'s
+components — can't tell which are on `PROJ-1`". The dashed border is what asserts "not
 on the ticket", so applying it here would state something unknown as fact; the solid
 form is the neutral one because it is what the chips looked like before this feature
 existed. No write is attempted, since no canonical name is available to send.
@@ -181,7 +181,7 @@ No hint line and no red: red is reserved for real failures, and cards carry no
 persistent hint lines.
 
 Every write is optimistic. The chip changes at once and a toast confirms
-(`Added billing-service to ASM-1`, `Removed pricing-api from ASM-1`), naming the
+(`Added billing-service to PROJ-1`, `Removed pricing-api from PROJ-1`), naming the
 component's canonical spelling because that is what Jira received. On failure the
 chip snaps back per the `movedChip` table above and the error toast carries the
 existing "Open in Jira" action — when Jira rejects a component the panel believed in,

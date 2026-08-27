@@ -430,10 +430,10 @@ In `test/unit/deckView.test.ts`, alongside the existing open-sessions cases:
 ```ts
   it("tags each agent with the run repo whose directory it runs in", async () => {
     h.runs = [runFixture({
-      key: "ASM-9",
+      key: "PROJ-9",
       repos: [
-        { name: "api", path: "/repos/api", isGit: true, branch: "ASM-9-x" },
-        { name: "web", path: "/repos/web", isGit: true, branch: "ASM-9-x" },
+        { name: "api", path: "/repos/api", isGit: true, branch: "PROJ-9-x" },
+        { name: "web", path: "/repos/web", isGit: true, branch: "PROJ-9-x" },
       ],
     })];
     h.openSessions = [
@@ -570,12 +570,12 @@ const DAY = 24 * HOUR;
 const NOW = 1_700_000_000_000;
 
 const run = (over: Partial<Run> = {}): Run => ({
-  key: "ASM-1", summary: "s", url: "https://jira/browse/ASM-1", createdAt: NOW - 30 * DAY,
-  mode: "per-window", repos: [{ name: "api", path: "/r/api", isGit: true, branch: "ASM-1-x" }],
+  key: "PROJ-1", summary: "s", url: "https://jira/browse/PROJ-1", createdAt: NOW - 30 * DAY,
+  mode: "per-window", repos: [{ name: "api", path: "/r/api", isGit: true, branch: "PROJ-1-x" }],
   briefPaths: [], ...over,
 });
 const repo = (over: Partial<RepoGit> = {}): RepoGit => ({
-  name: "api", path: "/r/api", branch: "ASM-1-x", dirty: false, ahead: 0,
+  name: "api", path: "/r/api", branch: "PROJ-1-x", dirty: false, ahead: 0,
   added: 0, removed: 0, files: 0, ...over,
 });
 const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
@@ -875,38 +875,38 @@ In `test/unit/deckView.test.ts`:
 ```ts
 describe("retire sweep", () => {
   it("drops an unreachable run from the board and deletes its record and PR cache", async () => {
-    h.runs = [runFixture({ key: "ASM-GONE", repos: [{ name: "api", path: "/gone/api", isGit: true, branch: "b" }] })];
+    h.runs = [runFixture({ key: "PROJ-GONE", repos: [{ name: "api", path: "/gone/api", isGit: true, branch: "b" }] })];
     h.exists = (p: string) => !p.startsWith("/gone");
     await showAndSettle();
-    expect(lastRuns().map((r) => r.run.key)).not.toContain("ASM-GONE");
-    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "ASM-GONE");
-    expect(h.removePrEntries).toHaveBeenCalledWith(expect.any(String), "ASM-GONE");
+    expect(lastRuns().map((r) => r.run.key)).not.toContain("PROJ-GONE");
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "PROJ-GONE");
+    expect(h.removePrEntries).toHaveBeenCalledWith(expect.any(String), "PROJ-GONE");
   });
 
   it("stamps a landed run, keeps rendering it, and does not delete it", async () => {
-    h.runs = [runFixture({ key: "ASM-DONE" })];
+    h.runs = [runFixture({ key: "PROJ-DONE" })];
     h.getStatus = vi.fn(async () => ({ status: "Done", category: "done" }));
     await showAndSettle();
     expect(h.writeRun).toHaveBeenCalledWith(
       expect.any(String),
-      expect.objectContaining({ key: "ASM-DONE", finishedAt: expect.any(Number) }),
+      expect.objectContaining({ key: "PROJ-DONE", finishedAt: expect.any(Number) }),
     );
     expect(h.removeRun).not.toHaveBeenCalled();
-    expect(lastRuns().map((r) => r.run.key)).toContain("ASM-DONE");
+    expect(lastRuns().map((r) => r.run.key)).toContain("PROJ-DONE");
   });
 
   it("retires a landed run once its stamp is older than the window", async () => {
     setConfig({ retireFinishedAfterHours: 1 });
-    h.runs = [runFixture({ key: "ASM-OLD", finishedAt: Date.now() - 2 * 3_600_000 })];
+    h.runs = [runFixture({ key: "PROJ-OLD", finishedAt: Date.now() - 2 * 3_600_000 })];
     h.getStatus = vi.fn(async () => ({ status: "Done", category: "done" }));
     await showAndSettle();
-    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "ASM-OLD");
-    expect(lastRuns().map((r) => r.run.key)).not.toContain("ASM-OLD");
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "PROJ-OLD");
+    expect(lastRuns().map((r) => r.run.key)).not.toContain("PROJ-OLD");
   });
 
   it("still sees open sessions with the Open agents toggle off, so it cannot retire live work", async () => {
     setConfig({ openAgents: false });
-    h.runs = [runFixture({ key: "ASM-LIVE", repos: [{ name: "api", path: "/repos/api", isGit: true, branch: "b" }] })];
+    h.runs = [runFixture({ key: "PROJ-LIVE", repos: [{ name: "api", path: "/repos/api", isGit: true, branch: "b" }] })];
     h.openSessions = [{ pid: 3, sessionId: "s1", cwd: "/repos/api", startedAt: 1, name: "api-1a" }];
     h.exists = () => false; // rule 1 would fire but for the live session
     await showAndSettle();
@@ -1143,7 +1143,7 @@ const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
 const prs = (f: PrFacts): PrEntryMap => ({ api: { facts: f, fetchedAt: 0 } });
 
 const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
-  run: { key: "ASM-1", summary: "s", url: "https://jira/browse/ASM-1", createdAt: 1,
+  run: { key: "PROJ-1", summary: "s", url: "https://jira/browse/PROJ-1", createdAt: 1,
     mode: "per-window", repos: [{ name: "api", path: "/r/api", isGit: true, branch: "b" }], briefPaths: [] },
   column: "progress", jiraStatus: "In Progress", jiraCategory: "indeterminate",
   repos: [{ name: "api", path: "/r/api", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
@@ -1174,7 +1174,7 @@ describe("projectCards", () => {
   it("makes one parked card for an agentless run, keeping the host's own column", () => {
     const cards = projectCards([mkStatus({ agents: [], column: "review" })]);
     expect(cards).toHaveLength(1);
-    expect(cards[0].id).toBe("p:ASM-1");
+    expect(cards[0].id).toBe("p:PROJ-1");
     expect(cards[0].agent).toBeNull();
     expect(cards[0].column).toBe("review");
   });
@@ -1329,27 +1329,27 @@ describe("Agents view", () => {
     expect(screen.getByText(/working ·/)).toBeInTheDocument();
     expect(screen.getByText(/ended turn ·/)).toBeInTheDocument();
     // One run, two cards, so the ticket appears twice.
-    expect(screen.getAllByText("ASM-1")).toHaveLength(2);
+    expect(screen.getAllByText("PROJ-1")).toHaveLength(2);
   });
 
   it("sends the agent's own repo with Open, so each opens its own directory", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [{ ...mkAgent("a1", "working", 100), repo: "web" }] })]));
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "open", repo: "web" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "open", repo: "web" });
   });
 
   it("renders one parked card with no agent name for an agentless run", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null } })]));
     expect(screen.getByText(/parked · git \+ Jira only/)).toBeInTheDocument();
-    expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+    expect(screen.getAllByText("PROJ-1")).toHaveLength(1);
   });
 
   it("collapses to one card per run when Open agents is off", () => {
     render(<DeckApp />);
     host({ ...runsMsg([mkStatus({ agents: [] })]), openAgents: false } as OutboundMessage);
-    expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+    expect(screen.getAllByText("PROJ-1")).toHaveLength(1);
   });
 
   it("shows the workspace view's nested agents row instead when grouping is workspaces", () => {
@@ -1358,7 +1358,7 @@ describe("Agents view", () => {
                  "PR initiated", "workspaces"));
     // The collapsed agents row, not a card per agent.
     expect(screen.getByTitle(/sessions open in this directory/i)).toBeInTheDocument();
-    expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+    expect(screen.getAllByText("PROJ-1")).toHaveLength(1);
   });
 
   it("asks the host to persist the grouping when the control is clicked", () => {
@@ -1591,7 +1591,7 @@ In `test/unit/deckView.test.ts`:
 ```ts
 describe("Clear stale", () => {
   it("counts runs that would retire if both windows were ignored", async () => {
-    h.runs = [runFixture({ key: "ASM-DONE" })];
+    h.runs = [runFixture({ key: "PROJ-DONE" })];
     h.getStatus = vi.fn(async () => ({ status: "Done", category: "done" }));
     setConfig({ retireFinishedAfterHours: 999 });
     await showAndSettle();
@@ -1600,17 +1600,17 @@ describe("Clear stale", () => {
   });
 
   it("clears them on request, after the user confirms", async () => {
-    h.runs = [runFixture({ key: "ASM-DONE" })];
+    h.runs = [runFixture({ key: "PROJ-DONE" })];
     h.getStatus = vi.fn(async () => ({ status: "Done", category: "done" }));
     setConfig({ retireFinishedAfterHours: 999 });
     window.showWarningMessage.mockResolvedValueOnce("Clear 1");
     await showAndSettle();
     await onMessage({ type: "deck:clearStale" });
-    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "ASM-DONE");
+    expect(h.removeRun).toHaveBeenCalledWith(expect.any(String), "PROJ-DONE");
   });
 
   it("clears nothing when the user declines", async () => {
-    h.runs = [runFixture({ key: "ASM-DONE" })];
+    h.runs = [runFixture({ key: "PROJ-DONE" })];
     h.getStatus = vi.fn(async () => ({ status: "Done", category: "done" }));
     setConfig({ retireFinishedAfterHours: 999 });
     window.showWarningMessage.mockResolvedValueOnce(undefined);
@@ -1620,7 +1620,7 @@ describe("Clear stale", () => {
   });
 
   it("still respects the veto — dirty work is never cleared in bulk", async () => {
-    h.runs = [runFixture({ key: "ASM-DIRTY" })];
+    h.runs = [runFixture({ key: "PROJ-DIRTY" })];
     h.getStatus = vi.fn(async () => ({ status: "Done", category: "done" }));
     h.buildRunStatus = vi.fn((i) => ({
       ...passThroughStatus(i),
@@ -1868,7 +1868,7 @@ After Task 9, confirm the real thing works — the test suite cannot see a webvi
 - [ ] With two agents open in one worktree, confirm two cards appear and land in different columns when one ends its turn.
 - [ ] Click **Open** on an agent card of a multi-repo run; confirm it opens that agent's own repo.
 - [ ] Switch to **Workspaces**; confirm today's board with the nested agents row. Close and reopen the Deck; confirm it comes back in Workspaces.
-- [ ] Check `~/.agentflow/runs`: confirm `ASM-5809` (both worktrees deleted) is gone, and that nothing with uncommitted work was removed.
+- [ ] Check `~/.agentflow/runs`: confirm `PROJ-5809` (both worktrees deleted) is gone, and that nothing with uncommitted work was removed.
 - [ ] Confirm the Agent Flow output channel logs a `deck: retired <key> (<reason>)` line for each retirement.
 
 ---

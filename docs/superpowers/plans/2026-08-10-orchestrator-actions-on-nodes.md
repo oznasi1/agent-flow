@@ -112,8 +112,8 @@ const LEGACY = JSON.stringify({
   armed: false,
   createdAt: 1_000,
   nodes: [
-    { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-    { id: "n2", kind: "planned", x: 200, y: 0, join: "any", ticketKey: "ASM-2", repos: ["agent-flow"], mode: "plan", dest: "worktree" },
+    { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+    { id: "n2", kind: "planned", x: 200, y: 0, join: "any", ticketKey: "PROJ-2", repos: ["agent-flow"], mode: "plan", dest: "worktree" },
     { id: "n3", kind: "notify", x: 400, y: 0, join: "any", message: "landed" },
   ],
   edges: [
@@ -407,8 +407,8 @@ In `test/unit/engine/orchestrator/evaluate.test.ts`:
 
 ```ts
 it("carries the action derived from each fired edge's target", () => {
-  const flow = flowWith([place("a", "ASM-1"), notify("z")], [edge("e1", "a", "z")]);
-  const out = run(flow, [status("ASM-1", { merged: true })]);
+  const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z")]);
+  const out = run(flow, [status("PROJ-1", { merged: true })]);
   expect(out.fired).toHaveLength(1);
   expect(out.fired[0].action).toBe("notify");
 });
@@ -416,14 +416,14 @@ it("carries the action derived from each fired edge's target", () => {
 // The derivation, not the record: `edge`'s default `action` is "notify", so an
 // edge pointing at PLANNED work must still come back as a launch.
 it("ignores the edge's stored action when deriving", () => {
-  const flow = flowWith([place("a", "ASM-1"), planned("z")], [edge("e1", "a", "z")]);
-  const out = run(flow, [status("ASM-1", { merged: true })]);
+  const flow = flowWith([place("a", "PROJ-1"), planned("z")], [edge("e1", "a", "z")]);
+  const out = run(flow, [status("PROJ-1", { merged: true })]);
   expect(out.fired[0].action).toBe("launch");
 });
 
 it("carries undefined for an edge pointing at nothing", () => {
-  const flow = flowWith([place("a", "ASM-1")], [edge("e1", "a", "gone")]);
-  const out = run(flow, [status("ASM-1", { merged: true })]);
+  const flow = flowWith([place("a", "PROJ-1")], [edge("e1", "a", "gone")]);
+  const out = run(flow, [status("PROJ-1", { merged: true })]);
   // A dangling edge is reported as blocked/gone rather than fired, so assert on
   // whichever list it lands in — but if it IS fired, its action must be
   // undefined, never a guess.
@@ -438,20 +438,20 @@ In `test/unit/engine/orchestrator/runner.test.ts`:
 // DECIDED, not re-derive it from a copy that may have changed underneath.
 it("announces a notify from the carried action, not the current graph", () => {
   const flow = flowWith(
-    [place("a", "ASM-1"), notify("z", "the migration has landed")],
+    [place("a", "PROJ-1"), notify("z", "the migration has landed")],
     [edge("e1", "a", "z")],
   );
   const fired: FiredEdge[] = [{ edge: flow.edges[0], perform: true, action: "notify" }];
   // The graph now says z is a place — a concurrent edit between the decision and
   // this call. The decision stands, and the message is gone with the node.
-  const edited: Flow = { ...flow, nodes: [flow.nodes[0], place("z", "ASM-9")] };
+  const edited: Flow = { ...flow, nodes: [flow.nodes[0], place("z", "PROJ-9")] };
   expect(notifyLines(edited, fired)).toEqual(["Ship the migration: a rule fired."]);
 });
 
 // The inverse, so the test above cannot pass by ignoring `action` altogether.
 it("says nothing for a carried action that is not notify", () => {
   const flow = flowWith(
-    [place("a", "ASM-1"), notify("z", "the migration has landed")],
+    [place("a", "PROJ-1"), notify("z", "the migration has landed")],
     [edge("e1", "a", "z")],
   );
   const fired: FiredEdge[] = [{ edge: flow.edges[0], perform: true, action: "launch" }];

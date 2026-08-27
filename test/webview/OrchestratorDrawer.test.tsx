@@ -278,7 +278,7 @@ describe("the canvas/list view toggle", () => {
     const onResetEdge = vi.fn();
     const fired = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you" }],
@@ -300,7 +300,7 @@ describe("the canvas/list view toggle", () => {
   it("clears the canvas's edge selection when the list deletes that same rule", () => {
     const wired = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" },
         { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "done" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -321,36 +321,36 @@ describe("the tray", () => {
   it("adds a place node when a card is dropped", () => {
     const onSave = vi.fn();
     render(<OrchestratorDrawer {...props({ onSave })} />);
-    drop(screen.getByTestId("orch-tray"), `ASM-1${DRAG_SEP}agent-flow`);
+    drop(screen.getByTestId("orch-tray"), `PROJ-1${DRAG_SEP}agent-flow`);
     expect(onSave).toHaveBeenCalledTimes(1);
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.nodes).toEqual([
-      expect.objectContaining({ kind: "place", runKey: "ASM-1", repo: "agent-flow", join: "any" }),
+      expect.objectContaining({ kind: "place", runKey: "PROJ-1", repo: "agent-flow", join: "any" }),
     ]);
   });
 
   it("gives the new node an id that is unique within the flow", () => {
     const onSave = vi.fn();
-    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-9", repo: "r" }] });
+    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-9", repo: "r" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    drop(screen.getByTestId("orch-tray"), `ASM-1${DRAG_SEP}agent-flow`);
+    drop(screen.getByTestId("orch-tray"), `PROJ-1${DRAG_SEP}agent-flow`);
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(new Set(saved.nodes.map((n) => n.id)).size).toBe(2);
   });
 
   it("refuses the same run and repo twice", () => {
     const onSave = vi.fn();
-    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
+    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    drop(screen.getByTestId("orch-tray"), `ASM-1${DRAG_SEP}agent-flow`);
+    drop(screen.getByTestId("orch-tray"), `PROJ-1${DRAG_SEP}agent-flow`);
     expect(onSave).not.toHaveBeenCalled();
   });
 
   it("accepts the same run in a different repo", () => {
     const onSave = vi.fn();
-    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
+    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    drop(screen.getByTestId("orch-tray"), `ASM-1${DRAG_SEP}other-repo`);
+    drop(screen.getByTestId("orch-tray"), `PROJ-1${DRAG_SEP}other-repo`);
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
@@ -415,7 +415,7 @@ describe("the tray", () => {
     const onSave = vi.fn();
     const chained = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" },
         { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh" },
         { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh" },
       ],
@@ -435,7 +435,7 @@ describe("the tray", () => {
     // No empty box for a flow that has none — the Sessions tray earns its empty
     // state because it is a drop target; this list is not.
     const placeOnly = flow({
-      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" }],
+      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" }],
     });
     render(<OrchestratorDrawer {...props({ flows: [placeOnly] })} />);
     expect(screen.queryByTestId("orch-actions")).toBeNull();
@@ -443,11 +443,11 @@ describe("the tray", () => {
 
   it("lists an attached node as a chip, and removes it", () => {
     const onSave = vi.fn();
-    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
+    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
     // Scoped to the tray: the same node's key now also renders on its canvas node.
-    expect(within(screen.getByTestId("orch-tray")).getByText("ASM-1")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Remove ASM-1" }));
+    expect(within(screen.getByTestId("orch-tray")).getByText("PROJ-1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove PROJ-1" }));
     expect((onSave.mock.calls[0][0] as Flow).nodes).toEqual([]);
   });
 
@@ -455,13 +455,13 @@ describe("the tray", () => {
     const onSave = vi.fn();
     const existing = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" },
         { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "done" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
     });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Remove ASM-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove PROJ-1" }));
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.edges).toEqual([]);
   });
@@ -473,13 +473,13 @@ describe("the tray", () => {
     const onSave = vi.fn();
     const existing = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" },
-        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-2", repo: "r" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" },
+        { id: "n2", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-2", repo: "r" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
     });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Remove ASM-2" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove PROJ-2" }));
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.edges).toEqual([]);
   });
@@ -491,21 +491,21 @@ describe("the tray", () => {
   // list simply having shrunk.
   it("clears the node selection when a node is removed", () => {
     const existing = flow({
-      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" }],
+      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" }],
     });
     render(<OrchestratorDrawer {...props({ onSave: vi.fn(), flows: [existing] })} />);
     // Pointer-down is what selects a node; release it so no drag is left in flight.
     fireEvent.pointerDown(screen.getByTestId("orch-node-n1"), { clientX: 0, clientY: 0 });
     fireEvent.pointerUp(window);
     expect(screen.getByTestId("orch-node-n1").classList.contains("sel")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Remove ASM-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove PROJ-1" }));
     expect(screen.getByTestId("orch-node-n1").classList.contains("sel")).toBe(false);
   });
 
   it("clears the edge selection when a node is removed", () => {
     const existing = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" },
         { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "done" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -513,7 +513,7 @@ describe("the tray", () => {
     render(<OrchestratorDrawer {...props({ onSave: vi.fn(), flows: [existing] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     expect(screen.queryByText(/select a connection/i)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Remove ASM-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove PROJ-1" }));
     // A re-minted `e1` would otherwise open the inspector on a rule nobody clicked.
     expect(screen.getByText(/select a connection/i)).toBeTruthy();
   });
@@ -522,8 +522,8 @@ describe("the tray", () => {
 const twoPlaces = () =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-      { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "bite-me" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "PROJ-2", repo: "bite-me" },
     ],
   });
 
@@ -539,7 +539,7 @@ describe("the canvas", () => {
   it("shows a place node's key and repo", () => {
     render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
     const n1 = screen.getByTestId("orch-node-n1");
-    expect(n1.textContent).toContain("ASM-1");
+    expect(n1.textContent).toContain("PROJ-1");
     expect(n1.textContent).toContain("agent-flow");
   });
 
@@ -572,7 +572,7 @@ describe("the canvas", () => {
      * every repo, i.e. the one agent's own state. */
     const twoRepoRun = (agentRepo: string): RunStatus => ({
       run: {
-        key: "ASM-5", summary: "s", url: "https://j/browse/ASM-5", createdAt: 1, mode: "multiroot",
+        key: "PROJ-5", summary: "s", url: "https://j/browse/PROJ-5", createdAt: 1, mode: "multiroot",
         repos: [
           { name: "web", path: "/r/web", isGit: true },
           { name: "api", path: "/r/api", isGit: true },
@@ -595,7 +595,7 @@ describe("the canvas", () => {
     });
 
     const boundTo = (repo: string): Flow =>
-      flow({ nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-5", repo }] });
+      flow({ nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-5", repo }] });
 
     it("does not borrow another repo's state", () => {
       // The agent that ended its turn is in `web`; this node is bound to `api`,
@@ -701,7 +701,7 @@ describe("the canvas", () => {
     const onSave = vi.fn();
     const messy = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 900, y: 900, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n1", kind: "place", x: 900, y: 900, join: "any", runKey: "PROJ-1", repo: "r" },
         { id: "n2", kind: "notify", x: 950, y: 950, join: "any", message: "done" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -751,7 +751,7 @@ describe("the canvas", () => {
     render(<OrchestratorDrawer {...props({ onSave, flows: [flow()] })} />);
     const canvas = screen.getByTestId("orch-canvas");
     fireEvent.drop(canvas, {
-      dataTransfer: { getData: () => "ASM-7\0centaur", dropEffect: "copy" },
+      dataTransfer: { getData: () => "PROJ-7\0webapp", dropEffect: "copy" },
       clientX: 200, clientY: 150,
     });
     const saved = onSave.mock.calls[0][0] as Flow;
@@ -788,7 +788,7 @@ describe("the canvas", () => {
 const wired = () =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -800,10 +800,10 @@ const wired = () =>
 const placeAndPlanned0 = () =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       {
         id: "n2", kind: "planned", x: 320, y: 24, join: "any",
-        ticketKey: "ASM-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
+        ticketKey: "PROJ-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
       },
     ],
   });
@@ -865,8 +865,8 @@ describe("wiring", () => {
     const onSave = vi.fn();
     const two = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
-        { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "r2" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" },
+        { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "PROJ-2", repo: "r2" },
       ],
     });
     render(<OrchestratorDrawer {...props({ onSave, flows: [two] })} />);
@@ -989,15 +989,15 @@ describe("wiring", () => {
 
   // The defect this fixes: an edge reaching a farther column had its label
   // land on an intermediate node in the same row, covering that node's own
-  // title (observed as "ASM-12" rendering as "A_M-12"). n3 sits exactly on
+  // title (observed as "PROJ-12" rendering as "A_M-12"). n3 sits exactly on
   // the raw chord midpoint between n1 and n2's ports; it is nobody's
   // endpoint on e1, so it must be in the obstacle list and the label must
   // step off of it.
   it("steps a label off an intermediate node the chord passes through", () => {
     const withObstacle = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
-        { id: "n3", kind: "place", x: 344, y: 24, join: "any", runKey: "ASM-12", repo: "r" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" },
+        { id: "n3", kind: "place", x: 344, y: 24, join: "any", runKey: "PROJ-12", repo: "r" },
         { id: "n2", kind: "notify", x: 624, y: 24, join: "any", message: "landed" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -1040,8 +1040,8 @@ describe("wiring", () => {
     // chord, which makes down the nearest way out.
     const above = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 64, join: "any", runKey: "ASM-1", repo: "r" },
-        { id: "n3", kind: "place", x: 344, y: 24, join: "any", runKey: "ASM-12", repo: "r" },
+        { id: "n1", kind: "place", x: 24, y: 64, join: "any", runKey: "PROJ-1", repo: "r" },
+        { id: "n3", kind: "place", x: 344, y: 24, join: "any", runKey: "PROJ-12", repo: "r" },
         { id: "n2", kind: "notify", x: 624, y: 64, join: "any", message: "landed" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -1065,8 +1065,8 @@ describe("wiring", () => {
   it("leaves the label at the chord midpoint when no obstacle is in the way", () => {
     const clear = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
-        { id: "n3", kind: "place", x: 344, y: 400, join: "any", runKey: "ASM-12", repo: "r" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" },
+        { id: "n3", kind: "place", x: 344, y: 400, join: "any", runKey: "PROJ-12", repo: "r" },
         { id: "n2", kind: "notify", x: 624, y: 24, join: "any", message: "landed" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -1092,7 +1092,7 @@ describe("wiring", () => {
   it("does not push a short edge's label away from its own endpoints", () => {
     const adjacent = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" },
         { id: "n2", kind: "notify", x: 80, y: 24, join: "any", message: "landed" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -1123,7 +1123,7 @@ describe("wiring", () => {
   it("tints a connector whose condition is a failure", () => {
     const failing = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" },
         { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ci-failed" }, action: "notify" }],
@@ -1145,10 +1145,10 @@ describe("wiring", () => {
   const threeIntoNotify = () =>
     flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
-        { id: "n2", kind: "place", x: 24, y: 112, join: "any", runKey: "ASM-2", repo: "r" },
-        { id: "n3", kind: "place", x: 24, y: 200, join: "any", runKey: "ASM-3", repo: "r" },
-        { id: "n4", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-4", repo: "r" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" },
+        { id: "n2", kind: "place", x: 24, y: 112, join: "any", runKey: "PROJ-2", repo: "r" },
+        { id: "n3", kind: "place", x: 24, y: 200, join: "any", runKey: "PROJ-3", repo: "r" },
+        { id: "n4", kind: "place", x: 320, y: 24, join: "any", runKey: "PROJ-4", repo: "r" },
         { id: "n5", kind: "notify", x: 320, y: 200, join: "any", message: "done" },
       ],
       edges: [
@@ -1234,7 +1234,7 @@ describe("the inspector", () => {
   it("names the two ends of the selected edge", () => {
     open();
     const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toContain("ASM-1");
+    expect(insp.textContent).toContain("PROJ-1");
   });
 
   it("changes the condition", () => {
@@ -1356,7 +1356,7 @@ describe("the inspector", () => {
       nodes: wired().nodes,
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ci-passed" }, action: "notify" }],
     });
-    render(<OrchestratorDrawer {...props({ runs: [runStatus("ASM-1", "agent-flow")], flows: [ciWired] })} />);
+    render(<OrchestratorDrawer {...props({ runs: [runStatus("PROJ-1", "agent-flow")], flows: [ciWired] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     // 4 of 7 checks reported: describeCond's own wording, reaching a user for
     // the first time.
@@ -1383,12 +1383,12 @@ describe("the inspector", () => {
     // is not a wait, and it is certainly not a missing card.
     const placeSourced = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "command-succeeded" }, action: "notify" }],
     });
-    render(<OrchestratorDrawer {...props({ runs: [runStatus("ASM-1", "agent-flow")], flows: [placeSourced] })} />);
+    render(<OrchestratorDrawer {...props({ runs: [runStatus("PROJ-1", "agent-flow")], flows: [placeSourced] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     const insp = screen.getByTestId("orch-inspector");
     expect(insp.textContent).toMatch(/waits on a command, but it does not come from one/i);
@@ -1404,7 +1404,7 @@ describe("the inspector", () => {
     // nothing is.
     const chained = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "command", x: 320, y: 24, join: "any", run: "deploy.sh --env=staging" },
         { id: "n3", kind: "command", x: 620, y: 24, join: "any", run: "smoke.sh" },
       ],
@@ -1413,7 +1413,7 @@ describe("the inspector", () => {
         { id: "e2", from: "n2", to: "n3", cond: { kind: "command-succeeded" } },
       ],
     });
-    render(<OrchestratorDrawer {...props({ runs: [runStatus("ASM-1", "agent-flow")], flows: [chained] })} />);
+    render(<OrchestratorDrawer {...props({ runs: [runStatus("PROJ-1", "agent-flow")], flows: [chained] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e2"));
     const insp = screen.getByTestId("orch-inspector");
     // Names the command it waits on, in `commandLabel`'s own words — the same
@@ -1462,10 +1462,10 @@ describe("the inspector", () => {
 const placeAndPlanned = () =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       {
         id: "n2", kind: "planned", x: 320, y: 24, join: "any",
-        ticketKey: "ASM-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
+        ticketKey: "PROJ-12", repos: ["agent-flow"], mode: "quick", dest: "worktree",
       },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
@@ -1476,8 +1476,8 @@ const placeAndPlanned = () =>
 const twoPlacesWired = () =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-      { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "PROJ-2", repo: "agent-flow" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
   });
@@ -1502,7 +1502,7 @@ describe("the acting verbs", () => {
     // string elsewhere in the panel.
     const then = within(screen.getByTestId("orch-then"));
     expect(then.getByText("launch")).toBeTruthy();
-    expect(then.getByText("ASM-12")).toBeTruthy();
+    expect(then.getByText("PROJ-12")).toBeTruthy();
   });
 
   it("reads the verb off the TARGET, not off a stale stored action", () => {
@@ -1534,7 +1534,7 @@ describe("the acting verbs", () => {
     // some verb it made up.
     const future = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "webhook", x: 320, y: 24, join: "any" } as unknown as Flow["nodes"][number],
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
@@ -1649,10 +1649,10 @@ describe("the acting verbs", () => {
     const hostModes = [{ id: "custom-1", label: "A mode only this test made up" }];
     const launching = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         {
           id: "n2", kind: "planned", x: 320, y: 24, join: "any",
-          ticketKey: "ASM-12", repos: ["agent-flow"], mode: "custom-1", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["agent-flow"], mode: "custom-1", dest: "worktree",
         },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
@@ -1686,12 +1686,12 @@ describe("the acting verbs", () => {
   it("shows the target's identifier in mono, house style for an identifier", () => {
     render(<OrchestratorDrawer {...props({ flows: [placeAndPlanned()] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
-    // "ASM-12" renders three times — the canvas node's own label (mono via a
+    // "PROJ-12" renders three times — the canvas node's own label (mono via a
     // CSS class, not inline style), the "Connection · A → B" header (already
     // covered by an earlier test), and the THEN clause this test is about.
     // Scoped to the inspector so the canvas node's match — which has no
     // inline style to assert on — is excluded, not silently counted as a pass.
-    const matches = within(screen.getByTestId("orch-inspector")).getAllByText("ASM-12");
+    const matches = within(screen.getByTestId("orch-inspector")).getAllByText("PROJ-12");
     expect(matches.length).toBe(2);
     for (const m of matches) expect(m.getAttribute("style")).toContain("mono");
   });
@@ -1738,7 +1738,7 @@ describe("a command node", () => {
   const placeAndCommand = (over: Partial<{ commandId: string; run: string }> = { commandId: "deploy-staging" }) =>
     flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "command", x: 320, y: 24, join: "any", ...over },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ci-passed" } }],
@@ -2036,13 +2036,13 @@ describe("a command node", () => {
   // the previous step actually saved, since each control reads the live prop.
   it("builds a whole condition → command rule from the drawer", () => {
     const onSave = vi.fn();
-    const initial = props({ onSave, flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    const initial = props({ onSave, flows: [flow()], runs: [runStatus("PROJ-1", "agent-flow")] });
     const { rerender } = render(<OrchestratorDrawer {...initial} />);
     const rerenderWith = (next: Flow) => rerender(<OrchestratorDrawer {...initial} flows={[next]} />);
     const lastSaved = () => onSave.mock.calls.at(-1)![0] as Flow;
 
     // A place, dragged off the board onto the tray.
-    drop(screen.getByTestId("orch-tray"), `ASM-1${DRAG_SEP}agent-flow`);
+    drop(screen.getByTestId("orch-tray"), `PROJ-1${DRAG_SEP}agent-flow`);
     rerenderWith(lastSaved());
 
     // A command node, from the picker — free text, so nothing about this test
@@ -2064,7 +2064,7 @@ describe("a command node", () => {
 
     const built = lastSaved();
     expect(built.nodes).toEqual([
-      expect.objectContaining({ kind: "place", runKey: "ASM-1", repo: "agent-flow" }),
+      expect.objectContaining({ kind: "place", runKey: "PROJ-1", repo: "agent-flow" }),
       expect.objectContaining({ kind: "command", run: "deploy.sh --env=staging" }),
     ]);
     expect(built.edges).toEqual([
@@ -2110,7 +2110,7 @@ describe("a selected node's own configuration", () => {
   const wiredCommand = (over: Partial<{ commandId: string; run: string }> = { commandId: "deploy-staging" }) =>
     flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "command", x: 320, y: 24, join: "any", ...over },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ci-passed" } }],
@@ -2480,11 +2480,11 @@ describe("arming", () => {
     const six = flow({
       armed: true,
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" },
-        { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "ASM-2", repo: "r" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" },
+        { id: "n2", kind: "place", x: 0, y: 88, join: "any", runKey: "PROJ-2", repo: "r" },
         {
           id: "n3", kind: "planned", x: 320, y: 0, join: "any",
-          ticketKey: "ASM-12", repos: ["r"], mode: "quick", dest: "worktree",
+          ticketKey: "PROJ-12", repos: ["r"], mode: "quick", dest: "worktree",
         },
         { id: "n4", kind: "notify", x: 320, y: 88, join: "any", message: "landed" },
         { id: "n5", kind: "command", x: 620, y: 0, join: "any", run: "deploy.sh" },
@@ -2555,7 +2555,7 @@ describe("the resume banner", () => {
 describe("Reset", () => {
   const firedFlow = () => flow({
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you: landed" }],
@@ -2592,12 +2592,12 @@ describe("an errored rule", () => {
    * `firedAt`. `evaluate.ts` settles on that, so this edge never fires again. */
   const erroredFlow = (over: Partial<Flow> = {}) => flow({
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
     ],
     edges: [{
       id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch",
-      error: "Couldn't launch ASM-12: no worktree",
+      error: "Couldn't launch PROJ-12: no worktree",
     }],
     ...over,
   });
@@ -2615,10 +2615,10 @@ describe("an errored rule", () => {
     // return a real waiting sentence here. Without that, an empty `runs` array
     // makes the drawer fall back to "this card is not on the board right now" and
     // the test could pass while still rendering the waiting branch.
-    render(<OrchestratorDrawer {...props({ flows: [erroredFlow()], runs: [runStatus("ASM-1", "agent-flow")] })} />);
+    render(<OrchestratorDrawer {...props({ flows: [erroredFlow()], runs: [runStatus("PROJ-1", "agent-flow")] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toContain("Couldn't launch ASM-12: no worktree");
+    expect(insp.textContent).toContain("Couldn't launch PROJ-12: no worktree");
     expect(insp.textContent).not.toContain("not on the board");
     // "PR open" is exactly what describeCond returns for pr-merged against this
     // fixture's OPEN pull request — i.e. the waiting line this branch replaces.
@@ -2630,7 +2630,7 @@ describe("an errored rule", () => {
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     const err = container.querySelector(".orch-obs .err");
     expect(err).not.toBeNull();
-    expect(err!.textContent).toBe("Couldn't launch ASM-12: no worktree");
+    expect(err!.textContent).toBe("Couldn't launch PROJ-12: no worktree");
     // And it is NOT wearing the done-coloured receipt class.
     expect(container.querySelector(".orch-obs .fired")).toBeNull();
   });
@@ -2639,13 +2639,13 @@ describe("an errored rule", () => {
     const both = erroredFlow({
       edges: [{
         id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch",
-        firedAt: 5, firedNote: "told you: landed", error: "Couldn't launch ASM-12: no worktree",
+        firedAt: 5, firedNote: "told you: landed", error: "Couldn't launch PROJ-12: no worktree",
       }],
     });
     render(<OrchestratorDrawer {...props({ flows: [both] })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toContain("Couldn't launch ASM-12: no worktree");
+    expect(insp.textContent).toContain("Couldn't launch PROJ-12: no worktree");
     expect(insp.textContent).not.toContain("told you: landed");
   });
 
@@ -2707,7 +2707,7 @@ describe("a branch-CI rule's observation", () => {
   const branchRule = () =>
     flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
         { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "deploy" },
       ],
       edges: [{
@@ -2720,7 +2720,7 @@ describe("a branch-CI rule's observation", () => {
    * two verdicts does not leave two drawers mounted and every query ambiguous. */
   const observationWith = (branchCi: Record<string, "passed" | "failed" | "pending" | "unknown">) => {
     const r = render(<OrchestratorDrawer {...props({
-      flows: [branchRule()], runs: [runStatus("ASM-1", "agent-flow")], branchCi,
+      flows: [branchRule()], runs: [runStatus("PROJ-1", "agent-flow")], branchCi,
     })} />);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     const text = screen.getByTestId("orch-inspector").textContent ?? "";
@@ -2764,8 +2764,8 @@ describe("a migrated rule's mismatch notice", () => {
   const migrated = (): Flow => {
     const stale = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-        { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "agent-flow" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+        { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "PROJ-2", repo: "agent-flow" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
     });
@@ -2828,7 +2828,7 @@ describe("a migrated rule's mismatch notice", () => {
     const both = { ...migrated(), armed: true };
     both.edges = [
       both.edges[0],
-      { id: "e2", from: "n1", to: "n2", cond: { kind: "ci-passed" }, error: "Couldn't seed ASM-2: no worktree" },
+      { id: "e2", from: "n1", to: "n2", cond: { kind: "ci-passed" }, error: "Couldn't seed PROJ-2: no worktree" },
     ];
     const { container } = render(<OrchestratorDrawer {...props({ flows: [both] })} />);
     expect(container.querySelector(".orch-ft .live.stalled")).not.toBeNull();
@@ -2841,7 +2841,7 @@ describe("a migrated rule's mismatch notice", () => {
       nodes: migrated().nodes,
       edges: [{
         id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" },
-        error: "Couldn't seed ASM-2: no worktree",
+        error: "Couldn't seed PROJ-2: no worktree",
       }],
     });
     const { container } = render(<OrchestratorDrawer {...props({ flows: [failed] })} />);
@@ -2987,7 +2987,7 @@ describe("the clipped-edge fade", () => {
     // the graph's own inner width at 526. A place node is NODE_W (168) wide,
     // so x=500 puts its right edge at 668 — comfortably past the fold.
     const wide = flow({
-      nodes: [{ id: "n1", kind: "place", x: 500, y: 24, join: "any", runKey: "ASM-1", repo: "r" }],
+      nodes: [{ id: "n1", kind: "place", x: 500, y: 24, join: "any", runKey: "PROJ-1", repo: "r" }],
     });
     render(<OrchestratorDrawer {...props({ flows: [wide] })} />);
     expect(screen.getByTestId("orch-graph-fade")).toBeTruthy();
@@ -2995,7 +2995,7 @@ describe("the clipped-edge fade", () => {
 
   it("does not appear when every node comfortably fits", () => {
     const fits = flow({
-      nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" }],
+      nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" }],
     });
     render(<OrchestratorDrawer {...props({ flows: [fits] })} />);
     expect(screen.queryByTestId("orch-graph-fade")).toBeNull();
@@ -3011,7 +3011,7 @@ describe("the clipped-edge fade", () => {
     // width — clipped at the default width, cleared by a single ArrowLeft
     // (+16px, see RESIZE_STEP): 542 >= 536.
     const barelyClipped = flow({
-      nodes: [{ id: "n1", kind: "place", x: 368, y: 24, join: "any", runKey: "ASM-1", repo: "r" }],
+      nodes: [{ id: "n1", kind: "place", x: 368, y: 24, join: "any", runKey: "PROJ-1", repo: "r" }],
     });
     render(<OrchestratorDrawer {...props({ flows: [barelyClipped] })} />);
     expect(screen.getByTestId("orch-graph-fade")).toBeTruthy();
@@ -3157,7 +3157,7 @@ describe("the list view's add-node controls", () => {
   });
 
   it("the place picker is an ordinary, keyboard-reachable control", () => {
-    openList({ flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    openList({ flows: [flow()], runs: [runStatus("PROJ-1", "agent-flow")] });
     const trigger = screen.getByRole("button", { name: "Add a place" });
     expect(trigger.tagName).toBe("BUTTON");
     expect(trigger).not.toHaveAttribute("tabindex", "-1");
@@ -3170,11 +3170,11 @@ describe("the list view's add-node controls", () => {
 
   it("choosing a run from the place picker adds it, through the same attach the drag path uses", () => {
     const onSave = vi.fn();
-    openList({ onSave, flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
-    pickFromCombo("Add a place", ["ASM-1"]);
+    openList({ onSave, flows: [flow()], runs: [runStatus("PROJ-1", "agent-flow")] });
+    pickFromCombo("Add a place", ["PROJ-1"]);
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.nodes).toEqual([
-      expect.objectContaining({ kind: "place", runKey: "ASM-1", repo: "agent-flow" }),
+      expect.objectContaining({ kind: "place", runKey: "PROJ-1", repo: "agent-flow" }),
     ]);
   });
 
@@ -3183,7 +3183,7 @@ describe("the list view's add-node controls", () => {
     // the risk the fold has to answer is that both nodes get their own id and y
     // rather than the second overwriting what the first computed.
     const onSave = vi.fn();
-    const twoRepo = runStatus("ASM-1", "web", {
+    const twoRepo = runStatus("PROJ-1", "web", {
       repos: [
         { name: "web", path: "/r/web", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
         { name: "api", path: "/r/api", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
@@ -3203,7 +3203,7 @@ describe("the list view's add-node controls", () => {
     // its key as mono, and the sheet really does give that class the mono family.
     // A command's label goes through the same component and must NOT — see the
     // per-option `mono` flag.
-    openList({ flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    openList({ flows: [flow()], runs: [runStatus("PROJ-1", "agent-flow")] });
     const row = within(openCombo("Add a place")).getAllByRole("option")[0];
     expect(row.querySelector(".l")!.className).toBe("l k");
     expect(ORCH_CSS).toContain(".combo-t .l.k { font-family: var(--mono)");
@@ -3212,7 +3212,7 @@ describe("the list view's add-node controls", () => {
   it("finds a place by typing its repo, which is the row's second line", () => {
     // The repo is printed as the row's detail, so filtering on the run key alone
     // would put a name on screen that cannot be typed.
-    const twoRepo = runStatus("ASM-1", "web", {
+    const twoRepo = runStatus("PROJ-1", "web", {
       repos: [
         { name: "web", path: "/r/web", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
         { name: "api", path: "/r/api", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
@@ -3227,8 +3227,8 @@ describe("the list view's add-node controls", () => {
   });
 
   it("excludes a run/repo pair already attached to this flow — choosing it again would silently do nothing", () => {
-    const already = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
-    openList({ flows: [already], runs: [runStatus("ASM-1", "agent-flow")] });
+    const already = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" }] });
+    openList({ flows: [already], runs: [runStatus("PROJ-1", "agent-flow")] });
     const list = openCombo("Add a place");
     expect(within(list).queryAllByRole("option")).toEqual([]);
     // And it says why, rather than showing an empty box that looks broken.
@@ -3236,7 +3236,7 @@ describe("the list view's add-node controls", () => {
   });
 
   it("offers every repo of a multi-repo run, not only whichever one an agent happens to be bound to", () => {
-    const twoRepo = runStatus("ASM-1", "web", {
+    const twoRepo = runStatus("PROJ-1", "web", {
       repos: [
         { name: "web", path: "/r/web", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
         { name: "api", path: "/r/api", branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 },
@@ -3244,7 +3244,7 @@ describe("the list view's add-node controls", () => {
     });
     openList({ flows: [flow()], runs: [twoRepo] });
     const rows = within(openCombo("Add a place")).getAllByRole("option");
-    expect(rows.map((r) => r.textContent)).toEqual(["ASM-1web", "ASM-1api"]);
+    expect(rows.map((r) => r.textContent)).toEqual(["PROJ-1web", "PROJ-1api"]);
   });
 });
 
@@ -3270,14 +3270,14 @@ describe("building a whole flow from the keyboard", () => {
   // each control here reads the live `flow` prop, not a store this test fakes.
   it("adds a place, adds a notify node, and wires a rule between them", () => {
     const onSave = vi.fn();
-    const initial = props({ onSave, flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    const initial = props({ onSave, flows: [flow()], runs: [runStatus("PROJ-1", "agent-flow")] });
     const { rerender } = render(<OrchestratorDrawer {...initial} />);
     const rerenderWith = (next: Flow) => rerender(<OrchestratorDrawer {...initial} flows={[next]} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
 
     // A place, from the keyboard picker.
-    pickFromCombo("Add a place", ["ASM-1"]);
+    pickFromCombo("Add a place", ["PROJ-1"]);
     let saved = onSave.mock.calls.at(-1)![0] as Flow;
     rerenderWith(saved);
 
@@ -3301,7 +3301,7 @@ describe("building a whole flow from the keyboard", () => {
     expect(saved.nodes).toHaveLength(2);
     expect(saved.nodes).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ kind: "place", runKey: "ASM-1", repo: "agent-flow" }),
+        expect.objectContaining({ kind: "place", runKey: "PROJ-1", repo: "agent-flow" }),
         expect.objectContaining({ kind: "notify" }),
       ]),
     );
@@ -3322,14 +3322,14 @@ describe("building a whole flow from the keyboard", () => {
   // control: a select, a select, a button, a select, a text field.
   it("adds a command node, wires a rule to it, and types what it runs — no pointer gesture", () => {
     const onSave = vi.fn();
-    const initial = props({ onSave, flows: [flow()], runs: [runStatus("ASM-1", "agent-flow")] });
+    const initial = props({ onSave, flows: [flow()], runs: [runStatus("PROJ-1", "agent-flow")] });
     const { rerender } = render(<OrchestratorDrawer {...initial} />);
     const rerenderWith = (next: Flow) => rerender(<OrchestratorDrawer {...initial} flows={[next]} />);
 
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
 
     // A place to watch.
-    pickFromCombo("Add a place", ["ASM-1"]);
+    pickFromCombo("Add a place", ["PROJ-1"]);
     let saved = onSave.mock.calls.at(-1)![0] as Flow;
     rerenderWith(saved);
 
@@ -3452,5 +3452,111 @@ describe("the open and close animation", () => {
     const { container, rerender } = render(<OrchestratorDrawer {...props()} />);
     rerender(<OrchestratorDrawer {...props({ flows: [] })} />);
     expect(aside(container)).toBeNull();
+  });
+});
+
+describe("the dry run", () => {
+  /** `wired()`'s PROJ-1 with its PR already merged, so its `pr-merged` rule is met. */
+  const merged = (key = "PROJ-1", repo = "agent-flow"): RunStatus => ({
+    ...runStatus(key, repo),
+    prs: {
+      [repo]: {
+        facts: {
+          number: 118, url: "u", title: "t", state: "MERGED", isDraft: false,
+          ci: { passing: 4, pending: 0, failing: [] }, review: "none", unresolved: null,
+          mergeable: "clean", ciAdvisory: false,
+        },
+        fetchedAt: 1,
+      },
+    },
+  });
+
+  const openDryRun = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()], runs: [merged()], ...over })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    return screen.getByTestId("orch-dryrun");
+  };
+
+  it("is closed until asked for", () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()], runs: [merged()] })} />);
+    expect(screen.queryByTestId("orch-dryrun")).toBeNull();
+    expect(screen.getByRole("button", { name: /what would fire/i })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  it("names a met rule as one that would fire", () => {
+    const panel = openDryRun();
+    expect(panel.textContent).toContain("would fire");
+    expect(panel.textContent).toContain("PROJ-1");
+  });
+
+  it("does not arm the flow to answer", () => {
+    const onArm = vi.fn();
+    const onSave = vi.fn();
+    openDryRun({ onArm, onSave });
+    expect(onArm).not.toHaveBeenCalled();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("says a rule is waiting when its condition is answerable and false", () => {
+    // The same flow with the PR still OPEN: `pr-merged` is false, not unobservable.
+    const panel = openDryRun({ runs: [runStatus("PROJ-1", "agent-flow")] });
+    expect(panel.textContent).toContain("waiting");
+  });
+
+  it("says a rule is blocked, and why, when its source card is off the board", () => {
+    const panel = openDryRun({ runs: [] });
+    expect(panel.textContent).toContain("blocked");
+    expect(panel.textContent).toMatch(/not on the board/i);
+  });
+
+  it("does not claim the pass will act on this verdict alone", () => {
+    // `previewFlow` knows nothing about deckView's per-target dedupe or its
+    // first-spend ask, so the panel must not read as a promise.
+    expect(openDryRun().textContent).toMatch(/first spend still asks/i);
+  });
+
+  it("keeps that disclaimer out of the scrolling region", () => {
+    // Structure, not layout, because jsdom has neither. The rows scroll and the
+    // footer must not: six rules already overflow the panel, and a disclaimer
+    // that scrolls out of sight is one nobody reads. Caught by screenshotting
+    // the real panel, which jsdom cannot do — so this pins the shape instead.
+    const panel = openDryRun();
+    const rows = panel.querySelector(".rows");
+    const ft = panel.querySelector(".ft");
+    expect(rows).not.toBeNull();
+    expect(ft).not.toBeNull();
+    expect(rows!.contains(ft!)).toBe(false);
+  });
+
+  it("closes again", () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()], runs: [merged()] })} />);
+    const btn = screen.getByRole("button", { name: /what would fire/i });
+    fireEvent.click(btn);
+    fireEvent.click(btn);
+    expect(screen.queryByTestId("orch-dryrun")).toBeNull();
+  });
+
+  it("does not promise two launches where an all-join opens one", () => {
+    // Both siblings of an "all" junction are stamped this pass, so "would fire"
+    // is true of both — but the junction LAUNCHES once. Two rows reading "would
+    // fire" beside "launch PROJ-9" is a promise of two windows.
+    const join = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+        { id: "n2", kind: "place", x: 24, y: 140, join: "any", runKey: "PROJ-2", repo: "other" },
+        { id: "n3", kind: "planned", x: 320, y: 80, join: "all", ticketKey: "PROJ-9",
+          repos: ["agent-flow"], mode: "quick", dest: "worktree" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" },
+      ],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [join], runs: [merged(), merged("PROJ-2", "other")] })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    expect(screen.getByTestId("orch-dryrun-e1").textContent).toContain("would fire");
+    const second = screen.getByTestId("orch-dryrun-e2").textContent ?? "";
+    expect(second).toContain("would close the join");
+    expect(second).not.toContain("would fire");
   });
 });

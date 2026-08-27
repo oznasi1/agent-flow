@@ -15,7 +15,7 @@ const repo = (over: Partial<RepoGit> = {}): RepoGit => ({
 
 const status = (over: Partial<RunStatus> = {}): RunStatus => ({
   run: {
-    key: "ASM-1", summary: "s", url: "https://jira/ASM-1", createdAt: 1, mode: "per-window",
+    key: "PROJ-1", summary: "s", url: "https://jira/PROJ-1", createdAt: 1, mode: "per-window",
     repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "feat/x" }], briefPaths: [],
   },
   column: "progress", ticketStatus: null, ticketCategory: null,

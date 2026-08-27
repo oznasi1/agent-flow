@@ -28,7 +28,7 @@ The Deck rendered a card for the Explore session
 
 ```json
 // ~/.agentflow/prfacts/explore-export-asset-file-name-per-asset-type.json
-{ "centaur": { "facts": {
+{ "webapp": { "facts": {
     "number": 241,
     "title": "Align master with redesign-master",
     "state": "CLOSED",
@@ -44,8 +44,8 @@ run record therefore stores the repo's *default* branch:
 // ~/.agentflow/runs/explore-export-asset-file-name-per-asset-type.json
 { "key": "explore-export-asset-file-name-per-asset-type",
   "url": "",
-  "repos": [ { "name": "centaur", "branch": "master" },
-             { "name": "automation_e2e", "branch": "main" } ] }
+  "repos": [ { "name": "webapp", "branch": "master" },
+             { "name": "e2e_suite", "branch": "main" } ] }
 ```
 
 [`GhProvider.fetch`](../../../src/engine/pr/provider.ts) then runs
@@ -125,7 +125,7 @@ execFileSync("git", ["-C", repoPath, "diff", "HEAD"], { stdio: [...] })
 ```
 
 - **`diff HEAD` is working-tree-only.** It answers "what has the agent not
-  committed yet". Every run past its first commit is blank — verified: `centaur`
+  committed yet". Every run past its first commit is blank — verified: `webapp`
   is clean, so the command returns nothing and the card's Diff button can only
   ever toast.
 - **No `maxBuffer`.** `execFileSync` defaults to 1 MB. A large task diff exceeds
@@ -167,7 +167,7 @@ Two supporting changes:
   small `rev-parse`/`status`/`numstat` calls, and the only way a real diff
   survives the trip.
 - The empty-result toast drops its now-incorrect qualifier:
-  `No uncommitted changes for ASM-1.` → `No changes to show for ASM-1.`
+  `No uncommitted changes for PROJ-1.` → `No changes to show for PROJ-1.`
 
 Multi-repo behaviour is unchanged: each repo contributes a `# <name>` chunk, and
 a run with a single repo gets a bare diff.

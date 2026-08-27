@@ -115,7 +115,7 @@ await seedClaudeCode(match.prompt, plan.key, log, plan.remoteControl === true);
 3. On success with `remoteControl`, a toast explains the two steps:
 
    ```
-   Agent Flow: ASM-1234 — press Enter to connect Remote Control, then ⌘V + Enter to
+   Agent Flow: PROJ-1234 — press Enter to connect Remote Control, then ⌘V + Enter to
    start the task (it's on your clipboard).
    ```
 
@@ -187,7 +187,7 @@ comes.
   - `takeBatch` never shows the picker and never passes `remoteControl: true`, even with
     the setting on.
 - **Manual / end-to-end:**
-  1. Set `ask`, take a task, choose Enable. The panel shows `/remote-control ASM-1234`;
+  1. Set `ask`, take a task, choose Enable. The panel shows `/remote-control PROJ-1234`;
      Enter connects it and the session appears on claude.ai; paste + Enter starts the task.
   2. Set `off` and take a task — the task prompt is seeded exactly as before.
   3. Take a task spanning two repos in per-window mode with the setting `on` — both
@@ -199,9 +199,9 @@ comes.
 
 - No Remote Control for parallel batch or multi-window launches (see §4). Supporting it
   needs a second channel for the task prompt that isn't the clipboard.
-- The single-clipboard guard is per-launch, not global. Taking ASM-1 with Remote Control
-  and then taking ASM-2 with Remote Control before pasting ASM-1's prompt overwrites the
-  clipboard — ASM-1's rendered prompt is lost permanently (its brief still survives at
+- The single-clipboard guard is per-launch, not global. Taking PROJ-1 with Remote Control
+  and then taking PROJ-2 with Remote Control before pasting PROJ-1's prompt overwrites the
+  clipboard — PROJ-1's rendered prompt is lost permanently (its brief still survives at
   `.pick-task/TASK.md`, but the seeded prompt does not). Plan files live 15 minutes, so
   the window for this collision is wide. No cross-launch clipboard reservation is
   implemented.

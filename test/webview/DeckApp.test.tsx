@@ -22,14 +22,14 @@ function host(msg: OutboundMessage) {
 
 const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   run: {
-    key: "ASM-1", summary: "Export fails on large accounts", url: "https://jira/ASM-1",
+    key: "PROJ-1", summary: "Export fails on large accounts", url: "https://jira/PROJ-1",
     createdAt: 1, mode: "per-window",
-    repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "ASM-1-x" }], briefPaths: [],
+    repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "PROJ-1-x" }], briefPaths: [],
   },
   column: "progress",
   ticketStatus: "In Progress",
   ticketCategory: "indeterminate",
-  repos: [{ name: "svc", path: "/r/svc", branch: "ASM-1-x", dirty: true, ahead: 1, added: 12, removed: 2, files: 3 }],
+  repos: [{ name: "svc", path: "/r/svc", branch: "PROJ-1-x", dirty: true, ahead: 1, added: 12, removed: 2, files: 3 }],
   agent: { state: "working", lastActivityMs: 1_000, slug: "export-streaming" },
   windowOpen: false,
   prs: {},
@@ -124,13 +124,13 @@ describe("DeckApp", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     expect(screen.queryByText(/loading/i)).not.toBeInTheDocument();
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
   });
 
   it("renders a card with key, summary and a diff stat, and the Jira status in its drawer", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
     expect(screen.getByText("Export fails on large accounts")).toBeInTheDocument();
     expect(screen.getByText(/\+12/)).toBeInTheDocument();
     // The Jira status pill moved off the card's own footer into the drawer.
@@ -154,8 +154,8 @@ describe("DeckApp", () => {
 
   it("groups runs into columns with counts", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" }, column: "needs", agent: { state: "needs-you", lastActivityMs: 1, slug: null } })]));
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" }, column: "needs", agent: { state: "needs-you", lastActivityMs: 1, slug: null } })]));
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
     // "Action required" names the same thing in the summary tile, the column header and
     // the legend — one name for one thing, so all three match.
     expect(screen.getAllByText(/action required/i).length).toBeGreaterThan(0);
@@ -185,14 +185,14 @@ describe("DeckApp", () => {
     // There is no longer a Total tile — this is really about whether the header
     // adds two separate runs into one tile's count, not about any one label.
     render(<DeckApp />);
-    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
     const tiles = Array.from(document.querySelectorAll(".stat")).map((s) => [s.querySelector(".l")!.textContent, s.querySelector(".n")!.textContent]);
     expect(tiles).toContainEqual(["In progress", "2"]);
   });
 
   it("shows one tile per board column, in board order", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus({ column: "progress" }), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" }, column: "needs" })]));
+    host(runsMsg([mkStatus({ column: "progress" }), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" }, column: "needs" })]));
     const labels = screen.getAllByText(/./, { selector: ".stat .l" }).map((n) => n.textContent);
     expect(labels).toEqual(["In progress", "Action required", "In review", "Merge"]);
   });
@@ -238,16 +238,16 @@ describe("DeckApp", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(screen.getByText("Open"));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "open" });
     fireEvent.click(screen.getByText("Diff"));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "diff" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
   });
 
   it("opens the ticket externally when the key is clicked", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByText("ASM-1"));
-    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+    fireEvent.click(screen.getByText("PROJ-1"));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/PROJ-1" });
   });
 
   it("labels a working agent with elapsed time", () => {
@@ -334,7 +334,7 @@ describe("DeckApp", () => {
   it("shows the branch on the card's signal line, and a launched-ago time in its drawer", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    expect(screen.getByText(/ASM-1-x/)).toBeInTheDocument();
+    expect(screen.getByText(/PROJ-1-x/)).toBeInTheDocument();
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(within(document.querySelector(".dd") as HTMLElement).getByText(/^launched/i)).toBeInTheDocument();
   });
@@ -350,7 +350,7 @@ describe("DeckApp", () => {
   it("exposes the card controls as buttons so they are keyboard reachable", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    for (const label of ["ASM-1", "Open", "Diff"]) {
+    for (const label of ["PROJ-1", "Open", "Diff"]) {
       expect(screen.getByText(label).tagName).toBe("BUTTON");
     }
     // The overflow menu's "more actions" toggle is gone — its former contents are
@@ -387,18 +387,18 @@ describe("DeckApp", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: "Forget" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "PROJ-1" });
   });
 
   it("removes a forgotten card immediately, without waiting for the host", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
     fireEvent.click(document.querySelectorAll(".card")[0]);
     fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     // No deck:runs has arrived; the card is gone regardless.
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
-    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
+    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "PROJ-1" });
   });
 
   it("restores an optimistically removed card if the host still reports it", () => {
@@ -407,9 +407,9 @@ describe("DeckApp", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: "Forget" }));
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
     host(runsMsg([mkStatus()]));
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
   });
 
   // The refresh button keeps its ⟳ at rest: a static logo on a button reads as
@@ -441,7 +441,7 @@ describe("DeckApp", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: "Open in Jira" }));
-    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/PROJ-1" });
   });
 
   const untracked = (over: Partial<RunStatus> = {}): RunStatus => {
@@ -475,16 +475,16 @@ describe("DeckApp", () => {
   it("keeps the Jira link on a tracked run", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByTitle(/Open ASM-1 in Jira/i));
-    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+    fireEvent.click(screen.getByTitle(/Open PROJ-1 in Jira/i));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/PROJ-1" });
   });
 
   it("keeps the key on an untracked run that is not an Explore session", () => {
     // isTicketRun only checks the url, so a record with a real key and no url must
     // not be relabelled "explore" — it keeps its identity, minus the dead Jira link.
     render(<DeckApp />);
-    host(runsMsg([untracked({ run: { ...mkStatus().run, key: "ASM-9", url: "" } })]));
-    expect(screen.getByText("ASM-9")).toBeInTheDocument();
+    host(runsMsg([untracked({ run: { ...mkStatus().run, key: "PROJ-9", url: "" } })]));
+    expect(screen.getByText("PROJ-9")).toBeInTheDocument();
     expect(screen.queryByText("explore")).not.toBeInTheDocument();
   });
 
@@ -499,18 +499,18 @@ describe("DeckApp", () => {
 
   it("shows a toast message from the host", () => {
     render(<DeckApp />);
-    host({ type: "toast", level: "error", message: "Nothing to open for ASM-1." });
-    expect(screen.getByText("Nothing to open for ASM-1.")).toBeInTheDocument();
+    host({ type: "toast", level: "error", message: "Nothing to open for PROJ-1." });
+    expect(screen.getByText("Nothing to open for PROJ-1.")).toBeInTheDocument();
   });
 
   const mkLocal = (over: Partial<RunStatus> = {}) => mkStatus({
-    run: { key: "local-centaur-1a2b3c4d", summary: "team table new design",
-      url: "https://jira/browse/ASM-5641", createdAt: 1, kind: "local", mode: "per-window",
-      repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-5641-team-table" }], briefPaths: [] },
+    run: { key: "local-webapp-1a2b3c4d", summary: "team table new design",
+      url: "https://jira/browse/PROJ-5641", createdAt: 1, kind: "local", mode: "per-window",
+      repos: [{ name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-5641-team-table" }], briefPaths: [] },
     // The host computes this from run.url through the connector (see
     // src/deckView.ts's buildAll) — the webview only ever reads it off the
     // wire, never parses a url itself.
-    inferredTicketKey: "ASM-5641",
+    inferredTicketKey: "PROJ-5641",
     ...over,
   });
 
@@ -519,16 +519,16 @@ describe("DeckApp", () => {
     host(runsMsg([mkLocal()]));
     expect(screen.getByText("local")).toBeTruthy();
     expect(screen.getByText("~inferred")).toBeTruthy();
-    expect(screen.getByText("ASM-5641")).toBeTruthy();
+    expect(screen.getByText("PROJ-5641")).toBeTruthy();
   });
 
   it("shows the place's name when nothing was inferred", () => {
     const { container } = render(<DeckApp />);
     // No inferredTicketKey on the wire — exactly what the host sends for a
     // local card whose url resolved to nothing, or has none at all.
-    host(runsMsg([mkLocal({ run: { ...mkLocal().run, url: "", summary: "centaur" }, inferredTicketKey: undefined })]));
+    host(runsMsg([mkLocal({ run: { ...mkLocal().run, url: "", summary: "webapp" }, inferredTicketKey: undefined })]));
     expect(screen.queryByText("~inferred")).toBeNull();
-    expect(screen.getByText("centaur")).toBeTruthy();
+    expect(screen.getByText("webapp")).toBeTruthy();
     // The requirement is that the key slot itself shows "local" — scope to
     // that element rather than screen.getByText("local"), which the
     // beside-summary chip would also satisfy in the inferred-key scenario.
@@ -539,12 +539,12 @@ describe("DeckApp", () => {
     // The url still looks like a real ticket url (mkLocal's default), but the
     // host declined to set inferredTicketKey. If the webview ever fell back to
     // parsing r.run.url on its own — the exact coupling this field exists to
-    // remove — "ASM-5641" would render anyway. It must not: that parsing is the
+    // remove — "PROJ-5641" would render anyway. It must not: that parsing is the
     // connector's job, host-side, and nowhere else.
     render(<DeckApp />);
     host(runsMsg([mkLocal({ inferredTicketKey: undefined })]));
     expect(screen.queryByText("~inferred")).toBeNull();
-    expect(screen.queryByText("ASM-5641")).toBeNull();
+    expect(screen.queryByText("PROJ-5641")).toBeNull();
   });
 
   it("offers Track it and no Forget", () => {
@@ -560,7 +560,7 @@ describe("DeckApp", () => {
     host(runsMsg([mkLocal()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     fireEvent.click(screen.getByRole("button", { name: "Track it" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-centaur-1a2b3c4d" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-webapp-1a2b3c4d" });
   });
 
   it("still offers Forget on a tracked card", () => {
@@ -577,14 +577,14 @@ describe("DeckApp", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({
       run: {
-        key: "local-centaur-1a2b3c4d", summary: "centaur", url: "", createdAt: 1,
+        key: "local-webapp-1a2b3c4d", summary: "webapp", url: "", createdAt: 1,
         kind: "explore", mode: "per-window",
-        repos: [{ name: "centaur", path: "/r/centaur", isGit: true }], briefPaths: [],
+        repos: [{ name: "webapp", path: "/r/webapp", isGit: true }], briefPaths: [],
       },
       ticketStatus: null, ticketCategory: null,
     })]));
     expect(screen.getByText("explore")).toBeInTheDocument();
-    expect(screen.queryByText("local-centaur-1a2b3c4d")).not.toBeInTheDocument();
+    expect(screen.queryByText("local-webapp-1a2b3c4d")).not.toBeInTheDocument();
   });
 });
 
@@ -1432,7 +1432,7 @@ describe("DeckApp — per-failure PR actions", () => {
     render(<DeckApp />);
     host(runsMsg([waitingPr({ prs: { svc: { facts: prFacts({ review: "changes_requested" }), fetchedAt: 1 } } })]));
     fireEvent.click(screen.getByRole("button", { name: "Address review" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:seedPrWork", key: "ASM-1", reason: "review" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:seedPrWork", key: "PROJ-1", reason: "review" });
   });
 
   it("moves the named action off the footer into .c-rows, leaving Open and Diff as the only footer buttons", () => {
@@ -1533,14 +1533,14 @@ describe("Agents view", () => {
     expect(screen.getByText(/working ·/)).toBeInTheDocument();
     expect(screen.getByText(/ended turn ·/)).toBeInTheDocument();
     // One run, two cards, so the ticket appears twice.
-    expect(screen.getAllByText("ASM-1")).toHaveLength(2);
+    expect(screen.getAllByText("PROJ-1")).toHaveLength(2);
   });
 
   it("sends the agent's own repo with Open, so each opens its own directory", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [{ ...mkAgent("a1", "working", 100), repo: "web" }] })]));
     fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "open", repo: "web" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "open", repo: "web" });
   });
 
   it("sends the agent's own repo with Diff too, so the diff editor opens that directory", () => {
@@ -1550,27 +1550,27 @@ describe("Agents view", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [{ ...mkAgent("a1", "working", 100), repo: "web" }] })]));
     fireEvent.click(screen.getByRole("button", { name: "Diff" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "diff", repo: "web" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "diff", repo: "web" });
   });
 
   it("renders one parked card with no agent name for an agentless run", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [], agent: { state: "unknown", lastActivityMs: null, slug: null } })]));
     expect(screen.getByText(/parked · git \+ Jira only/)).toBeInTheDocument();
-    expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+    expect(screen.getAllByText("PROJ-1")).toHaveLength(1);
   });
 
   it("collapses to one card per run when there are no agents to show", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [] })]));
-    expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+    expect(screen.getAllByText("PROJ-1")).toHaveLength(1);
   });
 
   it("shows the workspace view's nested agents row instead when grouping is workspaces", () => {
     render(<DeckApp />);
     host({ type: "deck:grouping", grouping: "workspaces" });
     host(runsMsg([mkStatus({ agents: [{ ...mkAgent("agent-flow-2e", "working", 100), repo: "svc" }] })]));
-    expect(screen.getAllByText("ASM-1")).toHaveLength(1);
+    expect(screen.getAllByText("PROJ-1")).toHaveLength(1);
     // The collapsed agents row moved into the drawer's Agents section.
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle(/sessions open in this directory/i)).toBeInTheDocument();
@@ -1670,11 +1670,11 @@ describe("Agents view", () => {
 describe("DeckApp — source label", () => {
   const localCard = (): RunStatus => mkStatus({
     run: {
-      key: "local-centaur-1a2b3c4d", summary: "team table new design",
-      url: "https://jira/browse/ASM-5641", createdAt: 1, kind: "local", mode: "per-window",
-      repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-5641-team-table" }], briefPaths: [],
+      key: "local-webapp-1a2b3c4d", summary: "team table new design",
+      url: "https://jira/browse/PROJ-5641", createdAt: 1, kind: "local", mode: "per-window",
+      repos: [{ name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-5641-team-table" }], briefPaths: [],
     },
-    inferredTicketKey: "ASM-5641",
+    inferredTicketKey: "PROJ-5641",
   });
 
   it("renders the chrome's Jira strings byte-for-byte before any deck:runs arrives — the defaulted first paint", () => {
@@ -1693,7 +1693,7 @@ describe("DeckApp — source label", () => {
   it("renders a tracked card's Jira strings byte-for-byte: key title, status pill title, drawer action item", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    expect(screen.getByTitle("Open ASM-1 in Jira")).toBeInTheDocument();
+    expect(screen.getByTitle("Open PROJ-1 in Jira")).toBeInTheDocument();
     // The status pill and the "Open in <source>" action both moved into the drawer.
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("Jira status: In Progress")).toBeInTheDocument();
@@ -1703,7 +1703,7 @@ describe("DeckApp — source label", () => {
   it("renders a local/inferred card's key title with Jira byte-for-byte", () => {
     render(<DeckApp />);
     host(runsMsg([localCard()]));
-    expect(screen.getByTitle("Open ASM-5641 in Jira")).toBeInTheDocument();
+    expect(screen.getByTitle("Open PROJ-5641 in Jira")).toBeInTheDocument();
   });
 
   it("templates every one of those strings off a non-Jira sourceLabel — proving the label actually reaches the render", () => {
@@ -1711,7 +1711,7 @@ describe("DeckApp — source label", () => {
     host(runsMsg([mkStatus()], "PR initiated", "Acme"));
     expect(screen.getByTitle("Re-read git, Acme and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Acme backbone · best-effort live from ~/.claude/projects");
-    expect(screen.getByTitle("Open ASM-1 in Acme")).toBeInTheDocument();
+    expect(screen.getByTitle("Open PROJ-1 in Acme")).toBeInTheDocument();
     // The status pill and the "Open in <source>" action both moved into the drawer.
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("Acme status: In Progress")).toBeInTheDocument();
@@ -1728,7 +1728,7 @@ describe("DeckApp — source label", () => {
   it("templates the inferred-key card title off a non-Jira sourceLabel too", () => {
     render(<DeckApp />);
     host(runsMsg([localCard()], "PR initiated", "Acme"));
-    expect(screen.getByTitle("Open ASM-5641 in Acme")).toBeInTheDocument();
+    expect(screen.getByTitle("Open PROJ-5641 in Acme")).toBeInTheDocument();
     expect(screen.queryByTitle(/in Jira/)).not.toBeInTheDocument();
   });
 });
@@ -1738,16 +1738,16 @@ describe("DeckApp — source label", () => {
 // `repo` matches nothing, and every condition on it would silently never fire.
 describe("the drag source", () => {
   it("makes a single-repo card draggable, carrying its run key and repo", () => {
-    const card = renderOneCard({ key: "ASM-1", repos: [{ name: "agent-flow" }] });
+    const card = renderOneCard({ key: "PROJ-1", repos: [{ name: "agent-flow" }] });
     expect(card.getAttribute("draggable")).toBe("true");
     const dt = { setData: vi.fn() };
     fireEvent.dragStart(card, { dataTransfer: dt });
-    expect(dt.setData).toHaveBeenCalledWith("text/plain", `ASM-1${DRAG_SEP}agent-flow`);
+    expect(dt.setData).toHaveBeenCalledWith("text/plain", `PROJ-1${DRAG_SEP}agent-flow`);
   });
 
   it("does not make a multi-repo card draggable — a place node must mean one repo", () => {
     const card = renderOneCard({
-      key: "ASM-2",
+      key: "PROJ-2",
       repos: [{ name: "api" }, { name: "web" }],
     });
     expect(card.getAttribute("draggable")).not.toBe("true");
@@ -1755,11 +1755,11 @@ describe("the drag source", () => {
 
   it("a two-repo run's agent card is draggable when the agent names its own repo", () => {
     const agent: CardAgent = { ...mkAgent("sess-1", "working", 1_000), repo: "api" };
-    const card = renderOneCard({ key: "ASM-3", repos: [{ name: "api" }, { name: "web" }], agents: [agent] });
+    const card = renderOneCard({ key: "PROJ-3", repos: [{ name: "api" }, { name: "web" }], agents: [agent] });
     expect(card.getAttribute("draggable")).toBe("true");
     const dt = { setData: vi.fn() };
     fireEvent.dragStart(card, { dataTransfer: dt });
-    expect(dt.setData).toHaveBeenCalledWith("text/plain", `ASM-3${DRAG_SEP}api`);
+    expect(dt.setData).toHaveBeenCalledWith("text/plain", `PROJ-3${DRAG_SEP}api`);
   });
 });
 
@@ -1778,7 +1778,7 @@ const mkFlow = (id: string, name: string): Flow => ({
 const firedFlow = (): Flow => ({
   ...mkFlow("f1", "Ship the migration"),
   nodes: [
-    { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+    { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
     { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
   ],
   edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you: landed" }],
@@ -1813,8 +1813,8 @@ describe("a deck:flows payload missing a field a newer webview reads", () => {
   const withARule = (): Flow => ({
     ...mkFlow("f1", "Ship the migration"),
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-      { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "PROJ-2", repo: "agent-flow" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
   });
@@ -2111,7 +2111,7 @@ describe("the drawer's callbacks", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     host(flowsMsg([{ ...mkFlow("f1", "One"),
-      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "svc" }] }]));
+      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "svc" }] }]));
     fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     const dot = screen.getByTestId("orch-node-n1").querySelector(".d") as HTMLElement;
     // mkStatus's single-repo run has a working agent.
@@ -2156,8 +2156,8 @@ describe("the drawer's callbacks", () => {
       flows: [{
         ...mkFlow("f1", "Ship the migration"),
         nodes: [
-          { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-          { id: "n2", kind: "planned", x: 320, y: 24, join: "any", ticketKey: "ASM-12", repos: ["agent-flow"], mode: "quick", dest: "worktree" },
+          { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+          { id: "n2", kind: "planned", x: 320, y: 24, join: "any", ticketKey: "PROJ-12", repos: ["agent-flow"], mode: "quick", dest: "worktree" },
         ],
         edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" }],
       }],
@@ -2183,17 +2183,17 @@ describe("the drawer's callbacks", () => {
 
 const wsStatus = () => mkStatus({
   run: {
-    key: "ASM-9", summary: "e2e flake", url: "https://jira/ASM-9", createdAt: 1,
-    mode: "multiroot", workspaceFile: "/ws/centaur+e2e.code-workspace",
+    key: "PROJ-9", summary: "e2e flake", url: "https://jira/PROJ-9", createdAt: 1,
+    mode: "multiroot", workspaceFile: "/ws/webapp+e2e.code-workspace",
     repos: [
-      { name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-9-x" },
-      { name: "automation_e2e", path: "/r/automation_e2e", isGit: true, branch: "main" },
+      { name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-9-x" },
+      { name: "e2e_suite", path: "/r/e2e_suite", isGit: true, branch: "main" },
     ],
     briefPaths: [],
   },
   repos: [
-    { name: "centaur", path: "/r/centaur", branch: "ASM-9-x", dirty: true, ahead: 0, added: 0, removed: 0, files: 0 },
-    { name: "automation_e2e", path: "/r/automation_e2e", branch: "main", dirty: false, ahead: 1, added: 12, removed: 2, files: 3 },
+    { name: "webapp", path: "/r/webapp", branch: "PROJ-9-x", dirty: true, ahead: 0, added: 0, removed: 0, files: 0 },
+    { name: "e2e_suite", path: "/r/e2e_suite", branch: "main", dirty: false, ahead: 1, added: 12, removed: 2, files: 3 },
   ],
 });
 
@@ -2205,7 +2205,7 @@ describe("the drawer's workspace block", () => {
     host(runsMsg([wsStatus()]));
     fireEvent.click(container.querySelector(".card") as HTMLElement);
     const chip = container.querySelector(".c-ws .ws")!;
-    expect(chip.textContent).toContain("centaur+e2e");
+    expect(chip.textContent).toContain("webapp+e2e");
     expect(chip.textContent).toContain("2 repos");
     expect(chip.textContent).not.toContain(".code-workspace");
   });
@@ -2217,7 +2217,7 @@ describe("the drawer's workspace block", () => {
     host(runsMsg([wsStatus()]));
     fireEvent.click(container.querySelector(".card") as HTMLElement);
     const chip = container.querySelector(".c-ws .ws")!;
-    expect(chip.getAttribute("title")).toBe("/ws/centaur+e2e.code-workspace");
+    expect(chip.getAttribute("title")).toBe("/ws/webapp+e2e.code-workspace");
   });
 
   it("shows every repo chip under the label, with its git signal", () => {
@@ -2226,7 +2226,7 @@ describe("the drawer's workspace block", () => {
     fireEvent.click(container.querySelector(".card") as HTMLElement);
     const row = container.querySelector(".c-ws .c-repos")!;
     expect(Array.from(row.querySelectorAll(".repo")).map((r) => r.textContent))
-      .toEqual(["centaur●", "automation_e2e+12−2↑1"]);
+      .toEqual(["webapp●", "e2e_suite+12−2↑1"]);
   });
 
   it("has nothing to expand — no fold, and a label rather than a toggle", () => {
@@ -2264,12 +2264,12 @@ describe("the drawer's workspace block", () => {
 // The branch/launched row moved off the card into the drawer's Work section.
 describe("branch line", () => {
   it("shows the branch of the repo this agent runs in", () => {
-    // repos[0] is centaur on ASM-9-x; the agent runs in automation_e2e on main.
+    // repos[0] is webapp on PROJ-9-x; the agent runs in e2e_suite on main.
     const s = wsStatus();
     const agent: CardAgent = {
-      session: { pid: 2, sessionId: "s9", cwd: "/r/automation_e2e", startedAt: 1, name: "e2e-3a" },
+      session: { pid: 2, sessionId: "s9", cwd: "/r/e2e_suite", startedAt: 1, name: "e2e-3a" },
       activity: { state: "working", lastActivityMs: 2_000, slug: null },
-      repo: "automation_e2e",
+      repo: "e2e_suite",
     };
     // The board mounts on the Agents lens (DeckApp.tsx:364), so this run renders
     // as one card per agent with no toggling.
@@ -2283,7 +2283,7 @@ describe("branch line", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
     fireEvent.click(container.querySelector(".card") as HTMLElement);
-    expect(container.querySelector(".c-branch .bn")!.textContent).toContain("ASM-9-x");
+    expect(container.querySelector(".c-branch .bn")!.textContent).toContain("PROJ-9-x");
   });
 });
 
@@ -2394,9 +2394,9 @@ describe("board zones", () => {
 
   it("gives a ready-to-merge run the merge column, apart from the ones still waiting", () => {
     render(<DeckApp />);
-    host(runsMsg([inReview("ASM-2", { review: "none" }), inReview("ASM-1", { review: "approved" })]));
-    expect(keys("Merge")).toEqual(["ASM-1"]);
-    expect(keys("In review")).toEqual(["ASM-2"]);
+    host(runsMsg([inReview("PROJ-2", { review: "none" }), inReview("PROJ-1", { review: "approved" })]));
+    expect(keys("Merge")).toEqual(["PROJ-1"]);
+    expect(keys("In review")).toEqual(["PROJ-2"]);
     expect(column("Merge").querySelector(".col-hd .ct")?.textContent).toBe("1");
   });
 
@@ -2443,20 +2443,20 @@ describe("board zones", () => {
 
   it("splits the merge column into the press and its aftermath, press first", () => {
     render(<DeckApp />);
-    host(runsMsg([inReview("ASM-9", { state: "MERGED" }), inReview("ASM-1", { review: "approved" })]));
+    host(runsMsg([inReview("PROJ-9", { state: "MERGED" }), inReview("PROJ-1", { review: "approved" })]));
     expect(lanes("Merge")).toEqual([["ready to merge", "1"], ["merged · wrap up", "1"]]);
-    expect(flow("Merge")).toEqual(["ready to merge", "ASM-1", "merged · wrap up", "ASM-9"]);
+    expect(flow("Merge")).toEqual(["ready to merge", "PROJ-1", "merged · wrap up", "PROJ-9"]);
   });
 
   it("still names the lane when every card in the column is on one side", () => {
     render(<DeckApp />);
-    host(runsMsg([inReview("ASM-9", { state: "MERGED" })]));
+    host(runsMsg([inReview("PROJ-9", { state: "MERGED" })]));
     expect(lanes("Merge")).toEqual([["merged · wrap up", "1"]]);
   });
 
   it("keeps the column header counting both lanes", () => {
     render(<DeckApp />);
-    host(runsMsg([inReview("ASM-9", { state: "MERGED" }), inReview("ASM-1", { review: "approved" })]));
+    host(runsMsg([inReview("PROJ-9", { state: "MERGED" }), inReview("PROJ-1", { review: "approved" })]));
     expect(column("Merge").querySelector(".col-hd .ct")?.textContent).toBe("2");
   });
 
@@ -2469,16 +2469,16 @@ describe("board zones", () => {
 
   it("splits In progress into the live agents and the parked ones, live first", () => {
     render(<DeckApp />);
-    host(runsMsg([quiet("ASM-2"), mkStatus()]));
+    host(runsMsg([quiet("PROJ-2"), mkStatus()]));
     expect(lanes("In progress")).toEqual([["working", "1"], ["parked", "1"]]);
-    expect(flow("In progress")).toEqual(["working", "ASM-1", "parked", "ASM-2"]);
+    expect(flow("In progress")).toEqual(["working", "PROJ-1", "parked", "PROJ-2"]);
   });
 
   it("splits In review into the PRs that want you and the ones that want somebody else", () => {
     render(<DeckApp />);
-    host(runsMsg([inReview("ASM-2", { review: "none" }), inReview("ASM-3", { mergeable: "conflicting" })]));
+    host(runsMsg([inReview("PROJ-2", { review: "none" }), inReview("PROJ-3", { mergeable: "conflicting" })]));
     expect(lanes("In review")).toEqual([["fixes needed", "1"], ["waiting on review", "1"]]);
-    expect(flow("In review")).toEqual(["fixes needed", "ASM-3", "waiting on review", "ASM-2"]);
+    expect(flow("In review")).toEqual(["fixes needed", "PROJ-3", "waiting on review", "PROJ-2"]);
   });
 
   it("leaves Action required without sub-headers — it is the one column that means one thing", () => {
@@ -2491,7 +2491,7 @@ describe("board zones", () => {
 
   it("keeps the In-progress header counting both of its lanes", () => {
     render(<DeckApp />);
-    host(runsMsg([quiet("ASM-2"), mkStatus()]));
+    host(runsMsg([quiet("PROJ-2"), mkStatus()]));
     expect(column("In progress").querySelector(".col-hd .ct")?.textContent).toBe("2");
   });
 });
@@ -2510,7 +2510,7 @@ describe("card selection", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(card());
     expect(document.querySelector(".dd")).not.toBeNull();
-    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("ASM-1");
+    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("PROJ-1");
     expect(card().className).toContain("sel");
   });
 
@@ -2535,12 +2535,12 @@ describe("card selection", () => {
 
   it("re-targets the drawer when a second card is selected", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
     const cards = document.querySelectorAll(".card");
     fireEvent.click(cards[0]);
     fireEvent.click(cards[1]);
     expect(document.querySelectorAll(".dd")).toHaveLength(1);
-    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("ASM-2");
+    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("PROJ-2");
   });
 
   it("clears the selection on Escape", () => {
@@ -2556,12 +2556,12 @@ describe("card selection", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(card());
     expect(document.querySelector(".dd")).not.toBeNull();
-    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "ASM-9" } })]));
+    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "PROJ-9" } })]));
     expect(document.querySelector(".dd")).toBeNull();
     // The `selId` state itself must clear, not just this render's recomputed
     // `selected` — otherwise a stale selId that outlived the card's absence
     // would silently reopen the drawer the moment a card with that same id
-    // (e.g. the same run, ASM-1) reappears in a later post, with no click.
+    // (e.g. the same run, PROJ-1) reappears in a later post, with no click.
     host(runsMsg([mkStatus()]));
     expect(document.querySelector(".dd")).toBeNull();
   });
@@ -2640,7 +2640,7 @@ describe("the card at rest", () => {
     host(runsMsg([wsStatus()]));
     const bits = Array.from(document.querySelectorAll(".card .c-sig span"));
     const count = bits.find((b) => b.textContent === "2 repos")!;
-    expect(count.getAttribute("title")).toBe("centaur\nautomation_e2e");
+    expect(count.getAttribute("title")).toBe("webapp\ne2e_suite");
   });
 
   it("shows Open and Diff in the footer, and no overflow menu", () => {
@@ -2759,7 +2759,7 @@ describe("DeckApp card anatomy", () => {
     render(<DeckApp />);
     host(runsMsg([withPr(failingPr(), { column: "needs" })]));
     fireEvent.click(screen.getByRole("button", { name: "Resolve conflict" }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:seedPrWork", key: "ASM-1", reason: "conflict" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
   });
 
   it("carries the failing check names as the ci action's detail", () => {
@@ -2767,7 +2767,7 @@ describe("DeckApp card anatomy", () => {
     host(runsMsg([withPr(failingPr(), { column: "needs" })]));
     fireEvent.click(screen.getByRole("button", { name: "Fix CI" }));
     expect(sent).toHaveBeenCalledWith({
-      type: "deck:seedPrWork", key: "ASM-1", reason: "ci", detail: "integration, lint",
+      type: "deck:seedPrWork", key: "PROJ-1", reason: "ci", detail: "integration, lint",
     });
   });
 
@@ -2797,7 +2797,7 @@ describe("DeckApp card anatomy", () => {
     render(<DeckApp />);
     const a = withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
     const b = withPr(healthyPr(), {
-      run: { ...mkStatus().run, key: "ASM-2" },
+      run: { ...mkStatus().run, key: "PROJ-2" },
       usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 },
     });
     // 4th arg turns the setting on: the tile is opt-in and absent by default, so
@@ -2836,7 +2836,7 @@ describe("DeckApp card anatomy", () => {
     host(runsMsg([withPr(healthyPr())]));
     expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "deck:usageFor" }));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
-    expect(sent).toHaveBeenCalledWith({ type: "deck:usageFor", key: "ASM-1" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:usageFor", key: "PROJ-1" });
   });
 
   it("feeds a deck:usage reply into the open drawer", () => {
@@ -2844,7 +2844,7 @@ describe("DeckApp card anatomy", () => {
     host(runsMsg([withPr(healthyPr())]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
-    host({ type: "deck:usage", key: "ASM-1", usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
+    host({ type: "deck:usage", key: "PROJ-1", usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
     expect(document.querySelector(".dd-spend")).not.toBeNull();
     expect(screen.queryByText(/Reading transcripts/)).toBeNull();
   });
@@ -2865,7 +2865,7 @@ describe("DeckApp card anatomy", () => {
     render(<DeckApp />);
     const a = withPr(healthyPr(), { usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
     const b = withPr(healthyPr(), {
-      run: { ...mkStatus().run, key: "ASM-2" },
+      run: { ...mkStatus().run, key: "PROJ-2" },
       shelf: "closed",
       usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 },
     });
@@ -2908,7 +2908,7 @@ describe("DeckApp card anatomy", () => {
       expect(hd.querySelector(".hd-t .c-title")!.textContent).toContain("Export fails on large accounts");
       // Its own slot, not sharing a row with the branch and the diff: a truncated
       // ticket key is the one identifier on this card nobody can reconstruct.
-      expect(hd.querySelector(".hd-k .key")!.textContent).toBe("ASM-1");
+      expect(hd.querySelector(".hd-k .key")!.textContent).toBe("PROJ-1");
     });
 
     it("gives a notepad card the notepad mark, not the ticket one", () => {
@@ -2933,7 +2933,7 @@ describe("DeckApp card anatomy", () => {
       const card = oneCard();
       fireEvent.click(card.querySelector(".hd-k .key")!);
       expect(card.className).not.toContain("sel");
-      expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+      expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/PROJ-1" });
     });
 
     it("puts the state on its own row under a hairline, with the age in mono", () => {
@@ -3000,7 +3000,7 @@ describe("the card detail's open and close animation", () => {
       // still drawing the card it held — this is the drawer the user just
       // dismissed, not a blank shell.
       expect(dd()!.className).toContain("closing");
-      expect(dd()!.querySelector(".dd-hd .k")!.textContent).toBe("ASM-1");
+      expect(dd()!.querySelector(".dd-hd .k")!.textContent).toBe("PROJ-1");
 
       // Just short of the animation's end it is still there; one tick past it,
       // gone. Both halves are asserted so a timer that never fires and a timer
@@ -3018,7 +3018,7 @@ describe("the card detail's open and close animation", () => {
     vi.useFakeTimers();
     try {
       openOne();
-      const named = { name: "Detail for ASM-1" };
+      const named = { name: "Detail for PROJ-1" };
       expect(screen.queryByRole("complementary", named)).not.toBeNull();
       fireEvent.click(screen.getByRole("button", { name: "Close" }));
       // Inert for those milliseconds: a drawer already dismissed must not answer
@@ -3050,7 +3050,7 @@ describe("the card detail's open and close animation", () => {
     vi.useFakeTimers();
     try {
       openOne();
-      host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "ASM-9" } })]));
+      host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "PROJ-9" } })]));
       expect(dd()).toBeNull();
       act(() => { vi.advanceTimersByTime(DRAWER_ANIM_MS * 2); });
       expect(dd()).toBeNull();
@@ -3100,7 +3100,7 @@ describe("the card's Merge row", () => {
     host({ ...runsMsg([withPr(mergeablePr())]), mergeWrites: true });
     const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
     fireEvent.click(btn);
-    expect(sent).toHaveBeenCalledWith({ type: "deck:mergePr", key: "ASM-1", repo: "svc", number: 2044 });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 2044 });
   });
 
   it("disables the button until deck:mergeDone comes back", async () => {
@@ -3109,7 +3109,7 @@ describe("the card's Merge row", () => {
     const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
     fireEvent.click(btn);
     await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(true));
-    host({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 2044, outcome: "cancelled" });
+    host({ type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 2044, outcome: "cancelled" });
     await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(false));
   });
 
@@ -3147,7 +3147,7 @@ describe("the card's Merge row", () => {
     host({ ...runsMsg([withPr(mergeablePr())]), mergeWrites: true });
     const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
     fireEvent.click(btn);
-    host({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 2044, outcome: "ok" });
+    host({ type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 2044, outcome: "ok" });
     await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(true));
     // Still disabled after a fresh board post that carries the STALE open facts —
     // the exact poll that used to re-arm it.
@@ -3166,7 +3166,7 @@ describe("the card's Merge row", () => {
     const btn = await waitFor(() => screen.getByRole("button", { name: "Merge" }));
     fireEvent.click(btn);
     await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(true));
-    host({ type: "deck:mergeDone", key: "ASM-1", repo: "svc", number: 2044, outcome: "failed" });
+    host({ type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 2044, outcome: "failed" });
     await waitFor(() => expect((screen.getByRole("button", { name: "Merge" }) as HTMLButtonElement).disabled).toBe(false));
   });
 

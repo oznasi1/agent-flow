@@ -1,6 +1,6 @@
 // A planned node has no run, so no condition on it can be evaluated. The moment a
 // launch succeeds it must become a real place, or a chain dies at its second step:
-// "ASM-1 merged -> launch ASM-12 -> ASM-12's CI passes -> launch ASM-15" would
+// "PROJ-1 merged -> launch PROJ-12 -> PROJ-12's CI passes -> launch PROJ-15" would
 // never reach the third link.
 //
 // Same id, position and join, so every downstream edge keeps pointing at it.

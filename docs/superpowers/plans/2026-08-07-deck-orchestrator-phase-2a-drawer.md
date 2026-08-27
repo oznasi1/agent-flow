@@ -477,7 +477,7 @@ describe("orchestrator flows", () => {
     const { send } = await openPanel();
     const edited: Flow = {
       ...mkFlow("f1", "n"),
-      nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" }],
+      nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" }],
     };
     await send({ type: "flow:save", flow: edited });
     expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).nodes).toHaveLength(1);
@@ -1072,36 +1072,36 @@ describe("the tray", () => {
   it("adds a place node when a card is dropped", () => {
     const onSave = vi.fn();
     render(<OrchestratorDrawer {...props({ onSave })} />);
-    drop(screen.getByTestId("orch-tray"), "ASM-1\0agent-flow");
+    drop(screen.getByTestId("orch-tray"), "PROJ-1\0agent-flow");
     expect(onSave).toHaveBeenCalledTimes(1);
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.nodes).toEqual([
-      expect.objectContaining({ kind: "place", runKey: "ASM-1", repo: "agent-flow", join: "any" }),
+      expect.objectContaining({ kind: "place", runKey: "PROJ-1", repo: "agent-flow", join: "any" }),
     ]);
   });
 
   it("gives the new node an id that is unique within the flow", () => {
     const onSave = vi.fn();
-    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-9", repo: "r" }] });
+    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-9", repo: "r" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    drop(screen.getByTestId("orch-tray"), "ASM-1\0agent-flow");
+    drop(screen.getByTestId("orch-tray"), "PROJ-1\0agent-flow");
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(new Set(saved.nodes.map((n) => n.id)).size).toBe(2);
   });
 
   it("refuses the same run and repo twice", () => {
     const onSave = vi.fn();
-    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
+    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    drop(screen.getByTestId("orch-tray"), "ASM-1\0agent-flow");
+    drop(screen.getByTestId("orch-tray"), "PROJ-1\0agent-flow");
     expect(onSave).not.toHaveBeenCalled();
   });
 
   it("accepts the same run in a different repo", () => {
     const onSave = vi.fn();
-    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
+    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    drop(screen.getByTestId("orch-tray"), "ASM-1\0bite-me");
+    drop(screen.getByTestId("orch-tray"), "PROJ-1\0bite-me");
     expect(onSave).toHaveBeenCalledTimes(1);
   });
 
@@ -1114,10 +1114,10 @@ describe("the tray", () => {
 
   it("lists an attached node as a chip, and removes it", () => {
     const onSave = vi.fn();
-    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "agent-flow" }] });
+    const existing = flow({ nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" }] });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    expect(screen.getByText("ASM-1")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Remove ASM-1" }));
+    expect(screen.getByText("PROJ-1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Remove PROJ-1" }));
     expect((onSave.mock.calls[0][0] as Flow).nodes).toEqual([]);
   });
 
@@ -1125,13 +1125,13 @@ describe("the tray", () => {
     const onSave = vi.fn();
     const existing = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" },
         { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "done" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
     });
     render(<OrchestratorDrawer {...props({ onSave, flows: [existing] })} />);
-    fireEvent.click(screen.getByRole("button", { name: "Remove ASM-1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove PROJ-1" }));
     const saved = onSave.mock.calls[0][0] as Flow;
     expect(saved.edges).toEqual([]);
   });
@@ -1336,16 +1336,16 @@ it("makes a single-repo card draggable, carrying its run key and repo", () => {
   // payload the card would put on the dataTransfer.
   // Use this file's existing helper for posting a `deck:runs` message and finding
   // a rendered card, rather than adding a new harness.
-  const card = renderOneCard({ key: "ASM-1", repos: [{ name: "agent-flow", path: "/r/agent-flow", isGit: true }] });
+  const card = renderOneCard({ key: "PROJ-1", repos: [{ name: "agent-flow", path: "/r/agent-flow", isGit: true }] });
   expect(card.getAttribute("draggable")).toBe("true");
   const dt = { setData: vi.fn() };
   fireEvent.dragStart(card, { dataTransfer: dt });
-  expect(dt.setData).toHaveBeenCalledWith("text/plain", `ASM-1${DRAG_SEP}agent-flow`);
+  expect(dt.setData).toHaveBeenCalledWith("text/plain", `PROJ-1${DRAG_SEP}agent-flow`);
 });
 
 it("does not make a multi-repo card draggable — a place node must mean one repo", () => {
   const card = renderOneCard({
-    key: "ASM-2",
+    key: "PROJ-2",
     repos: [
       { name: "api", path: "/r/api", isGit: true },
       { name: "web", path: "/r/web", isGit: true },
@@ -1369,8 +1369,8 @@ import { GRID } from "../../src/engine/orchestrator/layout";
 const twoPlaces = () =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
-      { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "bite-me" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "PROJ-2", repo: "bite-me" },
     ],
   });
 
@@ -1386,7 +1386,7 @@ describe("the canvas", () => {
   it("shows a place node's key and repo", () => {
     render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
     const n1 = screen.getByTestId("orch-node-n1");
-    expect(n1.textContent).toContain("ASM-1");
+    expect(n1.textContent).toContain("PROJ-1");
     expect(n1.textContent).toContain("agent-flow");
   });
 
@@ -1424,7 +1424,7 @@ describe("the canvas", () => {
     const onSave = vi.fn();
     const messy = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 900, y: 900, join: "any", runKey: "ASM-1", repo: "r" },
+        { id: "n1", kind: "place", x: 900, y: 900, join: "any", runKey: "PROJ-1", repo: "r" },
         { id: "n2", kind: "notify", x: 950, y: 950, join: "any", message: "done" },
       ],
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -1451,7 +1451,7 @@ describe("the canvas", () => {
     render(<OrchestratorDrawer {...props({ onSave, flows: [flow()] })} />);
     const canvas = screen.getByTestId("orch-canvas");
     fireEvent.drop(canvas, {
-      dataTransfer: { getData: () => "ASM-7\0centaur", dropEffect: "copy" },
+      dataTransfer: { getData: () => "PROJ-7\0webapp", dropEffect: "copy" },
       clientX: 200, clientY: 150,
     });
     const saved = onSave.mock.calls[0][0] as Flow;
@@ -1722,7 +1722,7 @@ Add to `test/webview/OrchestratorDrawer.test.tsx`:
 const wired = () =>
   flow({
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -1744,8 +1744,8 @@ describe("wiring", () => {
     const onSave = vi.fn();
     const two = flow({
       nodes: [
-        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "r" },
-        { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "ASM-2", repo: "r2" },
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "r" },
+        { id: "n2", kind: "place", x: 320, y: 24, join: "any", runKey: "PROJ-2", repo: "r2" },
       ],
     });
     render(<OrchestratorDrawer {...props({ onSave, flows: [two] })} />);
@@ -2056,7 +2056,7 @@ describe("the inspector", () => {
   it("names the two ends of the selected edge", () => {
     open();
     const insp = screen.getByTestId("orch-inspector");
-    expect(insp.textContent).toContain("ASM-1");
+    expect(insp.textContent).toContain("PROJ-1");
   });
 
   it("changes the condition", () => {
@@ -2096,7 +2096,7 @@ describe("the inspector", () => {
   });
 
   it("shows what the place currently looks like, from the board", () => {
-    open(vi.fn(), [runStatus("ASM-1", "agent-flow")]);
+    open(vi.fn(), [runStatus("PROJ-1", "agent-flow")]);
     // 4 of 7 checks reported: describeCond's own wording, reaching a user for
     // the first time.
     expect(screen.getByTestId("orch-inspector").textContent).toContain("CI running, 4 of 7");

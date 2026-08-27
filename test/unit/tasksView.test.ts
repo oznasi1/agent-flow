@@ -144,7 +144,7 @@ const CFG = {
   taskSource: "jira",
   forge: "github",
   baseUrl: "https://jira",
-  project: "ASM",
+  project: "PROJ",
   agileAcceleratorInstanceUrl: "",
   agileAcceleratorTeam: "",
   agileAcceleratorTargetOrg: "",
@@ -247,7 +247,7 @@ beforeEach(() => {
   trackErrorSpy.mockClear();
   clientStub = makeClient();
   vi.mocked(getConfig).mockReturnValue({ ...CFG });
-  vi.mocked(discoverRepos).mockReturnValue(mkRepos(["account-service", "centaur"]));
+  vi.mocked(discoverRepos).mockReturnValue(mkRepos(["account-service", "webapp"]));
   vi.mocked(JiraClient).mockImplementation(() => clientStub as unknown as JiraClient);
   // An implementation, not a resolved value: `provider` is what the REAL openWorkspace
   // resolved and seeded, which follows the setting each test installs — and tests set
@@ -270,7 +270,7 @@ beforeEach(() => {
   vi.mocked(windowIdentity).mockReturnValue(undefined);
   vi.mocked(currentWindow).mockReturnValue(undefined);
   vi.mocked(openSharedWorkspace).mockResolvedValue({
-    workspaceFile: "/ws/ASM-1+1.code-workspace",
+    workspaceFile: "/ws/PROJ-1+1.code-workspace",
     opened: true,
     briefs: [],
     seeded: 2,
@@ -438,7 +438,7 @@ describe("ready", () => {
   it("reports authed state with the current user and auto-fetches", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "PROJ", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
@@ -452,7 +452,7 @@ describe("ready", () => {
   it("reports unauthed state and does not fetch", async () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "PROJ", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
@@ -480,7 +480,7 @@ describe("ready", () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
     // A state is posted before (and regardless of) the /myself round-trip…
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "PROJ", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     // …and the task list — the real payload — still loads.
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
@@ -488,7 +488,7 @@ describe("ready", () => {
   it("re-establishes state and fetches on retry", async () => {
     const { send, posted } = setup({ authed: true });
     await send({ type: "retry" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "PROJ", me: "Jane", prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(clientStub.fetchTasks).toHaveBeenCalled();
   });
 
@@ -499,18 +499,18 @@ describe("ready", () => {
   });
 
   // The panel's own title bar is the identity row. The fixture connector's scope
-  // value is "ASM" (CFG.project) and the Jira client stub's getMyself returns "Jane".
+  // value is "PROJ" (CFG.project) and the Jira client stub's getMyself returns "Jane".
   it("titles the panel with the project and the signed-in user", async () => {
     const { send, view } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(view.title).toBe("ASM");
+    expect(view.title).toBe("PROJ");
     expect(view.description).toBe("Jane");
   });
 
   it("drops the description when nobody is signed in", async () => {
     const { send, view } = setup({ authed: false });
     await send({ type: "ready" });
-    expect(view.title).toBe("ASM");
+    expect(view.title).toBe("PROJ");
     expect(view.description).toBeUndefined();
   });
 
@@ -529,7 +529,7 @@ describe("state — liveCount", () => {
   it("reports the live window count from the same source as the open-target picker", async () => {
     vi.mocked(readLiveWindows).mockReturnValue([
       { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"], updatedAt: 9 },
-      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, roots: ["/repos/centaur"], updatedAt: 8 },
+      { pid: 2, identity: "/repos/webapp", kind: "folder", label: "webapp", folders: 1, roots: ["/repos/webapp"], updatedAt: 8 },
     ]);
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
@@ -540,7 +540,7 @@ describe("state — liveCount", () => {
     vi.mocked(windowIdentity).mockReturnValue({ identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"] });
     vi.mocked(readLiveWindows).mockReturnValue([
       { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"], updatedAt: 9 },
-      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, roots: ["/repos/centaur"], updatedAt: 8 },
+      { pid: 2, identity: "/repos/webapp", kind: "folder", label: "webapp", folders: 1, roots: ["/repos/webapp"], updatedAt: 8 },
     ]);
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
@@ -550,11 +550,11 @@ describe("state — liveCount", () => {
   it("omits liveCount from state when window tracking is off, rather than reporting zero", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, trackOpenWindows: false });
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, roots: ["/repos/centaur"], updatedAt: 8 },
+      { pid: 1, identity: "/repos/webapp", kind: "folder", label: "webapp", folders: 1, roots: ["/repos/webapp"], updatedAt: 8 },
     ]);
     const { send, posted } = setup({ authed: true });
     await send({ type: "ready" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: true, configured: true, project: "PROJ", me: "Jane",
       prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true } });
     const stateMsg = posted().find((m) => m.type === "state") as { liveCount?: number };
     expect(stateMsg.liveCount).toBeUndefined();
@@ -566,12 +566,12 @@ describe("fetch", () => {
     const { send, posted } = setup({ authed: false });
     await send({ type: "fetch", filter: "mine", size: "any" });
     expect(clientStub.fetchTasks).not.toHaveBeenCalled();
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "PROJ", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
   });
 
   it("toggles loading and posts tasks with a services guess", async () => {
     clientStub.fetchTasks.mockResolvedValue([
-      { key: "ASM-1", summary: "s", labels: [], components: [] },
+      { key: "PROJ-1", summary: "s", labels: [], components: [] },
     ]);
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
@@ -587,7 +587,7 @@ describe("fetch", () => {
 
   it("guesses only ticket-confirmed repos when a component matches (label guess dropped)", async () => {
     clientStub.fetchTasks.mockResolvedValue([
-      { key: "ASM-1", summary: "s", labels: ["centaur"], components: ["account-service"] },
+      { key: "PROJ-1", summary: "s", labels: ["webapp"], components: ["account-service"] },
     ]);
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
@@ -597,12 +597,12 @@ describe("fetch", () => {
 
   it("keeps label guesses on the card when the ticket confirms no repo", async () => {
     clientStub.fetchTasks.mockResolvedValue([
-      { key: "ASM-1", summary: "s", labels: ["centaur"], components: [] },
+      { key: "PROJ-1", summary: "s", labels: ["webapp"], components: [] },
     ]);
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
     const tasksMsg = posted().find((m) => m.type === "tasks") as { tasks: { services?: string[] }[] };
-    expect(tasksMsg.tasks[0].services).toEqual(["centaur"]);
+    expect(tasksMsg.tasks[0].services).toEqual(["webapp"]);
   });
 
   it("prunes then sorts by saved order in the full My-sprint view", async () => {
@@ -674,7 +674,7 @@ describe("changeStatus", () => {
   it("shows an info toast when there are no transitions", async () => {
     clientStub.getTransitions.mockResolvedValue([]);
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "info" }));
     expect(clientStub.transition).not.toHaveBeenCalled();
   });
@@ -685,7 +685,7 @@ describe("changeStatus", () => {
     ]);
     vi.mocked(window.showQuickPick).mockResolvedValue(undefined);
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).not.toHaveBeenCalled();
   });
 
@@ -695,12 +695,12 @@ describe("changeStatus", () => {
     ]);
     answerPicks(pickFirst);
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "41", {});
-    expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
+    await provider.changeStatus("PROJ-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "41", {});
+    expect(clientStub.addLabel).toHaveBeenCalledWith("PROJ-1", "claude-code");
     expect(posted()).toContainEqual({
       type: "statusChanged",
-      key: "ASM-1",
+      key: "PROJ-1",
       status: "Done",
       category: "done",
       removed: true,
@@ -714,7 +714,7 @@ describe("changeStatus", () => {
     ]);
     answerPicks(pickFirst);
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.addLabel).not.toHaveBeenCalled();
   });
 
@@ -725,8 +725,8 @@ describe("changeStatus", () => {
     clientStub.addLabel.mockRejectedValue(new Error("label denied"));
     answerPicks(pickFirst);
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "statusChanged", key: "ASM-1" }));
+    await provider.changeStatus("PROJ-1");
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "statusChanged", key: "PROJ-1" }));
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success" }));
   });
 
@@ -749,15 +749,15 @@ describe("changeStatus", () => {
     clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
     answerPicks(pickFirst, { label: "Won't Do" });
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "41", { resolution: { id: "10001" } });
+    await provider.changeStatus("PROJ-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "41", { resolution: { id: "10001" } });
   });
 
   it("writes nothing when the field prompt is cancelled", async () => {
     clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
     answerPicks(pickFirst, undefined);
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).not.toHaveBeenCalled();
     expect(posted().filter((p) => p.type === "toast")).toEqual([]);
   });
@@ -774,8 +774,8 @@ describe("changeStatus", () => {
     answerPicks(pickFirst);
     vi.mocked(window.showInputBox).mockResolvedValue("shipped in 0.1.36" as never);
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "51", { customfield_1: "shipped in 0.1.36" });
+    await provider.changeStatus("PROJ-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "51", { customfield_1: "shipped in 0.1.36" });
   });
 
   it("skips unfillable required fields and attempts the write anyway", async () => {
@@ -789,8 +789,8 @@ describe("changeStatus", () => {
     clientStub.getTransitions.mockResolvedValue([t]);
     answerPicks(pickFirst);
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "61", {});
+    await provider.changeStatus("PROJ-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "61", {});
   });
 
   it("does not prompt for optional screen fields", async () => {
@@ -804,9 +804,9 @@ describe("changeStatus", () => {
     clientStub.getTransitions.mockResolvedValue([t]);
     answerPicks(pickFirst);
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(window.showInputBox).not.toHaveBeenCalled();
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "71", {});
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "71", {});
   });
 
   // `src/tasks/jira/client` is mocked in this file, but `src/tasks/jira/errors` is not — the
@@ -822,10 +822,10 @@ describe("changeStatus", () => {
     // The upfront pass already asks for Resolution, so answer it twice.
     answerPicks(pickFirst, { label: "Done" }, { label: "Won't Do" });
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(2);
-    expect(clientStub.transition).toHaveBeenLastCalledWith("ASM-1", "41", { resolution: { id: "10001" } });
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "statusChanged", key: "ASM-1" }));
+    expect(clientStub.transition).toHaveBeenLastCalledWith("PROJ-1", "41", { resolution: { id: "10001" } });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "statusChanged", key: "PROJ-1" }));
   });
 
   it("re-prompts from explicit field errors even when the field wasn't required", async () => {
@@ -849,8 +849,8 @@ describe("changeStatus", () => {
       .mockResolvedValueOnce(undefined);
     answerPicks(pickFirst, { label: "Config drift" });
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(clientStub.transition).toHaveBeenLastCalledWith("ASM-1", "41", { customfield_1: { id: "9" } });
+    await provider.changeStatus("PROJ-1");
+    expect(clientStub.transition).toHaveBeenLastCalledWith("PROJ-1", "41", { customfield_1: { id: "9" } });
   });
 
   it("falls back to the site resolution list when the screen declared no fields", async () => {
@@ -862,9 +862,9 @@ describe("changeStatus", () => {
       .mockResolvedValueOnce(undefined);
     answerPicks(pickFirst, { label: "Done" });
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.listResolutions).toHaveBeenCalled();
-    expect(clientStub.transition).toHaveBeenLastCalledWith("ASM-1", "41", { resolution: { id: "10000" } });
+    expect(clientStub.transition).toHaveBeenLastCalledWith("PROJ-1", "41", { resolution: { id: "10000" } });
   });
 
   it("reports a readable toast with an Open in Jira action when nothing can be re-prompted", async () => {
@@ -873,13 +873,13 @@ describe("changeStatus", () => {
     clientStub.transition.mockRejectedValue(apiError(["Transition is not valid"]));
     answerPicks(pickFirst);
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(1);
     expect(posted()).toContainEqual({
       type: "toast",
       level: "error",
-      message: "Couldn't update ASM-1. Transition is not valid.",
-      action: { label: "Open in Jira", url: "https://jira/browse/ASM-1" },
+      message: "Couldn't update PROJ-1. Transition is not valid.",
+      action: { label: "Open in Jira", url: "https://jira/browse/PROJ-1" },
     });
     expect(posted().some((p) => p.type === "statusChanged")).toBe(false);
   });
@@ -896,9 +896,9 @@ describe("changeStatus", () => {
     clientStub.transition.mockRejectedValue(apiError([], { customfield_1: "Field is required" }));
     answerPicks(pickFirst);
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(posted()).toContainEqual(
-      expect.objectContaining({ message: "Couldn't update ASM-1. Root Cause: Field is required." }),
+      expect.objectContaining({ message: "Couldn't update PROJ-1. Root Cause: Field is required." }),
     );
   });
 
@@ -907,7 +907,7 @@ describe("changeStatus", () => {
     clientStub.transition.mockRejectedValue(apiError(["Ticket cannot be closed unless Resolution will be provided"]));
     answerPicks(pickFirst, { label: "Done" }, { label: "Done" });
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(2);
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
@@ -929,17 +929,17 @@ describe("changeStatus", () => {
     clientStub.getTransitions.mockResolvedValue([t]);
     answerPicks(pickFirst);
     const { provider, logged } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(logged).toContain("changeStatus ASM-1: can't fill Description, Environment here — letting Jira decide");
+    await provider.changeStatus("PROJ-1");
+    expect(logged).toContain("changeStatus PROJ-1: can't fill Description, Environment here — letting Jira decide");
     // Still attempted, exactly as before: refusing to try would be the worse failure.
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "81", {});
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "81", {});
   });
 
   it("says nothing about unfillable fields when every field could be prompted", async () => {
     clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
     answerPicks(pickFirst, { label: "Done" });
     const { provider, logged } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(logged.some((l) => l.includes("can't fill"))).toBe(false);
   });
 
@@ -949,11 +949,11 @@ describe("changeStatus", () => {
     clientStub.transition.mockRejectedValue(apiError(["You do not have permission"]));
     answerPicks(pickFirst);
     const { provider, posted, logged } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     // 403-vs-400 is "you may not" vs "that was malformed"; the prose says neither.
-    expect(logged).toContain("changeStatus ASM-1: 400 — Couldn't update ASM-1. You do not have permission.");
+    expect(logged).toContain("changeStatus PROJ-1: 400 — Couldn't update PROJ-1. You do not have permission.");
     const toast = posted().find((m) => m.type === "toast" && m.level === "error") as { message: string };
-    expect(toast.message).toBe("Couldn't update ASM-1. You do not have permission.");
+    expect(toast.message).toBe("Couldn't update PROJ-1. You do not have permission.");
     expect(toast.message).not.toContain("400");
   });
 
@@ -962,7 +962,7 @@ describe("changeStatus", () => {
     clientStub.transition.mockRejectedValue(apiError(["Ticket cannot be closed unless Resolution will be provided"]));
     answerPicks(pickFirst, { label: "Done" }, undefined);
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(1);
     expect(posted().filter((p) => p.type === "toast")).toEqual([]);
   });
@@ -1003,7 +1003,7 @@ describe("failure routing", () => {
   it("leaves the list up when a write fails — toast only", async () => {
     clientStub.getTransitions.mockRejectedValue(new Error("Couldn't reach Jira"));
     const { send, posted } = setup();
-    await send({ type: "changeStatus", key: "ASM-1" });
+    await send({ type: "changeStatus", key: "PROJ-1" });
     expect(posted().some((p) => p.type === "error")).toBe(false);
     expect(posted()).toContainEqual({ type: "toast", level: "error", message: "Couldn't reach Jira" });
   });
@@ -1042,7 +1042,7 @@ describe("failure routing", () => {
   it("reports jira_write when changeStatus fails with a real Jira error (resolveOp, not the plain MESSAGE_OPS lookup)", async () => {
     clientStub.getTransitions.mockRejectedValueOnce(parseJiraError(500, JSON.stringify({ errorMessages: ["Jira exploded"] })));
     const { send } = setup();
-    await send({ type: "changeStatus", key: "ASM-1" });
+    await send({ type: "changeStatus", key: "PROJ-1" });
     const ev = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
     expect(ev).toBeDefined();
     expect(ev.op).toBe("jira_write");
@@ -1052,47 +1052,47 @@ describe("failure routing", () => {
 describe("detail", () => {
   it("reports the issue's components and the repo → component map for every repo", async () => {
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "Do the thing",
       descriptionText: "desc",
-      labels: ["centaur"],
+      labels: ["webapp"],
       components: ["account-service"],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { send, posted } = setup();
-    await send({ type: "detail", key: "ASM-1" });
+    await send({ type: "detail", key: "PROJ-1" });
     expect(posted()).toContainEqual({
       type: "detail",
-      key: "ASM-1",
+      key: "PROJ-1",
       descriptionText: "desc",
-      // account-service is confirmed by the ticket's component; the centaur label
+      // account-service is confirmed by the ticket's component; the webapp label
       // is only a guess, so it must not ride along as pre-selected.
       inferred: ["account-service"],
-      repos: ["account-service", "centaur"],
+      repos: ["account-service", "webapp"],
       sourceComponents: ["account-service"],
-      // "centaur" is a discovered repo but not a component of ASM → absent
+      // "webapp" is a discovered repo but not a component of PROJ → absent
       mappable: { "account-service": "account-service" },
     });
   });
 
   it("keeps label/text guesses in `inferred` when the ticket confirms no repo", async () => {
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "Do the thing",
       descriptionText: "desc",
-      labels: ["centaur"],
+      labels: ["webapp"],
       components: [],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { send, posted } = setup();
-    await send({ type: "detail", key: "ASM-1" });
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "ASM-1", inferred: ["centaur"] }));
+    await send({ type: "detail", key: "PROJ-1" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "PROJ-1", inferred: ["webapp"] }));
   });
 
   it("reads the issue before the component list, so a dead token still re-gates the panel", async () => {
     clientStub.getDetail.mockRejectedValue(new JiraAuthError("nope"));
     const { send, posted } = setup();
-    await send({ type: "detail", key: "ASM-1" });
+    await send({ type: "detail", key: "PROJ-1" });
     expect(clientStub.listComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false }));
   });
@@ -1100,8 +1100,8 @@ describe("detail", () => {
   it("reports every chip as local-only when the project defines no components", async () => {
     clientStub.listComponents.mockResolvedValue([]);
     const { send, posted } = setup();
-    await send({ type: "detail", key: "ASM-1" });
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "ASM-1", mappable: {} }));
+    await send({ type: "detail", key: "PROJ-1" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "PROJ-1", mappable: {} }));
   });
 
   // null is a distinct answer from "[]" — the read failed, not "this project has no
@@ -1109,8 +1109,8 @@ describe("detail", () => {
   it("reports mappable: null (not {}) when the component list could not be read", async () => {
     clientStub.listComponents.mockResolvedValue(null);
     const { send, posted } = setup();
-    await send({ type: "detail", key: "ASM-1" });
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "ASM-1", mappable: null }));
+    await send({ type: "detail", key: "PROJ-1" });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "detail", key: "PROJ-1", mappable: null }));
   });
 });
 
@@ -1118,49 +1118,49 @@ describe("setComponent", () => {
   it("adds the component under the project's spelling and echoes ok", async () => {
     clientStub.listComponents.mockResolvedValue(["Account-Service"]);
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
-    expect(clientStub.updateComponents).toHaveBeenCalledWith("ASM-1", { add: ["Account-Service"] });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.updateComponents).toHaveBeenCalledWith("PROJ-1", { add: ["Account-Service"] });
     expect(posted()).toContainEqual({
-      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: true, ok: true,
+      type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: true, movedChip: true, ok: true,
     });
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success", message: "Added Account-Service to ASM-1" }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success", message: "Added Account-Service to PROJ-1" }));
   });
 
   it("removes the component and echoes ok", async () => {
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: false, movedChip: true });
-    expect(clientStub.updateComponents).toHaveBeenCalledWith("ASM-1", { remove: ["account-service"] });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: false, movedChip: true });
+    expect(clientStub.updateComponents).toHaveBeenCalledWith("PROJ-1", { remove: ["account-service"] });
     expect(posted()).toContainEqual({
-      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: false, movedChip: true, ok: true,
+      type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: false, movedChip: true, ok: true,
     });
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success", message: "Removed account-service from ASM-1" }));
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "success", message: "Removed account-service from PROJ-1" }));
   });
 
   it("echoes movedChip: false back unchanged (a push leaves the chip where it is)", async () => {
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: false });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: false });
     expect(posted()).toContainEqual({
-      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: false, ok: true,
+      type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: true, movedChip: false, ok: true,
     });
   });
 
   it("stamps the provenance label", async () => {
     const { send } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
-    expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
+    expect(clientStub.addLabel).toHaveBeenCalledWith("PROJ-1", "claude-code");
   });
 
   it("skips the label stamp when stampLabelOnWrite is off", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, stampLabelOnWrite: false });
     const { send } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(clientStub.addLabel).not.toHaveBeenCalled();
   });
 
   it("still succeeds when the label stamp fails", async () => {
     clientStub.addLabel.mockRejectedValue(new Error("label 500"));
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: true }));
   });
 
@@ -1171,12 +1171,12 @@ describe("setComponent", () => {
   it("echoes ok: false with an actionable toast when Jira rejects the write", async () => {
     clientStub.updateComponents.mockRejectedValue(parseJiraError(400, JSON.stringify({ errorMessages: ["Component name is not valid"], errors: {} })));
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(posted()).toContainEqual({
-      type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: true, ok: false,
+      type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: true, movedChip: true, ok: false,
     });
     expect(posted()).toContainEqual(expect.objectContaining({
-      type: "toast", level: "error", action: { label: "Open in Jira", url: "https://jira/browse/ASM-1" },
+      type: "toast", level: "error", action: { label: "Open in Jira", url: "https://jira/browse/PROJ-1" },
     }));
     expect(clientStub.addLabel).not.toHaveBeenCalled();
   });
@@ -1186,7 +1186,7 @@ describe("setComponent", () => {
   it("echoes ok: false and re-gates the panel on an auth failure, posting no toast", async () => {
     clientStub.updateComponents.mockRejectedValue(new JiraAuthError("token dead"));
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false }));
     // Re-gating to the sign-in screen is itself the indication — a toast on top
@@ -1197,11 +1197,11 @@ describe("setComponent", () => {
   it("writes nothing and echoes ok: false when the project has no such component", async () => {
     clientStub.listComponents.mockResolvedValue(["Infra"]);
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "scratch-tool", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "scratch-tool", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({
-      type: "toast", level: "error", message: "ASM has no component named “scratch-tool”.",
+      type: "toast", level: "error", message: "PROJ has no component named “scratch-tool”.",
     }));
   });
 
@@ -1211,11 +1211,11 @@ describe("setComponent", () => {
   it("blames the repo, not the connection, when the project defines no components", async () => {
     clientStub.listComponents.mockResolvedValue([]);
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({
-      type: "toast", level: "error", message: "ASM has no component named “account-service”.",
+      type: "toast", level: "error", message: "PROJ has no component named “account-service”.",
     }));
   });
 
@@ -1224,18 +1224,18 @@ describe("setComponent", () => {
   it("blames the connection, not the repo, when the component list could not be read", async () => {
     clientStub.listComponents.mockResolvedValue(null);
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({
       type: "toast", level: "error",
-      message: "Couldn't read ASM's components from Jira. Check the connection and try again.",
+      message: "Couldn't read PROJ's components from Jira. Check the connection and try again.",
     }));
   });
 
   it("echoes ok: false and re-gates when not signed in, without touching Jira", async () => {
     const { send, posted } = setup({ authed: false });
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "componentsChanged", ok: false }));
     expect(posted()).toContainEqual(expect.objectContaining({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: false }));
@@ -1247,10 +1247,10 @@ describe("setComponent", () => {
   it("posts exactly one ok:false componentsChanged when auth itself rejects", async () => {
     const { send, posted, auth } = setup();
     vi.mocked(auth.isAuthenticated).mockRejectedValue(new Error("keychain locked"));
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(clientStub.updateComponents).not.toHaveBeenCalled();
     expect(posted().filter((p) => p.type === "componentsChanged")).toEqual([
-      { type: "componentsChanged", key: "ASM-1", repo: "account-service", on: true, movedChip: true, ok: false },
+      { type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: true, movedChip: true, ok: false },
     ]);
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error", message: "keychain locked" }));
   });
@@ -1259,7 +1259,7 @@ describe("setComponent", () => {
   // exactly once, not merely at least once.
   it("posts exactly one componentsChanged on an ordinary successful call", async () => {
     const { send, posted } = setup();
-    await send({ type: "setComponent", key: "ASM-1", repo: "account-service", on: true, movedChip: true });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: true });
     expect(posted().filter((p) => p.type === "componentsChanged")).toHaveLength(1);
   });
 });
@@ -1268,7 +1268,7 @@ describe("addToMySprint", () => {
   it("errors when the account cannot be resolved", async () => {
     clientStub.getMyself.mockResolvedValue(null);
     const { provider, posted } = setup();
-    await provider.addToMySprint("ASM-1");
+    await provider.addToMySprint("PROJ-1");
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     expect(clientStub.addIssueToSprint).not.toHaveBeenCalled();
   });
@@ -1279,7 +1279,7 @@ describe("addToMySprint", () => {
     // toast rather than add to the sprint and then fail the assignment.
     clientStub.getMyself.mockResolvedValue({ accountId: "", displayName: "Jane" });
     const { provider, posted } = setup();
-    await provider.addToMySprint("ASM-1");
+    await provider.addToMySprint("PROJ-1");
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     expect(clientStub.addIssueToSprint).not.toHaveBeenCalled();
     expect(clientStub.assignIssue).not.toHaveBeenCalled();
@@ -1288,7 +1288,7 @@ describe("addToMySprint", () => {
   it("errors when there is no active sprint", async () => {
     clientStub.getActiveSprintId.mockResolvedValue(null);
     const { provider, posted } = setup();
-    await provider.addToMySprint("ASM-1");
+    await provider.addToMySprint("PROJ-1");
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     expect(clientStub.addIssueToSprint).not.toHaveBeenCalled();
   });
@@ -1296,42 +1296,42 @@ describe("addToMySprint", () => {
   it("adds to sprint, assigns, stamps the label, and reports removal from unassigned", async () => {
     const { provider, posted, send } = setup();
     await send({ type: "fetch", filter: "unassigned", size: "any" }); // lastFilter = unassigned
-    await provider.addToMySprint("ASM-1");
-    expect(clientStub.addIssueToSprint).toHaveBeenCalledWith(42, "ASM-1");
-    expect(clientStub.assignIssue).toHaveBeenCalledWith("ASM-1", "a1");
+    await provider.addToMySprint("PROJ-1");
+    expect(clientStub.addIssueToSprint).toHaveBeenCalledWith(42, "PROJ-1");
+    expect(clientStub.assignIssue).toHaveBeenCalledWith("PROJ-1", "a1");
     // ONE identity lookup for the pair, not one per write. Two would not merely cost a
     // request: a second lookup answering null after the sprint-add succeeded would
     // throw, leaving the task in the sprint and unassigned — a state one lookup makes
     // unreachable.
     expect(clientStub.getMyself).toHaveBeenCalledTimes(1);
-    expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
-    expect(posted()).toContainEqual({ type: "movedToSprint", key: "ASM-1", assignee: "Jane", removed: true });
+    expect(clientStub.addLabel).toHaveBeenCalledWith("PROJ-1", "claude-code");
+    expect(posted()).toContainEqual({ type: "movedToSprint", key: "PROJ-1", assignee: "Jane", removed: true });
   });
 });
 
 describe("removeFromSprint", () => {
   it("moves to backlog, stamps the label, prunes saved order, and posts removedFromSprint", async () => {
     const { provider, posted, workspaceState } = setup({
-      workspaceState: { "agentFlow.sprintOrder": ["ASM-1", "ASM-2"] },
+      workspaceState: { "agentFlow.sprintOrder": ["PROJ-1", "PROJ-2"] },
     });
-    await provider.removeFromSprint("ASM-1", "any");
-    expect(clientStub.removeIssueFromSprint).toHaveBeenCalledWith("ASM-1");
-    expect(clientStub.addLabel).toHaveBeenCalledWith("ASM-1", "claude-code");
-    expect(workspaceState.update).toHaveBeenCalledWith("agentFlow.sprintOrder", ["ASM-2"]);
-    expect(posted()).toContainEqual({ type: "removedFromSprint", key: "ASM-1" });
+    await provider.removeFromSprint("PROJ-1", "any");
+    expect(clientStub.removeIssueFromSprint).toHaveBeenCalledWith("PROJ-1");
+    expect(clientStub.addLabel).toHaveBeenCalledWith("PROJ-1", "claude-code");
+    expect(workspaceState.update).toHaveBeenCalledWith("agentFlow.sprintOrder", ["PROJ-2"]);
+    expect(posted()).toContainEqual({ type: "removedFromSprint", key: "PROJ-1" });
   });
 
   it("skips the label stamp when stampLabelOnWrite is off", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, stampLabelOnWrite: false });
     const { provider } = setup();
-    await provider.removeFromSprint("ASM-1", "any");
+    await provider.removeFromSprint("PROJ-1", "any");
     expect(clientStub.addLabel).not.toHaveBeenCalled();
   });
 
   it("does not remove the card when the backlog write fails", async () => {
     clientStub.removeIssueFromSprint.mockRejectedValue(new Error("boom"));
     const { send, posted } = setup();
-    await send({ type: "removeFromSprint", key: "ASM-1", size: "any" });
+    await send({ type: "removeFromSprint", key: "PROJ-1", size: "any" });
     expect(posted()).not.toContainEqual(expect.objectContaining({ type: "removedFromSprint" }));
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
@@ -1339,9 +1339,9 @@ describe("removeFromSprint", () => {
   it("re-adds to the active sprint and refetches when Undo is chosen", async () => {
     vi.mocked(window.showInformationMessage).mockResolvedValue("Undo");
     const { provider, posted } = setup();
-    await provider.removeFromSprint("ASM-1", "any");
+    await provider.removeFromSprint("PROJ-1", "any");
     expect(clientStub.getActiveSprintId).toHaveBeenCalled();
-    expect(clientStub.addIssueToSprint).toHaveBeenCalledWith(42, "ASM-1");
+    expect(clientStub.addIssueToSprint).toHaveBeenCalledWith(42, "PROJ-1");
     expect(posted()).toContainEqual(expect.objectContaining({ type: "tasks", filter: "mysprint" }));
   });
 });
@@ -1349,7 +1349,7 @@ describe("removeFromSprint", () => {
 describe("explore", () => {
   it("prompts for an action when exploreMode is 'ask' and seeds the chosen action's prompt", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
-    const repos = mkRepos(["account-service", "centaur"]);
+    const repos = mkRepos(["account-service", "webapp"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("retry logic");
     vi.mocked(window.showQuickPick)
@@ -1431,7 +1431,7 @@ describe("explore", () => {
 
   it("asks for an environment and fills {env} and {services} for the verify action", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
-    const repos = mkRepos(["account-service", "centaur"]);
+    const repos = mkRepos(["account-service", "webapp"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
     vi.mocked(window.showQuickPick)
@@ -1441,7 +1441,7 @@ describe("explore", () => {
     await send({ type: "explore" });
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
-        promptTemplate: "VER {summary} on staging for account-service, centaur{files}",
+        promptTemplate: "VER {summary} on staging for account-service, webapp{files}",
         ticket: expect.objectContaining({ key: "verify-staging-retry-banner", summary: "retry banner on staging" }),
       }),
     );
@@ -1641,9 +1641,9 @@ describe("explore", () => {
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(readRuns).mockReturnValue([
       {
-        key: "ASM-9",
+        key: "PROJ-9",
         summary: "Fix retry bug",
-        url: "https://jira/ASM-9",
+        url: "https://jira/PROJ-9",
         createdAt: 1,
         mode: "per-window",
         repos: [{ name: "svc", path: "/repos/svc", isGit: true, branch: "fix/retry" }],
@@ -1659,7 +1659,7 @@ describe("explore", () => {
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
         planMd: expect.stringContaining(
-          "- **ASM-9** (task) — Fix retry bug — `/repos/svc` (branch: fix/retry) — idle, no session attached",
+          "- **PROJ-9** (task) — Fix retry bug — `/repos/svc` (branch: fix/retry) — idle, no session attached",
         ),
       }),
     );
@@ -1757,7 +1757,7 @@ describe("error handling", () => {
     clientStub.fetchTasks.mockRejectedValue(new JiraAuthError("expired"));
     const { send, posted } = setup();
     await send({ type: "fetch", filter: "mine", size: "any" });
-    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "ASM", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
+    expect(posted()).toContainEqual({ type: "state", sourceLabel: "Jira", agentLabel: "Claude Code", caps: JIRA_CAPS, authed: false, configured: true, project: "PROJ", me: null, prReviewStatus: "PR initiated", filters: { size: true, status: true, repo: true, search: true }, liveCount: 0 });
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
     expect(posted()).toContainEqual({ type: "loading", loading: false });
     // Auth errors re-gate (no persistent error banner — the sign-in screen is the cue).
@@ -1778,10 +1778,10 @@ describe("error handling", () => {
 describe("takeTask", () => {
   it("opens the workspace for a preselected repo and toasts success", async () => {
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
-        ticket: expect.objectContaining({ key: "ASM-1" }),
+        ticket: expect.objectContaining({ key: "PROJ-1" }),
         promptTemplate: "P {key}",
         services: [expect.objectContaining({ name: "account-service" })],
       }),
@@ -1791,7 +1791,7 @@ describe("takeTask", () => {
 
   it("still says Claude Code pre-seeded by default", async () => {
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(posted()).toContainEqual(
       expect.objectContaining({
         type: "toast", level: "success",
@@ -1806,7 +1806,7 @@ describe("takeTask", () => {
     // pre-seeded". It has to be a product name.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(posted()).toContainEqual(
       expect.objectContaining({
         type: "toast", level: "success",
@@ -1818,7 +1818,7 @@ describe("takeTask", () => {
   it("names Copilot in the pre-seeded toast", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "copilot" });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(posted()).toContainEqual(
       expect.objectContaining({
         type: "toast", level: "success",
@@ -1830,7 +1830,7 @@ describe("takeTask", () => {
   it("errors when no repos are checked out", async () => {
     vi.mocked(discoverRepos).mockReturnValue([]);
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
@@ -1838,37 +1838,37 @@ describe("takeTask", () => {
   it("aborts when sign-in is declined", async () => {
     vi.mocked(commands.executeCommand).mockResolvedValue(false);
     const { provider } = setup({ authed: false });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 
   it("confirms repos via QuickPick when none are preselected", async () => {
-    const repos = mkRepos(["account-service", "centaur"]);
+    const repos = mkRepos(["account-service", "webapp"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "command");
+    await provider.takeTask("PROJ-1", "command");
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ services: [repos[0]] }));
   });
 
   it("lists the pre-checked repos first, keeping discovery order within each group", async () => {
-    const repos = mkRepos(["aardvark-service", "billing-service", "centaur", "delta-service"]);
+    const repos = mkRepos(["aardvark-service", "billing-service", "webapp", "delta-service"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "Do the thing",
       descriptionText: "desc",
       labels: ["billing-service"],
       components: ["delta-service"],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[1] }] as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "command");
+    await provider.takeTask("PROJ-1", "command");
     const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string; picked: boolean }[];
     // Inference order would put delta-service (component) ahead of billing-service
     // (label); the partition keeps discovery order inside each group instead.
-    expect(items.map((i) => i.label)).toEqual(["billing-service", "delta-service", "aardvark-service", "centaur"]);
+    expect(items.map((i) => i.label)).toEqual(["billing-service", "delta-service", "aardvark-service", "webapp"]);
     // Only delta-service is confirmed on the ticket; the billing-service label is a
     // guess — listed with the inferred group, but not pre-checked.
     expect(items.map((i) => i.picked)).toEqual([false, true, false, false]);
@@ -1877,7 +1877,7 @@ describe("takeTask", () => {
   it("aborts when the repo QuickPick is cancelled", async () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "command");
+    await provider.takeTask("PROJ-1", "command");
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 
@@ -1885,7 +1885,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: CFG.promptModes[0] } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ promptTemplate: "P {key}" }));
   });
 
@@ -1897,7 +1897,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask", promptModes: modes });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: modes[0] } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
     const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string; detail?: string }[];
     expect(items.map((i) => ({ label: i.label, detail: i.detail }))).toEqual([
@@ -1911,7 +1911,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask", promptModes: modes });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: modes[0] } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
     const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { detail?: string }[];
     expect(items[0].detail).toBeUndefined();
@@ -1921,7 +1921,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel the prompt-mode pick
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(clientStub.getDetail).not.toHaveBeenCalled(); // aborted before resolveKickoff read the ticket
     expect(openWorkspace).not.toHaveBeenCalled();
   });
@@ -1929,7 +1929,7 @@ describe("takeTask", () => {
   it("creates worktrees when worktree=always", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "always" });
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(createWorktrees).toHaveBeenCalled();
   });
 
@@ -1937,7 +1937,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(createWorktrees).toHaveBeenCalled();
   });
 
@@ -1945,7 +1945,7 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ mode: "multiroot" } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service", "webapp"]);
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "multiroot" }));
   });
 
@@ -1953,14 +1953,14 @@ describe("takeTask", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "multiroot" });
     vi.mocked(openWorkspace).mockResolvedValue({
       mode: "multiroot",
-      workspaceFile: "/ws/ASM-1.code-workspace",
+      workspaceFile: "/ws/PROJ-1.code-workspace",
       briefs: [],
-      opened: ["/ws/ASM-1.code-workspace"],
+      opened: ["/ws/PROJ-1.code-workspace"],
       remoteControl: false,
       provider: "claude-code",
     });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service", "webapp"]);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).toContain(".code-workspace");
   });
@@ -1971,7 +1971,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(listWorkspaceFiles).not.toHaveBeenCalled();
       expect(openWorkspace).toHaveBeenCalledWith(
@@ -1984,7 +1984,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).not.toHaveBeenCalled();
     });
@@ -2001,7 +2001,7 @@ describe("takeTask", () => {
         .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(listWorkspaceFiles).toHaveBeenCalledWith("/ws");
       expect(openWorkspace).toHaveBeenCalledWith(
@@ -2023,7 +2023,7 @@ describe("takeTask", () => {
       ] as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ existingWorkspaceFile: "/elsewhere/x.code-workspace" }),
@@ -2035,7 +2035,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).not.toHaveBeenCalled();
     });
@@ -2046,7 +2046,7 @@ describe("takeTask", () => {
       vi.mocked(window.showOpenDialog).mockResolvedValueOnce(undefined);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).not.toHaveBeenCalled();
     });
@@ -2062,7 +2062,7 @@ describe("takeTask", () => {
       });
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ openIn: "current", existingWorkspaceFile: undefined }),
@@ -2081,7 +2081,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel; we only inspect the items
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string; detail: string }[];
       const item = items.find((i) => i.label.includes("This window"));
@@ -2096,7 +2096,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string }[];
       expect(items.some((i) => i.label.includes("This window"))).toBe(false);
@@ -2107,7 +2107,7 @@ describe("takeTask", () => {
       vi.mocked(currentWindow).mockReturnValue(HERE);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ openIn: "current", currentWindow: HERE, mode: "per-window" }),
@@ -2123,7 +2123,7 @@ describe("takeTask", () => {
       });
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "multiroot" }));
     });
@@ -2133,7 +2133,7 @@ describe("takeTask", () => {
       vi.mocked(currentWindow).mockReturnValue(undefined);
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ openIn: "new" }));
       expect(posted()).toContainEqual(
@@ -2156,7 +2156,7 @@ describe("takeTask", () => {
       vi.mocked(currentWindow).mockReturnValueOnce(HERE).mockReturnValue(undefined);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).not.toHaveBeenCalled();
     });
@@ -2173,7 +2173,7 @@ describe("takeTask", () => {
       } as never);
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(posted()).toContainEqual(
         expect.objectContaining({ type: "toast", level: "success", message: expect.stringContaining("in this window") }),
@@ -2195,7 +2195,7 @@ describe("takeTask", () => {
       } as never);
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
       expect(toast.message).toContain("Opened nothing");
@@ -2220,7 +2220,7 @@ describe("takeTask", () => {
       });
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
       expect(toast.level).toBe("info");
@@ -2244,7 +2244,7 @@ describe("takeTask", () => {
       });
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
       expect(toast.level).toBe("success");
@@ -2263,7 +2263,7 @@ describe("takeTask", () => {
       pickExisting();
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
-        duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+        duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-1" }],
         redundant: [],
         present: [],
         ok: true,
@@ -2271,7 +2271,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       // Exactly one quick-pick fired: the workspace-file picker. No add-prompt.
       expect(window.showQuickPick).toHaveBeenCalledTimes(1);
@@ -2289,14 +2289,14 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       // `repoName` stays bare: it drives the dedup and the prompt copy, not the row.
       expect(planWorkspaceMerge).toHaveBeenCalledWith("/ws/team.code-workspace", [
         {
-          label: "account-service-ASM-1",
+          label: "account-service-PROJ-1",
           repoName: "account-service",
-          path: "/repos/account-service/.claude/worktrees/ASM-1",
+          path: "/repos/account-service/.claude/worktrees/PROJ-1",
         },
       ]);
     });
@@ -2315,7 +2315,7 @@ describe("takeTask", () => {
         .mockResolvedValueOnce({ yes: true } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ foldersToAdd: [{ name: "infra", path: "/repos/infra" }] }),
@@ -2336,7 +2336,7 @@ describe("takeTask", () => {
         .mockResolvedValueOnce({ yes: false } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
     });
@@ -2363,7 +2363,7 @@ describe("takeTask", () => {
       });
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast") as { message: string };
       expect(toast.message).toContain("Left team.code-workspace unchanged.");
@@ -2391,7 +2391,7 @@ describe("takeTask", () => {
       });
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast") as { message: string };
       expect(toast.message).not.toContain("unchanged");
@@ -2412,7 +2412,7 @@ describe("takeTask", () => {
         .mockResolvedValueOnce(undefined as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(openWorkspace).toHaveBeenCalled();
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
@@ -2424,7 +2424,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       expect(window.showQuickPick).toHaveBeenCalledTimes(1);
       expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
@@ -2434,7 +2434,7 @@ describe("takeTask", () => {
       pickExisting();
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
-        duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+        duplicates: [{ label: "account-service", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-1" }],
         redundant: [],
         present: [],
         ok: true,
@@ -2450,7 +2450,7 @@ describe("takeTask", () => {
       });
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
       expect(toast.level).toBe("success");
@@ -2461,7 +2461,7 @@ describe("takeTask", () => {
     it("passes no foldersToAdd for a new-window destination", async () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
       expect(planWorkspaceMerge).not.toHaveBeenCalled();
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({ existingWorkspaceFile: undefined, foldersToAdd: [] }),
@@ -2485,7 +2485,7 @@ describe("takeTask", () => {
         .mockResolvedValueOnce({ yes: true } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const addPrompt = vi.mocked(window.showQuickPick).mock.calls[1];
       expect((addPrompt[1] as { title: string }).title).toBe("Add 2 folders to team.code-workspace?");
@@ -2505,8 +2505,8 @@ describe("takeTask", () => {
       vi.mocked(planWorkspaceMerge).mockReturnValue({
         add: [],
         duplicates: [
-          { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/ASM-1" },
-          { label: "web", repoName: "web", path: "/repos/web/.claude/worktrees/ASM-1" },
+          { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/PROJ-1" },
+          { label: "web", repoName: "web", path: "/repos/web/.claude/worktrees/PROJ-1" },
         ],
         redundant: [],
         present: [],
@@ -2523,7 +2523,7 @@ describe("takeTask", () => {
       });
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
       const toast = posted().find((m) => m.type === "toast") as { message: string };
       expect(toast.message).toContain("api, web already in the workspace");
@@ -2533,7 +2533,7 @@ describe("takeTask", () => {
   describe("destinations that already have folders skip the repo picker", () => {
     it("uses the existing workspace's repos and never shows the service pick", async () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
-      vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
+      vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/webapp"]);
       vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
       // Destination picks only: open-target pick → workspace-file pick. No service pick follows.
       vi.mocked(window.showQuickPick)
@@ -2541,13 +2541,13 @@ describe("takeTask", () => {
         .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "command"); // no preselected repos
+      await provider.takeTask("PROJ-1", "command"); // no preselected repos
 
       expect(window.showQuickPick).toHaveBeenCalledTimes(2); // no third (service) pick
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({
           existingWorkspaceFile: "/ws/team.code-workspace",
-          services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+          services: [expect.objectContaining({ name: "webapp", path: "/repos/webapp" })],
         }),
       );
     });
@@ -2559,7 +2559,7 @@ describe("takeTask", () => {
       );
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "command"); // no preselected repos
+      await provider.takeTask("PROJ-1", "command"); // no preselected repos
 
       expect(window.showQuickPick).toHaveBeenCalledTimes(1); // destination pick only
       expect(openWorkspace).toHaveBeenCalledWith(
@@ -2572,14 +2572,14 @@ describe("takeTask", () => {
 
     it("honors an in-card preselection over the existing workspace's repos", async () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
-      vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
+      vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/webapp"]);
       vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
       vi.mocked(window.showQuickPick)
         .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
         .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never);
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]); // preselected wins
+      await provider.takeTask("PROJ-1", "card", ["account-service"]); // preselected wins
 
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({
@@ -2594,19 +2594,19 @@ describe("takeTask", () => {
     it("uses this window's folders and never shows the repo confirm pick", async () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
       vi.mocked(currentWindow).mockReturnValue({
-        identity: "/repos/centaur",
+        identity: "/repos/webapp",
         kind: "folder",
-        roots: [{ name: "centaur", path: "/repos/centaur" }],
+        roots: [{ name: "webapp", path: "/repos/webapp" }],
       });
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "command"); // no preselected repos
+      await provider.takeTask("PROJ-1", "command"); // no preselected repos
 
       expect(window.showQuickPick).not.toHaveBeenCalled();
       expect(openWorkspace).toHaveBeenCalledWith(
         expect.objectContaining({
           openIn: "current",
-          services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+          services: [expect.objectContaining({ name: "webapp", path: "/repos/webapp" })],
         }),
       );
     });
@@ -2617,16 +2617,16 @@ describe("takeTask", () => {
         identity: "/ws/team.code-workspace",
         kind: "workspace",
         roots: [
-          { name: "centaur", path: "/repos/centaur" },
+          { name: "webapp", path: "/repos/webapp" },
           { name: "account-service", path: "/repos/account-service" },
         ],
       });
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "command");
+      await provider.takeTask("PROJ-1", "command");
 
       const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
-      expect(services.map((s) => s.path)).toEqual(["/repos/centaur", "/repos/account-service"]);
+      expect(services.map((s) => s.path)).toEqual(["/repos/webapp", "/repos/account-service"]);
     });
 
     // The two currentWindow() reads aren't atomic (see the race test above). Losing the
@@ -2635,15 +2635,15 @@ describe("takeTask", () => {
     it("falls back to the confirm pick when this window loses its folders after the pick", async () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window" });
       vi.mocked(currentWindow)
-        .mockReturnValueOnce({ identity: "/repos/centaur", kind: "folder", roots: [{ name: "centaur", path: "/repos/centaur" }] })
+        .mockReturnValueOnce({ identity: "/repos/webapp", kind: "folder", roots: [{ name: "webapp", path: "/repos/webapp" }] })
         .mockReturnValue(undefined);
       vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel the confirm pick
 
       const { provider } = setup();
-      await provider.takeTask("ASM-1", "command");
+      await provider.takeTask("PROJ-1", "command");
 
       expect(vi.mocked(window.showQuickPick).mock.calls[0][1]).toEqual(
-        expect.objectContaining({ title: "ASM-1 — confirm the repos this task touches" }),
+        expect.objectContaining({ title: "PROJ-1 — confirm the repos this task touches" }),
       );
       expect(openWorkspace).not.toHaveBeenCalled();
     });
@@ -2655,7 +2655,7 @@ describe("takeTask", () => {
       vi.mocked(window.showQuickPick).mockResolvedValueOnce({ file: "/ws/empty.code-workspace" } as never);
 
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "command"); // no preselected repos
+      await provider.takeTask("PROJ-1", "command"); // no preselected repos
 
       expect(openWorkspace).not.toHaveBeenCalled();
       expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
@@ -2665,7 +2665,7 @@ describe("takeTask", () => {
 
 describe("Take funnel", () => {
   /** Drives a Take to a successful launch using a realistic ticket key and repo
-   * name (not the generic "ASM-1"/"account-service" this file uses elsewhere) so
+   * name (not the generic "PROJ-1"/"account-service" this file uses elsewhere) so
    * the leak test below has something concrete to check for. Default CFG (openIn
    * "new-window" → target "new", worktree "never", taskMode "plan" → a configured
    * mode, no picker) means the only QuickPick in play is the repo-confirm one —
@@ -2842,11 +2842,11 @@ describe("Take funnel", () => {
 
   it("reports cancelled (not launched) when the workspace-mode picker inside launch() is cancelled (workspaceMode 'ask', 2+ repos, new window)", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "ask" });
-    const repos = mkRepos(["acme-billing", "centaur"]);
+    const repos = mkRepos(["acme-billing", "webapp"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel launch()'s workspace-mode picker
     const { provider } = setup();
-    await provider.takeTask("BILL-1234", "card", ["acme-billing", "centaur"]);
+    await provider.takeTask("BILL-1234", "card", ["acme-billing", "webapp"]);
     expect(openWorkspace).not.toHaveBeenCalled();
     const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
     expect(done.outcome).toBe("cancelled");
@@ -2894,13 +2894,13 @@ describe("Take funnel", () => {
   });
 
   it("pre-checks only ticket-confirmed repos in the confirm QuickPick; a label guess stays listed unchecked", async () => {
-    const repos = mkRepos(["acme-billing", "centaur"]);
+    const repos = mkRepos(["acme-billing", "webapp"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     clientStub.getDetail.mockResolvedValue({
       key: "BILL-1234",
       summary: "Fix the billing thing",
       descriptionText: "desc",
-      labels: ["centaur"], // a guess — must not be pre-checked
+      labels: ["webapp"], // a guess — must not be pre-checked
       components: ["acme-billing"], // confirmed on the ticket
       url: "https://jira/browse/BILL-1234",
     });
@@ -2913,9 +2913,9 @@ describe("Take funnel", () => {
     const items = (await call[0]) as { label: string; picked: boolean; description: string }[];
     const byLabel = new Map(items.map((i) => [i.label, i]));
     expect(byLabel.get("acme-billing")!.picked).toBe(true);
-    expect(byLabel.get("centaur")!.picked).toBe(false);
+    expect(byLabel.get("webapp")!.picked).toBe(false);
     // Still surfaced as a suggestion — just not attached without a say-so.
-    expect(byLabel.get("centaur")!.description).toBe("inferred (label)");
+    expect(byLabel.get("webapp")!.description).toBe("inferred (label)");
     // Accepting the pre-checked set as-is counts as accepting the inference.
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
     expect(picked.inferred_count).toBe(1);
@@ -2923,7 +2923,7 @@ describe("Take funnel", () => {
   });
 
   it("marks accepted_inference false when the confirmed repo count differs from inference", async () => {
-    const repos = mkRepos(["acme-billing", "centaur"]);
+    const repos = mkRepos(["acme-billing", "webapp"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     clientStub.getDetail.mockResolvedValue({
       key: "BILL-1234",
@@ -2943,8 +2943,8 @@ describe("Take funnel", () => {
     expect(picked.accepted_inference).toBe(false);
   });
 
-  it("marks accepted_inference false on a same-count swap (inferred acme-billing, user picks centaur instead)", async () => {
-    const repos = mkRepos(["acme-billing", "centaur"]);
+  it("marks accepted_inference false on a same-count swap (inferred acme-billing, user picks webapp instead)", async () => {
+    const repos = mkRepos(["acme-billing", "webapp"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     clientStub.getDetail.mockResolvedValue({
       key: "BILL-1234",
@@ -2954,7 +2954,7 @@ describe("Take funnel", () => {
       components: ["acme-billing"], // inference proposes acme-billing only
       url: "https://jira/browse/BILL-1234",
     });
-    // Confirms centaur instead — same count (1) as inferred, but a different repo.
+    // Confirms webapp instead — same count (1) as inferred, but a different repo.
     // A count-only comparison would (wrongly) call this "accepted".
     vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[1] }] as never);
     const { provider } = setup();
@@ -3079,10 +3079,10 @@ describe("Take funnel", () => {
   });
 
   it("reports take_repos_picked and take_completed with the real repo_count", async () => {
-    const repos = mkRepos(["acme-billing", "centaur"]);
+    const repos = mkRepos(["acme-billing", "webapp"]);
     vi.mocked(discoverRepos).mockReturnValue(repos);
     const { provider } = setup();
-    await provider.takeTask("BILL-1234", "card", ["acme-billing", "centaur"]);
+    await provider.takeTask("BILL-1234", "card", ["acme-billing", "webapp"]);
     const picked = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_repos_picked") as any;
     const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
     expect(picked.repo_count).toBe(2);
@@ -3098,7 +3098,7 @@ describe("Take funnel", () => {
 });
 
 describe("takeBatch", () => {
-  const twoKeys = ["ASM-1", "ASM-2"];
+  const twoKeys = ["PROJ-1", "PROJ-2"];
 
   // With the worktree-fallback guard in place, a *successful* worktree must return a
   // path different from the main checkout. Simulate that here; restore the identity
@@ -3132,7 +3132,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]); // 2 > 1 → confirm
+    await provider.takeBatch(["PROJ-1", "PROJ-2"], ["api"]); // 2 > 1 → confirm
     expect(window.showWarningMessage).toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(2);
   });
@@ -3142,7 +3142,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]); // 2 > 1 → confirm
+    await provider.takeBatch(["PROJ-1", "PROJ-2"], ["api"]); // 2 > 1 → confirm
     expect(window.showWarningMessage).toHaveBeenCalledWith(
       "Launch 2 tasks in parallel? That's 2 Claude Code sessions.",
       { modal: true },
@@ -3155,7 +3155,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]); // 2 > 1 → confirm
+    await provider.takeBatch(["PROJ-1", "PROJ-2"], ["api"]); // 2 > 1 → confirm
     expect(window.showWarningMessage).toHaveBeenCalledWith(
       "Launch 2 tasks in parallel? That's 2 Copilot sessions.",
       { modal: true },
@@ -3217,7 +3217,7 @@ describe("takeBatch", () => {
     });
     pickCursorAgent();
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(agentPicks()).toHaveLength(1);
     expect(agentPicks()[0][1]).toEqual({
       title: "Which tool?",
@@ -3251,7 +3251,7 @@ describe("takeBatch", () => {
       remoteControl: false, provider: "cursor",
     });
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(agentPicks()).toHaveLength(0); // nothing asked up front — openWorkspace asks
     expect(vi.mocked(openWorkspace).mock.calls[0][0].planMd).toContain("Claude Code");
   });
@@ -3331,7 +3331,7 @@ describe("takeBatch", () => {
       provider: "claude-code", cancelled: true,
     });
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     // It really did reach the launch — otherwise this would pass for a batch that
     // bailed out somewhere earlier and never exercised the guard at all.
     expect(openWorkspace).toHaveBeenCalledTimes(1);
@@ -3345,7 +3345,7 @@ describe("takeBatch", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(agentPicks()).toHaveLength(0);
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect("provider" in vi.mocked(openWorkspace).mock.calls[0][0]).toBe(false);
@@ -3367,7 +3367,7 @@ describe("takeBatch", () => {
     });
     pickCursorAgent();
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(agentPicks()).toHaveLength(1);
     expect(openSharedWorkspace).toHaveBeenCalledWith(expect.objectContaining({ provider: "cursor" }));
   });
@@ -3387,7 +3387,7 @@ describe("takeBatch", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(createWorktrees).mockImplementation((s) => s); // fallback: path stays === repoRef.path
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(openWorkspace).not.toHaveBeenCalled();
     const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
     expect(toast.level).toBe("error");
@@ -3397,19 +3397,19 @@ describe("takeBatch", () => {
   it("names the repo whose worktree fell back, so a multi-repo task's failure is actionable", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "nothing recognisable here",
       descriptionText: "",
       labels: [],
       components: [],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     // billing gets its worktree; payments falls back to the main checkout.
     vi.mocked(createWorktrees).mockImplementation((s, key) =>
       s.map((r) => (r.name === "payments" ? r : { ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    await provider.takeBatch(["PROJ-1"], ["billing", "payments"]);
     expect(openWorkspace).not.toHaveBeenCalled();
     const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
     expect(toast.message).toContain("payments");
@@ -3429,7 +3429,7 @@ describe("takeBatch", () => {
   it("uses the configured task prompt mode without prompting", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]); // CFG.taskMode = "plan" is a known mode
+    await provider.takeBatch(["PROJ-1"], ["api"]); // CFG.taskMode = "plan" is a known mode
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ promptTemplate: "P {key}" }));
   });
@@ -3461,7 +3461,7 @@ describe("takeBatch", () => {
       { name: "docs", path: "/repos/docs", isGit: false },
     ]);
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api", "docs"]);
+    await provider.takeBatch(["PROJ-1"], ["api", "docs"]);
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(vi.mocked(createWorktrees).mock.calls[0][0]).toEqual([expect.objectContaining({ name: "api" })]);
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "info" }));
@@ -3470,7 +3470,7 @@ describe("takeBatch", () => {
   it("drops a name absent from the discovered repos and launches on the rest", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api", "ghost"]);
+    await provider.takeBatch(["PROJ-1"], ["api", "ghost"]);
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(vi.mocked(createWorktrees).mock.calls[0][0]).toEqual([expect.objectContaining({ name: "api" })]);
     const toast = posted().find((m) => m.type === "toast" && m.level === "info") as { message: string };
@@ -3480,7 +3480,7 @@ describe("takeBatch", () => {
   it("errors when no selected repo resolves to a git repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"], { isGit: false }));
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
@@ -3512,7 +3512,7 @@ describe("takeBatch", () => {
   it("routes the takeBatch message through onMessage to the handler", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { send } = setup();
-    await send({ type: "takeBatch", keys: ["ASM-1"], repos: ["api"] });
+    await send({ type: "takeBatch", keys: ["PROJ-1"], repos: ["api"] });
     expect(openWorkspace).toHaveBeenCalled();
   });
 
@@ -3524,15 +3524,15 @@ describe("takeBatch", () => {
     // src/engine/infer.ts), so keep names 5+ chars.
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "fix the billing flow",
       descriptionText: "desc",
       labels: [],
       components: [],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    await provider.takeBatch(["PROJ-1"], ["billing", "payments"]);
     const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
     expect(picked).toEqual(["billing"]); // payments is in the filter set but not inferred — excluded
   });
@@ -3540,15 +3540,15 @@ describe("takeBatch", () => {
   it("narrows a batched task to its ticket-confirmed repos, dropping text guesses", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "fix the payments flow", // payments is only a text guess
       descriptionText: "desc",
       labels: [],
       components: ["billing"], // billing is confirmed on the ticket
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    await provider.takeBatch(["PROJ-1"], ["billing", "payments"]);
     const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
     expect(picked).toEqual(["billing"]);
   });
@@ -3556,15 +3556,15 @@ describe("takeBatch", () => {
   it("falls back to the whole filter set when a task infers no repo in it", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing"]));
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "nothing recognisable here",
       descriptionText: "",
       labels: [],
       components: [],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["api", "billing"]);
+    await provider.takeBatch(["PROJ-1"], ["api", "billing"]);
     const picked = vi.mocked(createWorktrees).mock.calls[0][0].map((r) => r.name);
     expect(picked.sort()).toEqual(["api", "billing"]);
   });
@@ -3575,15 +3575,15 @@ describe("takeBatch", () => {
   it("gives a multi-repo task ONE multi-root window, not one window per repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "nothing recognisable here",
       descriptionText: "",
       labels: [],
       components: [],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    await provider.takeBatch(["PROJ-1"], ["billing", "payments"]);
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "multiroot" }));
     const req = vi.mocked(openWorkspace).mock.calls[0][0];
@@ -3593,15 +3593,15 @@ describe("takeBatch", () => {
   it("gives a single-repo task its own plain window", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "fix the billing flow",
       descriptionText: "",
       labels: [],
       components: [],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    await provider.takeBatch(["PROJ-1"], ["billing", "payments"]);
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "per-window" }));
   });
 
@@ -3609,15 +3609,15 @@ describe("takeBatch", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, workspaceMode: "per-window" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing", "payments"]));
     clientStub.getDetail.mockResolvedValue({
-      key: "ASM-1",
+      key: "PROJ-1",
       summary: "nothing recognisable here",
       descriptionText: "",
       labels: [],
       components: [],
-      url: "https://jira/browse/ASM-1",
+      url: "https://jira/browse/PROJ-1",
     });
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["billing", "payments"]);
+    await provider.takeBatch(["PROJ-1"], ["billing", "payments"]);
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ mode: "per-window" }));
   });
 
@@ -3724,7 +3724,7 @@ describe("takeBatch", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "new-window" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
   });
@@ -3749,13 +3749,13 @@ describe("takeBatch", () => {
       workspaceFile: undefined,
       opened: true,
       briefs: [],
-      unaddedFolders: ["api-ASM-1", "api-ASM-2"],
+      unaddedFolders: ["api-PROJ-1", "api-PROJ-2"],
       seeded: 2,
     });
     const { provider, posted } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
-    expect(toast.message).toContain("api-ASM-1");
+    expect(toast.message).toContain("api-PROJ-1");
   });
 
   it("says so when merging into an existing workspace fails to parse", async () => {
@@ -3789,7 +3789,7 @@ describe("takeBatch", () => {
       add: [],
       duplicates: [],
       redundant: [
-        { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/ASM-1" },
+        { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/PROJ-1" },
       ],
       present: [],
       ok: true,
@@ -3820,8 +3820,8 @@ describe("takeBatch", () => {
     const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
     expect(toast.level).toBe("error");
     expect(toast.message).toContain("Launched 0 of 2");
-    expect(toast.message).toContain("ASM-1 (disk full)");
-    expect(toast.message).toContain("ASM-2 (disk full)");
+    expect(toast.message).toContain("PROJ-1 (disk full)");
+    expect(toast.message).toContain("PROJ-2 (disk full)");
   });
 
   it("skips Remote Control without asking for a one-key batch to a shared (non-new) destination", async () => {
@@ -3833,7 +3833,7 @@ describe("takeBatch", () => {
       roots: [{ name: "api", path: "/repos/api" }],
     });
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(window.showQuickPick).not.toHaveBeenCalled(); // resolveRemoteControl's picker never fires
     expect(openSharedWorkspace).toHaveBeenCalledTimes(1);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
@@ -3847,7 +3847,7 @@ describe("takeBatch", () => {
     ]);
     vi.mocked(planWorkspaceMerge).mockReturnValue({
       add: [],
-      duplicates: [{ label: "account-service-ASM-1", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+      duplicates: [{ label: "account-service-PROJ-1", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-1" }],
       redundant: [],
       present: [],
       ok: true,
@@ -3858,7 +3858,7 @@ describe("takeBatch", () => {
     });
 
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], ["account-service"]);
+    await provider.takeBatch(["PROJ-1"], ["account-service"]);
 
     expect(openSharedWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
     // Pins the candidate array itself: if `label` ever regressed from folderName(key, repo)
@@ -3866,7 +3866,7 @@ describe("takeBatch", () => {
     // tasks in one repo silently became two identically-named roots.
     expect(planWorkspaceMerge).toHaveBeenCalledWith(
       "/ws/team.code-workspace",
-      [expect.objectContaining({ label: "account-service-ASM-1", repoName: "account-service" })],
+      [expect.objectContaining({ label: "account-service-PROJ-1", repoName: "account-service" })],
     );
   });
 
@@ -3880,8 +3880,8 @@ describe("takeBatch", () => {
     ]);
     vi.mocked(planWorkspaceMerge).mockReturnValue({
       add: [
-        { label: "account-service-ASM-1", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" },
-        { label: "account-service-ASM-2", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-2" },
+        { label: "account-service-PROJ-1", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-1" },
+        { label: "account-service-PROJ-2", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-2" },
       ],
       duplicates: [],
       redundant: [],
@@ -3903,8 +3903,8 @@ describe("takeBatch", () => {
     expect(openSharedWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
         foldersToAdd: [
-          { name: "account-service-ASM-1", path: "/repos/account-service/.claude/worktrees/ASM-1" },
-          { name: "account-service-ASM-2", path: "/repos/account-service/.claude/worktrees/ASM-2" },
+          { name: "account-service-PROJ-1", path: "/repos/account-service/.claude/worktrees/PROJ-1" },
+          { name: "account-service-PROJ-2", path: "/repos/account-service/.claude/worktrees/PROJ-2" },
         ],
       }),
     );
@@ -3916,7 +3916,7 @@ describe("takeBatch", () => {
       { file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 },
     ]);
     vi.mocked(planWorkspaceMerge).mockReturnValue({
-      add: [{ label: "account-service-ASM-1", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1" }],
+      add: [{ label: "account-service-PROJ-1", repoName: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-1" }],
       duplicates: [],
       redundant: [],
       present: [],
@@ -3930,7 +3930,7 @@ describe("takeBatch", () => {
     });
 
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["account-service"]);
+    await provider.takeBatch(["PROJ-1"], ["account-service"]);
 
     expect(openSharedWorkspace).toHaveBeenCalledWith(expect.objectContaining({ foldersToAdd: [] }));
     const toast = posted().find((m) => m.type === "toast") as { message: string };
@@ -4017,7 +4017,7 @@ describe("takeBatch", () => {
       roots: [{ name: "api", path: "/repos/api" }],
     });
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
     expect(toast.message).toBe("Launched 1 of 1 in one shared window. A worktree + Copilot session per task.");
     expect(toast.message).not.toContain("isn't seeded");
@@ -4068,7 +4068,7 @@ describe("takeBatch", () => {
       remoteControl: false, provider: "cursor",
     });
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
     expect(toast.message).toBe("Launched 1 of 1 in parallel. A worktree + Cursor session per task.");
   });
@@ -4080,13 +4080,13 @@ describe("live-window open targets", () => {
   it("lists an open workspace window and opens the task into it (merge path)", async () => {
     askCfg();
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/ws/team.code-workspace", kind: "workspace", label: "team.code-workspace", folders: 2, roots: ["/repos/account-service", "/repos/centaur"], updatedAt: 9 },
+      { pid: 1, identity: "/ws/team.code-workspace", kind: "workspace", label: "team.code-workspace", folders: 2, roots: ["/repos/account-service", "/repos/webapp"], updatedAt: 9 },
     ]);
     // The open-target picker returns the live workspace window's mapped target.
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "existing", file: "/ws/team.code-workspace" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ existingWorkspaceFile: "/ws/team.code-workspace", mode: "multiroot", openIn: "new" }),
@@ -4101,7 +4101,7 @@ describe("live-window open targets", () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/account-service" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({ existingFolder: "/repos/account-service", mode: "per-window", openIn: "new" }),
@@ -4113,16 +4113,16 @@ describe("live-window open targets", () => {
     vi.mocked(windowIdentity).mockReturnValue({ identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"] });
     vi.mocked(readLiveWindows).mockReturnValue([
       { pid: 1, identity: "/repos/account-service", kind: "folder", label: "account-service", folders: 1, roots: ["/repos/account-service"], updatedAt: 9 },
-      { pid: 2, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, roots: ["/repos/centaur"], updatedAt: 8 },
+      { pid: 2, identity: "/repos/webapp", kind: "folder", label: "webapp", folders: 1, roots: ["/repos/webapp"], updatedAt: 8 },
     ]);
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
     const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string }[];
     const labels = items.map((i) => i.label);
-    expect(labels.some((l) => l.includes("centaur"))).toBe(true);
+    expect(labels.some((l) => l.includes("webapp"))).toBe(true);
     expect(labels.some((l) => l.includes("account-service"))).toBe(false); // current window excluded
   });
 
@@ -4131,7 +4131,7 @@ describe("live-window open targets", () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ target: { kind: "new" } } as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
 
     expect(readLiveWindows).not.toHaveBeenCalled();
   });
@@ -4166,23 +4166,23 @@ describe("explore — open target", () => {
   it("opens an Explore session into a live folder window", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/centaur", kind: "folder", label: "centaur", folders: 1, roots: ["/repos/centaur"], updatedAt: 9 },
+      { pid: 1, identity: "/repos/webapp", kind: "folder", label: "webapp", folders: 1, roots: ["/repos/webapp"], updatedAt: 9 },
     ]);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("poke around");
     vi.mocked(window.showQuickPick)
-      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/centaur" } } as never) // open where (first)
-      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never);                            // repos (last)
+      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/webapp" } } as never) // open where (first)
+      .mockResolvedValueOnce([{ repo: mkRepos(["webapp"])[0] }] as never);                            // repos (last)
 
     await runExplore();
 
     expect(openWorkspace).toHaveBeenCalledWith(
-      expect.objectContaining({ existingFolder: "/repos/centaur", mode: "per-window", openIn: "new" }),
+      expect.objectContaining({ existingFolder: "/repos/webapp", mode: "per-window", openIn: "new" }),
     );
   });
 
   it("skips the repo pick and uses the existing workspace's repos", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
-    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
+    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/webapp"]);
     vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
     vi.mocked(window.showQuickPick)
@@ -4195,19 +4195,19 @@ describe("explore — open target", () => {
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
         existingWorkspaceFile: "/ws/team.code-workspace",
-        services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+        services: [expect.objectContaining({ name: "webapp", path: "/repos/webapp" })],
       }),
     );
   });
 
   it("derives the repo, not a phantom, from a workspace folder that is a worktree", async () => {
-    // A folder left behind by an older version points at .../worktrees/ASM-5111, whose
+    // A folder left behind by an older version points at .../worktrees/PROJ-5111, whose
     // basename is a ticket key. Taken at face value it becomes a phantom repo — and since a
     // worktree's .git is a pointer FILE it even passes the isGit check, so the next
     // createWorktrees would nest a worktree inside that worktree.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
-    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
-    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur/.claude/worktrees/ASM-5111"]);
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["webapp"]));
+    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/webapp/.claude/worktrees/PROJ-5111"]);
     vi.mocked(listWorkspaceFiles).mockReturnValue([
       { file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 },
     ]);
@@ -4220,17 +4220,17 @@ describe("explore — open target", () => {
 
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
-        services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+        services: [expect.objectContaining({ name: "webapp", path: "/repos/webapp" })],
       }),
     );
   });
 
   it("collapses a repo and a worktree of that repo to one service", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
-    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["webapp"]));
     vi.mocked(workspaceFolderPaths).mockReturnValue([
-      "/repos/centaur",
-      "/repos/centaur/.claude/worktrees/ASM-5885",
+      "/repos/webapp",
+      "/repos/webapp/.claude/worktrees/PROJ-5885",
     ]);
     vi.mocked(listWorkspaceFiles).mockReturnValue([
       { file: "/ws/team.code-workspace", folders: 2, mtimeMs: 1 },
@@ -4243,17 +4243,17 @@ describe("explore — open target", () => {
     await runExplore();
 
     const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
-    expect(services.map((s) => s.path)).toEqual(["/repos/centaur"]);
+    expect(services.map((s) => s.path)).toEqual(["/repos/webapp"]);
   });
 
   it("collapses two different worktrees of the same repo to one service", async () => {
     // Each worktree's root is independently unwound and (per the fix) canon()'d before
     // the dedup map keys on it — two distinct ticket keys must still land on one entry.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
-    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["webapp"]));
     vi.mocked(workspaceFolderPaths).mockReturnValue([
-      "/repos/centaur/.claude/worktrees/ASM-1111",
-      "/repos/centaur/.claude/worktrees/ASM-2222",
+      "/repos/webapp/.claude/worktrees/PROJ-1111",
+      "/repos/webapp/.claude/worktrees/PROJ-2222",
     ]);
     vi.mocked(listWorkspaceFiles).mockReturnValue([
       { file: "/ws/team.code-workspace", folders: 2, mtimeMs: 1 },
@@ -4266,7 +4266,7 @@ describe("explore — open target", () => {
     await runExplore();
 
     const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
-    expect(services).toEqual([expect.objectContaining({ name: "centaur", path: "/repos/centaur", isGit: true })]);
+    expect(services).toEqual([expect.objectContaining({ name: "webapp", path: "/repos/webapp", isGit: true })]);
   });
 
   it("collapses a live-folder destination pointed at a worktree to its owning repo", async () => {
@@ -4274,27 +4274,27 @@ describe("explore — open target", () => {
     // presence records that path, so a live folder pointing at .../worktrees/<KEY> is the
     // highest-traffic instance of the unwind — pin it so it can't regress.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
-    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["webapp"]));
     vi.mocked(readLiveWindows).mockReturnValue([
-      { pid: 1, identity: "/repos/centaur/.claude/worktrees/ASM-5885", kind: "folder", label: "ASM-5885", folders: 1, roots: ["/repos/centaur/.claude/worktrees/ASM-5885"], updatedAt: 9 },
+      { pid: 1, identity: "/repos/webapp/.claude/worktrees/PROJ-5885", kind: "folder", label: "PROJ-5885", folders: 1, roots: ["/repos/webapp/.claude/worktrees/PROJ-5885"], updatedAt: 9 },
     ]);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("poke around");
     vi.mocked(window.showQuickPick)
-      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/centaur/.claude/worktrees/ASM-5885" } } as never) // open where (first)
-      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never);                                                    // repos (last)
+      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/webapp/.claude/worktrees/PROJ-5885" } } as never) // open where (first)
+      .mockResolvedValueOnce([{ repo: mkRepos(["webapp"])[0] }] as never);                                                    // repos (last)
 
     await runExplore();
 
     const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
-    expect(services.map((s) => s.path)).toEqual(["/repos/centaur"]);
+    expect(services.map((s) => s.path)).toEqual(["/repos/webapp"]);
   });
 
   it("skips the repo pick for this window and uses the folders already open here", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "this-window", exploreMode: "knowledge" });
     vi.mocked(currentWindow).mockReturnValue({
-      identity: "/repos/centaur",
+      identity: "/repos/webapp",
       kind: "folder",
-      roots: [{ name: "centaur", path: "/repos/centaur" }],
+      roots: [{ name: "webapp", path: "/repos/webapp" }],
     });
     vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
 
@@ -4304,7 +4304,7 @@ describe("explore — open target", () => {
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
         openIn: "current",
-        services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+        services: [expect.objectContaining({ name: "webapp", path: "/repos/webapp" })],
       }),
     );
   });
@@ -4329,15 +4329,15 @@ describe("addressPr", () => {
 
   it("routes the addressPr message to the handler", async () => {
     const { send } = setup();
-    await send({ type: "addressPr", key: "ASM-1", services: ["account-service"] });
+    await send({ type: "addressPr", key: "PROJ-1", services: ["account-service"] });
     expect(openWorkspace).toHaveBeenCalledWith(
-      expect.objectContaining({ ticket: expect.objectContaining({ key: "ASM-1" }) }),
+      expect.objectContaining({ ticket: expect.objectContaining({ key: "PROJ-1" }) }),
     );
   });
 
   it("seeds the PR-review prompt (not a task prompt mode) and never prompts for a mode", async () => {
     const { provider } = setup();
-    await provider.addressPr("ASM-1", ["account-service"]);
+    await provider.addressPr("PROJ-1", ["account-service"]);
     expect(promptOf()).toContain("PR {key}"); // from cfg.prReviewPrompt
     expect(window.showQuickPick).not.toHaveBeenCalled(); // openIn=new-window, 1 repo, forced worktree → no picks
   });
@@ -4345,10 +4345,10 @@ describe("addressPr", () => {
   it("always creates a worktree even when worktree = never", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, worktree: "never" });
     const { provider } = setup();
-    await provider.addressPr("ASM-1", ["account-service"]);
+    await provider.addressPr("PROJ-1", ["account-service"]);
     expect(createWorktrees).toHaveBeenCalledWith(
       [expect.objectContaining({ name: "account-service" })],
-      "ASM-1",
+      "PROJ-1",
       "Do the thing",
       expect.anything(),
     );
@@ -4358,7 +4358,7 @@ describe("addressPr", () => {
   it("appends the auto-fix clause before {files} when prReviewAutoFix is on", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, prReviewAutoFix: true });
     const { provider } = setup();
-    await provider.addressPr("ASM-1", ["account-service"]);
+    await provider.addressPr("PROJ-1", ["account-service"]);
     const t = promptOf();
     expect(t).toContain(PR_REVIEW_AUTOFIX_CLAUSE);
     expect(t.indexOf(PR_REVIEW_AUTOFIX_CLAUSE)).toBeLessThan(t.indexOf("{files}"));
@@ -4367,7 +4367,7 @@ describe("addressPr", () => {
   it("omits the auto-fix clause when prReviewAutoFix is off", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, prReviewAutoFix: false });
     const { provider } = setup();
-    await provider.addressPr("ASM-1", ["account-service"]);
+    await provider.addressPr("PROJ-1", ["account-service"]);
     expect(promptOf()).toBe(CFG.prReviewPrompt);
     expect(promptOf()).not.toContain(PR_REVIEW_AUTOFIX_CLAUSE);
   });
@@ -4375,14 +4375,14 @@ describe("addressPr", () => {
   it("appends the auto-fix clause at the end when the prompt has no {files}", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, prReviewPrompt: "Review PR for {key}" });
     const { provider } = setup();
-    await provider.addressPr("ASM-1", ["account-service"]);
+    await provider.addressPr("PROJ-1", ["account-service"]);
     expect(promptOf()).toBe(`Review PR for {key} ${PR_REVIEW_AUTOFIX_CLAUSE}`);
   });
 
   it("errors when no repos are checked out", async () => {
     vi.mocked(discoverRepos).mockReturnValue([]);
     const { provider, posted } = setup();
-    await provider.addressPr("ASM-1", ["account-service"]);
+    await provider.addressPr("PROJ-1", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
@@ -4391,14 +4391,14 @@ describe("addressPr", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
     const { provider } = setup();
-    await provider.addressPr("ASM-1", ["account-service"]);
+    await provider.addressPr("PROJ-1", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 
   it("aborts when sign-in is declined", async () => {
     vi.mocked(commands.executeCommand).mockResolvedValue(false);
     const { provider } = setup({ authed: false });
-    await provider.addressPr("ASM-1", ["account-service"]);
+    await provider.addressPr("PROJ-1", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
   });
 });
@@ -4409,7 +4409,7 @@ describe("remote control", () => {
 
   it("passes false and never prompts when the setting is off", async () => {
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(lastOpen().remoteControl).toBe(false);
     expect(window.showQuickPick).not.toHaveBeenCalled();
   });
@@ -4417,7 +4417,7 @@ describe("remote control", () => {
   it("passes true without prompting when the setting is on", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(lastOpen().remoteControl).toBe(true);
     expect(window.showQuickPick).not.toHaveBeenCalled();
   });
@@ -4426,7 +4426,7 @@ describe("remote control", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(lastOpen().remoteControl).toBe(true);
   });
 
@@ -4434,7 +4434,7 @@ describe("remote control", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // dismissed
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(lastOpen().remoteControl).toBe(false);
   });
@@ -4443,14 +4443,14 @@ describe("remote control", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service", "webapp"]);
     expect(window.showQuickPick).toHaveBeenCalledTimes(1);
   });
 
   it("ask: never shows the picker when seedAgent is off — no plan file could ever carry the answer", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask", seedAgent: false });
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(lastOpen().remoteControl).toBe(false);
   });
@@ -4466,7 +4466,7 @@ describe("remote control", () => {
       provider: "claude-code",
     });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service", "centaur"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service", "webapp"]);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
     expect(toast.message).toContain("Remote Control skipped");
   });
@@ -4490,7 +4490,7 @@ describe("remote control", () => {
     );
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: false } as never); // layout pick
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    await provider.takeBatch(["PROJ-1", "PROJ-2"], ["api"]);
     expect(window.showQuickPick).toHaveBeenCalledTimes(1); // layout pick only — never a remote-control pick
     expect(vi.mocked(openWorkspace).mock.calls.every((c) => !c[0].remoteControl)).toBe(true);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
@@ -4513,7 +4513,7 @@ describe("remote control", () => {
       provider: "claude-code",
     });
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(window.showQuickPick).not.toHaveBeenCalled(); // "on" resolves without a picker
     expect(lastOpen().remoteControl).toBe(true);
     const toast = posted().find((m) => m.type === "toast") as { message: string };
@@ -4551,7 +4551,7 @@ describe("remote control × the Copilot provider", () => {
     // never happens, and no prompts for a launch already known to be impossible.
     copilot({ remoteControl: "on", worktree: "always" });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
@@ -4564,7 +4564,7 @@ describe("remote control × the Copilot provider", () => {
     // terminator — better than a phantom "cancelled" nobody chose.
     copilot({ remoteControl: "on" });
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).not.toContain("take_started");
   });
 
@@ -4573,7 +4573,7 @@ describe("remote control × the Copilot provider", () => {
     // leave behind if the refusal lands late.
     copilot({ remoteControl: "on" });
     const { provider, posted } = setup();
-    await provider.addressPr("ASM-1", ["account-service"]);
+    await provider.addressPr("PROJ-1", ["account-service"]);
     expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
@@ -4601,7 +4601,7 @@ describe("remote control × the Copilot provider", () => {
       s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
     expect(openWorkspace).not.toHaveBeenCalled();
     vi.mocked(createWorktrees).mockImplementation((s) => s);
@@ -4612,7 +4612,7 @@ describe("remote control × the Copilot provider", () => {
     // launch must still happen: an "ask" setting may never block a Copilot user.
     copilot({ remoteControl: "ask" });
     const { provider, posted, logged } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(window.showQuickPick).not.toHaveBeenCalled(); // the picker never appears
     expect(errorToast(posted)).toBeUndefined();
     expect(openWorkspace).toHaveBeenCalledTimes(1); // the launch proceeds
@@ -4626,7 +4626,7 @@ describe("remote control × the Copilot provider", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
     const { provider, logged } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(window.showQuickPick).toHaveBeenCalledTimes(1);
     expect(lastOpen().remoteControl).toBe(true);
     expect(logged.join("\n")).not.toContain("Remote Control not offered");
@@ -4639,7 +4639,7 @@ describe("remote control × the Copilot provider", () => {
     // launched fine before the block existed and must still launch now.
     copilot({ remoteControl: "on", seedAgent: false });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(errorToast(posted)).toBeUndefined();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(lastOpen().remoteControl).toBe(false);
@@ -4659,7 +4659,7 @@ describe("remote control × the Copilot provider", () => {
       s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(errorToast(posted)).toBeUndefined();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     vi.mocked(createWorktrees).mockImplementation((s) => s);
@@ -4668,7 +4668,7 @@ describe("remote control × the Copilot provider", () => {
   it("leaves Claude Code + Remote Control alone", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on" });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(errorToast(posted)).toBeUndefined();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(lastOpen().remoteControl).toBe(true);
@@ -4677,7 +4677,7 @@ describe("remote control × the Copilot provider", () => {
   it("does not fire when Remote Control is off", async () => {
     copilot({ remoteControl: "off" });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(errorToast(posted)).toBeUndefined();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(lastOpen().remoteControl).toBe(false);
@@ -4693,7 +4693,7 @@ describe("remote control × the Copilot provider", () => {
     );
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: false } as never); // layout pick
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    await provider.takeBatch(["PROJ-1", "PROJ-2"], ["api"]);
     expect(errorToast(posted)).toBeUndefined();
     expect(openWorkspace).toHaveBeenCalledTimes(2);
     vi.mocked(createWorktrees).mockImplementation((s) => s);
@@ -4725,7 +4725,7 @@ describe("remote control × the Cursor provider", () => {
     // is what actually pins this specific pre-flight predicate.
     cursor({ remoteControl: "on", seedAgent: true });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
@@ -4737,7 +4737,7 @@ describe("remote control × the Cursor provider", () => {
     // seeding is never locked out of every launch by this predicate.
     cursor({ remoteControl: "on", seedAgent: false });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(errorToast(posted)).toBeUndefined();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(lastOpen().remoteControl).toBe(false);
@@ -4748,7 +4748,7 @@ describe("remote control × the Cursor provider", () => {
     // must cover "cursor" too, or this would put up a toggle it could only refuse.
     cursor({ remoteControl: "ask" });
     const { provider, posted, logged } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(window.showQuickPick).not.toHaveBeenCalled(); // the picker never appears
     expect(errorToast(posted)).toBeUndefined();
     expect(openWorkspace).toHaveBeenCalledTimes(1); // the launch proceeds
@@ -4766,7 +4766,7 @@ describe("remote control × the Cursor provider", () => {
       s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
     expect(openWorkspace).not.toHaveBeenCalled();
     vi.mocked(createWorktrees).mockImplementation((s) => s);
@@ -4800,7 +4800,7 @@ describe("remote control × the `ask` provider", () => {
     // an agent that seedProvider resolves to Claude Code.
     ask({ remoteControl: "on" });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(errorToast(posted)).toBeUndefined();
     expect(openWorkspace).toHaveBeenCalledTimes(1); // the launch really happens
     expect(lastOpen().remoteControl).toBe(true); // …with Remote Control on, as asked
@@ -4816,7 +4816,7 @@ describe("remote control × the `ask` provider", () => {
       vi.mocked(openWorkspace).mockClear();
       vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider, remoteControl: "on" });
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
       return { toast: errorToast(posted)?.message, opens: vi.mocked(openWorkspace).mock.calls.length, rc: lastOpen().remoteControl };
     };
     expect(await run("ask")).toEqual(await run("claude-code"));
@@ -4829,7 +4829,7 @@ describe("remote control × the `ask` provider", () => {
     ask({ remoteControl: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ yes: true } as never);
     const { provider, logged } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(window.showQuickPick).toHaveBeenCalledTimes(1); // the picker appears
     expect(lastOpen().remoteControl).toBe(true); // and the answer is honoured
     expect(logged.join("\n")).not.toContain("Remote Control not offered");
@@ -4845,7 +4845,7 @@ describe("remote control × the `ask` provider", () => {
       s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], ["api"]);
+    await provider.takeBatch(["PROJ-1"], ["api"]);
     expect(errorToast(posted)).toBeUndefined();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     vi.mocked(createWorktrees).mockImplementation((s) => s);
@@ -4861,7 +4861,7 @@ describe("remote control × the `ask` provider", () => {
       remoteControl: false, provider: "cursor",
     });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
     expect(toast.message).toContain(" Remote Control skipped — it needs Claude Code, and Cursor was picked.");
     expect(toast.message).not.toContain("single window");
@@ -4873,11 +4873,11 @@ describe("remote control × the `ask` provider", () => {
     ask({ remoteControl: "on" });
     vi.mocked(openWorkspace).mockResolvedValue({
       mode: "per-window", workspaceFile: undefined, briefs: [],
-      opened: ["/repos/account-service", "/repos/centaur"],
+      opened: ["/repos/account-service", "/repos/webapp"],
       remoteControl: false, provider: "claude-code",
     });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
     expect(toast.message).toContain(" Remote Control skipped — it needs a single window.");
   });
@@ -4887,7 +4887,7 @@ describe("remote control × the `ask` provider", () => {
     for (const agentProvider of ["copilot", "cursor"] as const) {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider, remoteControl: "on" });
       const { provider, posted } = setup();
-      await provider.takeTask("ASM-1", "card", ["account-service"]);
+      await provider.takeTask("PROJ-1", "card", ["account-service"]);
       expect(errorToast(posted)?.message).toContain("Remote Control needs Claude Code");
       expect(openWorkspace).not.toHaveBeenCalled();
     }
@@ -4931,7 +4931,7 @@ describe("agent-naming copy under the `ask` provider", () => {
     );
     vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    await provider.takeBatch(["PROJ-1", "PROJ-2"], ["api"]);
     expect(window.showWarningMessage).toHaveBeenCalledWith(
       "Launch 2 tasks in parallel? That's 2 Cursor sessions.",
       { modal: true },
@@ -4961,7 +4961,7 @@ describe("agent-naming copy under the `ask` provider", () => {
       return "Launch" as never;
     });
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    await provider.takeBatch(["PROJ-1", "PROJ-2"], ["api"]);
     expect(order).toEqual(["agent", "confirm"]);
   });
 
@@ -4972,7 +4972,7 @@ describe("agent-naming copy under the `ask` provider", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     vi.mocked(window.showQuickPick).mockResolvedValue(undefined as never);
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1", "ASM-2"], ["api"]);
+    await provider.takeBatch(["PROJ-1", "PROJ-2"], ["api"]);
     expect(window.showWarningMessage).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted().filter((m) => m.type === "toast")).toEqual([]);
@@ -4982,7 +4982,7 @@ describe("agent-naming copy under the `ask` provider", () => {
     // briefMarkdown renders "_The {agentName} prompt for this task says…_".
     ask();
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const planMd = vi.mocked(openWorkspace).mock.calls[0][0].planMd;
     expect(planMd).toContain("_The Claude Code prompt for this task says");
     expect(planMd).not.toMatch(/The (your|a|an|the) /i);
@@ -5009,7 +5009,7 @@ describe("the `ask` picker's answer, at the call sites", () => {
     ask();
     vi.mocked(openWorkspace).mockResolvedValue(cancelled);
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     // Not "no success toast" — no toast at all. Dismissing a picker is not a failure
     // either, so an error toast would be just as wrong.
     expect(toasts(posted)).toEqual([]);
@@ -5022,7 +5022,7 @@ describe("the `ask` picker's answer, at the call sites", () => {
     ask();
     vi.mocked(openWorkspace).mockResolvedValue(cancelled);
     const { provider } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(trackSpy).toHaveBeenCalledWith(
       expect.objectContaining({ name: "take_completed", outcome: "cancelled" }),
     );
@@ -5034,7 +5034,7 @@ describe("the `ask` picker's answer, at the call sites", () => {
       mode: "per-window", briefs: [], opened: ["/repos/account-service"], remoteControl: false, provider: "cursor",
     });
     const { provider, posted } = setup();
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(posted()).toContainEqual(
       expect.objectContaining({
         type: "toast", level: "success",
@@ -6008,15 +6008,15 @@ describe("caps refresh", () => {
 // pre-tree flow untouched. These blocks add the method locally, which is the only
 // thing that turns the probe on.
 describe("takeTask: a ticket with children", () => {
-  /** One direct child of ASM-1, which has no children of its own — so buildTree
+  /** One direct child of PROJ-1, which has no children of its own — so buildTree
    *  yields exactly one leaf. */
   const CHILDREN: Record<string, { key: string; summary: string; type: string; statusCategory: string }[]> = {
-    "ASM-1": [{ key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "new" }],
+    "PROJ-1": [{ key: "PROJ-2", summary: "first bit", type: "Sub-task", statusCategory: "new" }],
   };
   /** The parent's branch, computed from the REAL branchName and the summary
    *  makeClient's getDetail actually returns ("Do the thing") — never a guessed slug,
    *  which would fail here as if the routing were wrong. */
-  const PARENT_BRANCH = branchName("ASM-1", "Do the thing");
+  const PARENT_BRANCH = branchName("PROJ-1", "Do the thing");
 
   beforeEach(() => {
     clientStub.childrenOf = vi.fn(async (key: string) => CHILDREN[key] ?? []);
@@ -6041,7 +6041,7 @@ describe("takeTask: a ticket with children", () => {
     // tree pickers, one openWorkspace — rather than by spying on probeTree.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: false });
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(clientStub.childrenOf).not.toHaveBeenCalled();
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
@@ -6050,14 +6050,14 @@ describe("takeTask: a ticket with children", () => {
   it("probes when the setting is on", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: true });
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]); // cancels at the mode picker
-    expect(clientStub.childrenOf).toHaveBeenCalledWith("ASM-1");
+    await provider.takeTask("PROJ-1", "card", ["account-service"]); // cancels at the mode picker
+    expect(clientStub.childrenOf).toHaveBeenCalledWith("PROJ-1");
   });
 
   it("does not probe at all when the source has no children capability", async () => {
     delete (clientStub as { childrenOf?: unknown }).childrenOf;
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     // The pre-tree flow exactly: one ticket read (resolveKickoff's), no picker at all
     // (a preselected repo, taskMode "plan" and worktree "never" answer everything).
     expect(clientStub.getDetail).toHaveBeenCalledTimes(1);
@@ -6067,28 +6067,28 @@ describe("takeTask: a ticket with children", () => {
 
   it("asks how to work the leaves, counting them in the title", async () => {
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]); // cancels at the mode picker
+    await provider.takeTask("PROJ-1", "card", ["account-service"]); // cancels at the mode picker
     expect(vi.mocked(window.showQuickPick).mock.calls[0][1]).toEqual(
-      expect.objectContaining({ title: "ASM-1 — 1 leaf under it. How do you want to work them?" }),
+      expect.objectContaining({ title: "PROJ-1 — 1 leaf under it. How do you want to work them?" }),
     );
   });
 
   it("offers exactly the three modes, naming the parent on the third", async () => {
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const items = vi.mocked(window.showQuickPick).mock.calls[0][0] as { label: string; detail: string }[];
     expect(items.map((i) => i.label)).toEqual([
       "A session per child",
       "One orchestrator session, children as subagents",
-      "Just ASM-1",
+      "Just PROJ-1",
     ]);
     expect(items[0].detail).toBe("1 worktree, 1 session, each on its own branch");
-    expect(items[1].detail).toBe("1 session in ASM-1, 1 child worktree for it to dispatch into");
+    expect(items[1].detail).toBe("1 session in PROJ-1, 1 child worktree for it to dispatch into");
   });
 
   it("takes nothing when the mode picker is cancelled", async () => {
     const { provider, posted } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     // No git write and no window: cancelling the first question must leave nothing
     // behind, on disk or on screen.
     expect(ensureBranch).not.toHaveBeenCalled();
@@ -6100,14 +6100,14 @@ describe("takeTask: a ticket with children", () => {
   it("pre-selects nothing in the leaf picker", async () => {
     answerPicks(pickFirst); // fan-out, then cancel the leaf picker
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as {
       label: string; description?: string; detail: string; picked?: boolean;
     }[];
-    expect(items.map((i) => i.label)).toEqual(["ASM-2 — first bit"]);
+    expect(items.map((i) => i.label)).toEqual(["PROJ-2 — first bit"]);
     // Every ticked row costs a worktree and a session, so nothing arrives ticked.
     expect(items.map((i) => i.picked)).toEqual([undefined]);
-    expect(items[0].detail).toBe("ASM-1 › ASM-2");
+    expect(items[0].detail).toBe("PROJ-1 › PROJ-2");
     expect(items[0].description).toBe(undefined);
     expect(vi.mocked(window.showQuickPick).mock.calls[1][1]).toEqual(
       expect.objectContaining({ title: "Which of these do you want to take?", canPickMany: true }),
@@ -6116,11 +6116,11 @@ describe("takeTask: a ticket with children", () => {
 
   it("marks a leaf that is already done", async () => {
     clientStub.childrenOf = vi.fn(async (key: string) =>
-      key === "ASM-1" ? [{ key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "done" }] : [],
+      key === "PROJ-1" ? [{ key: "PROJ-2", summary: "first bit", type: "Sub-task", statusCategory: "done" }] : [],
     );
     answerPicks(pickFirst);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as { description?: string }[];
     expect(items.map((i) => i.description)).toEqual(["done"]);
   });
@@ -6130,62 +6130,62 @@ describe("takeTask: a ticket with children", () => {
     // and in fan-out mode discards that child's run timestamps — for a ticket the user
     // never named individually. Labelled, never blocked: re-taking is legitimate.
     clientStub.childrenOf = vi.fn(async (key: string) =>
-      key === "ASM-1"
+      key === "PROJ-1"
         ? [
-            { key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
-            { key: "ASM-9", summary: "untouched", type: "Sub-task", statusCategory: "new" },
+            { key: "PROJ-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
+            { key: "PROJ-9", summary: "untouched", type: "Sub-task", statusCategory: "new" },
           ]
         : [],
     );
     vi.mocked(readRuns).mockReturnValue([
-      { key: "ASM-2", summary: "first bit", url: "", createdAt: 1, repos: [] },
+      { key: "PROJ-2", summary: "first bit", url: "", createdAt: 1, repos: [] },
     ] as unknown as ReturnType<typeof readRuns>);
     answerPicks(pickFirst);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as { label: string; description?: string }[];
     expect(items.map((i) => [i.label, i.description])).toEqual([
-      ["ASM-2 — first bit", "already taken"],
-      ["ASM-9 — untouched", undefined],
+      ["PROJ-2 — first bit", "already taken"],
+      ["PROJ-9 — untouched", undefined],
     ]);
   });
 
   it("marks a leaf whose own worktree holds a live session, with no run record at all", async () => {
     vi.mocked(readRuns).mockReturnValue([]);
     vi.mocked(readOpenSessions).mockReturnValue([
-      { pid: 1, sessionId: "s1", cwd: "/repos/account-service/.claude/worktrees/ASM-2", startedAt: 1, name: null },
+      { pid: 1, sessionId: "s1", cwd: "/repos/account-service/.claude/worktrees/PROJ-2", startedAt: 1, name: null },
     ]);
     answerPicks(pickFirst);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as { description?: string }[];
     expect(items.map((i) => i.description)).toEqual(["already taken"]);
   });
 
   it("does not mark a leaf for a live session sitting in an ordinary checkout", async () => {
-    // A session in `/repos/ASM-2` is not a per-task worktree, so its directory name says
+    // A session in `/repos/PROJ-2` is not a per-task worktree, so its directory name says
     // nothing about which ticket is being worked — marking on it would label leaves at
     // random.
     vi.mocked(readOpenSessions).mockReturnValue([
-      { pid: 1, sessionId: "s1", cwd: "/repos/ASM-2", startedAt: 1, name: null },
+      { pid: 1, sessionId: "s1", cwd: "/repos/PROJ-2", startedAt: 1, name: null },
     ]);
     answerPicks(pickFirst);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as { description?: string }[];
     expect(items.map((i) => i.description)).toEqual([undefined]);
   });
 
   it("says both when a leaf is done AND already taken", async () => {
     clientStub.childrenOf = vi.fn(async (key: string) =>
-      key === "ASM-1" ? [{ key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "done" }] : [],
+      key === "PROJ-1" ? [{ key: "PROJ-2", summary: "first bit", type: "Sub-task", statusCategory: "done" }] : [],
     );
     vi.mocked(readRuns).mockReturnValue([
-      { key: "ASM-2", summary: "first bit", url: "", createdAt: 1, repos: [] },
+      { key: "PROJ-2", summary: "first bit", url: "", createdAt: 1, repos: [] },
     ] as unknown as ReturnType<typeof readRuns>);
     answerPicks(pickFirst);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const items = vi.mocked(window.showQuickPick).mock.calls[1][0] as { description?: string }[];
     expect(items.map((i) => i.description)).toEqual(["done · already taken"]);
   });
@@ -6193,7 +6193,7 @@ describe("takeTask: a ticket with children", () => {
   it("takes nothing when the leaf picker is cancelled", async () => {
     answerPicks(pickFirst);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(ensureBranch).not.toHaveBeenCalled();
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
@@ -6202,21 +6202,21 @@ describe("takeTask: a ticket with children", () => {
   it("falls back to the ordinary single take when no leaf is selected", async () => {
     answerPicks(pickFirst, () => []); // fan-out, then tick nothing
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(ensureBranch).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(openWorkspace).toHaveBeenCalledWith(
-      expect.objectContaining({ ticket: expect.objectContaining({ key: "ASM-1" }) }),
+      expect.objectContaining({ ticket: expect.objectContaining({ key: "PROJ-1" }) }),
     );
   });
 
   it("takes just the parent without asking which leaves", async () => {
-    answerPicks((items: unknown[]) => items[2]); // "Just ASM-1"
+    answerPicks((items: unknown[]) => items[2]); // "Just PROJ-1"
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(window.showQuickPick).toHaveBeenCalledTimes(1); // no leaf picker
     expect(openWorkspace).toHaveBeenCalledWith(
-      expect.objectContaining({ ticket: expect.objectContaining({ key: "ASM-1" }) }),
+      expect.objectContaining({ ticket: expect.objectContaining({ key: "PROJ-1" }) }),
     );
   });
 
@@ -6224,9 +6224,9 @@ describe("takeTask: a ticket with children", () => {
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider } = setup({ authed: true });
     const takeBatch = vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
-    expect(takeBatch).toHaveBeenCalledWith(["ASM-2"], ["account-service"], {
-      key: "ASM-1",
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
+    expect(takeBatch).toHaveBeenCalledWith(["PROJ-2"], ["account-service"], {
+      key: "PROJ-1",
       branch: PARENT_BRANCH,
     });
   });
@@ -6242,9 +6242,9 @@ describe("takeTask: a ticket with children", () => {
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider } = setup({ authed: true });
     const takeBatch = vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
-    await provider.takeTask("ASM-1", "command");
-    expect(takeBatch).toHaveBeenCalledWith(["ASM-2"], ["account-service"], {
-      key: "ASM-1",
+    await provider.takeTask("PROJ-1", "command");
+    expect(takeBatch).toHaveBeenCalledWith(["PROJ-2"], ["account-service"], {
+      key: "PROJ-1",
       branch: PARENT_BRANCH,
     });
   });
@@ -6255,7 +6255,7 @@ describe("takeTask: a ticket with children", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["notes", "scratch"], { isGit: false }));
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider, posted } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "command");
+    await provider.takeTask("PROJ-1", "command");
     expect(posted()).toContainEqual({
       type: "toast",
       level: "error",
@@ -6273,9 +6273,9 @@ describe("takeTask: a ticket with children", () => {
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider } = setup({ authed: true });
     const takeBatch = vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
-    await provider.takeTask("ASM-1", "command");
-    expect(takeBatch).toHaveBeenCalledWith(["ASM-2"], ["account-service", "centaur"], {
-      key: "ASM-1",
+    await provider.takeTask("PROJ-1", "command");
+    expect(takeBatch).toHaveBeenCalledWith(["PROJ-2"], ["account-service", "webapp"], {
+      key: "PROJ-1",
       branch: PARENT_BRANCH,
     });
   });
@@ -6286,13 +6286,13 @@ describe("takeTask: a ticket with children", () => {
    *  non-matching summary the takeBatch tests above already use. */
   function parentInfersTwoOfFourRepos(): void {
     vi.mocked(discoverRepos).mockReturnValue(
-      mkRepos(["aardvark-service", "billing-service", "centaur", "delta-service"]),
+      mkRepos(["aardvark-service", "billing-service", "webapp", "delta-service"]),
     );
     clientStub.getDetail.mockImplementation(async (key: string) =>
-      key === "ASM-1"
+      key === "PROJ-1"
         ? {
             key, summary: "the parent", descriptionText: "",
-            labels: ["centaur"], components: ["billing-service", "delta-service"],
+            labels: ["webapp"], components: ["billing-service", "delta-service"],
             url: `https://jira/browse/${key}`,
           }
         : {
@@ -6306,7 +6306,7 @@ describe("takeTask: a ticket with children", () => {
     parentInfersTwoOfFourRepos();
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "command"); // no in-card selection
+    await provider.takeTask("PROJ-1", "command"); // no in-card selection
     // The child's ticket names no repo, so reposForTask widens to the whole filter set
     // it was handed — which is why that set has to be the parent's two repos and not
     // the four on the machine. By name: a count alone would pass on the wrong two.
@@ -6323,8 +6323,8 @@ describe("takeTask: a ticket with children", () => {
     parentInfersTwoOfFourRepos();
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "command");
-    expect(logged).toContain("fan-out ASM-1: 1 leaf into 2 repo(s) — billing-service, delta-service");
+    await provider.takeTask("PROJ-1", "command");
+    expect(logged).toContain("fan-out PROJ-1: 1 leaf into 2 repo(s) — billing-service, delta-service");
   });
 
   it("logs that set before any worktree is made, so a refusal still explains itself", async () => {
@@ -6332,9 +6332,9 @@ describe("takeTask: a ticket with children", () => {
     vi.mocked(ensureBranch).mockReturnValue(false); // refuses before the first worktree
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "command");
+    await provider.takeTask("PROJ-1", "command");
     expect(createWorktrees).not.toHaveBeenCalled();
-    expect(logged).toContain("fan-out ASM-1: 1 leaf into 2 repo(s) — billing-service, delta-service");
+    expect(logged).toContain("fan-out PROJ-1: 1 leaf into 2 repo(s) — billing-service, delta-service");
   });
 
   it("actually branches the child off the parent, end to end", async () => {
@@ -6342,17 +6342,17 @@ describe("takeTask: a ticket with children", () => {
     // filter that makes takeBatch launch nothing at all.
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(ensureBranch).toHaveBeenCalledWith("/repos/account-service", PARENT_BRANCH);
     expect(createWorktrees).toHaveBeenCalledWith(
       [expect.objectContaining({ name: "account-service" })],
-      "ASM-2",
+      "PROJ-2",
       "Do the thing",
       expect.any(Function),
       { baseRef: PARENT_BRANCH },
     );
     expect(openWorkspace).toHaveBeenCalledWith(
-      expect.objectContaining({ ticket: expect.objectContaining({ key: "ASM-2" }), parentKey: "ASM-1" }),
+      expect.objectContaining({ ticket: expect.objectContaining({ key: "PROJ-2" }), parentKey: "PROJ-1" }),
     );
   });
 
@@ -6364,7 +6364,7 @@ describe("takeTask: a ticket with children", () => {
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider } = setup({ authed: true });
     vi.spyOn(provider, "takeBatch").mockResolvedValue(undefined);
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).toEqual([]);
   });
 
@@ -6374,18 +6374,18 @@ describe("takeTask: a ticket with children", () => {
     // "no children". No picker, no toast, one ordinary take.
     clientStub.childrenOf = vi.fn(async () => []);
     const { provider, posted, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
-    expect(clientStub.childrenOf).toHaveBeenCalledWith("ASM-1");
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
+    expect(clientStub.childrenOf).toHaveBeenCalledWith("PROJ-1");
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     // The ordinary take's own success toast and nothing else — in particular not
-    // "Couldn't read the work under ASM-1", which is what the ladder's throw produced
+    // "Couldn't read the work under PROJ-1", which is what the ladder's throw produced
     // for every childless ticket on a team-managed project.
     expect(posted().filter((m) => m.type === "toast")).toEqual([
       {
         type: "toast",
         level: "success",
-        message: "Opened 1 window(s) for ASM-1. Brief seeded in each repo. Claude Code pre-seeded — press Enter to start.",
+        message: "Opened 1 window(s) for PROJ-1. Brief seeded in each repo. Claude Code pre-seeded — press Enter to start.",
       },
     ]);
     expect(logged.filter((l) => l.startsWith("probeTree "))).toEqual([]);
@@ -6400,26 +6400,26 @@ describe("takeTask: a ticket with children", () => {
       async (_opts: unknown, task: (...a: any[]) => any) => task(noopProgress(), liveToken(true)),
     );
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(vi.mocked(window.withProgress).mock.calls[0][0]).toEqual({
       location: ProgressLocation.Notification,
-      title: "Looking for work under ASM-1…",
+      title: "Looking for work under PROJ-1…",
       cancellable: true,
     });
     // The cancel routed to the ordinary take, not to an abandoned Take: no picker, and
     // the single-ticket flow ran to its window.
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
-    expect(logged).toContain("probeTree ASM-1: cancelled — taking the ticket on its own");
+    expect(logged).toContain("probeTree PROJ-1: cancelled — taking the ticket on its own");
   });
 
   it("degrades to the ordinary take when the ticket read behind the probe fails", async () => {
     clientStub.getDetail.mockRejectedValueOnce(new Error("500")); // the probe's read only
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
-    expect(logged).toContain("probeTree ASM-1: failed (Error: 500) — taking the ticket on its own");
+    expect(logged).toContain("probeTree PROJ-1: failed (Error: 500) — taking the ticket on its own");
   });
 
   it("says the work under the ticket could not be read, and takes it on its own", async () => {
@@ -6427,18 +6427,18 @@ describe("takeTask: a ticket with children", () => {
       throw new Error("500");
     });
     const { provider, logged, posted } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     // buildTree reports the unreadable root and yields no leaves — there is nothing to
     // offer, so the ordinary take runs and no picker appears…
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     // …but the whole subtree has just been discarded, so it is said in both places
     // rather than nowhere: this is the path where the plain take LOOKS like success.
-    expect(logged).toContain("probeTree ASM-1: tree dropped 1 (ASM-1)");
+    expect(logged).toContain("probeTree PROJ-1: tree dropped 1 (PROJ-1)");
     expect(posted()).toContainEqual({
       type: "toast",
       level: "info",
-      message: "Couldn't read the work under ASM-1 — taking the ticket on its own.",
+      message: "Couldn't read the work under PROJ-1 — taking the ticket on its own.",
     });
   });
 
@@ -6446,7 +6446,7 @@ describe("takeTask: a ticket with children", () => {
    *  K-20…K-24 are reported as dropped. */
   function overCapTree(): void {
     clientStub.childrenOf = vi.fn(async (key: string) =>
-      key === "ASM-1"
+      key === "PROJ-1"
         ? Array.from({ length: 25 }, (_, i) => ({ key: `K-${i}`, summary: "x", type: "Sub-task", statusCategory: "new" }))
         : [],
     );
@@ -6456,11 +6456,11 @@ describe("takeTask: a ticket with children", () => {
     overCapTree();
     answerPicks(pickFirst, (items: unknown[]) => [items[0]]);
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(vi.mocked(window.showQuickPick).mock.calls[0][1]).toEqual(
-      expect.objectContaining({ title: "ASM-1 — 20 leaves under it. How do you want to work them?" }),
+      expect.objectContaining({ title: "PROJ-1 — 20 leaves under it. How do you want to work them?" }),
     );
-    expect(logged).toContain("probeTree ASM-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
+    expect(logged).toContain("probeTree PROJ-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
   });
 
   it("names the omissions in the leaf picker's title", async () => {
@@ -6469,7 +6469,7 @@ describe("takeTask: a ticket with children", () => {
     overCapTree();
     answerPicks(pickFirst);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(vi.mocked(window.showQuickPick).mock.calls[1][1]).toEqual(
       expect.objectContaining({ title: "Which of these do you want to take? (20 of 25 — 5 not shown)" }),
     );
@@ -6482,32 +6482,32 @@ describe("takeTask: a ticket with children", () => {
     // on screen, and nothing is hidden: a title claiming "3 of 4 — 1 not shown" would
     // invent a fourth item while the third sat visibly in the list.
     clientStub.childrenOf = vi.fn(async (key: string) => {
-      if (key === "ASM-1") {
+      if (key === "PROJ-1") {
         return [
-          { key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
-          { key: "ASM-3", summary: "second bit", type: "Sub-task", statusCategory: "new" },
-          { key: "ASM-4", summary: "third bit", type: "Sub-task", statusCategory: "new" },
+          { key: "PROJ-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
+          { key: "PROJ-3", summary: "second bit", type: "Sub-task", statusCategory: "new" },
+          { key: "PROJ-4", summary: "third bit", type: "Sub-task", statusCategory: "new" },
         ];
       }
-      if (key === "ASM-3") throw new Error("500");
+      if (key === "PROJ-3") throw new Error("500");
       return [];
     });
     answerPicks(pickFirst);
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     const [items, opts] = vi.mocked(window.showQuickPick).mock.calls[1] as [
       { label: string }[],
       { title: string },
     ];
     expect(items.map((i) => i.label)).toEqual([
-      "ASM-2 — first bit",
-      "ASM-3 — second bit",
-      "ASM-4 — third bit",
+      "PROJ-2 — first bit",
+      "PROJ-3 — second bit",
+      "PROJ-4 — third bit",
     ]);
     expect(opts.title).toBe("Which of these do you want to take?");
     // The unexplored subtree is still reported — the overlap changes the arithmetic, not
     // the diagnostic.
-    expect(logged).toContain("probeTree ASM-1: tree dropped 1 (ASM-3)");
+    expect(logged).toContain("probeTree PROJ-1: tree dropped 1 (PROJ-3)");
   });
 
   it("counts and names a doubly-dropped key once", async () => {
@@ -6516,7 +6516,7 @@ describe("takeTask: a ticket with children", () => {
     // sighting. Undeduped, that read as "dropped 6 (K-21, K-20, K-21, …)" in the log and
     // as one more hidden item than exists in the picker's title.
     clientStub.childrenOf = vi.fn(async (key: string) => {
-      if (key === "ASM-1") {
+      if (key === "PROJ-1") {
         return Array.from({ length: 25 }, (_, i) => ({
           key: `K-${i}`, summary: "x", type: "Sub-task", statusCategory: "new",
         }));
@@ -6526,8 +6526,8 @@ describe("takeTask: a ticket with children", () => {
     });
     answerPicks(pickFirst);
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
-    expect(logged).toContain("probeTree ASM-1: tree dropped 5 (K-21, K-20, K-22, K-23, K-24)");
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
+    expect(logged).toContain("probeTree PROJ-1: tree dropped 5 (K-21, K-20, K-22, K-23, K-24)");
     expect(vi.mocked(window.showQuickPick).mock.calls[1][1]).toEqual(
       expect.objectContaining({ title: "Which of these do you want to take? (20 of 25 — 5 not shown)" }),
     );
@@ -6537,20 +6537,20 @@ describe("takeTask: a ticket with children", () => {
     // The diagnostic belongs to the probe, not to the fan-out: this path never reaches
     // the leaf picker at all, and the leaves are dropped just the same.
     overCapTree();
-    answerPicks((items: unknown[]) => items[2]); // "Just ASM-1"
+    answerPicks((items: unknown[]) => items[2]); // "Just PROJ-1"
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(window.showQuickPick).toHaveBeenCalledTimes(1);
     expect(openWorkspace).toHaveBeenCalledTimes(1);
-    expect(logged).toContain("probeTree ASM-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
+    expect(logged).toContain("probeTree PROJ-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
   });
 
   it("still logs the dropped leaves when the mode picker is cancelled", async () => {
     overCapTree();
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
-    expect(logged).toContain("probeTree ASM-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
+    expect(logged).toContain("probeTree PROJ-1: tree dropped 5 (K-20, K-21, K-22, K-23, K-24)");
   });
 
   it("does not claim the work was unreadable when the cap simply cut it", async () => {
@@ -6559,13 +6559,13 @@ describe("takeTask: a ticket with children", () => {
     overCapTree();
     answerPicks(pickFirst);
     const { provider, posted } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["account-service"]);
+    await provider.takeTask("PROJ-1", "card", ["account-service"]);
     expect(posted().filter((m) => m.type === "toast")).toEqual([]);
   });
 });
 
 describe("takeBatch with a parent", () => {
-  const PARENT = { key: "ASM-1", branch: "ASM-1-parent" };
+  const PARENT = { key: "PROJ-1", branch: "PROJ-1-parent" };
 
   beforeEach(() => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
@@ -6593,7 +6593,7 @@ describe("takeBatch with a parent", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web", "jobs", "edge"]));
     vi.mocked(window.showWarningMessage).mockResolvedValueOnce("Launch" as never);
     const { provider } = setup({ authed: true });
-    await provider.takeBatch(["ASM-2", "ASM-3"], ["api", "web", "jobs", "edge"], PARENT);
+    await provider.takeBatch(["PROJ-2", "PROJ-3"], ["api", "web", "jobs", "edge"], PARENT);
     expect(window.showWarningMessage).toHaveBeenCalledWith(
       "Launch 2 tasks in parallel? That's 2 Claude Code sessions and up to 8 git worktrees across 4 repos.",
       { modal: true },
@@ -6607,7 +6607,7 @@ describe("takeBatch with a parent", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web", "jobs", "edge"]));
     vi.mocked(window.showWarningMessage).mockResolvedValueOnce(undefined as never);
     const { provider } = setup({ authed: true });
-    await provider.takeBatch(["ASM-2", "ASM-3"], ["api", "web", "jobs", "edge"], PARENT);
+    await provider.takeBatch(["PROJ-2", "PROJ-3"], ["api", "web", "jobs", "edge"], PARENT);
     expect(ensureBranch).not.toHaveBeenCalled();
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
@@ -6630,7 +6630,7 @@ describe("takeBatch with a parent", () => {
     answerLayout();
     // The threshold is about worktrees: 2 keys × 1 repo is 2, well under 6.
     const { provider } = setup({ authed: true });
-    await provider.takeBatch(["ASM-2", "ASM-3"], ["api"], PARENT);
+    await provider.takeBatch(["PROJ-2", "PROJ-3"], ["api"], PARENT);
     expect(window.showWarningMessage).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(2);
   });
@@ -6641,21 +6641,21 @@ describe("takeBatch with a parent", () => {
     // ticket — 2 keys × 4 repos must still not prompt an existing user who changed nothing.
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web", "jobs", "edge"]));
     const { provider } = setup({ authed: true });
-    await provider.takeBatch(["ASM-2", "ASM-3"], ["api", "web", "jobs", "edge"]);
+    await provider.takeBatch(["PROJ-2", "PROJ-3"], ["api", "web", "jobs", "edge"]);
     expect(window.showWarningMessage).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledTimes(2);
   });
 
   it("makes the parent branch before the child worktree, then branches off it", async () => {
     const { provider } = setup({ authed: true });
-    await provider.takeBatch(["ASM-2"], ["api"], PARENT);
-    expect(ensureBranch).toHaveBeenCalledWith("/repos/api", "ASM-1-parent");
+    await provider.takeBatch(["PROJ-2"], ["api"], PARENT);
+    expect(ensureBranch).toHaveBeenCalledWith("/repos/api", "PROJ-1-parent");
     expect(createWorktrees).toHaveBeenCalledWith(
       [expect.objectContaining({ name: "api" })],
-      "ASM-2",
+      "PROJ-2",
       "Do the thing",
       expect.any(Function),
-      { baseRef: "ASM-1-parent" },
+      { baseRef: "PROJ-1-parent" },
     );
     // Order matters: a worktree created before its base branch exists would silently
     // start from main.
@@ -6667,37 +6667,37 @@ describe("takeBatch with a parent", () => {
   it("fails that child rather than branching off main when the parent branch cannot be made", async () => {
     vi.mocked(ensureBranch).mockReturnValue(false);
     const { provider, posted } = setup({ authed: true });
-    await provider.takeBatch(["ASM-2"], ["api"], PARENT);
+    await provider.takeBatch(["PROJ-2"], ["api"], PARENT);
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
     const toast = posted().find((m) => m.type === "toast") as { level: string; message: string };
     expect(toast.level).toBe("error");
     expect(toast.message).toBe(
-      "Launched 0 of 1 in parallel. Failed: ASM-2 (couldn't create the parent branch ASM-1-parent in api)",
+      "Launched 0 of 1 in parallel. Failed: PROJ-2 (couldn't create the parent branch PROJ-1-parent in api)",
     );
   });
 
   it("stamps parentKey on each separate window's request", async () => {
     const { provider } = setup({ authed: true });
-    await provider.takeBatch(["ASM-2"], ["api"], PARENT);
-    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ parentKey: "ASM-1" }));
+    await provider.takeBatch(["PROJ-2"], ["api"], PARENT);
+    expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ parentKey: "PROJ-1" }));
   });
 
   it("stamps parentKey on every task of a shared window", async () => {
     vi.mocked(window.showQuickPick).mockResolvedValueOnce({ shared: true } as never); // the layout pick
     const { provider } = setup({ authed: true });
-    await provider.takeBatch(["ASM-2", "ASM-3"], ["api"], PARENT);
+    await provider.takeBatch(["PROJ-2", "PROJ-3"], ["api"], PARENT);
     const req = vi.mocked(openSharedWorkspace).mock.calls[0][0];
-    expect(req.tasks.map((t) => t.parentKey)).toEqual(["ASM-1", "ASM-1"]);
+    expect(req.tasks.map((t) => t.parentKey)).toEqual(["PROJ-1", "PROJ-1"]);
   });
 
   it("touches no branch and stamps no parent without one", async () => {
     const { provider } = setup({ authed: true });
-    await provider.takeBatch(["ASM-2"], ["api"]);
+    await provider.takeBatch(["PROJ-2"], ["api"]);
     expect(ensureBranch).not.toHaveBeenCalled();
     expect(createWorktrees).toHaveBeenCalledWith(
       [expect.objectContaining({ name: "api" })],
-      "ASM-2",
+      "PROJ-2",
       "Do the thing",
       expect.any(Function),
       {},
@@ -6715,7 +6715,7 @@ describe("takeBatch with a parent", () => {
 describe("takeTask: orchestrator mode", () => {
   /** Computed from the REAL branchName and the summary the fixture's getDetail
    *  returns, never a guessed slug. */
-  const PARENT_BRANCH = branchName("ASM-1", "Do the thing");
+  const PARENT_BRANCH = branchName("PROJ-1", "Do the thing");
   /** The shipped prompt modes include an `orchestrator` entry (src/config.ts); the
    *  base CFG's list deliberately does not, so the fallback has its own tests below. */
   const WITH_ORCHESTRATOR = [
@@ -6725,10 +6725,10 @@ describe("takeTask: orchestrator mode", () => {
 
   beforeEach(() => {
     clientStub.childrenOf = vi.fn(async (key: string) =>
-      key === "ASM-1"
+      key === "PROJ-1"
         ? [
-            { key: "ASM-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
-            { key: "ASM-3", summary: "second bit", type: "Sub-task", statusCategory: "new" },
+            { key: "PROJ-2", summary: "first bit", type: "Sub-task", statusCategory: "new" },
+            { key: "PROJ-3", summary: "second bit", type: "Sub-task", statusCategory: "new" },
           ]
         : [],
     );
@@ -6736,7 +6736,7 @@ describe("takeTask: orchestrator mode", () => {
     // parent's detail instead of the child's is visible rather than identical.
     clientStub.getDetail.mockImplementation(async (key: string) => ({
       key,
-      summary: { "ASM-1": "Do the thing", "ASM-2": "first bit", "ASM-3": "second bit" }[key] ?? key,
+      summary: { "PROJ-1": "Do the thing", "PROJ-2": "first bit", "PROJ-3": "second bit" }[key] ?? key,
       descriptionText: `${key} description`,
       labels: [],
       components: [],
@@ -6770,8 +6770,8 @@ describe("takeTask: orchestrator mode", () => {
   /** The child worktree rows the parent's run carries, as the mocked createWorktrees
    *  places them. */
   const CHILD_ROWS = [
-    { key: "ASM-2", summary: "first bit", repo: "api", path: "/repos/api/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
-    { key: "ASM-3", summary: "second bit", repo: "api", path: "/repos/api/.claude/worktrees/ASM-3", branch: "ASM-3-second-bit" },
+    { key: "PROJ-2", summary: "first bit", repo: "api", path: "/repos/api/.claude/worktrees/PROJ-2", branch: "PROJ-2-first-bit" },
+    { key: "PROJ-3", summary: "second bit", repo: "api", path: "/repos/api/.claude/worktrees/PROJ-3", branch: "PROJ-3-second-bit" },
   ];
 
   const openArg = () => vi.mocked(openWorkspace).mock.calls[0][0];
@@ -6787,13 +6787,13 @@ describe("takeTask: orchestrator mode", () => {
   it("creates one worktree per selected leaf, each off the parent branch", async () => {
     answerOrchestrator();
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     // The children first, off the parent branch; then the parent's own worktree, which
     // takes NO baseRef because it IS the parent branch.
     expect(worktreeCalls()).toEqual([
-      [["api"], "ASM-2", "first bit", { baseRef: PARENT_BRANCH }],
-      [["api"], "ASM-3", "second bit", { baseRef: PARENT_BRANCH }],
-      [["api"], "ASM-1", "Do the thing", undefined],
+      [["api"], "PROJ-2", "first bit", { baseRef: PARENT_BRANCH }],
+      [["api"], "PROJ-3", "second bit", { baseRef: PARENT_BRANCH }],
+      [["api"], "PROJ-1", "Do the thing", undefined],
     ]);
   });
 
@@ -6801,7 +6801,7 @@ describe("takeTask: orchestrator mode", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web"]));
     answerOrchestrator();
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(vi.mocked(ensureBranch).mock.calls).toEqual([
       ["/repos/api", PARENT_BRANCH],
       ["/repos/web", PARENT_BRANCH],
@@ -6817,41 +6817,41 @@ describe("takeTask: orchestrator mode", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web"]));
     answerOrchestrator((items) => [items[0]]); // one leaf, two repos
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(openArg().children).toEqual([
-      { key: "ASM-2", summary: "first bit", repo: "api", path: "/repos/api/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
-      { key: "ASM-2", summary: "first bit", repo: "web", path: "/repos/web/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
+      { key: "PROJ-2", summary: "first bit", repo: "api", path: "/repos/api/.claude/worktrees/PROJ-2", branch: "PROJ-2-first-bit" },
+      { key: "PROJ-2", summary: "first bit", repo: "web", path: "/repos/web/.claude/worktrees/PROJ-2", branch: "PROJ-2-first-bit" },
     ]);
   });
 
   it("opens exactly one session, on the parent, in a worktree, with the orchestrator prompt", async () => {
     answerOrchestrator();
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     const calls = vi.mocked(openWorkspace).mock.calls;
     expect(calls).toHaveLength(1);
-    expect(calls[0][0].ticket).toEqual({ key: "ASM-1", summary: "Do the thing", url: "https://jira/browse/ASM-1" });
+    expect(calls[0][0].ticket).toEqual({ key: "PROJ-1", summary: "Do the thing", url: "https://jira/browse/PROJ-1" });
     // Forced, even though CFG sets worktree: "never" — the orchestrator works on the
     // parent branch, isolated from the checkout its children branch out of.
-    expect(calls[0][0].services.map((s) => s.path)).toEqual(["/repos/api/.claude/worktrees/ASM-1"]);
+    expect(calls[0][0].services.map((s) => s.path)).toEqual(["/repos/api/.claude/worktrees/PROJ-1"]);
     expect(calls[0][0].promptTemplate).toBe("ORCH {key}");
   });
 
   it("names every child worktree in the parent's brief", async () => {
     answerOrchestrator();
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     const { planMd } = openArg();
     expect(planMd).toContain("## Children — one subagent each");
-    expect(planMd).toContain("| ASM-2 | first bit | `/repos/api/.claude/worktrees/ASM-2` | `ASM-2-first-bit` |");
-    expect(planMd).toContain("| ASM-3 | second bit | `/repos/api/.claude/worktrees/ASM-3` | `ASM-3-second-bit` |");
+    expect(planMd).toContain("| PROJ-2 | first bit | `/repos/api/.claude/worktrees/PROJ-2` | `PROJ-2-first-bit` |");
+    expect(planMd).toContain("| PROJ-3 | second bit | `/repos/api/.claude/worktrees/PROJ-3` | `PROJ-3-second-bit` |");
     expect(planMd).toContain(`Merge finished children into \`${PARENT_BRANCH}\`; never into main.`);
   });
 
   it("records the child worktrees on the parent's run", async () => {
     answerOrchestrator();
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(openArg().children).toEqual(CHILD_ROWS);
   });
 
@@ -6862,28 +6862,28 @@ describe("takeTask: orchestrator mode", () => {
     // drawer chip shows, what Run.children[] stores, and what the brief tells the
     // orchestrator to merge. Here every worktree sits on a stale slug.
     vi.mocked(currentBranch).mockImplementation((p: string) =>
-      p.endsWith("/ASM-2") ? "ASM-2-the-old-summary" : p.endsWith("/ASM-3") ? "ASM-3-also-stale" : "ASM-1-stale-parent",
+      p.endsWith("/PROJ-2") ? "PROJ-2-the-old-summary" : p.endsWith("/PROJ-3") ? "PROJ-3-also-stale" : "PROJ-1-stale-parent",
     );
     answerOrchestrator();
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(vi.mocked(currentBranch).mock.calls.map((c) => c[0])).toEqual([
-      "/repos/api/.claude/worktrees/ASM-2",
-      "/repos/api/.claude/worktrees/ASM-3",
-      "/repos/api/.claude/worktrees/ASM-1",
+      "/repos/api/.claude/worktrees/PROJ-2",
+      "/repos/api/.claude/worktrees/PROJ-3",
+      "/repos/api/.claude/worktrees/PROJ-1",
     ]);
     expect(openArg().children).toEqual([
-      { ...CHILD_ROWS[0], branch: "ASM-2-the-old-summary" },
-      { ...CHILD_ROWS[1], branch: "ASM-3-also-stale" },
+      { ...CHILD_ROWS[0], branch: "PROJ-2-the-old-summary" },
+      { ...CHILD_ROWS[1], branch: "PROJ-3-also-stale" },
     ]);
     // The brief's table and its merge instruction name the observed branches too — the
     // orchestrator is told to merge into the branch its own worktree is on.
     const { planMd } = openArg();
-    expect(planMd).toContain("| ASM-2 | first bit | `/repos/api/.claude/worktrees/ASM-2` | `ASM-2-the-old-summary` |");
-    expect(planMd).toContain("| ASM-3 | second bit | `/repos/api/.claude/worktrees/ASM-3` | `ASM-3-also-stale` |");
-    expect(planMd).toContain("Merge finished children into `ASM-1-stale-parent`; never into main.");
+    expect(planMd).toContain("| PROJ-2 | first bit | `/repos/api/.claude/worktrees/PROJ-2` | `PROJ-2-the-old-summary` |");
+    expect(planMd).toContain("| PROJ-3 | second bit | `/repos/api/.claude/worktrees/PROJ-3` | `PROJ-3-also-stale` |");
+    expect(planMd).toContain("Merge finished children into `PROJ-1-stale-parent`; never into main.");
     // Not the computed names, anywhere.
-    expect(planMd).not.toContain("ASM-2-first-bit");
+    expect(planMd).not.toContain("PROJ-2-first-bit");
     expect(planMd).not.toContain(PARENT_BRANCH);
   });
 
@@ -6892,7 +6892,7 @@ describe("takeTask: orchestrator mode", () => {
     // rows then read exactly as they did before the observation was added.
     answerOrchestrator();
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(openArg().children).toEqual(CHILD_ROWS);
     expect(openArg().planMd).toContain(`Merge finished children into \`${PARENT_BRANCH}\`; never into main.`);
   });
@@ -6900,26 +6900,26 @@ describe("takeTask: orchestrator mode", () => {
   it("writes a brief into each child worktree, built from that child's own detail", async () => {
     answerOrchestrator();
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     const calls = vi.mocked(writeBriefInto).mock.calls;
     expect(calls.map((c) => [(c[0] as { path: string }[]).map((s) => s.path), c[1]])).toEqual([
-      [["/repos/api/.claude/worktrees/ASM-2"], { key: "ASM-2", summary: "first bit", url: "https://jira/browse/ASM-2" }],
-      [["/repos/api/.claude/worktrees/ASM-3"], { key: "ASM-3", summary: "second bit", url: "https://jira/browse/ASM-3" }],
+      [["/repos/api/.claude/worktrees/PROJ-2"], { key: "PROJ-2", summary: "first bit", url: "https://jira/browse/PROJ-2" }],
+      [["/repos/api/.claude/worktrees/PROJ-3"], { key: "PROJ-3", summary: "second bit", url: "https://jira/browse/PROJ-3" }],
     ]);
     // The child's own ticket text, not the parent's — a subagent reads a real brief,
     // not a row in the parent's table.
-    expect(calls[0][2]).toContain("## ASM-2: first bit");
-    expect(calls[0][2]).toContain("ASM-2 description");
-    expect(calls[1][2]).toContain("## ASM-3: second bit");
-    expect(calls[1][2]).toContain("ASM-3 description");
+    expect(calls[0][2]).toContain("## PROJ-2: first bit");
+    expect(calls[0][2]).toContain("PROJ-2 description");
+    expect(calls[1][2]).toContain("## PROJ-3: second bit");
+    expect(calls[1][2]).toContain("PROJ-3 description");
   });
 
   it("falls back to the leaf's own key and summary when the child's detail cannot be read", async () => {
     clientStub.getDetail.mockImplementation(async (key: string) => {
-      if (key === "ASM-3") throw new Error("500");
+      if (key === "PROJ-3") throw new Error("500");
       return {
         key,
-        summary: key === "ASM-1" ? "Do the thing" : "first bit",
+        summary: key === "PROJ-1" ? "Do the thing" : "first bit",
         descriptionText: `${key} description`,
         labels: [],
         components: [],
@@ -6928,12 +6928,12 @@ describe("takeTask: orchestrator mode", () => {
     });
     answerOrchestrator();
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     const calls = vi.mocked(writeBriefInto).mock.calls;
     // A failed detail fetch degrades to what the leaf already knew — it must not cost
     // the child its worktree, its brief, or the take.
-    expect(calls[1][1]).toEqual({ key: "ASM-3", summary: "second bit", url: "" });
-    expect(calls[1][2]).toContain("## ASM-3: second bit");
+    expect(calls[1][1]).toEqual({ key: "PROJ-3", summary: "second bit", url: "" });
+    expect(calls[1][2]).toContain("## PROJ-3: second bit");
     expect(calls[1][2]).toContain("_(No description on the ticket.)_");
     expect(openArg().children).toEqual(CHILD_ROWS);
   });
@@ -6942,29 +6942,29 @@ describe("takeTask: orchestrator mode", () => {
     // createWorktrees hands back the ORIGINAL ref when it could not create the
     // worktree — a subagent dispatched there would be in the parent's own checkout.
     vi.mocked(createWorktrees).mockImplementation((s, key) =>
-      key === "ASM-3" ? s : s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+      key === "PROJ-3" ? s : s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
     answerOrchestrator();
     const { provider, posted } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(openArg().children).toEqual([CHILD_ROWS[0]]);
-    expect(openArg().planMd).not.toContain("ASM-3");
+    expect(openArg().planMd).not.toContain("PROJ-3");
     // No brief in the main checkout either: the child is dropped whole.
-    expect(vi.mocked(writeBriefInto).mock.calls.map((c) => (c[1] as { key: string }).key)).toEqual(["ASM-2"]);
+    expect(vi.mocked(writeBriefInto).mock.calls.map((c) => (c[1] as { key: string }).key)).toEqual(["PROJ-2"]);
     expect(posted()).toContainEqual({
       type: "toast",
       level: "info",
-      message: "Couldn't create a worktree for ASM-3 — dispatch those by hand.",
+      message: "Couldn't create a worktree for PROJ-3 — dispatch those by hand.",
     });
   });
 
   it("still opens the orchestrator session when no child worktree could be made", async () => {
     vi.mocked(createWorktrees).mockImplementation((s, key) =>
-      key === "ASM-1" ? s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })) : s,
+      key === "PROJ-1" ? s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })) : s,
     );
     answerOrchestrator();
     const { provider, posted } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(vi.mocked(openWorkspace).mock.calls).toHaveLength(1);
     // Absent, not empty: a run with no children must read exactly like a run taken
     // before children existed (see Run.children), and the brief keeps no table.
@@ -6973,7 +6973,7 @@ describe("takeTask: orchestrator mode", () => {
     expect(posted()).toContainEqual({
       type: "toast",
       level: "info",
-      message: "Couldn't create a worktree for ASM-2, ASM-3 — dispatch those by hand.",
+      message: "Couldn't create a worktree for PROJ-2, PROJ-3 — dispatch those by hand.",
     });
   });
 
@@ -6991,7 +6991,7 @@ describe("takeTask: orchestrator mode", () => {
     );
     answerOrchestrator();
     const { provider, posted } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     // Nothing failed, so nothing is refused — asserted first, because the refusal's
     // toast is the symptom that names what went wrong.
     expect(posted().filter((m) => m.type === "toast" && m.level === "error")).toEqual([]);
@@ -6999,7 +6999,7 @@ describe("takeTask: orchestrator mode", () => {
     // The non-git repo is named here on purpose: it is a legitimate root of this
     // session, so a future filter that silently dropped it fails this assertion.
     expect(openArg().services.map((s) => [s.name, s.path])).toEqual([
-      ["api", "/repos/api/.claude/worktrees/ASM-1"],
+      ["api", "/repos/api/.claude/worktrees/PROJ-1"],
       ["docs", "/repos/docs"],
     ]);
     // Only the git repo can hold the parent branch, and only it yields child rows —
@@ -7016,17 +7016,17 @@ describe("takeTask: orchestrator mode", () => {
     // checkout: it would check the branch out over whatever they have open and write
     // merge commits there.
     vi.mocked(createWorktrees).mockImplementation((s, key) =>
-      key === "ASM-1" ? s : s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+      key === "PROJ-1" ? s : s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
     );
     answerOrchestrator();
     const { provider, posted } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted()).toContainEqual({
       type: "toast",
       level: "error",
       message:
-        "Couldn't create a git worktree for ASM-1 in api — not opening an orchestrator in your main checkout. The Agent Flow Deck output channel has the reason.",
+        "Couldn't create a git worktree for PROJ-1 in api — not opening an orchestrator in your main checkout. The Agent Flow Deck output channel has the reason.",
     });
   });
 
@@ -7035,7 +7035,7 @@ describe("takeTask: orchestrator mode", () => {
     vi.mocked(ensureBranch).mockReturnValue(false);
     answerOrchestrator();
     const { provider, posted } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(writeBriefInto).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
@@ -7053,26 +7053,26 @@ describe("takeTask: orchestrator mode", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web"]));
     answerPicks((items: unknown[]) => items[1], (items: unknown[]) => items);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card", ["web"]);
+    await provider.takeTask("PROJ-1", "card", ["web"]);
     // Two pickers, not three: the tree mode and the leaves.
     expect(window.showQuickPick).toHaveBeenCalledTimes(2);
     // By name, in the preselected repo only — `api` is discovered and never touched.
     expect(vi.mocked(ensureBranch).mock.calls).toEqual([["/repos/web", PARENT_BRANCH]]);
     expect(worktreeCalls()).toEqual([
-      [["web"], "ASM-2", "first bit", { baseRef: PARENT_BRANCH }],
-      [["web"], "ASM-3", "second bit", { baseRef: PARENT_BRANCH }],
-      [["web"], "ASM-1", "Do the thing", undefined],
+      [["web"], "PROJ-2", "first bit", { baseRef: PARENT_BRANCH }],
+      [["web"], "PROJ-3", "second bit", { baseRef: PARENT_BRANCH }],
+      [["web"], "PROJ-1", "Do the thing", undefined],
     ]);
     expect(openArg().children).toEqual([
-      { key: "ASM-2", summary: "first bit", repo: "web", path: "/repos/web/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
-      { key: "ASM-3", summary: "second bit", repo: "web", path: "/repos/web/.claude/worktrees/ASM-3", branch: "ASM-3-second-bit" },
+      { key: "PROJ-2", summary: "first bit", repo: "web", path: "/repos/web/.claude/worktrees/PROJ-2", branch: "PROJ-2-first-bit" },
+      { key: "PROJ-3", summary: "second bit", repo: "web", path: "/repos/web/.claude/worktrees/PROJ-3", branch: "PROJ-3-second-bit" },
     ]);
   });
 
   it("takes nothing when the repo picker is cancelled", async () => {
     answerOrchestrator((items) => items, () => undefined);
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(ensureBranch).not.toHaveBeenCalled();
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
@@ -7085,16 +7085,16 @@ describe("takeTask: orchestrator mode", () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "web"]));
     clientStub.getDetail.mockImplementation(async (key: string) => ({
       key,
-      summary: { "ASM-1": "Do the thing", "ASM-2": "first bit", "ASM-3": "second bit" }[key] ?? key,
+      summary: { "PROJ-1": "Do the thing", "PROJ-2": "first bit", "PROJ-3": "second bit" }[key] ?? key,
       descriptionText: "",
-      labels: key === "ASM-3" ? ["web"] : [],
+      labels: key === "PROJ-3" ? ["web"] : [],
       components: [],
       url: `https://jira/browse/${key}`,
     }));
     answerOrchestrator((items) => items, (items) => [items[0]]); // api only
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
-    expect(logged).toContain("orchestrator ASM-3: skipping web — outside the parent's repos (api)");
+    await provider.takeTask("PROJ-1", "card");
+    expect(logged).toContain("orchestrator PROJ-3: skipping web — outside the parent's repos (api)");
     // …and it still gets its worktree, in the parent's set.
     expect(openArg().children).toEqual(CHILD_ROWS);
   });
@@ -7106,7 +7106,7 @@ describe("takeTask: orchestrator mode", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, childWorktrees: true });
     answerOrchestrator();
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(openArg().promptTemplate).toBe("P {key}");
     expect(logged).toContain(
       'orchestrator mode: no "orchestrator" prompt mode configured — falling back to Plan',
@@ -7117,7 +7117,7 @@ describe("takeTask: orchestrator mode", () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, promptModes: [], childWorktrees: true });
     answerOrchestrator();
     const { provider, logged } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(openArg().promptTemplate).toBe("");
     expect(logged).toContain(
       'orchestrator mode: no "orchestrator" prompt mode configured — falling back to the default prompt',
@@ -7129,7 +7129,7 @@ describe("takeTask: orchestrator mode", () => {
     // take_started here would open a funnel nothing ever terminates.
     answerOrchestrator();
     const { provider } = setup({ authed: true });
-    await provider.takeTask("ASM-1", "card");
+    await provider.takeTask("PROJ-1", "card");
     expect(trackSpy.mock.calls.map((c) => (c[0] as { name: string }).name)).toEqual([]);
   });
 });

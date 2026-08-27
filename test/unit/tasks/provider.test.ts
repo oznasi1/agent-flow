@@ -128,8 +128,8 @@ describe("children capability", () => {
         of: async (key) => [{ key: `${key}-1`, summary: "child", type: "Sub-task", statusCategory: "new" }],
       },
     };
-    expect(await caps.children!.of("ASM-1")).toEqual([
-      { key: "ASM-1-1", summary: "child", type: "Sub-task", statusCategory: "new" },
+    expect(await caps.children!.of("PROJ-1")).toEqual([
+      { key: "PROJ-1-1", summary: "child", type: "Sub-task", statusCategory: "new" },
     ]);
   });
 

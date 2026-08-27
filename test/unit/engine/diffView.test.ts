@@ -63,37 +63,37 @@ describe("diffTitle", () => {
   const web = { name: "web", path: "/r/web" };
 
   it("names the one repo being diffed", () => {
-    expect(diffTitle("ASM-1", [svc])).toBe("Changes in ASM-1 — svc");
+    expect(diffTitle("PROJ-1", [svc])).toBe("Changes in PROJ-1 — svc");
   });
 
   it("names the workspace when the whole multi-root task is being diffed", () => {
-    expect(diffTitle("ASM-1", [svc, web], "/ws/pay-stack.code-workspace")).toBe("Changes in ASM-1 — pay-stack");
+    expect(diffTitle("PROJ-1", [svc, web], "/ws/pay-stack.code-workspace")).toBe("Changes in PROJ-1 — pay-stack");
   });
 
   it("says all repos when several are diffed without a workspace file", () => {
-    expect(diffTitle("ASM-1", [svc, web])).toBe("Changes in ASM-1 — all repos");
+    expect(diffTitle("PROJ-1", [svc, web])).toBe("Changes in PROJ-1 — all repos");
   });
 
   it("keeps the workspace label to the file's own name, not its directory", () => {
-    expect(diffTitle("ASM-1", [svc, web], "/ws/nested/dir/pay-stack.code-workspace")).toBe(
-      "Changes in ASM-1 — pay-stack",
+    expect(diffTitle("PROJ-1", [svc, web], "/ws/nested/dir/pay-stack.code-workspace")).toBe(
+      "Changes in PROJ-1 — pay-stack",
     );
   });
 
   it("says all repos when the workspace file has no name of its own", () => {
     // A bare `.code-workspace` leaves nothing after the extension is stripped;
     // "all repos" is still true, where an empty label would read as a glitch.
-    expect(diffTitle("ASM-1", [svc, web], "/ws/.code-workspace")).toBe("Changes in ASM-1 — all repos");
+    expect(diffTitle("PROJ-1", [svc, web], "/ws/.code-workspace")).toBe("Changes in PROJ-1 — all repos");
   });
 
   it("falls back to the run key alone when there is no repo to name", () => {
     // openTaskDiff reports "empty" for this, so the title is never seen — but a
     // trailing em dash with nothing after it would be the one visible wrong thing.
-    expect(diffTitle("ASM-1", [])).toBe("Changes in ASM-1");
+    expect(diffTitle("PROJ-1", [])).toBe("Changes in PROJ-1");
   });
 
   it("falls back to the run key alone when the single repo has no name", () => {
-    expect(diffTitle("ASM-1", [{ name: "" }])).toBe("Changes in ASM-1");
+    expect(diffTitle("PROJ-1", [{ name: "" }])).toBe("Changes in PROJ-1");
   });
 });
 
@@ -108,13 +108,13 @@ describe("openTaskDiff", () => {
   });
 
   it("reports empty and opens nothing when the task changed no files", async () => {
-    expect(await openTaskDiff("Changes in ASM-1", svc)).toBe("empty");
+    expect(await openTaskDiff("Changes in PROJ-1", svc)).toBe("empty");
     expect(commands.executeCommand).not.toHaveBeenCalled();
   });
 
   it("reports binary-only when every change was a binary file", async () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "pic.bin", binary: true }]);
-    expect(await openTaskDiff("Changes in ASM-1", svc)).toBe("binary-only");
+    expect(await openTaskDiff("Changes in PROJ-1", svc)).toBe("binary-only");
     expect(commands.executeCommand).not.toHaveBeenCalled();
   });
 
@@ -123,16 +123,16 @@ describe("openTaskDiff", () => {
       { status: "M", path: "pic.bin", binary: true },
       { status: "M", path: "a.ts", binary: false },
     ]);
-    expect(await openTaskDiff("Changes in ASM-1", svc)).toBe("opened");
+    expect(await openTaskDiff("Changes in PROJ-1", svc)).toBe("opened");
     expect(list()).toHaveLength(1);
     expect(list()[0][0].fsPath).toContain("a.ts");
   });
 
   it("runs the multi-file diff command with the run's key as the title", async () => {
     h.taskChangedFiles.mockReturnValue([{ status: "M", path: "a.ts", binary: false }]);
-    await openTaskDiff("Changes in ASM-1", svc);
+    await openTaskDiff("Changes in PROJ-1", svc);
     expect(args()[0]).toBe("vscode.changes");
-    expect(args()[1]).toBe("Changes in ASM-1");
+    expect(args()[1]).toBe("Changes in PROJ-1");
   });
 
   it("gives a modified file both sides", async () => {

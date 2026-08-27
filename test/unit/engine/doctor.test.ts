@@ -6,7 +6,7 @@ const healthy = (): DoctorInputs => ({
   sourceLabel: "Jira",
   scopeNoun: "project",
   endpoint: "https://jira.test",
-  scope: "ASM",
+  scope: "PROJ",
   endpointSetting: "agentFlow.jira.baseUrl",
   scopeSetting: "agentFlow.jira.project",
   hasCredentials: true,
@@ -567,17 +567,17 @@ describe("runChecks — PR reads that fail while the CLI looks fine", () => {
     // The exact state that reported GitHub ✓ OK while every fetch failed: the
     // probe asks a global question ("are you signed in?") and cannot see a
     // per-repo answer ("this account cannot resolve that repository").
-    const c = find({ ...healthy(), prReads: { runs: 6, repos: ["automation_e2e", "centaur"] } }, PR_ROW);
+    const c = find({ ...healthy(), prReads: { runs: 6, repos: ["e2e_suite", "webapp"] } }, PR_ROW);
     expect(c.status).toBe("warn");
     expect(c.group).toBe("GitHub");
     expect(c.detail).toContain("6 runs");
-    expect(c.detail).toContain("centaur");
+    expect(c.detail).toContain("webapp");
   });
 
   it("keeps the CLI row itself OK — the binary really is fine", () => {
     // Two rows saying different things is the point: the CLI is healthy AND the
     // reads are failing, and collapsing them would hide which half to fix.
-    const inputs = { ...healthy(), prReads: { runs: 6, repos: ["centaur"] } };
+    const inputs = { ...healthy(), prReads: { runs: 6, repos: ["webapp"] } };
     expect(find(inputs, "gh").status).toBe("ok");
   });
 
@@ -587,13 +587,13 @@ describe("runChecks — PR reads that fail while the CLI looks fine", () => {
     const inputs: DoctorInputs = {
       ...healthy(),
       forge: { ...healthy().forge, gap: { kind: "missing", detail: "spawn ENOENT" }, foundAt: null },
-      prReads: { runs: 6, repos: ["centaur"] },
+      prReads: { runs: 6, repos: ["webapp"] },
     };
     expect(runChecks(inputs).find((c) => c.label === PR_ROW)).toBeUndefined();
   });
 
   it("stays quiet when PR facts are off, since nothing was ever read", () => {
-    const inputs = { ...healthy(), prFacts: false, prReads: { runs: 6, repos: ["centaur"] } };
+    const inputs = { ...healthy(), prFacts: false, prReads: { runs: 6, repos: ["webapp"] } };
     expect(runChecks(inputs).find((c) => c.label === PR_ROW)).toBeUndefined();
   });
 
@@ -606,9 +606,9 @@ describe("runChecks — PR reads that fail while the CLI looks fine", () => {
   it("caps the repo list so one bad account does not print forty names", () => {
     // Real names, not single letters: "and 3 more" contains a bare "d", so a
     // one-letter fixture makes the not-listed assertion fail on the prose.
-    const repos = ["centaur", "hermes", "aws-ops", "device-manager", "synqly-fetcher", "notification-service"];
+    const repos = ["webapp", "hermes", "aws-ops", "device-manager", "synqly-fetcher", "notification-service"];
     const c = find({ ...healthy(), prReads: { runs: 9, repos } }, PR_ROW);
-    expect(c.detail).toContain("centaur, hermes, aws-ops");
+    expect(c.detail).toContain("webapp, hermes, aws-ops");
     expect(c.detail).not.toContain("device-manager");
     expect(c.detail).toContain("and 3 more");
   });
