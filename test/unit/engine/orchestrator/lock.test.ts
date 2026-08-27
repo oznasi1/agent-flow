@@ -142,6 +142,29 @@ describe("acquire — a lock stamped in the future", () => {
   });
 });
 
+describe("acquire — lock contents that are dead today only by parsing accident", () => {
+  // These two shapes are reaped by slice arithmetic, not by an explicit rule:
+  // "" parses to `Number("") === 0` (ancient), and digits with no colon lose
+  // their last character to `slice(0, indexOf(":"))` — indexOf answers -1 — so a
+  // current timestamp reads as timestamp÷10 (ancient too). Both are the SAFE
+  // answer, a crashed writer's leavings that must not wedge the store, and these
+  // pins are what keeps a refactor of the parsing from flipping either one to
+  // "fresh forever".
+  it("reaps an empty lock file — a writer that crashed before its stamp landed", () => {
+    const { io, files } = fakeIo({ [lockPath(DIR)]: "" });
+    expect(acquire(io, DIR, NOW, LOCK_TTL_MS, "win-a")).toBe(false);
+    expect(files[lockPath(DIR)]).toBeUndefined();
+    expect(acquire(io, DIR, NOW, LOCK_TTL_MS, "win-a")).toBe(true);
+  });
+
+  it("reaps a digits-only, colon-less lock file — a stamp cut off before its token", () => {
+    const { io, files } = fakeIo({ [lockPath(DIR)]: `${NOW}` });
+    expect(acquire(io, DIR, NOW, LOCK_TTL_MS, "win-a")).toBe(false);
+    expect(files[lockPath(DIR)]).toBeUndefined();
+    expect(acquire(io, DIR, NOW, LOCK_TTL_MS, "win-a")).toBe(true);
+  });
+});
+
 describe("renew", () => {
   it("pushes our own lock's deadline out, so the same holder survives its own TTL", () => {
     const { io, files } = fakeIo();
