@@ -167,7 +167,7 @@ In `test/unit/tasks/jira/client.test.ts`, add `issuetype: { name: "Story" }` to 
 
 ```ts
 const rawIssue = (over: Record<string, any> = {}) => ({
-  key: "ASM-1",
+  key: "PROJ-1",
   fields: {
     summary: "Do the thing",
     status: { name: "In Progress", statusCategory: { key: "indeterminate" } },
@@ -528,27 +528,27 @@ In `test/webview/App.test.tsx`, add these inside the describe that defines `with
 
 ```tsx
   it("marks a card with its ticket type", () => {
-    withTask(mkTask({ key: "ASM-1", type: "Bug" }));
+    withTask(mkTask({ key: "PROJ-1", type: "Bug" }));
     expect(screen.getByRole("img", { name: "Type: Bug" })).toHaveClass("ty-bug");
   });
 
   // A project's own type still gets a marker, named for what the project calls it.
   it("marks a type it does not recognise, under the source's own name", () => {
-    withTask(mkTask({ key: "ASM-1", type: "Spike" }));
+    withTask(mkTask({ key: "PROJ-1", type: "Spike" }));
     expect(screen.getByRole("img", { name: "Type: Spike" })).toHaveClass("ty-other");
   });
 
   it("still marks a task whose source named no type", () => {
-    withTask(mkTask({ key: "ASM-1" }));
+    withTask(mkTask({ key: "PROJ-1" }));
     expect(screen.getByRole("img", { name: "Type: unknown" })).toHaveClass("ty-other");
   });
 
   // Left of the key, and inside the top row — not floated into the action cluster.
   it("puts the marker at the head of the card's top row, before the key", () => {
-    withTask(mkTask({ key: "ASM-1", type: "Story" }));
-    const top = screen.getByText("ASM-1").closest(".card-top")!;
+    withTask(mkTask({ key: "PROJ-1", type: "Story" }));
+    const top = screen.getByText("PROJ-1").closest(".card-top")!;
     const marker = within(top as HTMLElement).getByRole("img", { name: "Type: Story" });
-    expect(marker.compareDocumentPosition(screen.getByText("ASM-1")))
+    expect(marker.compareDocumentPosition(screen.getByText("PROJ-1")))
       .toBe(Node.DOCUMENT_POSITION_FOLLOWING);
   });
 ```

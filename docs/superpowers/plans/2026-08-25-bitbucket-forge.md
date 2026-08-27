@@ -535,7 +535,7 @@ const REPO = { workspace: "acme", slug: "api-service" };
  * arrive. */
 const ROW = {
   id: 42, title: "Add export", state: "OPEN",
-  author: "Ada Lovelace", source: "feat/ASM-1", destination: "main",
+  author: "Ada Lovelace", source: "feat/PROJ-1", destination: "main",
 };
 
 describe("toProjectedFacts", () => {
@@ -753,7 +753,7 @@ import {
 const PR = {
   id: 42, title: "Add export", state: "OPEN", draft: false,
   links: { html: { href: "https://bitbucket.org/acme/api-service/pull-requests/42" } },
-  source: { branch: { name: "feat/ASM-1" } },
+  source: { branch: { name: "feat/PROJ-1" } },
   destination: { branch: { name: "main" } },
   participants: [] as unknown[],
 };
@@ -1115,11 +1115,11 @@ const provider = (run: Runner, apiMode: boolean) =>
   new BbProvider(run, () => BB, async () => apiMode);
 
 const PROJECTED_ROW = {
-  id: 42, title: "ASM-1 add export", state: "OPEN",
-  author: "Ada", source: "feat/ASM-1", destination: "main",
+  id: 42, title: "PROJ-1 add export", state: "OPEN",
+  author: "Ada", source: "feat/PROJ-1", destination: "main",
 };
 const REST_PR = {
-  id: 42, title: "ASM-1 add export", state: "OPEN", draft: false,
+  id: 42, title: "PROJ-1 add export", state: "OPEN", draft: false,
   links: { html: { href: "https://bitbucket.org/acme/api-service/pull-requests/42" } },
   participants: [{ role: "REVIEWER", approved: true, state: "approved" }],
 };
@@ -1160,7 +1160,7 @@ describe("BbProvider.fetch — projected mode", () => {
       "pipeline": JSON.stringify([{ build_number: 7, state: "SUCCESSFUL" }]),
       "pr": JSON.stringify([{ ...PROJECTED_ROW, source: "other" }, PROJECTED_ROW]),
     });
-    const res = await provider(run, false).fetch("/repos/api-service", "feat/ASM-1", "ASM-1");
+    const res = await provider(run, false).fetch("/repos/api-service", "feat/PROJ-1", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 42, state: "OPEN" }) });
 
     // Argv is what actually reached the CLI — the honest thing to pin. An
@@ -1179,13 +1179,13 @@ describe("BbProvider.fetch — projected mode", () => {
       "pipeline": JSON.stringify([]),
       "pr": JSON.stringify([PROJECTED_ROW]),
     });
-    const res = await provider(run, false).fetch("/repos/api-service", "some/other-branch", "ASM-1");
+    const res = await provider(run, false).fetch("/repos/api-service", "some/other-branch", "PROJ-1");
     expect(res).toMatchObject({ ok: true, facts: { number: 42 } });
   });
 
   it("reports no PR — not a failure — when nothing matches", async () => {
     const { run } = routed({ "remote.origin.url": REMOTE, "pr": JSON.stringify([]) });
-    await expect(provider(run, false).fetch("/r", "feat/x", "ASM-9")).resolves.toEqual({ ok: true, facts: null });
+    await expect(provider(run, false).fetch("/r", "feat/x", "PROJ-9")).resolves.toEqual({ ok: true, facts: null });
   });
 });
 
@@ -1198,7 +1198,7 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "/comments": JSON.stringify({ values: [] }),
       "source.branch.name": JSON.stringify({ values: [REST_PR] }),
     });
-    const res = await provider(run, true).fetch("/repos/api-service", "feat/ASM-1", "ASM-1");
+    const res = await provider(run, true).fetch("/repos/api-service", "feat/PROJ-1", "PROJ-1");
     expect(res).toMatchObject({
       ok: true,
       facts: {
@@ -1212,7 +1212,7 @@ describe("BbProvider.fetch — passthrough mode", () => {
     });
     expect(calls[1].args[0]).toBe("bb");
     expect(calls[1].args[1]).toBe("api");
-    expect(calls[1].args[2]).toContain('/2.0/repositories/acme/api-service/pullrequests?q=source.branch.name="feat/ASM-1"');
+    expect(calls[1].args[2]).toContain('/2.0/repositories/acme/api-service/pullrequests?q=source.branch.name="feat/PROJ-1"');
   });
 
   it("keeps the PR when a detail call fails, losing only that detail", async () => {
@@ -1223,7 +1223,7 @@ describe("BbProvider.fetch — passthrough mode", () => {
       "/comments": new Error("500"),
       "source.branch.name": JSON.stringify({ values: [REST_PR] }),
     });
-    await expect(provider(run, true).fetch("/r", "feat/ASM-1", "ASM-1")).resolves.toMatchObject({
+    await expect(provider(run, true).fetch("/r", "feat/PROJ-1", "PROJ-1")).resolves.toMatchObject({
       ok: true,
       facts: { number: 42, mergeable: "unknown", unresolved: null, ci: { passing: 0, pending: 0, failing: [] } },
     });

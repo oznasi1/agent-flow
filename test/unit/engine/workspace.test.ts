@@ -43,10 +43,10 @@ beforeEach(() => {
 });
 
 const baseReq = (over: Partial<OpenRequest> = {}): OpenRequest => ({
-  ticket: { key: "ASM-1", summary: "Do the thing", url: "https://jira/ASM-1" },
+  ticket: { key: "PROJ-1", summary: "Do the thing", url: "https://jira/PROJ-1" },
   planMd: "## Plan\n\nsteps",
   descriptionText: "no files here",
-  services: mkRepos(["account-service", "centaur"]),
+  services: mkRepos(["account-service", "webapp"]),
   mode: "multiroot",
   promptTemplate: "Start {key}: {summary} {url}{files}",
   workspaceDir: "/ws",
@@ -62,8 +62,8 @@ describe("openWorkspace — multiroot", () => {
     const result = await openWorkspace(baseReq());
 
     expect(result.mode).toBe("multiroot");
-    expect(result.workspaceFile).toBe("/ws/ASM-1.code-workspace");
-    expect(result.opened).toEqual(["/ws/ASM-1.code-workspace"]);
+    expect(result.workspaceFile).toBe("/ws/PROJ-1.code-workspace");
+    expect(result.opened).toEqual(["/ws/PROJ-1.code-workspace"]);
     expect(result.briefs).toHaveLength(2);
     expect(result.briefs.every((b) => b.gitExcluded)).toBe(true);
 
@@ -71,18 +71,18 @@ describe("openWorkspace — multiroot", () => {
     const wsWrite = writeArg((p) => p.endsWith(".code-workspace"));
     expect(wsWrite).toBeTruthy();
     const ws = JSON.parse(String(wsWrite![1]));
-    expect(ws.folders.map((f: { name: string }) => f.name)).toEqual(["account-service", "centaur"]);
+    expect(ws.folders.map((f: { name: string }) => f.name)).toEqual(["account-service", "webapp"]);
 
     // each repo gets a TASK.md brief mentioning the ticket
     const brief = writeArg((p) => p.endsWith("TASK.md"));
-    expect(String(brief![1])).toContain("ASM-1");
+    expect(String(brief![1])).toContain("PROJ-1");
 
     // a plan file is written for the seed handshake, carrying the rendered prompt
     const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
     expect(planWrite).toBeTruthy();
     const plan = JSON.parse(String(planWrite![1]));
     expect(plan.seedAgent).toBe(true);
-    expect(plan.matches[0].prompt).toContain("Start ASM-1");
+    expect(plan.matches[0].prompt).toContain("Start PROJ-1");
   });
 
   it("key-qualifies a worktree root's folder name and leaves a main checkout bare", async () => {
@@ -92,15 +92,15 @@ describe("openWorkspace — multiroot", () => {
     await openWorkspace(
       baseReq({
         services: [
-          { name: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1", isGit: true },
-          { name: "centaur", path: "/repos/centaur", isGit: true },
+          { name: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-1", isGit: true },
+          { name: "webapp", path: "/repos/webapp", isGit: true },
         ],
       }),
     );
     const ws = JSON.parse(String(writeArg((p) => p.endsWith(".code-workspace"))![1]));
     expect(ws.folders).toEqual([
-      { name: "account-service-ASM-1", path: "/repos/account-service/.claude/worktrees/ASM-1" },
-      { name: "centaur", path: "/repos/centaur" },
+      { name: "account-service-PROJ-1", path: "/repos/account-service/.claude/worktrees/PROJ-1" },
+      { name: "webapp", path: "/repos/webapp" },
     ]);
   });
 
@@ -109,12 +109,12 @@ describe("openWorkspace — multiroot", () => {
     await openWorkspace(
       baseReq({
         descriptionText: "see src/export.py",
-        services: [{ name: "account-service", path: "/repos/account-service/.claude/worktrees/ASM-1", isGit: true }],
+        services: [{ name: "account-service", path: "/repos/account-service/.claude/worktrees/PROJ-1", isGit: true }],
       }),
     );
     const plan = JSON.parse(String(writeArg((p) => p.includes("plans") && p.endsWith(".json"))![1]));
     // `@account-service/…` would name the checkout next door, not this worktree.
-    expect(plan.matches[0].prompt).toContain("@account-service-ASM-1/src/export.py");
+    expect(plan.matches[0].prompt).toContain("@account-service-PROJ-1/src/export.py");
   });
 
   it("falls back to openFolder when `open -a` fails", async () => {
@@ -125,7 +125,7 @@ describe("openWorkspace — multiroot", () => {
       expect.anything(),
       expect.objectContaining({ forceNewWindow: true }),
     );
-    expect(result.opened).toEqual(["/ws/ASM-1.code-workspace"]);
+    expect(result.opened).toEqual(["/ws/PROJ-1.code-workspace"]);
   });
 
   // The same-window reuse branch is gone: openFolder is only ever reached as the
@@ -156,9 +156,9 @@ describe("openWorkspace — multiroot", () => {
     const runWrite = writeArg((p) => p.includes(".agentflow") && p.includes("runs") && p.endsWith(".json"));
     expect(runWrite).toBeTruthy();
     const run = JSON.parse(String(runWrite![1]));
-    expect(run.key).toBe("ASM-1");
+    expect(run.key).toBe("PROJ-1");
     expect(run.mode).toBe("multiroot");
-    expect(run.repos.map((r: { name: string }) => r.name)).toEqual(["account-service", "centaur"]);
+    expect(run.repos.map((r: { name: string }) => r.name)).toEqual(["account-service", "webapp"]);
   });
 
   it("writes no run record when recordRun is false — opening into work that already has one", async () => {
@@ -205,8 +205,8 @@ describe("openWorkspace — attachments", () => {
 
   it("copies each attachment into .pick-task/images/<run key>/ in every repo", async () => {
     await openWorkspace(baseReq({ attachments: [{ path: "/store/i1.png", name: "shot.png" }] }));
-    expect(targets()).toContain("/repos/account-service/.pick-task/images/ASM-1/shot.png");
-    expect(targets()).toContain("/repos/centaur/.pick-task/images/ASM-1/shot.png");
+    expect(targets()).toContain("/repos/account-service/.pick-task/images/PROJ-1/shot.png");
+    expect(targets()).toContain("/repos/webapp/.pick-task/images/PROJ-1/shot.png");
   });
 
   // The reason the run key is in that path at all: two launches into one checkout each
@@ -219,12 +219,12 @@ describe("openWorkspace — attachments", () => {
       attachments: [{ path: "/store/i1.png", name: "image.png" }],
     }));
     await openWorkspace(baseReq({
-      ticket: { key: "ASM-2", summary: "Another", url: "https://jira/ASM-2" },
+      ticket: { key: "PROJ-2", summary: "Another", url: "https://jira/PROJ-2" },
       services: mkRepos(["account-service"]),
       attachments: [{ path: "/store/i2.png", name: "image.png" }],
     }));
-    expect(targets()).toContain("/repos/account-service/.pick-task/images/ASM-1/image.png");
-    expect(targets()).toContain("/repos/account-service/.pick-task/images/ASM-2/image.png");
+    expect(targets()).toContain("/repos/account-service/.pick-task/images/PROJ-1/image.png");
+    expect(targets()).toContain("/repos/account-service/.pick-task/images/PROJ-2/image.png");
   });
 
   // Keys are built from free text (a notepad title) or handed over by a task source, and
@@ -327,13 +327,13 @@ describe("openWorkspace: parent and children on the run record", () => {
   });
 
   it("stamps parentKey when the take came from a parent's tree", async () => {
-    await openWorkspace(baseReq({ parentKey: "ASM-1" }));
-    expect(lastWrittenRun().parentKey).toBe("ASM-1");
+    await openWorkspace(baseReq({ parentKey: "PROJ-1" }));
+    expect(lastWrittenRun().parentKey).toBe("PROJ-1");
   });
 
   it("stores the child worktrees an orchestrator run owns", async () => {
     const children = [
-      { key: "ASM-2", summary: "first", repo: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-2", branch: "ASM-2-first" },
+      { key: "PROJ-2", summary: "first", repo: "webapp", path: "/repos/webapp/.claude/worktrees/PROJ-2", branch: "PROJ-2-first" },
     ];
     await openWorkspace(baseReq({ children }));
     expect(lastWrittenRun().children).toEqual(children);
@@ -349,12 +349,12 @@ describe("openWorkspace — per-window", () => {
   it("opens one window per repo and records each path as a match", async () => {
     const result = await openWorkspace(baseReq({ mode: "per-window" }));
     expect(result.workspaceFile).toBeUndefined();
-    expect(result.opened).toEqual(["/repos/account-service", "/repos/centaur"]);
+    expect(result.opened).toEqual(["/repos/account-service", "/repos/webapp"]);
     const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
     const plan = JSON.parse(String(planWrite![1]));
     expect(plan.matches.map((m: { matchPath: string }) => m.matchPath)).toEqual([
       "/repos/account-service",
-      "/repos/centaur",
+      "/repos/webapp",
     ]);
   });
 });
@@ -372,7 +372,7 @@ describe("openWorkspace — promptSuffix", () => {
     const [{ prompt }] = planMatches();
     // Verbatim: the note is the user's own words, so a `{summary}` inside it stays
     // `{summary}` rather than being filled with the ticket's summary.
-    expect(prompt).toBe(`Start ASM-1: Do the thing https://jira/ASM-1\n\n${SUFFIX}`);
+    expect(prompt).toBe(`Start PROJ-1: Do the thing https://jira/PROJ-1\n\n${SUFFIX}`);
   });
 
   it("keeps the suffix after the relevant-files block", async () => {
@@ -470,7 +470,7 @@ describe("openWorkspace — relevant files", () => {
 });
 
 describe("agentPrompt", () => {
-  const ticket: TicketRef = { key: "ASM-1", summary: "Do the thing", url: "https://jira/ASM-1" };
+  const ticket: TicketRef = { key: "PROJ-1", summary: "Do the thing", url: "https://jira/PROJ-1" };
 
   it("defaults {brief} to the relative BRIEF_DIR/BRIEF_FILE path", () => {
     expect(agentPrompt(ticket, [], "{brief}")).toBe(`${BRIEF_DIR}/${BRIEF_FILE}`);
@@ -486,20 +486,20 @@ describe("agentPrompt", () => {
 describe("maybeSeedAgent", () => {
   const planJson = (over: Record<string, unknown> = {}) =>
     JSON.stringify({
-      key: "ASM-1",
+      key: "PROJ-1",
       createdAt: Date.now(),
       seedAgent: true,
-      matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "do it" }],
+      matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "do it" }],
       ...over,
     });
 
   const withWorkspaceFile = () => {
-    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/PROJ-1.code-workspace" };
   };
 
   /** The "already seeded this window" guard for one plan file. It carries the plan's
    * createdAt, so a test that pre-sets it has to pin the same value into the plan. */
-  const guardKey = (createdAt: number, key = "ASM-1", identity = "/ws/ASM-1.code-workspace") =>
+  const guardKey = (createdAt: number, key = "PROJ-1", identity = "/ws/PROJ-1.code-workspace") =>
     `seeded:${key}:${createdAt}:${identity}`;
 
   describe("seedProvider", () => {
@@ -513,7 +513,7 @@ describe("maybeSeedAgent", () => {
     it("a plan's own provider beats a conflicting live setting", async () => {
       setConfig({ agentProvider: "claude-code" });
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
       readFileSync.mockReturnValue(planJson({ provider: "cursor" }));
       commands.getCommands.mockResolvedValue(["workbench.action.chat.open", CLAUDE_OPEN_CMD]);
       const { context } = fakeContext();
@@ -533,7 +533,7 @@ describe("maybeSeedAgent", () => {
       // re-read here. Degrading beats prompting in a window nobody expected a dialog in.
       setConfig({ agentProvider: "ask" });
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
       readFileSync.mockReturnValue(planJson()); // no `provider` field
       commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
       const { context } = fakeContext();
@@ -565,7 +565,7 @@ describe("maybeSeedAgent", () => {
   it("seeds the matching plan via the Claude Code command", async () => {
     withWorkspaceFile();
     const createdAt = Date.now();
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson({ createdAt }));
     commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
     const { context, globalState } = fakeContext();
@@ -578,7 +578,7 @@ describe("maybeSeedAgent", () => {
 
   it("deletes an expired plan and does not seed", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-old.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-old.json"] as never);
     readFileSync.mockReturnValue(planJson({ createdAt: Date.now() - 16 * 60 * 1000 }));
     const { context } = fakeContext();
 
@@ -590,7 +590,7 @@ describe("maybeSeedAgent", () => {
 
   it("skips a plan whose matchPath is a different window", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson({ matches: [{ matchPath: "/other/window", prompt: "do it" }] }));
     commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
     const { context } = fakeContext();
@@ -604,7 +604,7 @@ describe("maybeSeedAgent", () => {
   it("does not re-seed a window already seeded from this very plan (globalState guard)", async () => {
     withWorkspaceFile();
     const createdAt = Date.now();
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson({ createdAt }));
     commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
     const { context } = fakeContext({ globalState: { [guardKey(createdAt)]: true } });
@@ -622,19 +622,19 @@ describe("maybeSeedAgent", () => {
     commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
     const { context } = fakeContext(); // one window's globalState across both passes
 
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(
       planJson({
         createdAt: Date.now() - 60_000,
-        matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first take" }],
+        matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "first take" }],
       }),
     );
     await maybeSeedAgent(context, () => {});
 
     // Re-taking the same key writes a NEW plan naming the same deterministic window.
-    readdirSync.mockReturnValue(["ASM-1-2.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-2.json"] as never);
     readFileSync.mockReturnValue(
-      planJson({ matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second take" }] }),
+      planJson({ matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "second take" }] }),
     );
     await maybeSeedAgent(context, () => {});
 
@@ -646,11 +646,11 @@ describe("maybeSeedAgent", () => {
     vi.useFakeTimers();
     try {
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-2-1.json", "ASM-1-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-2-1.json", "PROJ-1-1.json"] as never);
       readFileSync.mockImplementation((p) =>
-        String(p).includes("ASM-1")
-          ? planJson({ key: "ASM-1", seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
-          : planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+        String(p).includes("PROJ-1")
+          ? planJson({ key: "PROJ-1", seq: 0, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "first" }] })
+          : planJson({ key: "PROJ-2", seq: 1, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "second" }] }),
       );
       commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
       const { context } = fakeContext();
@@ -670,11 +670,11 @@ describe("maybeSeedAgent", () => {
     vi.useFakeTimers();
     try {
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
       readFileSync.mockImplementation((p) =>
-        String(p).includes("ASM-1")
-          ? planJson({ key: "ASM-1", seq: 0 })
-          : planJson({ key: "ASM-2", seq: 1 }),
+        String(p).includes("PROJ-1")
+          ? planJson({ key: "PROJ-1", seq: 0 })
+          : planJson({ key: "PROJ-2", seq: 1 }),
       );
       commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
       const { context } = fakeContext();
@@ -694,9 +694,9 @@ describe("maybeSeedAgent", () => {
     vi.useFakeTimers();
     try {
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
       readFileSync.mockImplementation((p) =>
-        String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+        String(p).includes("PROJ-1") ? planJson({ key: "PROJ-1", seq: 0 }) : planJson({ key: "PROJ-2", seq: 1 }),
       );
       commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
       const { context } = fakeContext();
@@ -716,11 +716,11 @@ describe("maybeSeedAgent", () => {
     try {
       withWorkspaceFile();
       const createdAt = Date.now();
-      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
       readFileSync.mockImplementation((p) =>
-        String(p).includes("ASM-1")
-          ? planJson({ key: "ASM-1", createdAt, seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
-          : planJson({ key: "ASM-2", createdAt, seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+        String(p).includes("PROJ-1")
+          ? planJson({ key: "PROJ-1", createdAt, seq: 0, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "first" }] })
+          : planJson({ key: "PROJ-2", createdAt, seq: 1, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "second" }] }),
       );
       commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
       const { context } = fakeContext({ globalState: { [guardKey(createdAt)]: true } });
@@ -740,9 +740,9 @@ describe("maybeSeedAgent", () => {
     vi.useFakeTimers();
     try {
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
       readFileSync.mockImplementation((p) =>
-        String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+        String(p).includes("PROJ-1") ? planJson({ key: "PROJ-1", seq: 0 }) : planJson({ key: "PROJ-2", seq: 1 }),
       );
       commands.getCommands.mockResolvedValue([]); // no Claude command at all
       env.openExternal.mockResolvedValue(false); // URI handler fails too
@@ -763,9 +763,9 @@ describe("maybeSeedAgent", () => {
     vi.useFakeTimers();
     try {
       withWorkspaceFile();
-      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
       readFileSync.mockImplementation((p) =>
-        String(p).includes("ASM-1") ? planJson({ key: "ASM-1", seq: 0 }) : planJson({ key: "ASM-2", seq: 1 }),
+        String(p).includes("PROJ-1") ? planJson({ key: "PROJ-1", seq: 0 }) : planJson({ key: "PROJ-2", seq: 1 }),
       );
       commands.getCommands.mockResolvedValue([]); // no Claude command at all
       env.openExternal.mockResolvedValue(false); // URI handler fails too
@@ -776,7 +776,7 @@ describe("maybeSeedAgent", () => {
       await pending;
 
       expect(window.showInformationMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Agent Flow Deck: couldn't start Claude Code for ASM-1."),
+        expect.stringContaining("Agent Flow Deck: couldn't start Claude Code for PROJ-1."),
       );
     } finally {
       vi.useRealTimers();
@@ -790,18 +790,18 @@ describe("maybeSeedAgent", () => {
       // Both passes read the same two plan FILES, and a plan file is written once — so
       // pin createdAt instead of letting the fixture re-stamp it on the second read.
       const createdAt = Date.now();
-      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
       readFileSync.mockImplementation((p) =>
-        String(p).includes("ASM-1")
-          ? planJson({ key: "ASM-1", createdAt, seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] })
-          : planJson({ key: "ASM-2", createdAt, seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }),
+        String(p).includes("PROJ-1")
+          ? planJson({ key: "PROJ-1", createdAt, seq: 0, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "first" }] })
+          : planJson({ key: "PROJ-2", createdAt, seq: 1, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "second" }] }),
       );
       commands.getCommands.mockResolvedValue(["claude-vscode.editor.open", CLAUDE_OPEN_CMD]);
       const { context } = fakeContext();
 
       // Simulates the watcher's debounce firing a second pass mid-batch — e.g. another
       // plan-dir write lands while the first pass is still staggering between sessions.
-      // Without serializing, the second pass would re-collect the still-unguarded ASM-2
+      // Without serializing, the second pass would re-collect the still-unguarded PROJ-2
       // (its `seeded:` guard isn't written until its turn in the first pass) and seed it again.
       const first = maybeSeedAgent(context, () => {});
       const second = maybeSeedAgent(context, () => {});
@@ -819,16 +819,16 @@ describe("maybeSeedAgent", () => {
 describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
   const planJson = (over: Record<string, unknown> = {}) =>
     JSON.stringify({
-      key: "ASM-1",
+      key: "PROJ-1",
       createdAt: Date.now(),
       seedAgent: true,
-      matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "do it" }],
+      matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "do it" }],
       ...over,
     });
 
   const setupMatchingPlan = (over: Record<string, unknown> = {}) => {
-    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/PROJ-1.code-workspace" };
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson(over));
   };
 
@@ -883,7 +883,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       await p;
 
       expect(window.showInformationMessage).toHaveBeenCalledWith(
-        "Agent Flow Deck: opened workspace for ASM-1. Claude Code prompt copied — paste it into the panel to start.",
+        "Agent Flow Deck: opened workspace for PROJ-1. Claude Code prompt copied — paste it into the panel to start.",
       );
     } finally {
       vi.useRealTimers();
@@ -921,7 +921,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       await seedWithTimers(context);
 
       expect(window.createTerminal).toHaveBeenCalledTimes(1);
-      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · ASM-1" });
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · PROJ-1" });
       const t = terminalAt();
       expect(t.show).toHaveBeenCalled();
       // First send runs the CLI (submitted); second types the prompt (NOT submitted).
@@ -936,8 +936,8 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       // renderPrompt appends "\n\nRelevant files: …" whenever a task has file
       // mentions, so this is the common case, not an edge case. Without the
       // markers the TUI would submit at the blank line and drop the file list.
-      const prompt = "Start ASM-1\n\nRelevant files: @a.ts";
-      setupMatchingPlan({ matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt }] });
+      const prompt = "Start PROJ-1\n\nRelevant files: @a.ts";
+      setupMatchingPlan({ matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt }] });
       const { context } = fakeContext();
 
       await seedWithTimers(context);
@@ -948,7 +948,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     it("uses a folder matchPath as the terminal cwd", async () => {
       workspace.workspaceFile = undefined;
       workspace.workspaceFolders = [{ uri: { fsPath: "/repos/api" } }];
-      readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+      readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
       readFileSync.mockReturnValue(
         planJson({ matches: [{ matchPath: "/repos/api", prompt: "do it" }] }),
       );
@@ -993,7 +993,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
 
       expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
       expect(terminalAt().sendText.mock.calls[1][0]).toBe(
-        `${BRACKET_ON}/remote-control ASM-1${BRACKET_OFF}`,
+        `${BRACKET_ON}/remote-control PROJ-1${BRACKET_OFF}`,
       );
       expect(terminalAt().sendText.mock.calls[1][1]).toBe(false);
       // The user is told what to press.
@@ -1003,20 +1003,20 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     });
 
     it("gives each task in a batch its own named terminal", async () => {
-      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
-      readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-2-1.json"] as never);
+      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/PROJ-1.code-workspace" };
+      readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-2-1.json"] as never);
       readFileSync.mockImplementation((p) =>
-        String(p).includes("ASM-1")
-          ? planJson({ key: "ASM-1", seq: 0 })
-          : planJson({ key: "ASM-2", seq: 1 }),
+        String(p).includes("PROJ-1")
+          ? planJson({ key: "PROJ-1", seq: 0 })
+          : planJson({ key: "PROJ-2", seq: 1 }),
       );
       const { context } = fakeContext();
 
       await seedWithTimers(context);
 
       expect(window.createTerminal.mock.calls.map((c) => c[0]?.name)).toEqual([
-        "Claude · ASM-1",
-        "Claude · ASM-2",
+        "Claude · PROJ-1",
+        "Claude · PROJ-2",
       ]);
     });
   });
@@ -1040,7 +1040,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       await seedWithTimers(context);
 
       expect(window.createTerminal).toHaveBeenCalledTimes(1);
-      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Copilot · ASM-1" });
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Copilot · PROJ-1" });
       expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "copilot", true);
     });
 
@@ -1061,7 +1061,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
         // happens before the boot-delay setTimeout is armed.
         await vi.advanceTimersByTimeAsync(0);
 
-        const i = window.createTerminal.mock.calls.findIndex((c) => c[0]?.name === "Copilot · ASM-1");
+        const i = window.createTerminal.mock.calls.findIndex((c) => c[0]?.name === "Copilot · PROJ-1");
         expect(i).toBeGreaterThanOrEqual(0);
         const t = terminalAt(i);
         expect(t.sendText).toHaveBeenNthCalledWith(1, "copilot", true);
@@ -1089,7 +1089,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
 
       await seedWithTimers(context);
 
-      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · ASM-1" });
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · PROJ-1" });
       expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "claude", true);
     });
   });
@@ -1183,7 +1183,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
 
       await maybeSeedAgent(context, (m) => logs.push(m));
 
-      expect(logs).toContain(`seed ASM-1: opened Copilot Chat via ${CHAT_OPEN_CMD} (attempt 1)`);
+      expect(logs).toContain(`seed PROJ-1: opened Copilot Chat via ${CHAT_OPEN_CMD} (attempt 1)`);
     });
 
     it("never calls Claude Code's open command", async () => {
@@ -1222,7 +1222,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       await seedWithTimers(context);
 
       expect(window.showInformationMessage).toHaveBeenCalledWith(
-        "Agent Flow Deck: opened workspace for ASM-1. Copilot prompt copied — paste it into the panel to start.",
+        "Agent Flow Deck: opened workspace for PROJ-1. Copilot prompt copied — paste it into the panel to start.",
       );
     });
 
@@ -1265,7 +1265,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       // prompt lands on the clipboard and the user is told to paste it.
       expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
       expect(window.showInformationMessage).toHaveBeenCalledWith(
-        "Agent Flow Deck: opened workspace for ASM-1. Copilot prompt copied — paste it into the panel to start.",
+        "Agent Flow Deck: opened workspace for PROJ-1. Copilot prompt copied — paste it into the panel to start.",
       );
     });
 
@@ -1299,7 +1299,7 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
       expect(logs.some((m) => m.includes("registered but threw"))).toBe(true);
       expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
       expect(window.showInformationMessage).toHaveBeenCalledWith(
-        "Agent Flow Deck: opened workspace for ASM-1. Copilot prompt copied — paste it into the panel to start.",
+        "Agent Flow Deck: opened workspace for PROJ-1. Copilot prompt copied — paste it into the panel to start.",
       );
     });
   });
@@ -1331,19 +1331,19 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
      * "seeds every plan matching this window" above), with the polling delay
      * faked away so the test doesn't burn real seconds. */
     const seedTwoTasks = async (key1: string, key2: string) => {
-      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/PROJ-1.code-workspace" };
       readdirSync.mockReturnValue([`${key1}-1.json`, `${key2}-1.json`] as never);
       readFileSync.mockImplementation((p) =>
         String(p).includes(key1)
           ? planJson({
               key: key1,
               seq: 0,
-              matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: `Start ${key1}` }],
+              matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: `Start ${key1}` }],
             })
           : planJson({
               key: key2,
               seq: 1,
-              matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: `Start ${key2}` }],
+              matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: `Start ${key2}` }],
             }),
       );
       const { context } = fakeContext();
@@ -1358,21 +1358,21 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     };
 
     it("never reuses the single-instance panel for a batch", async () => {
-      await seedTwoTasks("ASM-1", "ASM-2");
+      await seedTwoTasks("PROJ-1", "PROJ-2");
       expect(commands.executeCommand).not.toHaveBeenCalledWith(CHAT_OPEN_CMD, expect.anything());
     });
 
     it("returns false immediately, without polling for a chat command", async () => {
       // The multi guard short-circuits before the poll loop — proven here by asserting
       // getCommands is never even called, not just that its result goes unused.
-      await seedTwoTasks("ASM-1", "ASM-2");
+      await seedTwoTasks("PROJ-1", "PROJ-2");
       expect(commands.getCommands).not.toHaveBeenCalled();
     });
 
     it("points at the briefs for each task, with the clipboard withheld", async () => {
       // One clipboard can't carry two prompts — this is the fallback maybeSeedAgent's
       // multi path already uses for Claude Code, and a Copilot batch must land here too.
-      await seedTwoTasks("ASM-1", "ASM-2");
+      await seedTwoTasks("PROJ-1", "PROJ-2");
       expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining(BRIEF_DIR));
       expect(window.showInformationMessage).toHaveBeenCalledTimes(2); // one per task
       expect(env.clipboard.writeText).not.toHaveBeenCalled();
@@ -1381,12 +1381,12 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     // Task 5 routes a Copilot batch onto this exact notification, so it must name
     // Copilot rather than the Claude Code wording that shipped before providers existed.
     it("names Copilot, not Claude Code, in the batch fallback notification", async () => {
-      await seedTwoTasks("ASM-1", "ASM-2");
+      await seedTwoTasks("PROJ-1", "PROJ-2");
       expect(window.showInformationMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Agent Flow Deck: couldn't start Copilot for ASM-1."),
+        expect.stringContaining("Agent Flow Deck: couldn't start Copilot for PROJ-1."),
       );
       expect(window.showInformationMessage).toHaveBeenCalledWith(
-        expect.stringContaining("Agent Flow Deck: couldn't start Copilot for ASM-2."),
+        expect.stringContaining("Agent Flow Deck: couldn't start Copilot for PROJ-2."),
       );
     });
   });
@@ -1397,15 +1397,15 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
 
   const planJson = (over: Record<string, unknown> = {}) =>
     JSON.stringify({
-      key: "ASM-1",
+      key: "PROJ-1",
       createdAt: Date.now(),
       seedAgent: true,
-      matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "do it" }],
+      matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "do it" }],
       ...over,
     });
 
   const withWorkspaceFile = () => {
-    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/PROJ-1.code-workspace" };
   };
 
   beforeEach(() => {
@@ -1415,7 +1415,7 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
 
   it("opens a Cursor composer with the prompt pre-filled and unsubmitted", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson());
     commands.getCommands.mockResolvedValue([CHAT_CMD]);
     const { context } = fakeContext();
@@ -1433,10 +1433,10 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
     // Cursor's handler calls createComposer({ openInNewTab: true }), so N calls give
     // N tabs. Copilot's panel is single-instance and bails to the briefs instead.
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json", "ASM-1-2.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json", "PROJ-1-2.json"] as never);
     readFileSync
-      .mockReturnValueOnce(planJson({ seq: 0, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "first" }] }))
-      .mockReturnValueOnce(planJson({ key: "ASM-2", seq: 1, matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "second" }] }));
+      .mockReturnValueOnce(planJson({ seq: 0, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "first" }] }))
+      .mockReturnValueOnce(planJson({ key: "PROJ-2", seq: 1, matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "second" }] }));
     commands.getCommands.mockResolvedValue([CHAT_CMD]);
     const { context } = fakeContext();
 
@@ -1451,7 +1451,7 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
   it("runs cursor-agent on the terminal surface", async () => {
     setConfig({ agentProvider: "cursor", agentSurface: "terminal" });
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson({ matches: [{ matchPath: "/repo", prompt: "do it" }] }));
     workspace.workspaceFile = undefined;
     workspace.workspaceFolders = [{ uri: { fsPath: "/repo" } }];
@@ -1460,7 +1460,7 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
     await maybeSeedAgent(context, () => {});
 
     expect(window.createTerminal).toHaveBeenCalledWith(
-      expect.objectContaining({ name: "Cursor · ASM-1" }),
+      expect.objectContaining({ name: "Cursor · PROJ-1" }),
     );
     const terminal = window.createTerminal.mock.results[0].value;
     expect(terminal.sendText).toHaveBeenCalledWith("cursor-agent", true);
@@ -1468,7 +1468,7 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
 
   it("refuses Remote Control under cursor, as it does under copilot", async () => {
     withWorkspaceFile();
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(planJson({ remoteControl: true }));
     commands.getCommands.mockResolvedValue([CHAT_CMD]);
     const { context } = fakeContext();
@@ -1484,14 +1484,14 @@ describe("Cursor seeding (via maybeSeedAgent)", () => {
 
 describe("seedClaudeCode — remote control", () => {
   const seedPlan = (over: Record<string, unknown> = {}) => {
-    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
-    readdirSync.mockReturnValue(["ASM-1-1.json"] as never);
+    workspace.workspaceFile = { scheme: "file", fsPath: "/ws/PROJ-1.code-workspace" };
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
     readFileSync.mockReturnValue(
       JSON.stringify({
-        key: "ASM-1",
+        key: "PROJ-1",
         createdAt: Date.now(),
         seedAgent: true,
-        matches: [{ matchPath: "/ws/ASM-1.code-workspace", prompt: "do it" }],
+        matches: [{ matchPath: "/ws/PROJ-1.code-workspace", prompt: "do it" }],
         ...over,
       }),
     );
@@ -1504,7 +1504,7 @@ describe("seedClaudeCode — remote control", () => {
 
     await maybeSeedAgent(context, () => {});
 
-    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "/remote-control ASM-1");
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "/remote-control PROJ-1");
     expect(env.clipboard.writeText).toHaveBeenCalledWith("do it");
     expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining("Remote Control"));
   });
@@ -1551,7 +1551,7 @@ describe("seedClaudeCode — remote control", () => {
       await maybeSeedAgent(context, () => {});
 
       const msg = String(window.showErrorMessage.mock.calls[0][0]);
-      expect(msg).toContain("take ASM-1 again");
+      expect(msg).toContain("take PROJ-1 again");
       expect(msg).toContain("reloading this window won't re-seed it");
     });
 
@@ -1570,7 +1570,7 @@ describe("seedClaudeCode — remote control", () => {
       expect(commands.executeCommand).not.toHaveBeenCalledWith(
         CLAUDE_OPEN_CMD,
         undefined,
-        "/remote-control ASM-1",
+        "/remote-control PROJ-1",
       );
     });
 
@@ -1625,7 +1625,7 @@ describe("seedClaudeCode — remote control", () => {
       await p;
 
       const uri = String(vi.mocked(env.openExternal).mock.calls[0][0]);
-      expect(uri).toContain(encodeURIComponent("/remote-control ASM-1"));
+      expect(uri).toContain(encodeURIComponent("/remote-control PROJ-1"));
     } finally {
       vi.useRealTimers();
     }
@@ -1664,7 +1664,7 @@ describe("watchPlansAndSeed", () => {
       // Resolve a single-workspace identity so maybeSeedAgent proceeds far enough to
       // read the plan dir; readdirSync (no plan files, per the default mock) is the
       // observable signal for "ran once" that lets this test prove the debounce.
-      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/PROJ-1.code-workspace" };
 
       const disp = watchPlansAndSeed(fakeContext().context, () => {});
       expect(fs.mkdirSync).toHaveBeenCalled(); // ensured PLAN_DIR exists
@@ -1693,7 +1693,7 @@ describe("watchPlansAndSeed", () => {
         fire = cb;
         return { close } as unknown as fs.FSWatcher;
       }) as never);
-      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/ASM-1.code-workspace" };
+      workspace.workspaceFile = { scheme: "file", fsPath: "/ws/PROJ-1.code-workspace" };
 
       const disp = watchPlansAndSeed(fakeContext().context, () => {});
       fire!(); // schedules a debounced maybeSeedAgent call
@@ -1707,40 +1707,40 @@ describe("watchPlansAndSeed", () => {
 });
 
 describe("mergeReposIntoWorkspace", () => {
-  const repos = mkRepos(["account-service", "centaur"]); // paths: /repos/account-service, /repos/centaur
+  const repos = mkRepos(["account-service", "webapp"]); // paths: /repos/account-service, /repos/webapp
 
   it("appends only missing repos and preserves comments + settings", () => {
     readFileSync.mockReturnValue(
-      '{\n  // my workspace\n  "folders": [{ "name": "centaur", "path": "/repos/centaur" }],\n  "settings": { "editor.tabSize": 2 }\n}\n',
+      '{\n  // my workspace\n  "folders": [{ "name": "webapp", "path": "/repos/webapp" }],\n  "settings": { "editor.tabSize": 2 }\n}\n',
     );
     let written = "";
     writeFileSync.mockImplementation((_p, data) => { written = String(data); });
 
-    const res = mergeReposIntoWorkspace("/ws/ASM-1.code-workspace", repos);
+    const res = mergeReposIntoWorkspace("/ws/PROJ-1.code-workspace", repos);
 
     expect(res).toEqual({ added: ["account-service"], ok: true });
     expect(written).toContain("// my workspace");            // comment preserved
     expect(written).toContain('"editor.tabSize": 2');        // settings preserved
     expect(written).toContain('"path": "/repos/account-service"'); // repo added
-    // centaur present exactly once (not duplicated)
-    expect(written.match(/\/repos\/centaur/g)?.length).toBe(1);
+    // webapp present exactly once (not duplicated)
+    expect(written.match(/\/repos\/webapp/g)?.length).toBe(1);
   });
 
   it("is idempotent — no write when all repos already present", () => {
     readFileSync.mockReturnValue(
-      '{ "folders": [{ "path": "/repos/account-service" }, { "path": "/repos/centaur" }] }',
+      '{ "folders": [{ "path": "/repos/account-service" }, { "path": "/repos/webapp" }] }',
     );
-    const res = mergeReposIntoWorkspace("/ws/ASM-1.code-workspace", repos);
+    const res = mergeReposIntoWorkspace("/ws/PROJ-1.code-workspace", repos);
     expect(res).toEqual({ added: [], ok: true });
     expect(writeFileSync).not.toHaveBeenCalled();
   });
 
   it("resolves relative existing-folder paths against the workspace dir", () => {
-    // workspace lives in /repos, folder path "centaur" → /repos/centaur (already present)
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "centaur" }] }');
+    // workspace lives in /repos, folder path "webapp" → /repos/webapp (already present)
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "webapp" }] }');
     writeFileSync.mockImplementation(() => {});
     const res = mergeReposIntoWorkspace("/repos/team.code-workspace", repos);
-    expect(res.added).toEqual(["account-service"]); // centaur matched via relative resolution
+    expect(res.added).toEqual(["account-service"]); // webapp matched via relative resolution
   });
 
   it("does NOT write on unparseable input (ok:false)", () => {
@@ -1782,7 +1782,7 @@ describe("mergeReposIntoWorkspace", () => {
     // must still not be able to nest a root inside a root.
     readFileSync.mockReturnValue('{ "folders": [{ "path": "/Users/me/projects" }] }');
     const res = mergeReposIntoWorkspace("/ws/t.code-workspace", [
-      { name: "centaur", path: "/Users/me/projects/centaur/.claude/worktrees/ASM-1" },
+      { name: "webapp", path: "/Users/me/projects/webapp/.claude/worktrees/PROJ-1" },
     ]);
     expect(res).toEqual({ added: [], ok: true });
     expect(writeFileSync).not.toHaveBeenCalled();
@@ -1814,7 +1814,7 @@ describe("openWorkspace — existing workspace", () => {
     // account-service, the one of the two not already declared) is caught: it
     // wouldn't match "infra".
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
 
     const result = await openWorkspace(
@@ -1828,7 +1828,7 @@ describe("openWorkspace — existing workspace", () => {
     expect(result.workspaceFile).toBe("/ws/team.code-workspace");
     expect(result.mergedRepos).toEqual(["infra"]);
     expect(result.mergeFailed).toBeUndefined();
-    expect(writeArg((p) => p.endsWith("ASM-1.code-workspace"))).toBeUndefined();
+    expect(writeArg((p) => p.endsWith("PROJ-1.code-workspace"))).toBeUndefined();
     expect(result.opened).toContain("/ws/team.code-workspace");
   });
 
@@ -1854,7 +1854,7 @@ describe("openWorkspace — existing workspace", () => {
   it("leaves the file untouched when foldersToAdd is absent", async () => {
     // The user's workspace is their artifact: no approval, no write.
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
 
     const result = await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace" }));
@@ -1867,7 +1867,7 @@ describe("openWorkspace — existing workspace", () => {
 
   it("leaves the file untouched when foldersToAdd is empty", async () => {
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
     await openWorkspace(baseReq({ existingWorkspaceFile: "/ws/team.code-workspace", foldersToAdd: [] }));
     expect(writeArg((p) => p.endsWith(".code-workspace"))).toBeUndefined();
@@ -1876,12 +1876,12 @@ describe("openWorkspace — existing workspace", () => {
   it("routes a worktree's mentions through its containing root", async () => {
     execSync.mockReturnValue("src/export.py\n"); // git ls-files
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
 
     await openWorkspace(
       baseReq({
-        services: [{ name: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-1", isGit: true }],
+        services: [{ name: "webapp", path: "/repos/webapp/.claude/worktrees/PROJ-1", isGit: true }],
         descriptionText: "fix `src/export.py`",
         existingWorkspaceFile: "/ws/team.code-workspace",
       }),
@@ -1889,13 +1889,13 @@ describe("openWorkspace — existing workspace", () => {
 
     const planWrite = writeArg((p) => p.includes("/.agentflow/plans/"));
     const plan = JSON.parse(String(planWrite![1]));
-    expect(plan.matches[0].prompt).toContain("@centaur/.claude/worktrees/ASM-1/src/export.py");
+    expect(plan.matches[0].prompt).toContain("@webapp/.claude/worktrees/PROJ-1/src/export.py");
   });
 
   it("drops mentions for a repo that is inside no root", async () => {
     execSync.mockReturnValue("src/export.py\n");
     readFileSync.mockImplementation((p) =>
-      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/centaur" }] }' : "",
+      String(p).endsWith(".code-workspace") ? '{ "folders": [{ "path": "/repos/webapp" }] }' : "",
     );
 
     await openWorkspace(
@@ -1918,14 +1918,14 @@ describe("openWorkspace — existing workspace", () => {
 
     await openWorkspace(
       baseReq({
-        services: mkRepos(["centaur"]),
+        services: mkRepos(["webapp"]),
         promptTemplate: "brief at {brief}",
         existingWorkspaceFile: "/ws/team.code-workspace",
       }),
     );
 
     const plan = JSON.parse(String(writeArg((p) => p.includes("/.agentflow/plans/"))![1]));
-    expect(plan.matches[0].prompt).toBe("brief at /repos/centaur/.pick-task/TASK.md");
+    expect(plan.matches[0].prompt).toBe("brief at /repos/webapp/.pick-task/TASK.md");
   });
 });
 
@@ -1939,8 +1939,8 @@ describe("openWorkspace — existing folder window", () => {
     expect(result.mode).toBe("per-window");
     expect(result.workspaceFile).toBeUndefined();
     expect(result.opened).toEqual(["/repos/account-service"]);
-    // account-service IS the open folder; centaur can't be added as a root.
-    expect(result.unaddedRepos).toEqual(["centaur"]);
+    // account-service IS the open folder; webapp can't be added as a root.
+    expect(result.unaddedRepos).toEqual(["webapp"]);
 
     const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
     const plan = JSON.parse(String(planWrite![1]));
@@ -1958,7 +1958,7 @@ describe("openWorkspace — existing folder window", () => {
     await openWorkspace(baseReq({ services: mkRepos(["solo"]), existingFolder: "/other/open-window" }));
     const brief = writeArg((p) => p === "/other/open-window/.pick-task/TASK.md");
     expect(brief).toBeTruthy();
-    expect(String(brief![1])).toContain("ASM-1");
+    expect(String(brief![1])).toContain("PROJ-1");
   });
 
   // `absoluteBrief` exists for **Review with agent**: a review's brief belongs in the
@@ -2029,7 +2029,7 @@ describe("openWorkspace — keepExistingBrief", () => {
     await openWorkspace(baseReq({ services: mkRepos(["account-service"]) }));
     const brief = writeArg((p) => p === BRIEF);
     expect(brief).toBeTruthy();
-    expect(String(brief![1])).toContain("ASM-1");
+    expect(String(brief![1])).toContain("PROJ-1");
   });
 
   it("leaves an existing brief untouched when asked to keep it", async () => {
@@ -2353,7 +2353,7 @@ describe("openWorkspace — this window", () => {
     await openWorkspace(
       baseReq({
         openIn: "current",
-        currentWindow: folderWindow, // only account-service is a root; centaur is not
+        currentWindow: folderWindow, // only account-service is a root; webapp is not
         descriptionText: "fix `src/export.py`",
         promptTemplate: "Go{files}",
       }),
@@ -2361,7 +2361,7 @@ describe("openWorkspace — this window", () => {
     const planWrite = writeArg((p) => p.includes(".agentflow") && p.includes("plans") && p.endsWith(".json"));
     const prompt = String(JSON.parse(String(planWrite![1])).matches[0].prompt);
     expect(prompt).toContain("@account-service/src/export.py");
-    expect(prompt).not.toContain("@centaur/");
+    expect(prompt).not.toContain("@webapp/");
   });
 });
 
@@ -2406,17 +2406,17 @@ describe("listWorkspaceFiles", () => {
 describe("workspaceFolders", () => {
   it("returns each folder's name and canonical path, resolved against the file's dir", () => {
     readFileSync.mockReturnValue(
-      '{ "folders": [{ "name": "API", "path": "api" }, { "path": "/repos/centaur" }] }',
+      '{ "folders": [{ "name": "API", "path": "api" }, { "path": "/repos/webapp" }] }',
     );
     expect(workspaceFolders("/repos/team.code-workspace")).toEqual([
       { name: "API", path: "/repos/api" },
-      { path: "/repos/centaur" },
+      { path: "/repos/webapp" },
     ]);
   });
 
   it("skips folders with no string path", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "name": "nameless" }, { "path": "/repos/centaur" }] }');
-    expect(workspaceFolders("/ws/t.code-workspace")).toEqual([{ path: "/repos/centaur" }]);
+    readFileSync.mockReturnValue('{ "folders": [{ "name": "nameless" }, { "path": "/repos/webapp" }] }');
+    expect(workspaceFolders("/ws/t.code-workspace")).toEqual([{ path: "/repos/webapp" }]);
   });
 
   it("distinguishes a valid empty folders array from a parse failure", () => {
@@ -2453,47 +2453,47 @@ describe("planWorkspaceMerge", () => {
   });
 
   it("buckets an already-declared path as present", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
-    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("centaur", "/repos/centaur")]);
-    expect(plan.present.map((c) => c.repoName)).toEqual(["centaur"]);
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("webapp", "/repos/webapp")]);
+    expect(plan.present.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.add).toEqual([]);
     expect(plan.duplicates).toEqual([]);
     expect(plan.ok).toBe(true);
   });
 
   it("buckets a worktree of an already-declared repo as a duplicate, not an addition", () => {
-    // The core case: same repo NAME, different path. A second root called `centaur`
-    // is indistinguishable in the explorer and makes @centaur/… ambiguous.
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    // The core case: same repo NAME, different path. A second root called `webapp`
+    // is indistinguishable in the explorer and makes @webapp/… ambiguous.
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("centaur", "/repos/centaur/.claude/worktrees/ASM-1"),
+      cand("webapp", "/repos/webapp/.claude/worktrees/PROJ-1"),
     ]);
-    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.add).toEqual([]);
   });
 
   it("buckets a repo the workspace has by neither path nor name as an addition", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("infra", "/repos/infra")]);
     expect(plan.add.map((c) => c.repoName)).toEqual(["infra"]);
     expect(plan.duplicates).toEqual([]);
   });
 
   it("dedups against a folder's custom name field", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "name": "centaur", "path": "/elsewhere/c" }] }');
-    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("centaur", "/repos/centaur")]);
-    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    readFileSync.mockReturnValue('{ "folders": [{ "name": "webapp", "path": "/elsewhere/c" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("webapp", "/repos/webapp")]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["webapp"]);
   });
 
   it("dedups against a folder's path basename even when a custom name differs", () => {
     // servicesFromExistingDestination derives an unmatched folder's service name from
     // the BASENAME, so comparing only the `name` field would let a custom name defeat
     // the rule against the service derived from that very folder.
-    readFileSync.mockReturnValue('{ "folders": [{ "name": "Custom Label", "path": "/repos/centaur" }] }');
+    readFileSync.mockReturnValue('{ "folders": [{ "name": "Custom Label", "path": "/repos/webapp" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("centaur", "/repos/centaur/.claude/worktrees/ASM-1"),
+      cand("webapp", "/repos/webapp/.claude/worktrees/PROJ-1"),
     ]);
-    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["webapp"]);
   });
 
   it("compares names case-insensitively", () => {
@@ -2503,12 +2503,12 @@ describe("planWorkspaceMerge", () => {
   });
 
   it("dedups a key-qualified batch label against the bare repo name", () => {
-    // The label written into the file is api-ASM-1, but dedup must compare `api`.
+    // The label written into the file is api-PROJ-1, but dedup must compare `api`.
     readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/api" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("api", "/repos/api/.claude/worktrees/ASM-1", "api-ASM-1"),
+      cand("api", "/repos/api/.claude/worktrees/PROJ-1", "api-PROJ-1"),
     ]);
-    expect(plan.duplicates.map((c) => c.label)).toEqual(["api-ASM-1"]);
+    expect(plan.duplicates.map((c) => c.label)).toEqual(["api-PROJ-1"]);
     expect(plan.add).toEqual([]);
   });
 
@@ -2516,9 +2516,9 @@ describe("planWorkspaceMerge", () => {
     readFileSync.mockReturnValue('{ "folders": [] }');
     const plan = planWorkspaceMerge("/ws/empty.code-workspace", [
       cand("api", "/repos/api"),
-      cand("centaur", "/repos/centaur"),
+      cand("webapp", "/repos/webapp"),
     ]);
-    expect(plan.add.map((c) => c.repoName)).toEqual(["api", "centaur"]);
+    expect(plan.add.map((c) => c.repoName)).toEqual(["api", "webapp"]);
     expect(plan.ok).toBe(true);
   });
 
@@ -2547,9 +2547,9 @@ describe("planWorkspaceMerge", () => {
     // The root is the repos parent, so no name matches — only containment can see this.
     readFileSync.mockReturnValue('{ "folders": [{ "path": "/Users/me/projects" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("centaur", "/Users/me/projects/centaur/.claude/worktrees/ASM-1"),
+      cand("webapp", "/Users/me/projects/webapp/.claude/worktrees/PROJ-1"),
     ]);
-    expect(plan.redundant.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.redundant.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.add).toEqual([]);
     expect(plan.duplicates).toEqual([]);
   });
@@ -2559,34 +2559,34 @@ describe("planWorkspaceMerge", () => {
       '{ "folders": [{ "name": "monorepo", "path": "/Users/me/projects" }] }',
     );
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("centaur", "/Users/me/projects/centaur"),
+      cand("webapp", "/Users/me/projects/webapp"),
     ]);
-    expect(plan.redundant.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.redundant.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.add).toEqual([]);
   });
 
   it("keeps name precedence: a worktree of a same-named root is still a duplicate", () => {
     // Regression guard on the precedence decision. This candidate satisfies BOTH rules;
     // moving it to `redundant` would change the launch toast's wording.
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("centaur", "/repos/centaur/.claude/worktrees/ASM-1"),
+      cand("webapp", "/repos/webapp/.claude/worktrees/PROJ-1"),
     ]);
-    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.redundant).toEqual([]);
   });
 
   it("keeps an exact root match in present, not redundant", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
-    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("centaur", "/repos/centaur")]);
-    expect(plan.present.map((c) => c.repoName)).toEqual(["centaur"]);
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("webapp", "/repos/webapp")]);
+    expect(plan.present.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.redundant).toEqual([]);
   });
 
   it("still adds a repo that is inside no root and shares no name", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("infra", "/elsewhere/infra/.claude/worktrees/ASM-1"),
+      cand("infra", "/elsewhere/infra/.claude/worktrees/PROJ-1"),
     ]);
     expect(plan.add.map((c) => c.repoName)).toEqual(["infra"]);
     expect(plan.redundant).toEqual([]);
@@ -2604,9 +2604,9 @@ describe("planWorkspaceMerge", () => {
 describe("workspaceFolderPaths", () => {
   it("returns canonical folder paths, resolving relative paths against the file dir", () => {
     // realpathSync is mocked to identity in beforeEach, so canon() returns its input.
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }, { "path": "account-service" }] }');
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }, { "path": "account-service" }] }');
     const paths = workspaceFolderPaths("/repos/team.code-workspace");
-    expect(paths).toEqual(["/repos/centaur", "/repos/account-service"]);
+    expect(paths).toEqual(["/repos/webapp", "/repos/account-service"]);
   });
 
   it("returns [] on unparseable input", () => {
@@ -2638,7 +2638,7 @@ describe("containingRoot", () => {
 
   it("matches a worktree several levels under a root", () => {
     expect(
-      containingRoot(roots("/repos/api"), "/repos/api/.claude/worktrees/ASM-1")?.path,
+      containingRoot(roots("/repos/api"), "/repos/api/.claude/worktrees/PROJ-1")?.path,
     ).toBe("/repos/api");
   });
 
@@ -2664,39 +2664,39 @@ describe("containingRoot", () => {
 
 describe("mentionInWorkspace", () => {
   it("uses the root's own name when the repo IS a root", () => {
-    const roots = [{ path: "/repos/centaur" }];
-    expect(mentionInWorkspace(roots, "/repos/centaur", "src/x.ts")).toBe("@centaur/src/x.ts");
+    const roots = [{ path: "/repos/webapp" }];
+    expect(mentionInWorkspace(roots, "/repos/webapp", "src/x.ts")).toBe("@webapp/src/x.ts");
   });
 
   it("prefers a root's custom name field over its basename", () => {
-    const roots = [{ name: "Centaur Service", path: "/repos/centaur" }];
-    expect(mentionInWorkspace(roots, "/repos/centaur", "src/x.ts")).toBe("@Centaur Service/src/x.ts");
+    const roots = [{ name: "Webapp Service", path: "/repos/webapp" }];
+    expect(mentionInWorkspace(roots, "/repos/webapp", "src/x.ts")).toBe("@Webapp Service/src/x.ts");
   });
 
   it("routes a worktree through its containing root", () => {
     // The whole point: the worktree is not a root, but it IS inside one, so the
     // mention can name it precisely instead of resolving to the main checkout.
-    const roots = [{ path: "/repos/centaur" }];
-    expect(mentionInWorkspace(roots, "/repos/centaur/.claude/worktrees/ASM-1", "src/x.ts")).toBe(
-      "@centaur/.claude/worktrees/ASM-1/src/x.ts",
+    const roots = [{ path: "/repos/webapp" }];
+    expect(mentionInWorkspace(roots, "/repos/webapp/.claude/worktrees/PROJ-1", "src/x.ts")).toBe(
+      "@webapp/.claude/worktrees/PROJ-1/src/x.ts",
     );
   });
 
   it("picks the deepest containing root, matching VS Code's most-specific resolution", () => {
-    const roots = [{ path: "/repos" }, { path: "/repos/centaur" }];
-    expect(mentionInWorkspace(roots, "/repos/centaur/.claude/worktrees/ASM-1", "src/x.ts")).toBe(
-      "@centaur/.claude/worktrees/ASM-1/src/x.ts",
+    const roots = [{ path: "/repos" }, { path: "/repos/webapp" }];
+    expect(mentionInWorkspace(roots, "/repos/webapp/.claude/worktrees/PROJ-1", "src/x.ts")).toBe(
+      "@webapp/.claude/worktrees/PROJ-1/src/x.ts",
     );
   });
 
   it("returns undefined when the repo is inside no root", () => {
-    // Emitting @centaur/src/x.ts here would point the agent at a DIFFERENT checkout.
-    const roots = [{ path: "/repos/centaur" }];
+    // Emitting @webapp/src/x.ts here would point the agent at a DIFFERENT checkout.
+    const roots = [{ path: "/repos/webapp" }];
     expect(mentionInWorkspace(roots, "/repos/infra", "src/x.ts")).toBeUndefined();
   });
 
   it("returns undefined when there are no roots at all", () => {
-    expect(mentionInWorkspace([], "/repos/centaur", "src/x.ts")).toBeUndefined();
+    expect(mentionInWorkspace([], "/repos/webapp", "src/x.ts")).toBeUndefined();
   });
 
   it("does not treat a sibling with a shared prefix as containment", () => {
@@ -2706,9 +2706,9 @@ describe("mentionInWorkspace", () => {
 });
 
 describe("briefMarkdown — repo scope", () => {
-  const ticket = { key: "ASM-12", summary: "Isolate renew queue", url: "https://j/ASM-12" };
+  const ticket = { key: "PROJ-12", summary: "Isolate renew queue", url: "https://j/PROJ-12" };
   const services = [
-    { name: "centaur", path: "/repos/centaur", isGit: true },
+    { name: "webapp", path: "/repos/webapp", isGit: true },
     { name: "infra", path: "/repos/infra", isGit: true },
   ];
 
@@ -2716,7 +2716,7 @@ describe("briefMarkdown — repo scope", () => {
     // A ticket description naming a repo nobody checked out is the common case:
     // without this the agent goes hunting for `billing-svc` instead of working here.
     const plan = "## Ticket description\n\nMight also need changes in billing-svc.";
-    const out = briefMarkdown(ticket, plan, services, "centaur", []);
+    const out = briefMarkdown(ticket, plan, services, "webapp", []);
     const scopeAt = out.indexOf("## Repos in scope");
     const ruleAt = out.indexOf("These are the only repos checked out for this task.");
     expect(scopeAt).toBeGreaterThan(-1);
@@ -2727,9 +2727,9 @@ describe("briefMarkdown — repo scope", () => {
 
   it("still names every in-scope repo and marks the current one", () => {
     const out = briefMarkdown(ticket, "", services, "infra", []);
-    expect(out).toContain("- `centaur` — /repos/centaur");
+    expect(out).toContain("- `webapp` — /repos/webapp");
     expect(out).toContain("- `infra` — /repos/infra  ← you are here");
-    expect(out).toContain("**Repos in scope:** centaur, infra");
+    expect(out).toContain("**Repos in scope:** webapp, infra");
   });
 });
 
@@ -2738,27 +2738,27 @@ describe("briefMarkdown — repo scope", () => {
 // it cannot go through openWorkspace. Same two functions in the same order as the
 // parent's brief: the caller renders `planMd` (engine/brief), this writes it.
 describe("writeBriefInto", () => {
-  const child: TicketRef = { key: "ASM-2", summary: "first bit", url: "https://jira/ASM-2" };
-  const worktrees = mkRepos(["api", "web"], { root: "/repos/parent/.claude/worktrees/ASM-2" });
+  const child: TicketRef = { key: "PROJ-2", summary: "first bit", url: "https://jira/PROJ-2" };
+  const worktrees = mkRepos(["api", "web"], { root: "/repos/parent/.claude/worktrees/PROJ-2" });
 
   it("writes .pick-task/TASK.md into every worktree it is handed", () => {
     const written = writeBriefInto(worktrees, child, "## Plan\n\nsteps", () => {});
     expect(written).toEqual([
-      "/repos/parent/.claude/worktrees/ASM-2/api/.pick-task/TASK.md",
-      "/repos/parent/.claude/worktrees/ASM-2/web/.pick-task/TASK.md",
+      "/repos/parent/.claude/worktrees/PROJ-2/api/.pick-task/TASK.md",
+      "/repos/parent/.claude/worktrees/PROJ-2/web/.pick-task/TASK.md",
     ]);
-    expect(mkdirSync).toHaveBeenCalledWith("/repos/parent/.claude/worktrees/ASM-2/api/.pick-task", { recursive: true });
-    expect(mkdirSync).toHaveBeenCalledWith("/repos/parent/.claude/worktrees/ASM-2/web/.pick-task", { recursive: true });
+    expect(mkdirSync).toHaveBeenCalledWith("/repos/parent/.claude/worktrees/PROJ-2/api/.pick-task", { recursive: true });
+    expect(mkdirSync).toHaveBeenCalledWith("/repos/parent/.claude/worktrees/PROJ-2/web/.pick-task", { recursive: true });
   });
 
   it("names the child's own ticket and carries the rendered plan through", () => {
-    writeBriefInto([worktrees[0]], child, "## ASM-2: first bit\n\nthe child's own brief", () => {});
+    writeBriefInto([worktrees[0]], child, "## PROJ-2: first bit\n\nthe child's own brief", () => {});
     const brief = writeArg((p) => p.endsWith(BRIEF_FILE));
-    expect(String(brief![0])).toBe("/repos/parent/.claude/worktrees/ASM-2/api/.pick-task/TASK.md");
-    expect(String(brief![1])).toContain("# ASM-2 — first bit");
+    expect(String(brief![0])).toBe("/repos/parent/.claude/worktrees/PROJ-2/api/.pick-task/TASK.md");
+    expect(String(brief![1])).toContain("# PROJ-2 — first bit");
     expect(String(brief![1])).toContain("the child's own brief");
     // The brief names the worktree it sits in — a subagent has to know where it is.
-    expect(String(brief![1])).toContain("- `api` — /repos/parent/.claude/worktrees/ASM-2/api  ← you are here");
+    expect(String(brief![1])).toContain("- `api` — /repos/parent/.claude/worktrees/PROJ-2/api  ← you are here");
   });
 
   it("still writes the other worktrees when one is unwritable, and says which", () => {
@@ -2768,9 +2768,9 @@ describe("writeBriefInto", () => {
     }) as never);
     const logged: string[] = [];
     const written = writeBriefInto(worktrees, child, "plan", (m) => logged.push(m));
-    expect(written).toEqual(["/repos/parent/.claude/worktrees/ASM-2/web/.pick-task/TASK.md"]);
+    expect(written).toEqual(["/repos/parent/.claude/worktrees/PROJ-2/web/.pick-task/TASK.md"]);
     expect(logged).toEqual([
-      "brief api: could not write into /repos/parent/.claude/worktrees/ASM-2/api (Error: EACCES)",
+      "brief api: could not write into /repos/parent/.claude/worktrees/PROJ-2/api (Error: EACCES)",
     ]);
   });
 });

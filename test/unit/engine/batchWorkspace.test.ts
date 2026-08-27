@@ -31,16 +31,16 @@ beforeEach(() => {
 const baseReq = (over: Partial<SharedOpenRequest> = {}): SharedOpenRequest => ({
   tasks: [
     {
-      ticket: { key: "ASM-1", summary: "one", url: "https://jira/ASM-1" },
+      ticket: { key: "PROJ-1", summary: "one", url: "https://jira/PROJ-1" },
       planMd: "## Plan\n\na",
       descriptionText: "",
-      services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+      services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-1", isGit: true }],
     },
     {
-      ticket: { key: "ASM-2", summary: "two", url: "https://jira/ASM-2" },
+      ticket: { key: "PROJ-2", summary: "two", url: "https://jira/PROJ-2" },
       planMd: "## Plan\n\nb",
       descriptionText: "",
-      services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-2", isGit: true }],
+      services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-2", isGit: true }],
     },
   ],
   promptTemplate: "Start {key} — brief at {brief}{files}",
@@ -58,8 +58,8 @@ describe("openSharedWorkspace", () => {
     const result = await openSharedWorkspace(baseReq());
     const briefs = writes((p) => p.endsWith("TASK.md"));
     expect(briefs.map((c) => String(c[0]))).toEqual([
-      "/repos/api/.claude/worktrees/ASM-1/.pick-task/TASK.md",
-      "/repos/api/.claude/worktrees/ASM-2/.pick-task/TASK.md",
+      "/repos/api/.claude/worktrees/PROJ-1/.pick-task/TASK.md",
+      "/repos/api/.claude/worktrees/PROJ-2/.pick-task/TASK.md",
     ]);
     expect(result.briefs).toHaveLength(2);
   });
@@ -68,26 +68,26 @@ describe("openSharedWorkspace", () => {
     await openSharedWorkspace(baseReq());
     const ws = JSON.parse(String(writes((p) => p.endsWith(".code-workspace"))[0][1]));
     expect(ws.folders).toEqual([
-      { name: "api-ASM-1", path: "/repos/api/.claude/worktrees/ASM-1" },
-      { name: "api-ASM-2", path: "/repos/api/.claude/worktrees/ASM-2" },
+      { name: "api-PROJ-1", path: "/repos/api/.claude/worktrees/PROJ-1" },
+      { name: "api-PROJ-2", path: "/repos/api/.claude/worktrees/PROJ-2" },
     ]);
   });
 
   it("names the workspace file after the first key and the remaining count", async () => {
     const result = await openSharedWorkspace(baseReq());
-    expect(result.workspaceFile).toBe("/ws/ASM-1+1.code-workspace");
+    expect(result.workspaceFile).toBe("/ws/PROJ-1+1.code-workspace");
   });
 
   it("writes one plan and one run per task, all pointing at the same window", async () => {
     await openSharedWorkspace(baseReq());
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
-    expect(plans.map((p) => p.key)).toEqual(["ASM-1", "ASM-2"]);
+    expect(plans.map((p) => p.key)).toEqual(["PROJ-1", "PROJ-2"]);
     expect(plans.map((p) => p.seq)).toEqual([0, 1]);
-    expect(plans.every((p) => p.matches[0].matchPath === "/ws/ASM-1+1.code-workspace")).toBe(true);
+    expect(plans.every((p) => p.matches[0].matchPath === "/ws/PROJ-1+1.code-workspace")).toBe(true);
 
     const runs = writes((p) => p.includes("/runs/")).map((c) => JSON.parse(String(c[1])));
-    expect(runs.map((r) => r.key)).toEqual(["ASM-1", "ASM-2"]);
-    expect(runs.every((r) => r.workspaceFile === "/ws/ASM-1+1.code-workspace")).toBe(true);
+    expect(runs.map((r) => r.key)).toEqual(["PROJ-1", "PROJ-2"]);
+    expect(runs.every((r) => r.workspaceFile === "/ws/PROJ-1+1.code-workspace")).toBe(true);
     expect(runs.every((r) => r.mode === "multiroot")).toBe(true);
   });
 
@@ -139,8 +139,8 @@ describe("openSharedWorkspace", () => {
   it("seeds each prompt with that task's absolute brief path", async () => {
     await openSharedWorkspace(baseReq());
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
-    expect(plans[0].matches[0].prompt).toContain("/repos/api/.claude/worktrees/ASM-1/.pick-task/TASK.md");
-    expect(plans[1].matches[0].prompt).toContain("/repos/api/.claude/worktrees/ASM-2/.pick-task/TASK.md");
+    expect(plans[0].matches[0].prompt).toContain("/repos/api/.claude/worktrees/PROJ-1/.pick-task/TASK.md");
+    expect(plans[1].matches[0].prompt).toContain("/repos/api/.claude/worktrees/PROJ-2/.pick-task/TASK.md");
   });
 
   it("qualifies file mentions with the folder name so they resolve to the right root", async () => {
@@ -149,16 +149,16 @@ describe("openSharedWorkspace", () => {
       baseReq({
         tasks: [
           {
-            ticket: { key: "ASM-1", summary: "one", url: "" },
+            ticket: { key: "PROJ-1", summary: "one", url: "" },
             planMd: "p",
             descriptionText: "look at `src/foo.ts`",
-            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-1", isGit: true }],
           },
         ],
       }),
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
-    expect(plan.matches[0].prompt).toContain("@api-ASM-1/src/foo.ts");
+    expect(plan.matches[0].prompt).toContain("@api-PROJ-1/src/foo.ts");
   });
 
   it("writes no plan file when seeding is off", async () => {
@@ -177,7 +177,7 @@ describe("openSharedWorkspace", () => {
   it("adds no folders to a live folder window and reports them unadded", async () => {
     const result = await openSharedWorkspace(baseReq({ target: { kind: "live-folder", folder: "/repos/web" } }));
     expect(result.workspaceFile).toBeUndefined();
-    expect(result.unaddedFolders).toEqual(["api-ASM-1", "api-ASM-2"]);
+    expect(result.unaddedFolders).toEqual(["api-PROJ-1", "api-PROJ-2"]);
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
     expect(plans.every((p) => p.matches[0].matchPath === "/repos/web")).toBe(true);
   });
@@ -189,17 +189,17 @@ describe("openSharedWorkspace", () => {
         target: { kind: "live-folder", folder: "/repos/web" },
         tasks: [
           {
-            ticket: { key: "ASM-1", summary: "one", url: "" },
+            ticket: { key: "PROJ-1", summary: "one", url: "" },
             planMd: "p",
             descriptionText: "look at `src/foo.ts`",
-            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-1", isGit: true }],
           },
         ],
       }),
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
     expect(plan.matches[0].prompt).toContain("@src/foo.ts");
-    expect(plan.matches[0].prompt).not.toContain("@api-ASM-1/src/foo.ts");
+    expect(plan.matches[0].prompt).not.toContain("@api-PROJ-1/src/foo.ts");
   });
 
   it("bares the mentions when merging into an existing workspace failed", async () => {
@@ -210,16 +210,16 @@ describe("openSharedWorkspace", () => {
         target: { kind: "existing", file: "/ws/team.code-workspace" },
         tasks: [
           {
-            ticket: { key: "ASM-1", summary: "one", url: "" },
+            ticket: { key: "PROJ-1", summary: "one", url: "" },
             planMd: "p",
             descriptionText: "look at `src/foo.ts`",
-            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-1", isGit: true }],
           },
         ],
       }),
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/plans/"))[0][1]));
-    expect(plan.matches[0].prompt).not.toContain("@api-ASM-1/src/foo.ts");
+    expect(plan.matches[0].prompt).not.toContain("@api-PROJ-1/src/foo.ts");
   });
 
   // The plan-dir watcher coalesces events 300ms after the last one, so an N-plan batch
@@ -251,7 +251,7 @@ describe("openSharedWorkspace", () => {
   it("opens the destination exactly once", async () => {
     await openSharedWorkspace(baseReq());
     expect(exec).toHaveBeenCalledTimes(1);
-    expect(String(exec.mock.calls[0][0])).toContain("/ws/ASM-1+1.code-workspace");
+    expect(String(exec.mock.calls[0][0])).toContain("/ws/PROJ-1+1.code-workspace");
   });
 
   // "This window" is the one destination that changes nothing about the window it
@@ -307,16 +307,16 @@ describe("openSharedWorkspace", () => {
           promptTemplate: "Go{files}",
           tasks: [
             {
-              ticket: { key: "ASM-1", summary: "one", url: "https://jira/ASM-1" },
+              ticket: { key: "PROJ-1", summary: "one", url: "https://jira/PROJ-1" },
               planMd: "## Plan\n\na",
               descriptionText: "fix `src/export.py`",
-              services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+              services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-1", isGit: true }],
             },
           ],
         }),
       );
       const plan = JSON.parse(String(writes((p) => p.includes("plans") && p.endsWith(".json"))[0][1]));
-      expect(String(plan.matches[0].prompt)).toContain("@api/.claude/worktrees/ASM-1/src/export.py");
+      expect(String(plan.matches[0].prompt)).toContain("@api/.claude/worktrees/PROJ-1/src/export.py");
     });
   });
 
@@ -359,9 +359,9 @@ describe("openSharedWorkspace", () => {
       }),
     );
     const plans = writes((p) => p.includes("/plans/")).map((c) => JSON.parse(String(c[1])));
-    expect(plans[0].matches[0].prompt).toContain("Review aws-ops#8491 — ASM-1");
+    expect(plans[0].matches[0].prompt).toContain("Review aws-ops#8491 — PROJ-1");
     // The task that set nothing still gets the shared template, rendered as always.
-    expect(plans[1].matches[0].prompt).toContain("Start ASM-2");
+    expect(plans[1].matches[0].prompt).toContain("Start PROJ-2");
   });
 
   it("puts a task's brief in its own sub-directory when it asks for one", async () => {
@@ -399,8 +399,8 @@ describe("openSharedWorkspace", () => {
   it("leaves a task batch's brief path exactly where it was", async () => {
     await openSharedWorkspace(baseReq());
     expect(writes((p) => p.endsWith("TASK.md")).map((c) => String(c[0]))).toEqual([
-      "/repos/api/.claude/worktrees/ASM-1/.pick-task/TASK.md",
-      "/repos/api/.claude/worktrees/ASM-2/.pick-task/TASK.md",
+      "/repos/api/.claude/worktrees/PROJ-1/.pick-task/TASK.md",
+      "/repos/api/.claude/worktrees/PROJ-2/.pick-task/TASK.md",
     ]);
   });
 });
@@ -428,15 +428,15 @@ describe("openSharedWorkspace — existing workspace", () => {
       baseReq({
         target: { kind: "existing", file: "/ws/team.code-workspace" },
         foldersToAdd: [
-          { name: "infra-ASM-1", path: "/repos/infra/.claude/worktrees/ASM-1" },
-          { name: "infra-ASM-2", path: "/repos/infra/.claude/worktrees/ASM-2" },
+          { name: "infra-PROJ-1", path: "/repos/infra/.claude/worktrees/PROJ-1" },
+          { name: "infra-PROJ-2", path: "/repos/infra/.claude/worktrees/PROJ-2" },
         ],
       }),
     );
-    expect(result.mergedFolders).toEqual(["infra-ASM-1", "infra-ASM-2"]);
+    expect(result.mergedFolders).toEqual(["infra-PROJ-1", "infra-PROJ-2"]);
     expect(result.workspaceFile).toBe("/ws/team.code-workspace");
     // No new batch workspace file is written when the destination is an existing one.
-    expect(writes((p) => p.endsWith("ASM-1+1.code-workspace"))).toHaveLength(0);
+    expect(writes((p) => p.endsWith("PROJ-1+1.code-workspace"))).toHaveLength(0);
   });
 
   it("routes a worktree's mentions through its containing root", async () => {
@@ -446,17 +446,17 @@ describe("openSharedWorkspace — existing workspace", () => {
       baseReq({
         tasks: [
           {
-            ticket: { key: "ASM-1", summary: "one", url: "" },
+            ticket: { key: "PROJ-1", summary: "one", url: "" },
             planMd: "p",
             descriptionText: "fix `src/export.py`",
-            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-1", isGit: true }],
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-1", isGit: true }],
           },
         ],
         target: { kind: "existing", file: "/ws/team.code-workspace" },
       }),
     );
     const plan = JSON.parse(String(writes((p) => p.includes("/.agentflow/plans/"))[0][1]));
-    expect(plan.matches[0].prompt).toContain("@api/.claude/worktrees/ASM-1/src/export.py");
+    expect(plan.matches[0].prompt).toContain("@api/.claude/worktrees/PROJ-1/src/export.py");
   });
 });
 
@@ -472,16 +472,16 @@ describe("openSharedWorkspace: parentKey on each run", () => {
       baseReq({
         tasks: [
           {
-            ticket: { key: "ASM-2", summary: "two", url: "https://jira/ASM-2" },
+            ticket: { key: "PROJ-2", summary: "two", url: "https://jira/PROJ-2" },
             planMd: "## Plan\n\nb",
             descriptionText: "",
-            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-2", isGit: true }],
-            parentKey: "ASM-1",
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-2", isGit: true }],
+            parentKey: "PROJ-1",
           },
         ],
       }),
     );
-    expect(lastWrittenRun().parentKey).toBe("ASM-1");
+    expect(lastWrittenRun().parentKey).toBe("PROJ-1");
   });
 
   // `in` rather than `toBeUndefined()`: a key that exists holding `undefined` would
@@ -495,10 +495,10 @@ describe("openSharedWorkspace: parentKey on each run", () => {
       baseReq({
         tasks: [
           {
-            ticket: { key: "ASM-2", summary: "two", url: "https://jira/ASM-2" },
+            ticket: { key: "PROJ-2", summary: "two", url: "https://jira/PROJ-2" },
             planMd: "## Plan\n\nb",
             descriptionText: "",
-            services: [{ name: "api", path: "/repos/api/.claude/worktrees/ASM-2", isGit: true }],
+            services: [{ name: "api", path: "/repos/api/.claude/worktrees/PROJ-2", isGit: true }],
           },
         ],
       }),

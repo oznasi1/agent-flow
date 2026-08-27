@@ -164,7 +164,7 @@ describe("chooseOpenTarget", () => {
   // are the same act, since `openInEditor` focuses the window already holding a folder
   // rather than opening a second one.
   describe("the stay item", () => {
-    const STAY = { label: "$(window) Its own window", detail: "Where ASM-1 already lives" };
+    const STAY = { label: "$(window) Its own window", detail: "Where PROJ-1 already lives" };
 
     it("replaces New window, and leaves the rest of the picker in order", async () => {
       const d = deps({ liveWindows: vi.fn(() => [rec()]) });
@@ -176,7 +176,7 @@ describe("chooseOpenTarget", () => {
         "$(folder-library) Existing workspace…",
         "$(window) bite-me",
       ]);
-      expect(items[0].detail).toBe("Where ASM-1 already lives");
+      expect(items[0].detail).toBe("Where PROJ-1 already lives");
     });
 
     it("answers { kind: 'stay' } when it is picked", async () => {

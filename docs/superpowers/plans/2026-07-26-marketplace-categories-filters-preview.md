@@ -64,11 +64,11 @@ Append to `test/unit/engine/claudeAssets.test.ts` (the file already imports `des
 describe("scanClaudeAssets categories", () => {
   const tree = (over: Record<string, string> = {}) => ({
     "/h/.claude/plugins/known_marketplaces.json": JSON.stringify({
-      atbay: { installLocation: "/mk", source: { source: "github", repo: "org/atbay" } },
+      acme: { installLocation: "/mk", source: { source: "github", repo: "org/acme" } },
     }),
     "/h/.claude/plugins/installed_plugins.json": JSON.stringify({ plugins: {} }),
     "/mk/.claude-plugin/marketplace.json": JSON.stringify({
-      name: "atbay",
+      name: "acme",
       plugins: [
         { name: "cicd", description: "Ships things", category: "Deployment" },
         { name: "plain", description: "No category" },
@@ -762,7 +762,7 @@ Add `h.readFile.mockReset().mockReturnValue(null);` to the existing `beforeEach`
 
 ```ts
 describe("MarketplacePanel file preview", () => {
-  const FILE = "/home/u/.claude/plugins/cache/atbay/cicd/1/skills/build/SKILL.md";
+  const FILE = "/home/u/.claude/plugins/cache/acme/cicd/1/skills/build/SKILL.md";
 
   it("returns a listed file's contents", async () => {
     h.readFile.mockReturnValue("# Build\n");
@@ -794,7 +794,7 @@ describe("MarketplacePanel file preview", () => {
   it("serves a plugin README, which the scan lists alongside asset files", async () => {
     h.scanClaudeAssets.mockReturnValue(view({
       plugins: [{
-        name: "cicd", marketplace: "atbay", description: "d", state: "installed", enabled: true,
+        name: "cicd", marketplace: "acme", description: "d", state: "installed", enabled: true,
         scopes: [], version: "", counts: { skill: 0, command: 0, agent: 0, hook: 0 },
         category: "deployment", readme: "/mk/cicd/README.md", installCommand: "",
       }],
@@ -1420,7 +1420,7 @@ import { PluginPicker, PickerItem } from "../../src/webview/PluginPicker";
 
 const items: PickerItem[] = [
   { key: "superpowers@official", name: "superpowers", marketplace: "official", count: 17 },
-  { key: "cicd-plugin@atbay", name: "cicd-plugin", marketplace: "atbay", count: 5 },
+  { key: "cicd-plugin@acme", name: "cicd-plugin", marketplace: "acme", count: 5 },
   { key: "figma@official", name: "figma", marketplace: "official", count: 0 },
 ];
 const setup = (selected: string[] = []) => {
@@ -1439,7 +1439,7 @@ describe("PluginPicker", () => {
   });
 
   it("shows the selected count on the button and nothing when empty", () => {
-    setup(["cicd-plugin@atbay"]);
+    setup(["cicd-plugin@acme"]);
     expect(screen.getByRole("button", { name: /^Plugins/ }).textContent).toContain("1");
   });
 
@@ -1850,7 +1850,7 @@ Append to `test/webview/MarketplaceApp.test.tsx`:
 describe("MarketplaceApp marketplace filter", () => {
   const v = () => view({
     marketplaces: [
-      { name: "atbay", kind: "github", origin: "org/atbay", pluginCount: 2, stale: false },
+      { name: "acme", kind: "github", origin: "org/acme", pluginCount: 2, stale: false },
       { name: "~/.claude", kind: "user", origin: "~/.claude", pluginCount: 1, stale: false },
     ],
   });
@@ -1867,9 +1867,9 @@ describe("MarketplaceApp marketplace filter", () => {
     render(<MarketplaceApp />);
     host(assetsMsg(v()));
     fireEvent.click(screen.getByRole("button", { name: "~/.claude" }));
-    fireEvent.click(screen.getByRole("button", { name: "atbay" }));
+    fireEvent.click(screen.getByRole("button", { name: "acme" }));
     expect(screen.getAllByText("pipeline").length).toBeGreaterThan(0);
-    fireEvent.click(screen.getByRole("button", { name: /atbay ×/ }));
+    fireEvent.click(screen.getByRole("button", { name: /acme ×/ }));
     expect(screen.queryByText("pipeline")).not.toBeInTheDocument();
   });
 

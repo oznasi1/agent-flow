@@ -31,7 +31,7 @@ catch different things:
 
 | Guard | Catches | Misses |
 |-------|---------|--------|
-| Name (existing) | Same repo name at any path — two separate checkouts of `api` | A root named `At-Bay-Projects` that already contains `centaur` |
+| Name (existing) | Same repo name at any path — two separate checkouts of `api` | A root named `Work-Projects` that already contains `webapp` |
 | Containment (new) | Anything nested beneath a declared root, whatever it is called | A same-named repo at an unrelated path |
 
 Neither is a superset of the other, so both stay. Where a candidate satisfies both — the
@@ -54,12 +54,12 @@ folder it can't match to a discovered repo. `discoverRepos` scans only the top l
 *pointer file*, which passes `existsSync`. Verified against a real worktree:
 
 ```
-basename → ASM-5885        isGit per discoverRepos rule → true
+basename → PROJ-5885        isGit per discoverRepos rule → true
 ```
 
-So a root at `centaur/.claude/worktrees/ASM-5885` becomes a phantom repo named `ASM-5885`,
+So a root at `webapp/.claude/worktrees/PROJ-5885` becomes a phantom repo named `PROJ-5885`,
 and the next take calls `createWorktrees` on it, producing
-`centaur/.claude/worktrees/ASM-5885/.claude/worktrees/ASM-NEW` — a worktree inside a
+`webapp/.claude/worktrees/PROJ-5885/.claude/worktrees/PROJ-NEW` — a worktree inside a
 worktree. Each take makes the next one worse. Preventing the write is necessary but not
 sufficient: a root a *user* added by hand triggers the same cascade, so the derivation is
 fixed independently.
@@ -91,7 +91,7 @@ fixed independently.
   `mergeReposIntoWorkspace` means a future caller that bypasses merge-planning still cannot
   reintroduce it. Defense in depth *behind* the root-cause fix, not instead of it.
 - **A nested root buys brevity, not capability.** `mentionInWorkspace` already emits
-  `@centaur/.claude/worktrees/ASM-5885/src/x.ts` for a worktree beneath the `centaur` root,
+  `@webapp/.claude/worktrees/PROJ-5885/src/x.ts` for a worktree beneath the `webapp` root,
   deliberately, because the short form would point the agent at the main checkout. Refusing
   the root costs mention length and nothing else — no new code path, no new risk.
 - **Unwind the convention, don't infer.** `.claude/worktrees/<KEY>` is Agent Flow's own
@@ -117,11 +117,11 @@ resolveWorkspaceAdditions(file, candidates)
 ```
 
 Worked example — a workspace with a single root at the repos parent directory,
-`{ "path": "/Users/me/At-Bay-Projects" }`, taking a task across `centaur` + `infra`:
+`{ "path": "/Users/me/Work-Projects" }`, taking a task across `webapp` + `infra`:
 
 ```
-centaur  worktree …/At-Bay-Projects/centaur/.claude/worktrees/ASM-1  → inside the root  → redundant, skipped
-infra    worktree …/elsewhere/infra/.claude/worktrees/ASM-1          → inside no root   → new, offered
+webapp  worktree …/Work-Projects/webapp/.claude/worktrees/PROJ-1  → inside the root  → redundant, skipped
+infra    worktree …/elsewhere/infra/.claude/worktrees/PROJ-1          → inside no root   → new, offered
 ```
 
 Before this change both were offered and, on approval, both written — one of them a root
@@ -130,8 +130,8 @@ nested inside a root the workspace already had.
 The user's real file is the name-matching case and its classification does not move:
 
 ```
-centaur         worktree …/centaur/.claude/worktrees/ASM-5885         → name taken → duplicate, skipped
-automation_e2e  worktree …/automation_e2e/.claude/worktrees/ASM-5885  → name taken → duplicate, skipped
+webapp         worktree …/webapp/.claude/worktrees/PROJ-5885         → name taken → duplicate, skipped
+e2e_suite  worktree …/e2e_suite/.claude/worktrees/PROJ-5885  → name taken → duplicate, skipped
 ```
 
 ## Surfaces
@@ -171,7 +171,7 @@ export interface WorkspaceMergePlan {
   its `ok:false` contract — and builds `WorkspaceFolder[]` from that already-parsed document
   rather than re-reading the file. Those paths must be resolved against the file's directory
   and canonicalized, exactly as `workspaceFolders` does and as its current `present` set
-  already does (`canon(path.resolve(wsDir, p))`); a raw relative `"centaur"` would contain
+  already does (`canon(path.resolve(wsDir, p))`); a raw relative `"webapp"` would contain
   nothing.
 
 ### `src/engine/worktree.ts`
@@ -189,8 +189,8 @@ export function repoRootOfWorktree(p: string): string | undefined;
 
 - **`servicesFromExistingDestination`** maps each prefill path through `repoRootOfWorktree`
   first, then resolves as today (discovered repo by canonical path, else a synthesized
-  `ServiceRef`), then dedups by canonical path. A workspace declaring both `centaur` and
-  `centaur/.claude/worktrees/ASM-5885` yields one service: `centaur`, the main checkout.
+  `ServiceRef`), then dedups by canonical path. A workspace declaring both `webapp` and
+  `webapp/.claude/worktrees/PROJ-5885` yields one service: `webapp`, the main checkout.
 - **`resolveWorkspaceAdditions`** unions `plan.duplicates` and `plan.redundant` into
   `skipped`, still deduped by `repoName`. No copy change: "already in the workspace — not
   added as folders" is true of both.

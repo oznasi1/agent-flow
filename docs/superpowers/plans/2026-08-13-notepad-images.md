@@ -1287,7 +1287,7 @@ describe("openWorkspace — attachments", () => {
     }));
     const targets = copyFileSync.mock.calls.map((c) => String(c[1]));
     expect(targets).toContain("/repos/account-service/.pick-task/images/shot.png");
-    expect(targets).toContain("/repos/centaur/.pick-task/images/shot.png");
+    expect(targets).toContain("/repos/webapp/.pick-task/images/shot.png");
   });
 
   it("disambiguates two attachments that share a filename", async () => {

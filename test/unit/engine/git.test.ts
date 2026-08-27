@@ -98,7 +98,7 @@ describe("taskDiff", () => {
   it("shows work the agent already committed on a task branch", () => {
     // The defect: `git diff HEAD` is blank here, so the Deck reported "no changes"
     // for every run whose agent had committed — i.e. every run with a PR.
-    g("checkout", "-qb", "ASM-1-retry");
+    g("checkout", "-qb", "PROJ-1-retry");
     fs.appendFileSync(file(), "committed\n");
     g("add", "-A");
     g("commit", "-q", "-m", "work");
@@ -157,7 +157,7 @@ describe("taskDiff", () => {
     // than by renaming and fetching, because git ≥ 2.50 re-points origin/HEAD on
     // fetch and older gits do not — the dangling ref is the state under test either way.
     s("symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/master");
-    s("checkout", "-qb", "ASM-9-stale");
+    s("checkout", "-qb", "PROJ-9-stale");
     fs.appendFileSync(path.join(stale, "a.txt"), "committed\n");
     s("add", "-A");
     s("commit", "-q", "-m", "work");
@@ -265,7 +265,7 @@ describe("defaultBranch & prEligible", () => {
 
   it("says a feature branch can own a PR", () => {
     const work = clone("elig");
-    expect(prEligible({ path: work, isGit: true, branch: "ASM-1-x" })).toBe(true);
+    expect(prEligible({ path: work, isGit: true, branch: "PROJ-1-x" })).toBe(true);
   });
 
   it("says the default branch cannot", () => {
@@ -278,12 +278,12 @@ describe("defaultBranch & prEligible", () => {
   it("says a repo with no origin cannot", () => {
     const solo = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-elig-solo-"));
     execFileSync("git", ["-c", "init.defaultBranch=main", "init", "-q", solo]);
-    expect(prEligible({ path: solo, isGit: true, branch: "ASM-1-x" })).toBe(false);
+    expect(prEligible({ path: solo, isGit: true, branch: "PROJ-1-x" })).toBe(false);
     fs.rmSync(solo, { recursive: true, force: true });
   });
 
   it("says a non-git service cannot, and one with no branch cannot", () => {
-    expect(prEligible({ path: "/svc", isGit: false, branch: "ASM-1-x" })).toBe(false);
+    expect(prEligible({ path: "/svc", isGit: false, branch: "PROJ-1-x" })).toBe(false);
     expect(prEligible({ path: "/svc", isGit: true })).toBe(false);
   });
 });

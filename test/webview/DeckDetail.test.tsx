@@ -24,7 +24,7 @@ const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
 const mkCard = (over: Partial<RunStatus> = {}, agent: DeckCard["agent"] = null): DeckCard => {
   const status: RunStatus = {
     run: {
-      key: "ASM-1", summary: "Export fails", url: "https://jira/ASM-1", createdAt: 1,
+      key: "PROJ-1", summary: "Export fails", url: "https://jira/PROJ-1", createdAt: 1,
       mode: "per-window",
       repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "feat/x" }], briefPaths: [],
     },
@@ -53,7 +53,7 @@ describe("DeckDetail", () => {
   it("names the run in its header", () => {
     render1(mkCard());
     const hd = document.querySelector(".dd-hd")!;
-    expect(hd.textContent).toContain("ASM-1");
+    expect(hd.textContent).toContain("PROJ-1");
     expect(hd.textContent).toContain("Export fails");
   });
 
@@ -102,7 +102,7 @@ describe("DeckDetail", () => {
     render1(mkCard());
     expect(document.querySelector(".dd-hd .t")!.hasAttribute("title")).toBe(false);
     // The key keeps its own: that one IS still truncated, at 50% of the row.
-    expect(document.querySelector(".dd-hd .k")!.getAttribute("title")).toBe("ASM-1");
+    expect(document.querySelector(".dd-hd .k")!.getAttribute("title")).toBe("PROJ-1");
   });
 
   it("relocates the branch, launched time and repo chips", () => {
@@ -125,7 +125,7 @@ describe("DeckDetail", () => {
   it("opens the workspace", () => {
     render1(mkCard());
     fireEvent.click(screen.getByRole("button", { name: /open workspace/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "open" });
   });
 
   it("scopes a per-repo diff to that repo", () => {
@@ -137,7 +137,7 @@ describe("DeckDetail", () => {
     });
     render1(card);
     fireEvent.click(screen.getByRole("button", { name: /diff — web/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "diff", repo: "web" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "diff", repo: "web" });
   });
 
   it("offers no per-repo diff on a single-repo card — the all-repos one already is it", () => {
@@ -214,7 +214,7 @@ describe("DeckDetail", () => {
     Object.assign(navigator, { clipboard: { writeText } });
     render1(mkCard());
     fireEvent.click(screen.getByRole("button", { name: /copy ticket key/i }));
-    expect(writeText).toHaveBeenCalledWith("ASM-1");
+    expect(writeText).toHaveBeenCalledWith("PROJ-1");
     expect(sent).not.toHaveBeenCalled();
   });
 
@@ -240,7 +240,7 @@ describe("DeckDetail", () => {
     const onForget = vi.fn();
     render1(mkCard(), vi.fn(), onForget);
     fireEvent.click(screen.getByRole("button", { name: /^forget$/i }));
-    expect(onForget).toHaveBeenCalledWith("ASM-1");
+    expect(onForget).toHaveBeenCalledWith("PROJ-1");
   });
 
   it("offers Track it instead of Forget on a local card", () => {
@@ -279,8 +279,8 @@ describe("DeckDetail", () => {
   it("still prints a ticket key in full, with no tooltip fallback needed", () => {
     render1(mkCard());
     const k = document.querySelector(".dd-hd .k")!;
-    expect(k.textContent).toBe("ASM-1");
-    expect(k.getAttribute("title")).toBe("ASM-1");
+    expect(k.textContent).toBe("PROJ-1");
+    expect(k.getAttribute("title")).toBe("PROJ-1");
   });
 });
 
@@ -288,8 +288,8 @@ describe("DeckDetail", () => {
 // sessions of their own, so they get no card, only a row here.
 describe("child worktrees", () => {
   const children = [
-    { key: "ASM-2", summary: "first bit", repo: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-2", branch: "ASM-2-first-bit" },
-    { key: "ASM-3", summary: "second bit", repo: "centaur", path: "/repos/centaur/.claude/worktrees/ASM-3", branch: "ASM-3-second-bit" },
+    { key: "PROJ-2", summary: "first bit", repo: "webapp", path: "/repos/webapp/.claude/worktrees/PROJ-2", branch: "PROJ-2-first-bit" },
+    { key: "PROJ-3", summary: "second bit", repo: "webapp", path: "/repos/webapp/.claude/worktrees/PROJ-3", branch: "PROJ-3-second-bit" },
   ];
 
   const withChildren = (over: unknown[]) => mkCard({ run: { ...mkCard().status.run, children: over } as never });
@@ -309,22 +309,22 @@ describe("child worktrees", () => {
   it("lists a row per child worktree", () => {
     render1(withChildren(children));
     expect(screen.getByText("Children")).toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
     expect(screen.getByText("first bit")).toBeInTheDocument();
-    expect(screen.getByTitle("/repos/centaur/.claude/worktrees/ASM-2")).toBeInTheDocument();
+    expect(screen.getByTitle("/repos/webapp/.claude/worktrees/PROJ-2")).toBeInTheDocument();
   });
 
   it("names the branch each child is on", () => {
     render1(withChildren(children));
-    expect(screen.getByText("⎇ ASM-2-first-bit")).toBeInTheDocument();
+    expect(screen.getByText("⎇ PROJ-2-first-bit")).toBeInTheDocument();
   });
 
   it("copies a child's worktree path on click", () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render1(withChildren(children));
-    fireEvent.click(screen.getByRole("button", { name: "Copy ASM-2 worktree path in centaur" }));
-    expect(writeText).toHaveBeenCalledWith("/repos/centaur/.claude/worktrees/ASM-2");
+    fireEvent.click(screen.getByRole("button", { name: "Copy PROJ-2 worktree path in webapp" }));
+    expect(writeText).toHaveBeenCalledWith("/repos/webapp/.claude/worktrees/PROJ-2");
   });
 
   it("renders one row per repo when a child spans two, each with its own accessible name", () => {
@@ -334,11 +334,11 @@ describe("child worktrees", () => {
     // either one).
     render1(withChildren([
       children[0],
-      { ...children[0], repo: "frontend", path: "/repos/frontend/.claude/worktrees/ASM-2" },
+      { ...children[0], repo: "frontend", path: "/repos/frontend/.claude/worktrees/PROJ-2" },
     ]));
-    expect(screen.getAllByText("ASM-2")).toHaveLength(2);
-    expect(screen.getByRole("button", { name: "Copy ASM-2 worktree path in centaur" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Copy ASM-2 worktree path in frontend" })).toBeInTheDocument();
+    expect(screen.getAllByText("PROJ-2")).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Copy PROJ-2 worktree path in webapp" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Copy PROJ-2 worktree path in frontend" })).toBeInTheDocument();
   });
 
   // jsdom does no layout, so this cannot prove the branch chip actually shrinks
@@ -351,7 +351,7 @@ describe("child worktrees", () => {
     render1(withChildren(children));
     const bn = document.querySelector(".dd-child .bn")!;
     expect(bn).toBeInTheDocument();
-    expect(bn.textContent).toBe("⎇ ASM-2-first-bit");
+    expect(bn.textContent).toBe("⎇ PROJ-2-first-bit");
   });
 });
 

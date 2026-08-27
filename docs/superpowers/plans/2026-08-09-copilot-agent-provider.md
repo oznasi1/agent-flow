@@ -377,14 +377,14 @@ describe("seedAgentSession — copilot terminal", () => {
   });
 
   it("names the terminal for Copilot and runs the copilot CLI", async () => {
-    await seedOneTask("ASM-1"); // the file's existing helper for driving a single seed
+    await seedOneTask("PROJ-1"); // the file's existing helper for driving a single seed
     expect(window.createTerminal).toHaveBeenCalledTimes(1);
-    expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Copilot · ASM-1" });
+    expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Copilot · PROJ-1" });
     expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "copilot", true);
   });
 
   it("still pre-types the prompt without submitting it", async () => {
-    await seedOneTask("ASM-1");
+    await seedOneTask("PROJ-1");
     const [text, addNewLine] = terminalAt(0).sendText.mock.calls[1];
     expect(addNewLine).toBe(false);
     expect(text).toContain("[200~");
@@ -392,8 +392,8 @@ describe("seedAgentSession — copilot terminal", () => {
 
   it("uses Claude's terminal name and CLI when the provider is unset", async () => {
     setConfig({ agentProvider: undefined });
-    await seedOneTask("ASM-1");
-    expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · ASM-1" });
+    await seedOneTask("PROJ-1");
+    expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Claude · PROJ-1" });
     expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "claude", true);
   });
 });
@@ -404,7 +404,7 @@ That third test is the regression guard: it asserts the default path still produ
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `npm test -- test/unit/engine/workspace.test.ts`
-Expected: FAIL on the first two — the terminal is named `Claude · ASM-1` and runs `claude`, because nothing reads the provider yet. The third should already PASS; if it fails, the harness in Step 1 is wrong, not the implementation.
+Expected: FAIL on the first two — the terminal is named `Claude · PROJ-1` and runs `claude`, because nothing reads the provider yet. The third should already PASS; if it fails, the harness in Step 1 is wrong, not the implementation.
 
 - [ ] **Step 3: Replace the CLI constants with a per-provider table**
 
@@ -541,7 +541,7 @@ describe("seedAgentSession — copilot panel", () => {
   });
 
   it("opens chat with the prompt prefilled and unsubmitted", async () => {
-    await seedOneTask("ASM-1");
+    await seedOneTask("PROJ-1");
     expect(commands.executeCommand).toHaveBeenCalledWith(
       "workbench.action.chat.open",
       expect.objectContaining({ isPartialQuery: true, mode: "agent" }),
@@ -549,11 +549,11 @@ describe("seedAgentSession — copilot panel", () => {
     const arg = commands.executeCommand.mock.calls.find(
       (c) => c[0] === "workbench.action.chat.open",
     )?.[1] as { query: string };
-    expect(arg.query).toContain("ASM-1");
+    expect(arg.query).toContain("PROJ-1");
   });
 
   it("never calls Claude Code's open command", async () => {
-    await seedOneTask("ASM-1");
+    await seedOneTask("PROJ-1");
     expect(commands.executeCommand).not.toHaveBeenCalledWith(
       "claude-vscode.primaryEditor.open",
       expect.anything(),
@@ -563,14 +563,14 @@ describe("seedAgentSession — copilot panel", () => {
 
   it("falls back to the clipboard when no chat command is registered", async () => {
     commands.getCommands.mockResolvedValue([]);
-    await seedOneTask("ASM-1");
+    await seedOneTask("PROJ-1");
     expect(env.clipboard.writeText).toHaveBeenCalled();
     expect(window.showInformationMessage).toHaveBeenCalled();
   });
 
   it("does not try the Claude Code URI handler", async () => {
     commands.getCommands.mockResolvedValue([]);
-    await seedOneTask("ASM-1");
+    await seedOneTask("PROJ-1");
     expect(env.openExternal).not.toHaveBeenCalled();
   });
 });
@@ -699,15 +699,15 @@ describe("seedAgentSession — copilot batch", () => {
   });
 
   it("opens one editor tab per task", async () => {
-    await seedTwoTasks("ASM-1", "ASM-2"); // the file's existing batch helper
+    await seedTwoTasks("PROJ-1", "PROJ-2"); // the file's existing batch helper
     const tabCalls = commands.executeCommand.mock.calls.filter((c) => c[0] === COPILOT_EDITOR_CMD);
     expect(tabCalls).toHaveLength(2);
-    expect((tabCalls[0][1] as { query: string }).query).toContain("ASM-1");
-    expect((tabCalls[1][1] as { query: string }).query).toContain("ASM-2");
+    expect((tabCalls[0][1] as { query: string }).query).toContain("PROJ-1");
+    expect((tabCalls[1][1] as { query: string }).query).toContain("PROJ-2");
   });
 
   it("never reuses the single-instance panel for a batch", async () => {
-    await seedTwoTasks("ASM-1", "ASM-2");
+    await seedTwoTasks("PROJ-1", "PROJ-2");
     expect(commands.executeCommand).not.toHaveBeenCalledWith(
       "workbench.action.chat.open",
       expect.anything(),
@@ -716,7 +716,7 @@ describe("seedAgentSession — copilot batch", () => {
 
   it("points at the briefs when the editor command is absent", async () => {
     commands.getCommands.mockResolvedValue([]);
-    await seedTwoTasks("ASM-1", "ASM-2");
+    await seedTwoTasks("PROJ-1", "PROJ-2");
     expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining(BRIEF_DIR));
     expect(env.clipboard.writeText).not.toHaveBeenCalled();
   });
@@ -829,7 +829,7 @@ describe("Remote Control x Copilot", () => {
   it("refuses the launch and opens nothing", async () => {
     env.uriScheme = "vscode";
     setConfig({ agentProvider: "copilot", remoteControl: "on", seedAgent: true });
-    await takeTask("ASM-1");
+    await takeTask("PROJ-1");
     expect(window.showErrorMessage).toHaveBeenCalledWith(
       expect.stringContaining("Remote Control needs Claude Code"),
     );
@@ -842,14 +842,14 @@ describe("Remote Control x Copilot", () => {
 
   it("leaves Claude Code + Remote Control alone", async () => {
     setConfig({ agentProvider: undefined, remoteControl: "on", seedAgent: true });
-    await takeTask("ASM-1");
+    await takeTask("PROJ-1");
     expect(window.showErrorMessage).not.toHaveBeenCalled();
   });
 
   it("does not fire when Remote Control is off", async () => {
     env.uriScheme = "vscode";
     setConfig({ agentProvider: "copilot", remoteControl: "off", seedAgent: true });
-    await takeTask("ASM-1");
+    await takeTask("PROJ-1");
     expect(window.showErrorMessage).not.toHaveBeenCalled();
   });
 });
@@ -863,7 +863,7 @@ Add the seed-time backstop test to `test/unit/engine/workspace.test.ts`:
 it("refuses to seed remote control into Copilot", async () => {
   env.uriScheme = "vscode";
   setConfig({ agentProvider: "copilot" });
-  await seedOneTask("ASM-1", { remoteControl: true });
+  await seedOneTask("PROJ-1", { remoteControl: true });
   expect(commands.executeCommand).not.toHaveBeenCalledWith(
     "workbench.action.chat.open",
     expect.anything(),
@@ -1146,14 +1146,14 @@ Seven strings hardcode "Claude Code" at seed time, plus one that makes a factual
 it("names Copilot in the pre-seeded toast", async () => {
   env.uriScheme = "vscode";
   setConfig({ agentProvider: "copilot", seedAgent: true, remoteControl: "off" });
-  await takeTask("ASM-1");
+  await takeTask("PROJ-1");
   expect(lastToast()).toContain("Copilot pre-seeded — press Enter to start.");
   env.uriScheme = "cursor";
 });
 
 it("still says Claude Code by default", async () => {
   setConfig({ agentProvider: undefined, seedAgent: true, remoteControl: "off" });
-  await takeTask("ASM-1");
+  await takeTask("PROJ-1");
   expect(lastToast()).toContain("Claude Code pre-seeded — press Enter to start.");
 });
 ```

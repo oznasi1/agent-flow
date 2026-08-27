@@ -53,7 +53,7 @@ async function settledCanvasBox(page: Page) {
 /** Drop a board card onto the canvas at a viewport point, the way DeckApp's
  *  cards do: `runKey`, a NUL, then the repo. */
 async function dropCardAt(page: Page, clientX: number, clientY: number) {
-  const payload = `ASM-7${DRAG_SEP}centaur`;
+  const payload = `PROJ-7${DRAG_SEP}webapp`;
   const dt = await page.evaluateHandle((raw) => {
     const d = new DataTransfer();
     d.setData("text/plain", raw);

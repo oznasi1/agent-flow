@@ -17,14 +17,14 @@ const flowWith = (nodes: FlowNode[], edges: FlowEdge[]): Flow =>
 
 describe("applyFired", () => {
   it("stamps firedAt and a note on a performed edge", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }], NOW);
     expect(out.edges[0].firedAt).toBe(NOW);
     expect(out.edges[0].firedNote).toBeTruthy();
   });
 
   it("does not mutate the flow it is given", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "done")], [edge("e1", "a", "z")]);
     const before = JSON.stringify(flow);
     applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }], NOW);
     expect(JSON.stringify(flow)).toBe(before);
@@ -32,7 +32,7 @@ describe("applyFired", () => {
 
   it("stamps a perform:false edge too — an unstamped junction sibling re-evaluates forever", () => {
     const flow = flowWith(
-      [place("a", "ASM-1"), place("b", "ASM-2"), notify("z", "both landed", "all")],
+      [place("a", "PROJ-1"), place("b", "PROJ-2"), notify("z", "both landed", "all")],
       [edge("e1", "a", "z"), edge("e2", "b", "z")],
     );
     const out = applyFired(
@@ -45,7 +45,7 @@ describe("applyFired", () => {
 
   it("distinguishes a performed note from a stamped-only one", () => {
     const flow = flowWith(
-      [place("a", "ASM-1"), place("b", "ASM-2"), notify("z", "both landed", "all")],
+      [place("a", "PROJ-1"), place("b", "PROJ-2"), notify("z", "both landed", "all")],
       [edge("e1", "a", "z"), edge("e2", "b", "z")],
     );
     const out = applyFired(
@@ -59,14 +59,14 @@ describe("applyFired", () => {
   });
 
   it("leaves an edge that did not fire completely alone", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("y", "one"), notify("z", "two")], [edge("e1", "a", "y"), edge("e2", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("y", "one"), notify("z", "two")], [edge("e1", "a", "y"), edge("e2", "a", "z")]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }], NOW);
     expect(out.edges[1].firedAt).toBeUndefined();
     expect(out.edges[1].firedNote).toBeUndefined();
   });
 
   it("keeps every other field of the flow and of each edge", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z", { cond: { kind: "ci-failed" } })]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "done")], [edge("e1", "a", "z", { cond: { kind: "ci-failed" } })]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }], NOW);
     expect(out.name).toBe("Ship the migration");
     expect(out.armed).toBe(true);
@@ -75,14 +75,14 @@ describe("applyFired", () => {
   });
 
   it("returns an equal flow when nothing fired", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "done")], [edge("e1", "a", "z")]);
     expect(applyFired(flow, [], NOW)).toEqual(flow);
   });
 
   it("ignores a fired edge whose id is not in the flow", () => {
     // Defensive: the runner is handed edges by the evaluator, but a stale
     // EvalResult must not be able to invent an edge.
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "done")], [edge("e1", "a", "z")]);
     const out = applyFired(flow, [{ edge: edge("ghost", "a", "z"), perform: true, action: "notify" }], NOW);
     expect(out.edges).toHaveLength(1);
     expect(out.edges[0].firedAt).toBeUndefined();
@@ -97,7 +97,7 @@ describe("applyFired", () => {
     // and offers Reset, and a Reset makes it genuinely run later.
     // The target `b` is a `place`, whose derived action is `seed` — see
     // `actionFor` in model.ts — regardless of the edge's own stored `action`.
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b", { action: "launch" })]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "seed" }], NOW);
     expect(out.edges[0].error).toBeTruthy();
     // The latch must NOT read as a success.
@@ -106,7 +106,7 @@ describe("applyFired", () => {
   });
 
   it("names the action it could not perform, and never claims it ran", () => {
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "seed" })]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b", { action: "seed" })]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "seed" }], NOW);
     expect(out.edges[0].error).toBe("seed was not performed");
     expect(out.edges[0].error).not.toMatch(/success|ran|done|told you/i);
@@ -115,27 +115,27 @@ describe("applyFired", () => {
   it("takes the note from the caller for an acting edge that succeeded", () => {
     // The whole point of the outcome argument: only the caller knows whether a
     // launch opened a window, and what to call it. `applyFired` must not pre-judge.
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b", { action: "launch" })]);
     const out = applyFired(
       flow,
       [{ edge: flow.edges[0], perform: true, action: "launch" }],
       NOW,
-      new Map([["e1", { ok: true, note: "launched ASM-12 in aws-ops" } as const]]),
+      new Map([["e1", { ok: true, note: "launched PROJ-12 in aws-ops" } as const]]),
     );
     expect(out.edges[0].firedAt).toBe(NOW);
-    expect(out.edges[0].firedNote).toBe("launched ASM-12 in aws-ops");
+    expect(out.edges[0].firedNote).toBe("launched PROJ-12 in aws-ops");
     expect(out.edges[0].error).toBeUndefined();
   });
 
   it("takes the error from the caller for an acting edge that failed, and stamps no firedAt", () => {
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b", { action: "launch" })]);
     const out = applyFired(
       flow,
       [{ edge: flow.edges[0], perform: true, action: "seed" }],
       NOW,
-      new Map([["e1", { ok: false, error: "Couldn't launch ASM-12: no worktree" } as const]]),
+      new Map([["e1", { ok: false, error: "Couldn't launch PROJ-12: no worktree" } as const]]),
     );
-    expect(out.edges[0].error).toBe("Couldn't launch ASM-12: no worktree");
+    expect(out.edges[0].error).toBe("Couldn't launch PROJ-12: no worktree");
     expect(out.edges[0].firedAt).toBeUndefined();
     expect(out.edges[0].firedNote).toBeUndefined();
   });
@@ -143,7 +143,7 @@ describe("applyFired", () => {
   it("keeps a notify edge's own note even when the caller reports an outcome for it", () => {
     // A caller only ever performs the acting verbs, but an outcome keyed to a
     // notify edge must not be able to rewrite what the toast already said.
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
     const out = applyFired(
       flow,
       [{ edge: flow.edges[0], perform: true, action: "notify" }],
@@ -167,16 +167,16 @@ describe("applyFired", () => {
     // this edge is a `notify`. `e1`'s stored `action` fields (on both `flow`'s
     // edge and `performed`) are the legacy mirror and are irrelevant to this
     // branch — only `hit.action`, set explicitly below to `seed`, decides it.
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "notify" })]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b", { action: "notify" })]);
     const performed = edge("e1", "a", "b", { action: "launch" }); // same id, the earlier (acted-on) vintage
     const out = applyFired(
       flow,
       [{ edge: performed, perform: true, action: "seed" }],
       NOW,
-      new Map([["e1", { ok: true, note: "launched ASM-12 in aws-ops" } as const]]),
+      new Map([["e1", { ok: true, note: "launched PROJ-12 in aws-ops" } as const]]),
     );
     expect(out.edges[0].firedAt).toBe(NOW);
-    expect(out.edges[0].firedNote).toBe("launched ASM-12 in aws-ops");
+    expect(out.edges[0].firedNote).toBe("launched PROJ-12 in aws-ops");
     expect(out.edges[0].error).toBeUndefined();
   });
 
@@ -188,7 +188,7 @@ describe("applyFired", () => {
     // that fix depends on, asserted directly against `applyFired`'s real
     // output rather than a hand-constructed fixture.
     const flow = flowWith(
-      [place("a", "ASM-1"), place("b", "ASM-2"), notify("z", "both landed", "all")],
+      [place("a", "PROJ-1"), place("b", "PROJ-2"), notify("z", "both landed", "all")],
       [edge("e1", "a", "z"), edge("e2", "b", "z")],
     );
     const out = applyFired(
@@ -207,19 +207,19 @@ describe("applyFired", () => {
     // `performed` was already undefined either way, so silence here would
     // read as "never ran" instead of "ran and failed" — both wrong, but the
     // second is the one Task 7's condition must distinguish.
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b", { action: "launch" })]);
     const out = applyFired(
       flow,
       [{ edge: flow.edges[0], perform: true, action: "seed" }],
       NOW,
-      new Map([["e1", { ok: false, error: "Couldn't launch ASM-12: no worktree" } as const]]),
+      new Map([["e1", { ok: false, error: "Couldn't launch PROJ-12: no worktree" } as const]]),
     );
-    expect(out.edges[0].error).toBe("Couldn't launch ASM-12: no worktree");
+    expect(out.edges[0].error).toBe("Couldn't launch PROJ-12: no worktree");
     expect(out.edges[0].performed).toBe(true);
   });
 
   it("marks a fail-closed performer (no outcome reported at all) performed:true as well", () => {
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "seed" })]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b", { action: "seed" })]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "seed" }], NOW);
     expect(out.edges[0].error).toBe("seed was not performed");
     expect(out.edges[0].performed).toBe(true);
@@ -233,7 +233,7 @@ describe("applyFired", () => {
     // the sentence written for exactly this case sat unreachable in `performEdge`
     // (the dispatch there only ever calls it for a spending verb).
     const unknown = { id: "z", kind: "webhook", x: 0, y: 0, join: "any" } as unknown as FlowNode;
-    const flow = flowWith([place("a", "ASM-1"), unknown], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), unknown], [edge("e1", "a", "z")]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: undefined }], NOW);
     expect(out.edges[0].error).toBe(
       "this rule points at z, which is not a place, planned work, a notification, or a command.",
@@ -249,7 +249,7 @@ describe("applyFired", () => {
     // the junction's own note rather than the refusal above, which is about an
     // action that was attempted.
     const unknown = { id: "z", kind: "webhook", x: 0, y: 0, join: "any" } as unknown as FlowNode;
-    const flow = flowWith([place("a", "ASM-1"), unknown], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), unknown], [edge("e1", "a", "z")]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: false, action: undefined }], NOW);
     expect(out.edges[0].error).toBeUndefined();
     expect(out.edges[0].firedNote).toBe("another edge into this target already acted");
@@ -260,7 +260,7 @@ describe("applyFired", () => {
     // attempted its action, so there is nothing to have failed. Recording an error
     // for it would stall the junction it just legitimately closed.
     const flow = flowWith(
-      [place("a", "ASM-1"), place("b", "ASM-2"), place("c", "ASM-3", "all")],
+      [place("a", "PROJ-1"), place("b", "PROJ-2"), place("c", "PROJ-3", "all")],
       [edge("e1", "a", "c"), edge("e2", "b", "c", { action: "launch" })],
     );
     const out = applyFired(
@@ -277,7 +277,7 @@ describe("applyFired", () => {
 
 describe("notifyLines", () => {
   it("names the flow and the notify node's own message", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
     const lines = notifyLines(flow, [{ edge: flow.edges[0], perform: true, action: "notify" }]);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("Ship the migration");
@@ -285,19 +285,19 @@ describe("notifyLines", () => {
   });
 
   it("says nothing for a stamped-only edge — it performed nothing", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "done", "all")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "done", "all")], [edge("e1", "a", "z")]);
     expect(notifyLines(flow, [{ edge: flow.edges[0], perform: false, action: "notify" }])).toEqual([]);
   });
 
   it("says nothing for an action that is not notify", () => {
     // The target `b` is a `place`, whose derived action is `seed`; if one
     // appears in a hand-edited flow it must not produce a toast claiming it ran.
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b", { action: "launch" })]);
     expect(notifyLines(flow, [{ edge: flow.edges[0], perform: true, action: "seed" }])).toEqual([]);
   });
 
   it("falls back gracefully when the target is not a notify node", () => {
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b")]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b")]);
     // The carried action is notify but the target is a place — a hand-edited
     // flow, since a `place` target would normally derive `seed`. One line, no
     // crash, and no invented message.
@@ -308,7 +308,7 @@ describe("notifyLines", () => {
 
   it("returns one line per performed notify edge", () => {
     const flow = flowWith(
-      [place("a", "ASM-1"), notify("y", "first"), notify("z", "second")],
+      [place("a", "PROJ-1"), notify("y", "first"), notify("z", "second")],
       [edge("e1", "a", "y"), edge("e2", "a", "z")],
     );
     const lines = notifyLines(flow, [
@@ -322,20 +322,20 @@ describe("notifyLines", () => {
   // DECIDED, not re-derive it from a copy that may have changed underneath.
   it("announces a notify from the carried action, not the current graph", () => {
     const flow = flowWith(
-      [place("a", "ASM-1"), notify("z", "the migration has landed")],
+      [place("a", "PROJ-1"), notify("z", "the migration has landed")],
       [edge("e1", "a", "z")],
     );
     const fired: FiredEdge[] = [{ edge: flow.edges[0], perform: true, action: "notify" }];
     // The graph now says z is a place — a concurrent edit between the decision and
     // this call. The decision stands, and the message is gone with the node.
-    const edited: Flow = { ...flow, nodes: [flow.nodes[0], place("z", "ASM-9")] };
+    const edited: Flow = { ...flow, nodes: [flow.nodes[0], place("z", "PROJ-9")] };
     expect(notifyLines(edited, fired)).toEqual(["Ship the migration: a rule fired."]);
   });
 
   // The inverse, so the test above cannot pass by ignoring `action` altogether.
   it("says nothing for a carried action that is not notify", () => {
     const flow = flowWith(
-      [place("a", "ASM-1"), notify("z", "the migration has landed")],
+      [place("a", "PROJ-1"), notify("z", "the migration has landed")],
       [edge("e1", "a", "z")],
     );
     const fired: FiredEdge[] = [{ edge: flow.edges[0], perform: true, action: "launch" }];

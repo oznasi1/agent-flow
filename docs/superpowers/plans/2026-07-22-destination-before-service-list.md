@@ -45,9 +45,9 @@ Append this `describe` block to the end of `test/unit/engine/workspace.test.ts`:
 describe("workspaceFolderPaths", () => {
   it("returns canonical folder paths, resolving relative paths against the file dir", () => {
     // realpathSync is mocked to identity in beforeEach, so canon() returns its input.
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }, { "path": "account-service" }] }');
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }, { "path": "account-service" }] }');
     const paths = workspaceFolderPaths("/repos/team.code-workspace");
-    expect(paths).toEqual(["/repos/centaur", "/repos/account-service"]);
+    expect(paths).toEqual(["/repos/webapp", "/repos/account-service"]);
   });
 
   it("returns [] on unparseable input", () => {
@@ -149,7 +149,7 @@ Replace the existing test `"aborts when the mode prompt is cancelled"` (currentl
     vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
     vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel the prompt-mode pick
     const { provider } = setup();
-    await provider.takeTask("ASM-1", ["account-service"]);
+    await provider.takeTask("PROJ-1", ["account-service"]);
     expect(clientStub.getDetail).not.toHaveBeenCalled(); // aborted before resolveKickoff read the ticket
     expect(openWorkspace).not.toHaveBeenCalled();
   });
@@ -160,25 +160,25 @@ Add, at the end of the `describe("takeTask", ...)` block (just before its closin
 ```ts
   it("pre-checks repos the chosen existing workspace already contains", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" }); // no preselection → service pick shows
-    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
+    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/webapp"]);
     vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
     // Destination is chosen first: open-target pick → workspace-file pick → service pick.
     vi.mocked(window.showQuickPick)
       .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
       .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never)
-      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never);
+      .mockResolvedValueOnce([{ repo: mkRepos(["webapp"])[0] }] as never);
 
     const { provider } = setup();
-    await provider.takeTask("ASM-1"); // no preselected repos
+    await provider.takeTask("PROJ-1"); // no preselected repos
 
-    // 3rd quick-pick is the service pick; centaur is pre-checked because it's in the workspace.
+    // 3rd quick-pick is the service pick; webapp is pre-checked because it's in the workspace.
     const items = vi.mocked(window.showQuickPick).mock.calls[2][0] as Array<{ label: string; picked: boolean }>;
-    expect(items.find((i) => i.label === "centaur")?.picked).toBe(true);
+    expect(items.find((i) => i.label === "webapp")?.picked).toBe(true);
     expect(items.find((i) => i.label === "account-service")?.picked).toBe(false);
   });
 ```
 
-> Note: `inferServices` and `fs` are NOT mocked in this test file. Real inference over summary "Do the thing" (no matching tokens) returns nothing, so `picked` comes only from prefill. Real `fs.realpathSync("/repos/centaur")` throws (path absent) so `canon` returns the path unchanged — matching the mocked `workspaceFolderPaths` value exactly.
+> Note: `inferServices` and `fs` are NOT mocked in this test file. Real inference over summary "Do the thing" (no matching tokens) returns nothing, so `picked` comes only from prefill. Real `fs.realpathSync("/repos/webapp")` throws (path absent) so `canon` returns the path unchanged — matching the mocked `workspaceFolderPaths` value exactly.
 
 - [ ] **Step 2: Run the tests to verify they fail**
 
@@ -430,8 +430,8 @@ For `"opens an Explore session into a live folder window"` (currently lines 780�
 ```ts
     vi.mocked(window.showInputBox).mockResolvedValueOnce("poke around");
     vi.mocked(window.showQuickPick)
-      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/centaur" } } as never) // open where (first)
-      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never);                            // repos (last)
+      .mockResolvedValueOnce({ target: { kind: "live-folder", folder: "/repos/webapp" } } as never) // open where (first)
+      .mockResolvedValueOnce([{ repo: mkRepos(["webapp"])[0] }] as never);                            // repos (last)
 ```
 
 Add a prefill test inside the same `describe("explore — open target", ...)` block:
@@ -439,19 +439,19 @@ Add a prefill test inside the same `describe("explore — open target", ...)` bl
 ```ts
   it("pre-checks repos the chosen existing workspace already contains", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
-    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur"]);
+    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/webapp"]);
     vi.mocked(listWorkspaceFiles).mockReturnValue([{ file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 }]);
     vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
     vi.mocked(window.showQuickPick)
       .mockResolvedValueOnce({ target: { kind: "existing-pick" } } as never)
       .mockResolvedValueOnce({ file: "/ws/team.code-workspace" } as never)
-      .mockResolvedValueOnce([{ repo: mkRepos(["centaur"])[0] }] as never);
+      .mockResolvedValueOnce([{ repo: mkRepos(["webapp"])[0] }] as never);
 
     await runExplore();
 
-    // 3rd quick-pick is the repo picker; centaur is pre-checked (present in the workspace).
+    // 3rd quick-pick is the repo picker; webapp is pre-checked (present in the workspace).
     const items = vi.mocked(window.showQuickPick).mock.calls[2][0] as Array<{ label: string; picked: boolean }>;
-    expect(items.find((i) => i.label === "centaur")?.picked).toBe(true);
+    expect(items.find((i) => i.label === "webapp")?.picked).toBe(true);
     expect(items.find((i) => i.label === "account-service")?.picked).toBe(false);
   });
 ```

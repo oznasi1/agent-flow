@@ -54,7 +54,7 @@ Tests mirror each file; `test/webview/OrchestratorDrawer.test.tsx` and a new `te
 **Interfaces:**
 - Produces: `labelPoint(a: Point, b: Point, obstacles?: Box[]): Point`. The third argument is optional so every existing call site keeps compiling; Task 2 passes the node boxes.
 
-**Why.** `labelPoint` currently returns the chord midpoint (`layout.ts:32-34`) and knows nothing about nodes. When an edge reaches a farther column its midpoint lands on an intermediate node in the same row and the pill covers that node's title — observed in the real UI as `ASM-12` rendering as `A_M-12`.
+**Why.** `labelPoint` currently returns the chord midpoint (`layout.ts:32-34`) and knows nothing about nodes. When an edge reaches a farther column its midpoint lands on an intermediate node in the same row and the pill covers that node's title — observed in the real UI as `PROJ-12` rendering as `A_M-12`.
 
 Geometry already in the file: `NODE_W = 168`, `NODE_H = 44`, `COL_GAP = 296`, `ROW_GAP = 88`, `GRID = 8`.
 

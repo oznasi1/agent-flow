@@ -139,9 +139,9 @@ describe("multi-select & parallel launch", () => {
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "ASM-1", summary: "one", services: ["api"] }),
-        mkTask({ key: "ASM-2", summary: "two", services: ["api"] }),
-        mkTask({ key: "ASM-3", summary: "three", services: ["billing"] }),
+        mkTask({ key: "PROJ-1", summary: "one", services: ["api"] }),
+        mkTask({ key: "PROJ-2", summary: "two", services: ["api"] }),
+        mkTask({ key: "PROJ-3", summary: "three", services: ["billing"] }),
       ],
     });
   // Open the repo multiselect popup and toggle a repo option by name.
@@ -163,7 +163,7 @@ describe("multi-select & parallel launch", () => {
     render(<App />);
     authed();
     apiPool();
-    selectRepo("api"); // narrows the pool to ASM-1 + ASM-2
+    selectRepo("api"); // narrows the pool to PROJ-1 + PROJ-2
     expect(checks().length).toBe(2);
   });
 
@@ -184,10 +184,10 @@ describe("multi-select & parallel launch", () => {
     authed();
     apiPool();
     selectRepo("api");
-    fireEvent.click(checks()[0]); // ASM-1
-    fireEvent.click(checks()[1]); // ASM-2
+    fireEvent.click(checks()[0]); // PROJ-1
+    fireEvent.click(checks()[1]); // PROJ-2
     fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1", "ASM-2"], repo: "api" });
+    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["PROJ-1", "PROJ-2"], repo: "api" });
   });
 
   it("does not expand a card when its checkbox is clicked", () => {
@@ -413,7 +413,7 @@ Add this describe block to `test/unit/tasksView.test.ts` (after the `takeTask` d
 
 ```ts
 describe("takeBatch", () => {
-  const twoKeys = ["ASM-1", "ASM-2"];
+  const twoKeys = ["PROJ-1", "PROJ-2"];
 
   it("launches one worktree'd new window per selected task in the filtered repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing"]));
@@ -428,7 +428,7 @@ describe("takeBatch", () => {
   it("uses the configured task prompt mode without prompting", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { provider } = setup();
-    await provider.takeBatch(["ASM-1"], "api"); // CFG.taskMode = "plan" is a known mode
+    await provider.takeBatch(["PROJ-1"], "api"); // CFG.taskMode = "plan" is a known mode
     expect(window.showQuickPick).not.toHaveBeenCalled();
     expect(openWorkspace).toHaveBeenCalledWith(expect.objectContaining({ promptTemplate: "P {key}" }));
   });
@@ -455,7 +455,7 @@ describe("takeBatch", () => {
   it("errors when the filtered repo is not a git repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"], { isGit: false }));
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], "api");
+    await provider.takeBatch(["PROJ-1"], "api");
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
@@ -464,7 +464,7 @@ describe("takeBatch", () => {
   it("errors when the repo name is not found", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["billing"]));
     const { provider, posted } = setup();
-    await provider.takeBatch(["ASM-1"], "api");
+    await provider.takeBatch(["PROJ-1"], "api");
     expect(openWorkspace).not.toHaveBeenCalled();
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
@@ -495,7 +495,7 @@ describe("takeBatch", () => {
   it("routes the takeBatch message through onMessage to the handler", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     const { send } = setup();
-    await send({ type: "takeBatch", keys: ["ASM-1"], repo: "api" });
+    await send({ type: "takeBatch", keys: ["PROJ-1"], repo: "api" });
     expect(openWorkspace).toHaveBeenCalled();
   });
 });

@@ -122,8 +122,8 @@ export const OFFERED_CONDS: CondKind[] = (Object.keys(COND_LABEL) as Condition["
  * a gap: `isMet` cannot answer for it *yet*, but `promoteToPlace` (promote.ts)
  * rewrites a launched planned node into a `place` WITH THE SAME ID, so every one
  * of those conditions becomes answerable the moment the launch succeeds. That is
- * the whole point of promotion — "ASM-1 merged -> launch ASM-12 -> ASM-12's CI
- * passes -> launch ASM-15" needs the second link to be expressible before the
+ * the whole point of promotion — "PROJ-1 merged -> launch PROJ-12 -> PROJ-12's CI
+ * passes -> launch PROJ-15" needs the second link to be expressible before the
  * first has run. An earlier version of this comment called it "a known omission",
  * which is worse than merely wrong on the one function that decides what both
  * pickers offer: a reader trusting it would strip every condition from rules out

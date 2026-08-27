@@ -497,63 +497,63 @@ describe("defaultPrFactsDir", () => {
 
 describe("readPrEntries / writePrEntry", () => {
   it("is empty for a key that was never written", () => {
-    expect(readPrEntries(dir, "ASM-1")).toEqual({});
+    expect(readPrEntries(dir, "PROJ-1")).toEqual({});
   });
 
   it("is empty for a directory that does not exist", () => {
-    expect(readPrEntries(path.join(dir, "nope"), "ASM-1")).toEqual({});
+    expect(readPrEntries(path.join(dir, "nope"), "PROJ-1")).toEqual({});
   });
 
   it("round-trips an entry keyed by repo name", () => {
     const e: PrEntry = { facts: facts(), fetchedAt: 1000 };
-    writePrEntry(dir, "ASM-1", "api", e);
-    expect(readPrEntries(dir, "ASM-1")).toEqual({ api: e });
+    writePrEntry(dir, "PROJ-1", "api", e);
+    expect(readPrEntries(dir, "PROJ-1")).toEqual({ api: e });
   });
 
   it("merges a second repo into the same run file", () => {
-    writePrEntry(dir, "ASM-1", "api", { facts: facts(), fetchedAt: 1 });
-    writePrEntry(dir, "ASM-1", "web", { facts: null, fetchedAt: 2 });
-    expect(Object.keys(readPrEntries(dir, "ASM-1")).sort()).toEqual(["api", "web"]);
+    writePrEntry(dir, "PROJ-1", "api", { facts: facts(), fetchedAt: 1 });
+    writePrEntry(dir, "PROJ-1", "web", { facts: null, fetchedAt: 2 });
+    expect(Object.keys(readPrEntries(dir, "PROJ-1")).sort()).toEqual(["api", "web"]);
   });
 
   it("overwrites the same repo rather than appending", () => {
-    writePrEntry(dir, "ASM-1", "api", { facts: facts({ number: 1 }), fetchedAt: 1 });
-    writePrEntry(dir, "ASM-1", "api", { facts: facts({ number: 2 }), fetchedAt: 2 });
-    expect(readPrEntries(dir, "ASM-1").api.facts!.number).toBe(2);
+    writePrEntry(dir, "PROJ-1", "api", { facts: facts({ number: 1 }), fetchedAt: 1 });
+    writePrEntry(dir, "PROJ-1", "api", { facts: facts({ number: 2 }), fetchedAt: 2 });
+    expect(readPrEntries(dir, "PROJ-1").api.facts!.number).toBe(2);
   });
 
   it("keeps runs separate", () => {
-    writePrEntry(dir, "ASM-1", "api", { facts: null, fetchedAt: 1 });
-    expect(readPrEntries(dir, "ASM-2")).toEqual({});
+    writePrEntry(dir, "PROJ-1", "api", { facts: null, fetchedAt: 1 });
+    expect(readPrEntries(dir, "PROJ-2")).toEqual({});
   });
 
   it("preserves a null-facts entry — 'no PR' is a real cached answer", () => {
-    writePrEntry(dir, "ASM-1", "api", { facts: null, fetchedAt: 5 });
-    expect(readPrEntries(dir, "ASM-1").api).toEqual({ facts: null, fetchedAt: 5 });
+    writePrEntry(dir, "PROJ-1", "api", { facts: null, fetchedAt: 5 });
+    expect(readPrEntries(dir, "PROJ-1").api).toEqual({ facts: null, fetchedAt: 5 });
   });
 
   it("skips a corrupt file rather than throwing", () => {
     fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, "ASM-1.json"), "{ not json");
-    expect(readPrEntries(dir, "ASM-1")).toEqual({});
+    fs.writeFileSync(path.join(dir, "PROJ-1.json"), "{ not json");
+    expect(readPrEntries(dir, "PROJ-1")).toEqual({});
   });
 
   it("survives a write into a directory that does not exist yet", () => {
     const nested = path.join(dir, "deep", "deeper");
-    writePrEntry(nested, "ASM-1", "api", { facts: null, fetchedAt: 1 });
-    expect(readPrEntries(nested, "ASM-1").api.fetchedAt).toBe(1);
+    writePrEntry(nested, "PROJ-1", "api", { facts: null, fetchedAt: 1 });
+    expect(readPrEntries(nested, "PROJ-1").api.fetchedAt).toBe(1);
   });
 });
 
 describe("removePrEntries", () => {
   it("drops a run's file", () => {
-    writePrEntry(dir, "ASM-1", "api", { facts: null, fetchedAt: 1 });
-    removePrEntries(dir, "ASM-1");
-    expect(readPrEntries(dir, "ASM-1")).toEqual({});
+    writePrEntry(dir, "PROJ-1", "api", { facts: null, fetchedAt: 1 });
+    removePrEntries(dir, "PROJ-1");
+    expect(readPrEntries(dir, "PROJ-1")).toEqual({});
   });
 
   it("is a no-op for a run that was never written", () => {
-    expect(() => removePrEntries(dir, "ASM-404")).not.toThrow();
+    expect(() => removePrEntries(dir, "PROJ-404")).not.toThrow();
   });
 });
 
@@ -714,30 +714,30 @@ function scripted(...replies: (string | Error)[]): { run: Runner; calls: { file:
 describe("GhProvider.fetch — argv", () => {
   it("asks gh for the head branch first, in the repo directory, with every field", async () => {
     const { run, calls } = scripted(JSON.stringify([pr()]));
-    await new GhProvider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    await new GhProvider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(calls).toHaveLength(1);
     expect(calls[0].file).toBe("gh");
     expect(calls[0].cwd).toBe("/r/api");
     expect(calls[0].args).toEqual([
-      "pr", "list", "--head", "feat/ASM-1", "--state", "all", "--limit", "10", "--json", PR_JSON_FIELDS,
+      "pr", "list", "--head", "feat/PROJ-1", "--state", "all", "--limit", "10", "--json", PR_JSON_FIELDS,
     ]);
   });
 
   it("falls back to a Jira-key title search when the branch has no PR", async () => {
     const { run, calls } = scripted("[]", JSON.stringify([pr({ number: 77 })]));
-    const res = await new GhProvider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await new GhProvider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(calls).toHaveLength(2);
     expect(calls[1].args).toEqual([
-      "pr", "list", "--search", "ASM-1 in:title", "--state", "all", "--limit", "10", "--json", PR_JSON_FIELDS,
+      "pr", "list", "--search", "PROJ-1 in:title", "--state", "all", "--limit", "10", "--json", PR_JSON_FIELDS,
     ]);
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 77 }) });
   });
 
   it("goes straight to the key search when the repo has no branch", async () => {
     const { run, calls } = scripted(JSON.stringify([pr()]));
-    await new GhProvider(run).fetch("/r/api", null, "ASM-1");
+    await new GhProvider(run).fetch("/r/api", null, "PROJ-1");
 
     expect(calls).toHaveLength(1);
     expect(calls[0].args).toContain("--search");
@@ -745,7 +745,7 @@ describe("GhProvider.fetch — argv", () => {
 
   it("passes the 10s timeout to the runner", async () => {
     const run = vi.fn<Runner>(async () => "[]");
-    await new GhProvider(run).fetch("/r/api", "b", "ASM-1");
+    await new GhProvider(run).fetch("/r/api", "b", "PROJ-1");
     expect(GH_TIMEOUT_MS).toBe(10_000);
     expect(run).toHaveBeenCalledWith("gh", expect.any(Array), { cwd: "/r/api", timeoutMs: 10_000 });
   });
@@ -754,28 +754,28 @@ describe("GhProvider.fetch — argv", () => {
 describe("GhProvider.fetch — results", () => {
   it("reports no PR when both lookups come back empty", async () => {
     const { run } = scripted("[]", "[]");
-    expect(await new GhProvider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: true, facts: null });
+    expect(await new GhProvider(run).fetch("/r/api", "b", "PROJ-1")).toEqual({ ok: true, facts: null });
   });
 
   it("prefers OPEN over MERGED when a branch has both", async () => {
     const { run } = scripted(JSON.stringify([pr({ number: 1, state: "MERGED" }), pr({ number: 2, state: "OPEN" })]));
-    const res = await new GhProvider(run).fetch("/r/api", "b", "ASM-1");
+    const res = await new GhProvider(run).fetch("/r/api", "b", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 2, state: "OPEN" }) });
   });
 
   it("reports failure — not 'no PR' — when gh errors", async () => {
     const { run } = scripted(new Error("gh: command not found"));
-    expect(await new GhProvider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: false });
+    expect(await new GhProvider(run).fetch("/r/api", "b", "PROJ-1")).toEqual({ ok: false });
   });
 
   it("reports failure on unparseable stdout", async () => {
     const { run } = scripted("not json");
-    expect(await new GhProvider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: false });
+    expect(await new GhProvider(run).fetch("/r/api", "b", "PROJ-1")).toEqual({ ok: false });
   });
 
   it("reports failure when gh returns a non-array payload", async () => {
     const { run } = scripted(JSON.stringify({ message: "Not Found" }));
-    expect(await new GhProvider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: false });
+    expect(await new GhProvider(run).fetch("/r/api", "b", "PROJ-1")).toEqual({ ok: false });
   });
 });
 
@@ -785,7 +785,7 @@ describe("GhProvider.fetch — review threads", () => {
 
   it("skips the GraphQL call when there is no review decision", async () => {
     const { run, calls } = scripted(JSON.stringify([pr({ reviewDecision: null })]));
-    const res = await new GhProvider(run).fetch("/r/api", "b", "ASM-1");
+    const res = await new GhProvider(run).fetch("/r/api", "b", "PROJ-1");
     expect(calls).toHaveLength(1);
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: null }) });
   });
@@ -800,7 +800,7 @@ describe("GhProvider.fetch — review threads", () => {
         { isResolved: false, isOutdated: true },
       ]),
     );
-    const res = await new GhProvider(run).fetch("/r/api", "b", "ASM-1");
+    const res = await new GhProvider(run).fetch("/r/api", "b", "PROJ-1");
 
     expect(calls).toHaveLength(2);
     expect(calls[1].args[0]).toBe("api");
@@ -813,13 +813,13 @@ describe("GhProvider.fetch — review threads", () => {
 
   it("keeps the PR facts with a null count when the GraphQL call fails", async () => {
     const { run } = scripted(JSON.stringify([pr({ reviewDecision: "APPROVED" })]), new Error("rate limited"));
-    const res = await new GhProvider(run).fetch("/r/api", "b", "ASM-1");
+    const res = await new GhProvider(run).fetch("/r/api", "b", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ review: "approved", unresolved: null }) });
   });
 
   it("skips the GraphQL call when the PR url has no parseable owner/repo", async () => {
     const { run, calls } = scripted(JSON.stringify([pr({ reviewDecision: "APPROVED", url: "https://example.com/x" })]));
-    const res = await new GhProvider(run).fetch("/r/api", "b", "ASM-1");
+    const res = await new GhProvider(run).fetch("/r/api", "b", "PROJ-1");
     expect(calls).toHaveLength(1);
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: null }) });
   });
@@ -1566,7 +1566,7 @@ and change the existing config mock to serve the two new settings:
 
 ```ts
 vi.mock("../../src/config", () => ({
-  getConfig: () => ({ baseUrl: "https://jira", project: "ASM", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds }),
+  getConfig: () => ({ baseUrl: "https://jira", project: "PROJ", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds }),
 }));
 ```
 
@@ -1600,8 +1600,8 @@ describe("DeckPanel PR facts", () => {
   it("fetches a repo with no cached entry", async () => {
     show();
     await settled();
-    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "ASM-1");
-    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "ASM-1", "svc", expect.objectContaining({ facts: null, fetchedAt: expect.any(Number) }));
+    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", "b", "PROJ-1");
+    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "PROJ-1", "svc", expect.objectContaining({ facts: null, fetchedAt: expect.any(Number) }));
   });
 
   it("does not refetch an entry inside its TTL", async () => {
@@ -1624,7 +1624,7 @@ describe("DeckPanel PR facts", () => {
     h.prFetch.mockResolvedValue({ ok: false });
     show();
     await settled();
-    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "ASM-1", "svc", expect.objectContaining({ facts: stale, error: true }));
+    expect(h.writePrEntry).toHaveBeenCalledWith("/prfacts", "PROJ-1", "svc", expect.objectContaining({ facts: stale, error: true }));
   });
 
   it("fetches nothing when prFacts is off, and reports it to the webview", async () => {
@@ -1654,15 +1654,15 @@ describe("DeckPanel PR facts", () => {
   it("forgets a run's PR facts alongside its run record", async () => {
     show();
     await settled();
-    await lastPanel()._fire({ type: "deck:forget", key: "ASM-1" });
-    expect(h.removePrEntries).toHaveBeenCalledWith("/prfacts", "ASM-1");
+    await lastPanel()._fire({ type: "deck:forget", key: "PROJ-1" });
+    expect(h.removePrEntries).toHaveBeenCalledWith("/prfacts", "PROJ-1");
   });
 
   it("skips repos with no branch and no key match rather than throwing", async () => {
     h.runs = [mkRun({ repos: [{ name: "svc", path: "/r/svc", isGit: true }] })];
     show();
     await settled();
-    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", null, "ASM-1");
+    expect(h.prFetch).toHaveBeenCalledWith("/r/svc", null, "PROJ-1");
   });
 });
 ```

@@ -9,7 +9,7 @@ const deps = (over: Partial<DoctorDeps> = {}): DoctorDeps => ({
     sourceLabel: "Jira",
     scopeNoun: "project",
     endpoint: "https://jira.test",
-    scope: "ASM",
+    scope: "PROJ",
     endpointSetting: "agentFlow.jira.baseUrl",
     scopeSetting: "agentFlow.jira.project",
     reposRoot: "/repos",

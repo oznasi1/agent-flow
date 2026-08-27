@@ -165,8 +165,8 @@ export function showFileAtRef(repoPath: string, ref: string, file: string): stri
 const rootMemo = new Map<string, string>();
 const defaultBranchMemo = new Map<string, string>();
 
-/** The git repo root containing `cwd`, so a session started in `centaur/src`
- * resolves to the same place as one started in `centaur` — and so a place
+/** The git repo root containing `cwd`, so a session started in `webapp/src`
+ * resolves to the same place as one started in `webapp` — and so a place
  * compares equal to a run record's repo path, which is always a root. "" when
  * `cwd` is in no repo at all. */
 export function repoRoot(cwd: string): string {

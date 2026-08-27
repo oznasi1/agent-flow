@@ -5,7 +5,7 @@ import { mkRepos } from "../../_helpers/factories";
 const repos = mkRepos([
   "account-service",
   "domains-manager",
-  "centaur",
+  "webapp",
   "new-stance-aggregator",
   "scan-service",
   "api", // 3 chars — below the text-match length guard
@@ -33,7 +33,7 @@ describe("inferServices — structured fields", () => {
   });
 
   it("matches a label to a repo", () => {
-    expect(names({ summary: "fix a thing", labels: ["centaur"] })).toEqual(["centaur:label"]);
+    expect(names({ summary: "fix a thing", labels: ["webapp"] })).toEqual(["webapp:label"]);
   });
 
   it("matches components case-insensitively and trims whitespace", () => {
@@ -59,7 +59,7 @@ describe("inferServices — free-text matches", () => {
   });
 
   it("does not match a repo name that is only a substring (whole-word boundary)", () => {
-    expect(names({ summary: "the centaurs are restless" })).toEqual([]);
+    expect(names({ summary: "the webapps are restless" })).toEqual([]);
   });
 
   it("does not text-match repo names shorter than 5 chars", () => {
@@ -84,13 +84,13 @@ describe("inferServices — precedence & dedupe", () => {
   });
 
   it("prefers a label over a text match for the same repo", () => {
-    expect(names({ summary: "centaur needs love", labels: ["centaur"] })).toEqual(["centaur:label"]);
+    expect(names({ summary: "webapp needs love", labels: ["webapp"] })).toEqual(["webapp:label"]);
   });
 
   it("returns multiple services across reasons", () => {
-    expect(names({ summary: "sync centaur with the backend", components: ["account-service"] })).toEqual([
+    expect(names({ summary: "sync webapp with the backend", components: ["account-service"] })).toEqual([
       "account-service:component",
-      "centaur:text",
+      "webapp:text",
     ]);
   });
 
@@ -106,21 +106,21 @@ describe("confirmedServices — what may attach without the user's say-so", () =
 
   it("drops label and text guesses when the ticket confirms a repo via component", () => {
     expect(
-      confirmedNames({ summary: "sync centaur too", components: ["account-service"], labels: ["domains-manager"] }),
+      confirmedNames({ summary: "sync webapp too", components: ["account-service"], labels: ["domains-manager"] }),
     ).toEqual(["account-service"]);
   });
 
   it("keeps every confirmed repo when the ticket has several components", () => {
-    expect(confirmedNames({ summary: "x", components: ["account-service", "centaur"], labels: ["scan-service"] })).toEqual([
+    expect(confirmedNames({ summary: "x", components: ["account-service", "webapp"], labels: ["scan-service"] })).toEqual([
       "account-service",
-      "centaur",
+      "webapp",
     ]);
   });
 
   it("falls back to the guesses when the ticket confirms nothing", () => {
-    expect(confirmedNames({ summary: "centaur needs love", labels: ["scan-service"] })).toEqual([
-      "centaur",
+    expect(confirmedNames({ summary: "webapp needs love", labels: ["scan-service"] })).toEqual([
       "scan-service",
+      "webapp",
     ]);
   });
 

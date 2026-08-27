@@ -683,7 +683,7 @@ Replace the existing `it("throws a generic Error with the status + body on other
         400,
       ),
     ]);
-    const err = await client().getTransitions("ASM-1").catch((e) => e);
+    const err = await client().getTransitions("PROJ-1").catch((e) => e);
     expect(err).toBeInstanceOf(mod.JiraApiError);
     expect(err.status).toBe(400);
     expect(err.messages).toEqual(["Ticket cannot be closed unless Resolution will be provided"]);
@@ -692,7 +692,7 @@ Replace the existing `it("throws a generic Error with the status + body on other
 
   it("does not leak a non-JSON error body into the message", async () => {
     installFetch([textResponse("server boom", 500)]);
-    await expect(client().getTransitions("ASM-1")).rejects.toThrow("Jira is having trouble (500) — try again shortly.");
+    await expect(client().getTransitions("PROJ-1")).rejects.toThrow("Jira is having trouble (500) — try again shortly.");
   });
 ```
 
@@ -720,38 +720,38 @@ describe("transitions", () => {
 
   it("asks Jira to expand the transition screen fields", async () => {
     const fetchMock = installFetch([jsonResponse(TRANSITIONS)]);
-    await client().getTransitions("ASM-1");
-    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/ASM-1/transitions?expand=transitions.fields`);
+    await client().getTransitions("PROJ-1");
+    expect(urlOf(fetchMock, 0)).toBe(`${BASE}/rest/api/3/issue/PROJ-1/transitions?expand=transitions.fields`);
   });
 
   it("surfaces the field metadata alongside the status names", async () => {
     installFetch([jsonResponse(TRANSITIONS)]);
-    const [t] = await client().getTransitions("ASM-1");
+    const [t] = await client().getTransitions("PROJ-1");
     expect(t).toMatchObject({ id: "41", name: "Resolve", toName: "Done", toCategory: "done" });
     expect(t.fields.resolution.allowedValues).toEqual([{ id: "10000", name: "Done" }]);
   });
 
   it("defaults fields to an empty record when Jira omits them", async () => {
     installFetch([jsonResponse({ transitions: [{ id: "31", name: "Start", to: { name: "In Progress" } }] })]);
-    const [t] = await client().getTransitions("ASM-1");
+    const [t] = await client().getTransitions("PROJ-1");
     expect(t.fields).toEqual({});
   });
 
   it("posts only the transition id when there are no fields", async () => {
     const fetchMock = installFetch([emptyResponse(204)]);
-    await client().transition("ASM-1", "41");
+    await client().transition("PROJ-1", "41");
     expect(bodyOf(fetchMock, 0)).toEqual({ transition: { id: "41" } });
   });
 
   it("omits an empty fields object rather than sending `fields: {}`", async () => {
     const fetchMock = installFetch([emptyResponse(204)]);
-    await client().transition("ASM-1", "41", {});
+    await client().transition("PROJ-1", "41", {});
     expect(bodyOf(fetchMock, 0)).toEqual({ transition: { id: "41" } });
   });
 
   it("includes collected fields in the transition body", async () => {
     const fetchMock = installFetch([emptyResponse(204)]);
-    await client().transition("ASM-1", "41", { resolution: { id: "10000" } });
+    await client().transition("PROJ-1", "41", { resolution: { id: "10000" } });
     expect(bodyOf(fetchMock, 0)).toEqual({ transition: { id: "41" }, fields: { resolution: { id: "10000" } } });
   });
 });
@@ -892,7 +892,7 @@ git commit -m "feat(jira): expand transition fields and send them on transition"
 In `test/unit/tasksView.test.ts`, add `listResolutions: vi.fn(async () => [] as unknown[]),` to `makeClient` (after `transition`), and change the existing assertion at line 291 to include the fields argument:
 
 ```ts
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "41", {});
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "41", {});
 ```
 
 Then add this block inside the existing `describe("changeStatus", …)`:
@@ -925,15 +925,15 @@ Then add this block inside the existing `describe("changeStatus", …)`:
     clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
     answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Won't Do" });
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "41", { resolution: { id: "10001" } });
+    await provider.changeStatus("PROJ-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "41", { resolution: { id: "10001" } });
   });
 
   it("writes nothing when the field prompt is cancelled", async () => {
     clientStub.getTransitions.mockResolvedValue([DONE_WITH_RESOLUTION]);
     answerPicks({ t: DONE_WITH_RESOLUTION }, undefined);
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).not.toHaveBeenCalled();
     expect(posted().filter((p) => p.type === "toast")).toEqual([]);
   });
@@ -950,8 +950,8 @@ Then add this block inside the existing `describe("changeStatus", …)`:
     answerPicks({ t });
     vi.mocked(window.showInputBox).mockResolvedValue("shipped in 0.1.36" as never);
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "51", { customfield_1: "shipped in 0.1.36" });
+    await provider.changeStatus("PROJ-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "51", { customfield_1: "shipped in 0.1.36" });
   });
 
   it("skips unfillable required fields and attempts the write anyway", async () => {
@@ -965,8 +965,8 @@ Then add this block inside the existing `describe("changeStatus", …)`:
     clientStub.getTransitions.mockResolvedValue([t]);
     answerPicks({ t });
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "61", {});
+    await provider.changeStatus("PROJ-1");
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "61", {});
   });
 
   it("does not prompt for optional screen fields", async () => {
@@ -980,9 +980,9 @@ Then add this block inside the existing `describe("changeStatus", …)`:
     clientStub.getTransitions.mockResolvedValue([t]);
     answerPicks({ t });
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(window.showInputBox).not.toHaveBeenCalled();
-    expect(clientStub.transition).toHaveBeenCalledWith("ASM-1", "71", {});
+    expect(clientStub.transition).toHaveBeenCalledWith("PROJ-1", "71", {});
   });
 ```
 
@@ -1142,10 +1142,10 @@ Add to `test/unit/tasksView.test.ts` inside `describe("changeStatus", …)` — 
     // The upfront pass already asks for Resolution, so answer it twice.
     answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Done" }, { label: "Won't Do" });
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(2);
-    expect(clientStub.transition).toHaveBeenLastCalledWith("ASM-1", "41", { resolution: { id: "10001" } });
-    expect(posted()).toContainEqual(expect.objectContaining({ type: "statusChanged", key: "ASM-1" }));
+    expect(clientStub.transition).toHaveBeenLastCalledWith("PROJ-1", "41", { resolution: { id: "10001" } });
+    expect(posted()).toContainEqual(expect.objectContaining({ type: "statusChanged", key: "PROJ-1" }));
   });
 
   it("re-prompts from explicit field errors even when the field wasn't required", async () => {
@@ -1169,8 +1169,8 @@ Add to `test/unit/tasksView.test.ts` inside `describe("changeStatus", …)` — 
       .mockResolvedValueOnce(undefined);
     answerPicks({ t }, { label: "Config drift" });
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
-    expect(clientStub.transition).toHaveBeenLastCalledWith("ASM-1", "41", { customfield_1: { id: "9" } });
+    await provider.changeStatus("PROJ-1");
+    expect(clientStub.transition).toHaveBeenLastCalledWith("PROJ-1", "41", { customfield_1: { id: "9" } });
   });
 
   it("falls back to the site resolution list when the screen declared no fields", async () => {
@@ -1182,9 +1182,9 @@ Add to `test/unit/tasksView.test.ts` inside `describe("changeStatus", …)` — 
       .mockResolvedValueOnce(undefined);
     answerPicks({ t }, { label: "Done" });
     const { provider } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.listResolutions).toHaveBeenCalled();
-    expect(clientStub.transition).toHaveBeenLastCalledWith("ASM-1", "41", { resolution: { id: "10000" } });
+    expect(clientStub.transition).toHaveBeenLastCalledWith("PROJ-1", "41", { resolution: { id: "10000" } });
   });
 
   it("reports a readable toast with an Open in Jira action when nothing can be re-prompted", async () => {
@@ -1193,13 +1193,13 @@ Add to `test/unit/tasksView.test.ts` inside `describe("changeStatus", …)` — 
     clientStub.transition.mockRejectedValue(apiError(["Transition is not valid"]));
     answerPicks({ t });
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(1);
     expect(posted()).toContainEqual({
       type: "toast",
       level: "error",
-      message: "Couldn't update ASM-1. Transition is not valid.",
-      action: { label: "Open in Jira", url: "https://jira/browse/ASM-1" },
+      message: "Couldn't update PROJ-1. Transition is not valid.",
+      action: { label: "Open in Jira", url: "https://jira/browse/PROJ-1" },
     });
     expect(posted().some((p) => p.type === "statusChanged")).toBe(false);
   });
@@ -1216,9 +1216,9 @@ Add to `test/unit/tasksView.test.ts` inside `describe("changeStatus", …)` — 
     clientStub.transition.mockRejectedValue(apiError([], { customfield_1: "Field is required" }));
     answerPicks({ t });
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(posted()).toContainEqual(
-      expect.objectContaining({ message: "Couldn't update ASM-1. Root Cause: Field is required." }),
+      expect.objectContaining({ message: "Couldn't update PROJ-1. Root Cause: Field is required." }),
     );
   });
 
@@ -1227,7 +1227,7 @@ Add to `test/unit/tasksView.test.ts` inside `describe("changeStatus", …)` — 
     clientStub.transition.mockRejectedValue(apiError(["Ticket cannot be closed unless Resolution will be provided"]));
     answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Done" }, { label: "Done" });
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(2);
     expect(posted()).toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
@@ -1237,7 +1237,7 @@ Add to `test/unit/tasksView.test.ts` inside `describe("changeStatus", …)` — 
     clientStub.transition.mockRejectedValue(apiError(["Ticket cannot be closed unless Resolution will be provided"]));
     answerPicks({ t: DONE_WITH_RESOLUTION }, { label: "Done" }, undefined);
     const { provider, posted } = setup();
-    await provider.changeStatus("ASM-1");
+    await provider.changeStatus("PROJ-1");
     expect(clientStub.transition).toHaveBeenCalledTimes(1);
     expect(posted().filter((p) => p.type === "toast")).toEqual([]);
   });
@@ -1257,7 +1257,7 @@ describe("failure routing", () => {
   it("leaves the list up when a write fails — toast only", async () => {
     clientStub.getTransitions.mockRejectedValue(new Error("Couldn't reach Jira"));
     const { send, posted } = setup();
-    await send({ type: "changeStatus", key: "ASM-1" });
+    await send({ type: "changeStatus", key: "PROJ-1" });
     expect(posted().some((p) => p.type === "error")).toBe(false);
     expect(posted()).toContainEqual({ type: "toast", level: "error", message: "Couldn't reach Jira" });
   });
@@ -1429,9 +1429,9 @@ describe("toasts", () => {
 
   it("keeps an error toast up past the auto-dismiss window", () => {
     render(<App />);
-    host({ type: "toast", level: "error", message: "Couldn't update ASM-1. Resolution is required." });
+    host({ type: "toast", level: "error", message: "Couldn't update PROJ-1. Resolution is required." });
     act(() => vi.advanceTimersByTime(30000));
-    expect(screen.getByText("Couldn't update ASM-1. Resolution is required.")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't update PROJ-1. Resolution is required.")).toBeInTheDocument();
   });
 
   it("dismisses an error toast on click", () => {
@@ -1446,12 +1446,12 @@ describe("toasts", () => {
     host({
       type: "toast",
       level: "error",
-      message: "Couldn't update ASM-1.",
-      action: { label: "Open in Jira", url: "https://jira/browse/ASM-1" },
+      message: "Couldn't update PROJ-1.",
+      action: { label: "Open in Jira", url: "https://jira/browse/PROJ-1" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Open in Jira" }));
-    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/browse/ASM-1" });
-    expect(screen.getByText("Couldn't update ASM-1.")).toBeInTheDocument();
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/browse/PROJ-1" });
+    expect(screen.getByText("Couldn't update PROJ-1.")).toBeInTheDocument();
   });
 });
 ```

@@ -6,11 +6,11 @@ import type { OpenRequest, OpenResult } from "../../../../src/engine/workspace";
 
 const node = (over: Partial<PlannedNode> = {}): PlannedNode => ({
   id: "n1", kind: "planned", x: 0, y: 0, join: "any",
-  ticketKey: "ASM-12", repos: ["aws-ops"], mode: "backend", dest: "new-window", ...over,
+  ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "backend", dest: "new-window", ...over,
 });
 
 const detail: LaunchTicketDetail = {
-  key: "ASM-12", summary: "Isolate renew queue", url: "https://jira.example/ASM-12", descriptionText: "do the thing",
+  key: "PROJ-12", summary: "Isolate renew queue", url: "https://jira.example/PROJ-12", descriptionText: "do the thing",
 };
 
 const repos: ServiceRef[] = [
@@ -32,7 +32,7 @@ const makeReq = (over: Partial<LaunchRequest> = {}): LaunchRequest => ({
 
 const makeDeps = (over: Partial<LaunchDeps> = {}): LaunchDeps => ({
   createWorktrees: vi.fn((services: ServiceRef[]) =>
-    services.map((s) => ({ ...s, path: `${s.path}/.claude/worktrees/ASM-12` })),
+    services.map((s) => ({ ...s, path: `${s.path}/.claude/worktrees/PROJ-12` })),
   ),
   openWorkspace: vi.fn(async (_req: OpenRequest): Promise<OpenResult> => ({
     mode: "per-window", briefs: [], opened: ["/w"], remoteControl: false, provider: "claude-code",
@@ -51,7 +51,7 @@ describe("launchPlanned", () => {
     const out = await launchPlanned(makeReq({ node: node({ ticketKey: "OTHER-9" }) }), d);
     expect(out).toEqual({
       ok: false,
-      message: "flow node names OTHER-9 but the ticket fetched was ASM-12 — not launching.",
+      message: "flow node names OTHER-9 but the ticket fetched was PROJ-12 — not launching.",
     });
     expect(d.createWorktrees).not.toHaveBeenCalled();
     expect(d.openWorkspace).not.toHaveBeenCalled();
@@ -59,7 +59,7 @@ describe("launchPlanned", () => {
 
   it("uses whichever ticket key node and detail agree on, not a value baked in from other fixtures", async () => {
     // Every other test in this file sets node.ticketKey and detail.key to the same
-    // literal "ASM-12" — a launcher that read a hardcoded "ASM-12" (or always read
+    // literal "PROJ-12" — a launcher that read a hardcoded "PROJ-12" (or always read
     // node.ticketKey where it should read detail.key, or vice versa) would still pass
     // every one of them. This uses an agreeing pair with a DIFFERENT shared value, so
     // the identity actually used has to flow through, not be assumed.
@@ -76,7 +76,7 @@ describe("launchPlanned", () => {
     const out = await launchPlanned(makeReq({ node: node({ repos: [] }) }), d);
     expect(out).toEqual({
       ok: false,
-      message: "the flow node names no repos — nothing to launch ASM-12 into.",
+      message: "the flow node names no repos — nothing to launch PROJ-12 into.",
     });
     expect(d.createWorktrees).not.toHaveBeenCalled();
     expect(d.openWorkspace).not.toHaveBeenCalled();
@@ -85,7 +85,7 @@ describe("launchPlanned", () => {
   it("logs the repos it drops because they aren't checked out here, and still launches with what resolved", async () => {
     const d = makeDeps();
     const out = await launchPlanned(makeReq({ node: node({ repos: ["aws-ops", "ghost-repo"] }) }), d);
-    expect(out).toEqual({ ok: true, runKey: "ASM-12", repo: "aws-ops" });
+    expect(out).toEqual({ ok: true, runKey: "PROJ-12", repo: "aws-ops" });
     expect(d.log).toHaveBeenCalledWith(expect.stringMatching(/ghost-repo.*not checked out/));
     const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
     expect(arg.services).toEqual([{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }]);
@@ -94,7 +94,7 @@ describe("launchPlanned", () => {
   it("pluralizes the dropped-repos log when more than one name fails to resolve", async () => {
     const d = makeDeps();
     const out = await launchPlanned(makeReq({ node: node({ repos: ["ghost-one", "ghost-two", "aws-ops"] }) }), d);
-    expect(out).toEqual({ ok: true, runKey: "ASM-12", repo: "aws-ops" });
+    expect(out).toEqual({ ok: true, runKey: "PROJ-12", repo: "aws-ops" });
     expect(d.log).toHaveBeenCalledWith(expect.stringMatching(/ghost-one, ghost-two.*without them/));
   });
 
@@ -110,13 +110,13 @@ describe("launchPlanned", () => {
   it("launches into the resolved repo and reports the run key and repo", async () => {
     const d = makeDeps();
     const out = await launchPlanned(makeReq(), d);
-    expect(out).toEqual({ ok: true, runKey: "ASM-12", repo: "aws-ops" });
+    expect(out).toEqual({ ok: true, runKey: "PROJ-12", repo: "aws-ops" });
     expect(d.openWorkspace).toHaveBeenCalledTimes(1);
     const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
     expect(arg.services).toEqual([{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }]);
     expect(arg.mode).toBe("per-window");
     expect(arg.promptTemplate).toBe("Fix {key}");
-    expect(arg.ticket).toEqual({ key: "ASM-12", summary: "Isolate renew queue", url: "https://jira.example/ASM-12" });
+    expect(arg.ticket).toEqual({ key: "PROJ-12", summary: "Isolate renew queue", url: "https://jira.example/PROJ-12" });
     expect(arg.openIn).toBe("new");
     expect(arg.kind).toBeUndefined();
   });
@@ -135,7 +135,7 @@ describe("launchPlanned", () => {
     const out = await launchPlanned(makeReq({ node: node({ repos: ["ghost-one", "ghost-two"] }) }), d);
     expect(out).toEqual({
       ok: false,
-      message: "ghost-one, ghost-two aren't checked out under your repos root — not launching ASM-12.",
+      message: "ghost-one, ghost-two aren't checked out under your repos root — not launching PROJ-12.",
     });
   });
 
@@ -152,14 +152,14 @@ describe("launchPlanned", () => {
     await launchPlanned(makeReq({ node: node({ dest: "worktree" }) }), d);
     expect(d.createWorktrees).toHaveBeenCalledWith(
       [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }],
-      "ASM-12",
+      "PROJ-12",
       "Isolate renew queue",
       d.log,
     );
     const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
     // The whole point: openWorkspace must receive the WORKTREE-mapped services, not
     // the original checkout createWorktrees was given.
-    expect(arg.services).toEqual([{ name: "aws-ops", path: "/repos/aws-ops/.claude/worktrees/ASM-12", isGit: true }]);
+    expect(arg.services).toEqual([{ name: "aws-ops", path: "/repos/aws-ops/.claude/worktrees/PROJ-12", isGit: true }]);
     expect(arg.openIn).toBe("new");
   });
 
@@ -215,7 +215,7 @@ describe("launchPlanned", () => {
   it("binds the place to the first named repo that actually resolved, not literally the first name", async () => {
     const d = makeDeps();
     const out = await launchPlanned(makeReq({ node: node({ repos: ["ghost-repo", "bite-me"] }) }), d);
-    expect(out).toEqual({ ok: true, runKey: "ASM-12", repo: "bite-me" });
+    expect(out).toEqual({ ok: true, runKey: "PROJ-12", repo: "bite-me" });
     const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
     expect(arg.services).toEqual([{ name: "bite-me", path: "/repos/bite-me", isGit: true }]);
   });
@@ -223,7 +223,7 @@ describe("launchPlanned", () => {
   it("opens every resolved repo, not only the one it binds the place to", async () => {
     const d = makeDeps();
     const out = await launchPlanned(makeReq({ node: node({ repos: ["aws-ops", "bite-me"] }) }), d);
-    expect(out).toEqual({ ok: true, runKey: "ASM-12", repo: "aws-ops" });
+    expect(out).toEqual({ ok: true, runKey: "PROJ-12", repo: "aws-ops" });
     const arg = (d.openWorkspace as ReturnType<typeof vi.fn>).mock.calls[0][0] as OpenRequest;
     expect(arg.services).toEqual([
       { name: "aws-ops", path: "/repos/aws-ops", isGit: true },

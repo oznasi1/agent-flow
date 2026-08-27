@@ -4,7 +4,7 @@ import { Flow, FlowNode, PlannedNode, emptyFlow, isPlace } from "../../../../src
 
 const planned = (id: string, over: Partial<PlannedNode> = {}): PlannedNode => ({
   id, kind: "planned", x: 40, y: 80, join: "all",
-  ticketKey: "ASM-12", repos: ["bite-me"], mode: "tdd", dest: "worktree", ...over,
+  ticketKey: "PROJ-12", repos: ["bite-me"], mode: "tdd", dest: "worktree", ...over,
 });
 /** A fixed clock for the stamps promotion writes — the pass's own `nowMs` in
  * production (see `promoteToPlace`). */
@@ -14,19 +14,19 @@ const flowWith = (nodes: FlowNode[]): Flow => ({ ...emptyFlow("f1", "f", 0), nod
 
 describe("promoteToPlace", () => {
   it("turns the planned node into a place bound to the new run", () => {
-    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "ASM-12", "bite-me", NOW);
+    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "PROJ-12", "bite-me", NOW);
     const n = out.nodes[0];
     expect(isPlace(n)).toBe(true);
-    expect(n).toMatchObject({ kind: "place", runKey: "ASM-12", repo: "bite-me" });
+    expect(n).toMatchObject({ kind: "place", runKey: "PROJ-12", repo: "bite-me" });
   });
 
   it("keeps the id, position and join so downstream edges still point at it", () => {
-    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "ASM-12", "bite-me", NOW);
+    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "PROJ-12", "bite-me", NOW);
     expect(out.nodes[0]).toMatchObject({ id: "n3", x: 40, y: 80, join: "all" });
   });
 
   it("drops the planned-only fields", () => {
-    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "ASM-12", "bite-me", NOW);
+    const out = promoteToPlace(flowWith([planned("n3")]), "n3", "PROJ-12", "bite-me", NOW);
     expect(out.nodes[0]).not.toHaveProperty("ticketKey");
     expect(out.nodes[0]).not.toHaveProperty("mode");
     expect(out.nodes[0]).not.toHaveProperty("dest");
@@ -36,26 +36,26 @@ describe("promoteToPlace", () => {
   it("does not mutate the flow it is given", () => {
     const flow = flowWith([planned("n3")]);
     const before = JSON.stringify(flow);
-    promoteToPlace(flow, "n3", "ASM-12", "bite-me", NOW);
+    promoteToPlace(flow, "n3", "PROJ-12", "bite-me", NOW);
     expect(JSON.stringify(flow)).toBe(before);
   });
 
   it("leaves every other node alone", () => {
-    const other: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "r" };
-    const out = promoteToPlace(flowWith([other, planned("n3")]), "n3", "ASM-12", "bite-me", NOW);
+    const other: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" };
+    const out = promoteToPlace(flowWith([other, planned("n3")]), "n3", "PROJ-12", "bite-me", NOW);
     expect(out.nodes[0]).toEqual(other);
   });
 
   it("is a no-op for an id that is not in the flow", () => {
     const flow = flowWith([planned("n3")]);
-    expect(promoteToPlace(flow, "nope", "ASM-12", "bite-me", NOW)).toEqual(flow);
+    expect(promoteToPlace(flow, "nope", "PROJ-12", "bite-me", NOW)).toEqual(flow);
   });
 
   it("is a no-op for a node that is not planned", () => {
     // Promoting a place again would rewrite the repo it is bound to, which is a
     // silent change of what every condition on it means.
-    const place: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "api" };
-    const out = promoteToPlace(flowWith([place]), "n1", "ASM-9", "web", NOW);
+    const place: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "api" };
+    const out = promoteToPlace(flowWith([place]), "n1", "PROJ-9", "web", NOW);
     expect(out.nodes[0]).toEqual(place);
   });
 
@@ -73,7 +73,7 @@ describe("promoteToPlace", () => {
         { id: "e2", from: "n2", to: "n3", cond: { kind: "ci-passed" }, action: "launch" },
       ],
     };
-    const out = promoteToPlace(flow, "n3", "ASM-12", "bite-me", NOW);
+    const out = promoteToPlace(flow, "n3", "PROJ-12", "bite-me", NOW);
     expect(out.edges[0].action).toBeUndefined();
     expect(out.edges[1].action).toBeUndefined();
     // The FIELD is removed, not set to `undefined`: that is the shape an edge
@@ -87,13 +87,13 @@ describe("promoteToPlace", () => {
       ...flowWith([planned("n3")]),
       edges: [{
         id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" },
-        action: "launch", mode: "tdd", note: "staging", firedAt: 5, firedNote: "launched ASM-12",
+        action: "launch", mode: "tdd", note: "staging", firedAt: 5, firedNote: "launched PROJ-12",
       }],
     };
-    const e = promoteToPlace(flow, "n3", "ASM-12", "bite-me", NOW).edges[0];
+    const e = promoteToPlace(flow, "n3", "PROJ-12", "bite-me", NOW).edges[0];
     expect(e).toMatchObject({
       id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" },
-      mode: "tdd", note: "staging", firedAt: 5, firedNote: "launched ASM-12",
+      mode: "tdd", note: "staging", firedAt: 5, firedNote: "launched PROJ-12",
     });
   });
 
@@ -104,7 +104,7 @@ describe("promoteToPlace", () => {
       ...flowWith([planned("n3")]),
       edges: [{ id: "e1", from: "n3", to: "n9", cond: { kind: "ci-passed" }, action: "notify" }],
     };
-    const out = promoteToPlace(flow, "n3", "ASM-12", "bite-me", NOW);
+    const out = promoteToPlace(flow, "n3", "PROJ-12", "bite-me", NOW);
     expect(out.edges[0]).toBe(flow.edges[0]);
   });
 
@@ -119,14 +119,14 @@ describe("promoteToPlace", () => {
       ...flowWith([planned("n3")]),
       edges: [
         // The performer, already stamped by `applyFired` before promotion runs.
-        { id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", firedAt: 5, firedNote: "launched ASM-12 in bite-me", performed: true },
+        { id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", firedAt: 5, firedNote: "launched PROJ-12 in bite-me", performed: true },
         // The sibling whose condition never held.
         { id: "e2", from: "n2", to: "n3", cond: { kind: "ci-passed" }, action: "launch" },
       ],
     };
-    const e2 = promoteToPlace(flow, "n3", "ASM-12", "bite-me", NOW).edges[1];
+    const e2 = promoteToPlace(flow, "n3", "PROJ-12", "bite-me", NOW).edges[1];
     expect(e2.firedAt).toBe(NOW);
-    expect(e2.firedNote).toBe("ASM-12 was already launched by another rule");
+    expect(e2.firedNote).toBe("PROJ-12 was already launched by another rule");
     // NOT `performed`: this rule ran nothing. The exact shape `applyFired` writes for
     // a demoted sibling, which is what keeps `commandSucceeded` from reading it as a
     // performer and what `FlowEdge.performed`'s doc comment describes.
@@ -142,21 +142,21 @@ describe("promoteToPlace", () => {
     // It is history: rewriting it would blame the promotion for what the launch did.
     const flow: Flow = {
       ...flowWith([planned("n3")]),
-      edges: [{ id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", firedAt: 5, firedNote: "launched ASM-12 in bite-me", performed: true }],
+      edges: [{ id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", firedAt: 5, firedNote: "launched PROJ-12 in bite-me", performed: true }],
     };
-    const e1 = promoteToPlace(flow, "n3", "ASM-12", "bite-me", NOW).edges[0];
+    const e1 = promoteToPlace(flow, "n3", "PROJ-12", "bite-me", NOW).edges[0];
     expect(e1.firedAt).toBe(5);
-    expect(e1.firedNote).toBe("launched ASM-12 in bite-me");
+    expect(e1.firedNote).toBe("launched PROJ-12 in bite-me");
     expect(e1.performed).toBe(true);
   });
 
   it("does not overwrite an errored sibling's own failure", () => {
     const flow: Flow = {
       ...flowWith([planned("n3")]),
-      edges: [{ id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", error: "Couldn't launch ASM-12: no worktree" }],
+      edges: [{ id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", error: "Couldn't launch PROJ-12: no worktree" }],
     };
-    const e1 = promoteToPlace(flow, "n3", "ASM-12", "bite-me", NOW).edges[0];
-    expect(e1.error).toBe("Couldn't launch ASM-12: no worktree");
+    const e1 = promoteToPlace(flow, "n3", "PROJ-12", "bite-me", NOW).edges[0];
+    expect(e1.error).toBe("Couldn't launch PROJ-12: no worktree");
     expect(e1.firedAt).toBeUndefined();
   });
 
@@ -167,17 +167,17 @@ describe("promoteToPlace", () => {
       ...flowWith([planned("n3")]),
       edges: [{ id: "e1", from: "n3", to: "n9", cond: { kind: "ci-passed" }, action: "notify" }],
     };
-    expect(promoteToPlace(flow, "n3", "ASM-12", "bite-me", NOW).edges[0]).toBe(flow.edges[0]);
+    expect(promoteToPlace(flow, "n3", "PROJ-12", "bite-me", NOW).edges[0]).toBe(flow.edges[0]);
   });
 
   it("clears nothing when nothing was promoted", () => {
     // Same gate as the node rewrite: a call naming a node that is already a place
     // changes no kind, so no edge's meaning moved and no stored action is stale.
-    const place: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "api" };
+    const place: FlowNode = { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "api" };
     const flow: Flow = {
       ...flowWith([place]),
       edges: [{ id: "e1", from: "n0", to: "n1", cond: { kind: "pr-merged" }, action: "seed" }],
     };
-    expect(promoteToPlace(flow, "n1", "ASM-9", "web", NOW).edges[0].action).toBe("seed");
+    expect(promoteToPlace(flow, "n1", "PROJ-9", "web", NOW).edges[0].action).toBe("seed");
   });
 });

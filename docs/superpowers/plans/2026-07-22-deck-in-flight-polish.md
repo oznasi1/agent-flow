@@ -318,7 +318,7 @@ Add to the `DeckPanel` describe block:
   it("opens without a success toast (silent focus)", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "open" });
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
     const successToast = posts(p).find((m) => m.type === "toast" && m.level === "success");
     expect(successToast).toBeUndefined();
@@ -328,7 +328,7 @@ Add to the `DeckPanel` describe block:
     h.openInEditor.mockResolvedValueOnce(false);
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    await p._fire({ type: "deck:inspect", key: "PROJ-1", action: "open" });
     const errorToast = posts(p).find((m) => m.type === "toast" && m.level === "error");
     expect(errorToast).toBeTruthy();
   });
@@ -423,8 +423,8 @@ Add the test:
   it("forgets a run and re-posts the board", async () => {
     show();
     const p = lastPanel();
-    await p._fire({ type: "deck:forget", key: "ASM-1" });
-    expect(h.removeRun).toHaveBeenCalledWith("/runs", "ASM-1");
+    await p._fire({ type: "deck:forget", key: "PROJ-1" });
+    expect(h.removeRun).toHaveBeenCalledWith("/runs", "PROJ-1");
     expect(posts(p).some((m) => m.type === "deck:runs")).toBe(true);
   });
 ```
@@ -642,7 +642,7 @@ In `test/webview/DeckApp.test.tsx` add:
 
   it("shows a summary strip with the total count", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
     expect(screen.getByText(/Total/i)).toBeInTheDocument();
   });
 
@@ -751,7 +751,7 @@ Add to `test/webview/DeckApp.test.tsx`:
   it("shows the branch and a launched-ago time on a card", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
-    expect(screen.getByText(/ASM-1-x/)).toBeInTheDocument();
+    expect(screen.getByText(/PROJ-1-x/)).toBeInTheDocument();
     expect(screen.getByText(/launched/i)).toBeInTheDocument();
   });
 
@@ -841,7 +841,7 @@ Add to `test/webview/DeckApp.test.tsx`:
     host(runsMsg([mkStatus()]));
     fireEvent.click(screen.getByTitle(/more actions/i));
     fireEvent.click(screen.getByText(/^Forget$/));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "ASM-1" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "PROJ-1" });
   });
 
   it("opens the ticket in Jira from the overflow menu", () => {
@@ -849,7 +849,7 @@ Add to `test/webview/DeckApp.test.tsx`:
     host(runsMsg([mkStatus()]));
     fireEvent.click(screen.getByTitle(/more actions/i));
     fireEvent.click(screen.getByText(/Open in Jira/i));
-    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/PROJ-1" });
   });
 ```
 

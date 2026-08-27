@@ -102,7 +102,7 @@ describe("buildRunStatus", () => {
     fs.utimesSync(tfile, NOW / 1000, NOW / 1000); // fresh → working
 
     run = {
-      key: "ASM-9", summary: "do a thing", url: "https://x/ASM-9", createdAt: 1, mode: "per-window",
+      key: "PROJ-9", summary: "do a thing", url: "https://x/PROJ-9", createdAt: 1, mode: "per-window",
       repos: [{ name: "repo", path: repoPath, isGit: true, branch: "main" }], briefPaths: [],
     };
   });
@@ -224,7 +224,7 @@ describe("buildRunStatus", () => {
       fs.utimesSync(tfile, NOW / 1000, NOW / 1000);
 
       const localRun: Run = {
-        key: "ASM-10", summary: "x", url: "https://x/ASM-10", createdAt: 1, mode: "per-window",
+        key: "PROJ-10", summary: "x", url: "https://x/PROJ-10", createdAt: 1, mode: "per-window",
         repos: [{ name: "repo", path: localRepo, isGit: true, branch: "main" }], briefPaths: [],
       };
       const s = buildRunStatus({
@@ -373,7 +373,7 @@ describe("buildRunStatus", () => {
       fs.writeFileSync(tfile, JSON.stringify({ type: "assistant", slug: "done", message: { stop_reason: "end_turn" } }) + "\n");
       fs.utimesSync(tfile, NOW / 1000, NOW / 1000);
       endRun = {
-        key: "ASM-10", summary: "finished", url: "https://x/ASM-10", createdAt: 1, mode: "per-window",
+        key: "PROJ-10", summary: "finished", url: "https://x/PROJ-10", createdAt: 1, mode: "per-window",
         repos: [{ name: "repo", path: repo, isGit: true, branch: "main" }], briefPaths: [],
       };
     });

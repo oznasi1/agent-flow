@@ -140,7 +140,7 @@ keeps of its running sessions. Sessions attach to the card that owns their
 directory, so a worktree with two sessions in it lists both, in the order you
 opened them; a place with no tracked run of its own gets a card of its own,
 marked `local`. A local card reads its branch for a ticket key
-(`ASM-5641-team-table` → `ASM-5641`, marked `~inferred` since a branch can name
+(`PROJ-5641-team-table` → `PROJ-5641`, marked `~inferred` since a branch can name
 a ticket somebody else owns) and for its pull request, so a worktree Claude Code
 made on its own lands on the board as complete as one you took. It disappears
 the moment you close its last session — **⋯** → **Track it** pins it to the runs

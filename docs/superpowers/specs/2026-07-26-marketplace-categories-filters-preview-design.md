@@ -92,7 +92,7 @@ development 29 · uncategorized 27 · productivity 19
 security 2 · learning 2 · design 2 · database 1 · math 1 · testing 1 · deployment 1
 ```
 
-**26 of the 27 uncategorized plugins are `atbay-plugins`**, whose manifest declares only `name`,
+**26 of the 27 uncategorized plugins are `acme-plugins`**, whose manifest declares only `name`,
 `source`, `description`. Adding one `category` line per plugin in that repo would collapse the largest
 muddy bucket this UI has. That is a change to a different repo and is out of scope here, but it is the
 single highest-leverage follow-up.

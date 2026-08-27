@@ -58,7 +58,7 @@ const repo = (over: Partial<RepoGit> = {}): RepoGit => ({
 
 const status = (over: Partial<RunStatus> = {}): RunStatus => ({
   run: {
-    key: "ASM-1", summary: "s", url: "https://jira/ASM-1", createdAt: 1, mode: "per-window",
+    key: "PROJ-1", summary: "s", url: "https://jira/PROJ-1", createdAt: 1, mode: "per-window",
     repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "feat/x" }], briefPaths: [],
   },
   column: "progress", ticketStatus: null, ticketCategory: null,
@@ -361,7 +361,7 @@ const facts = (over: Partial<PrFacts> = {}): PrFacts => ({
 const mkCard = (over: Partial<RunStatus> = {}, agent: DeckCard["agent"] = null): DeckCard => {
   const status: RunStatus = {
     run: {
-      key: "ASM-1", summary: "Export fails", url: "https://jira/ASM-1", createdAt: 1,
+      key: "PROJ-1", summary: "Export fails", url: "https://jira/PROJ-1", createdAt: 1,
       mode: "per-window",
       repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "feat/x" }], briefPaths: [],
     },
@@ -382,7 +382,7 @@ describe("DeckDetail", () => {
   it("names the run in its header", () => {
     render1(mkCard());
     const hd = document.querySelector(".dd-hd")!;
-    expect(hd.textContent).toContain("ASM-1");
+    expect(hd.textContent).toContain("PROJ-1");
     expect(hd.textContent).toContain("Export fails");
   });
 
@@ -406,7 +406,7 @@ describe("DeckDetail", () => {
   it("opens the workspace", () => {
     render1(mkCard());
     fireEvent.click(screen.getByRole("button", { name: /open workspace/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "open" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "open" });
   });
 
   it("scopes a per-repo diff to that repo", () => {
@@ -418,7 +418,7 @@ describe("DeckDetail", () => {
     });
     render1(card);
     fireEvent.click(screen.getByRole("button", { name: /diff — web/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "ASM-1", action: "diff", repo: "web" });
+    expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "diff", repo: "web" });
   });
 
   it("offers no per-repo diff on a single-repo card — the all-repos one already is it", () => {
@@ -463,7 +463,7 @@ describe("DeckDetail", () => {
     const onForget = vi.fn();
     render1(mkCard(), vi.fn(), onForget);
     fireEvent.click(screen.getByRole("button", { name: /^forget$/i }));
-    expect(onForget).toHaveBeenCalledWith("ASM-1");
+    expect(onForget).toHaveBeenCalledWith("PROJ-1");
   });
 
   it("offers Track it instead of Forget on a local card", () => {
@@ -770,7 +770,7 @@ describe("card selection", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(card());
     expect(document.querySelector(".dd")).not.toBeNull();
-    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("ASM-1");
+    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("PROJ-1");
     expect(card().className).toContain("sel");
   });
 
@@ -791,12 +791,12 @@ describe("card selection", () => {
 
   it("re-targets the drawer when a second card is selected", () => {
     render(<DeckApp />);
-    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "ASM-2" } })]));
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
     const cards = document.querySelectorAll(".card");
     fireEvent.click(cards[0]);
     fireEvent.click(cards[1]);
     expect(document.querySelectorAll(".dd")).toHaveLength(1);
-    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("ASM-2");
+    expect(document.querySelector(".dd-hd .k")!.textContent).toBe("PROJ-2");
   });
 
   it("clears the selection on Escape", () => {
@@ -812,7 +812,7 @@ describe("card selection", () => {
     host(runsMsg([mkStatus()]));
     fireEvent.click(card());
     expect(document.querySelector(".dd")).not.toBeNull();
-    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "ASM-9" } })]));
+    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "PROJ-9" } })]));
     expect(document.querySelector(".dd")).toBeNull();
   });
 

@@ -40,7 +40,7 @@ const FIXTURE_CAPS: SerializedCaps = {
   sizes: false, labels: false, sprints: false, components: false,
 };
 const authed = (prReviewStatus = "PR initiated", filters = ALL_FILTERS) =>
-  host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus, filters });
+  host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "PROJ", me: "Jane", prReviewStatus, filters });
 
 beforeEach(() => sent.mockClear());
 
@@ -64,8 +64,8 @@ describe("mount + auth gate", () => {
   it("renders the task list, with the identity left to the view title bar", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
+    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "PROJ-1", summary: "Fix the bug" })] });
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
     expect(screen.getByText("Fix the bug")).toBeInTheDocument();
     expect(screen.queryByText("Jane")).not.toBeInTheDocument();
     expect(document.querySelector(".header")).toBeNull();
@@ -78,7 +78,7 @@ describe("mount + auth gate", () => {
     authed();
     host({ type: "loading", loading: true });
     expect(container.querySelector(".loading svg.lmark")).toBeInTheDocument();
-    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
+    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "PROJ-1", summary: "Fix the bug" })] });
     expect(container.querySelector(".loading svg.lmark")).toBeInTheDocument();
     host({ type: "loading", loading: false });
     expect(container.querySelector("svg.lmark")).not.toBeInTheDocument();
@@ -86,7 +86,7 @@ describe("mount + auth gate", () => {
 
   it("keeps the gauge and Explore in the tab row on both tabs", () => {
     render(<App />);
-    host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane",
+    host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "PROJ", me: "Jane",
            prReviewStatus: "PR initiated", filters: ALL_FILTERS, liveCount: 2 });
     const trail = () => document.querySelector(".tabbar .tabbar-trail") as HTMLElement;
     expect(trail()).not.toBeNull();
@@ -103,7 +103,7 @@ describe("mount + auth gate", () => {
   it("puts the tab bar first, with nothing rendered before it", () => {
     const { container } = render(<App />);
     authed();
-    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", summary: "Fix the bug" })] });
+    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "PROJ-1", summary: "Fix the bug" })] });
     // The panel's own root element — App's top-level <div> — must open on the tab
     // bar now that the header above it is gone.
     const panelRoot = container.firstElementChild as HTMLElement;
@@ -143,7 +143,7 @@ describe("problem indication", () => {
     render(<App />);
     host({ type: "error", message: "boom", canRetry: true });
     expect(screen.getByText(/boom/)).toBeInTheDocument();
-    host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS });
+    host({ type: "state", sourceLabel: "Jira", caps: JIRA_CAPS, authed: true, configured: true, project: "PROJ", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS });
     expect(screen.queryByText(/boom/)).not.toBeInTheDocument();
   });
 
@@ -190,7 +190,7 @@ describe("filter + size lenses", () => {
     authed();
     // The Status lens only renders once the pool has a status to show — deliver
     // that the way the neighbouring "status filter lens" tests do.
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", status: "To Do", statusCategory: "new" })] });
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", status: "To Do", statusCategory: "new" })] });
     for (const name of ["Task filter", "Size", "Status"]) {
       expect(screen.getByRole("group", { name })).toBeInTheDocument();
     }
@@ -203,8 +203,8 @@ describe("status filter lens", () => {
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "ASM-1", summary: "todo one", status: "To Do", statusCategory: "new" }),
-        mkTask({ key: "ASM-2", summary: "wip one", status: "In Progress", statusCategory: "indeterminate" }),
+        mkTask({ key: "PROJ-1", summary: "todo one", status: "To Do", statusCategory: "new" }),
+        mkTask({ key: "PROJ-2", summary: "wip one", status: "In Progress", statusCategory: "indeterminate" }),
       ],
     });
   // The filter chips live in the Status segmented group — scope queries there so
@@ -216,12 +216,12 @@ describe("status filter lens", () => {
     render(<App />);
     authed();
     twoStatuses();
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
 
     fireEvent.click(chip("In Progress"));
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
   });
 
   it("is multi-select: adding a second status widens the view", () => {
@@ -230,8 +230,8 @@ describe("status filter lens", () => {
     twoStatuses();
     fireEvent.click(chip("In Progress"));
     fireEvent.click(chip("To Do"));
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
   });
 
   it("All clears the selection", () => {
@@ -239,16 +239,16 @@ describe("status filter lens", () => {
     authed();
     twoStatuses();
     fireEvent.click(chip("In Progress"));
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
     fireEvent.click(chip("All"));
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
   });
 
   it("shows no status row when the pool has no statuses", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", status: "" })] });
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", status: "" })] });
     expect(document.querySelector('[aria-label="Status"]')).toBeNull();
   });
 
@@ -256,11 +256,11 @@ describe("status filter lens", () => {
     render(<App />);
     authed();
     twoStatuses();
-    fireEvent.click(chip("In Progress")); // filter down to ASM-2
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    fireEvent.click(chip("In Progress")); // filter down to PROJ-2
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
     // New pool has no "In Progress" — the stale selection must be dropped, not hide everything.
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-3", summary: "todo two", status: "To Do", statusCategory: "new" })] });
-    expect(screen.getByText("ASM-3")).toBeInTheDocument();
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-3", summary: "todo two", status: "To Do", statusCategory: "new" })] });
+    expect(screen.getByText("PROJ-3")).toBeInTheDocument();
   });
 });
 
@@ -272,7 +272,7 @@ describe("configurable filter visibility", () => {
     host({
       type: "tasks",
       filter: "mine",
-      tasks: [mkTask({ key: "ASM-1", status: "To Do", statusCategory: "new", services: ["billing"] })],
+      tasks: [mkTask({ key: "PROJ-1", status: "To Do", statusCategory: "new", services: ["billing"] })],
     });
 
   it("shows Size, Status, and Repo controls by default", () => {
@@ -309,12 +309,12 @@ describe("configurable filter visibility", () => {
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "ASM-1", summary: "todo one", status: "To Do", statusCategory: "new" }),
-        mkTask({ key: "ASM-2", summary: "wip one", status: "In Progress", statusCategory: "indeterminate" }),
+        mkTask({ key: "PROJ-1", summary: "todo one", status: "To Do", statusCategory: "new" }),
+        mkTask({ key: "PROJ-2", summary: "wip one", status: "In Progress", statusCategory: "indeterminate" }),
       ],
     });
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
   });
 });
 
@@ -324,9 +324,9 @@ describe("repo multiselect", () => {
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "ASM-1", summary: "alpha", services: ["billing"] }),
-        mkTask({ key: "ASM-2", summary: "bravo", services: ["web"] }),
-        mkTask({ key: "ASM-3", summary: "charlie", services: ["billing", "worker"] }),
+        mkTask({ key: "PROJ-1", summary: "alpha", services: ["billing"] }),
+        mkTask({ key: "PROJ-2", summary: "bravo", services: ["web"] }),
+        mkTask({ key: "PROJ-3", summary: "charlie", services: ["billing", "worker"] }),
       ],
     });
 
@@ -354,12 +354,12 @@ describe("repo multiselect", () => {
     threeRepos();
     fireEvent.click(screen.getByText("Filter repos"));
     // Scoped to the popup list — "billing" also appears as a service chip on the
-    // ASM-1/ASM-3 cards, so an unscoped getByText would match multiple nodes.
+    // PROJ-1/PROJ-3 cards, so an unscoped getByText would match multiple nodes.
     const repoList = document.querySelector(".repo-list") as HTMLElement;
     fireEvent.mouseDown(within(repoList).getByText("billing").closest(".repo-opt")!);
-    expect(screen.getByText("ASM-1")).toBeInTheDocument(); // billing
-    expect(screen.getByText("ASM-3")).toBeInTheDocument(); // billing + worker
-    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument(); // web only
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument(); // billing
+    expect(screen.getByText("PROJ-3")).toBeInTheDocument(); // billing + worker
+    expect(screen.queryByText("PROJ-2")).not.toBeInTheDocument(); // web only
   });
 
   it("Clear resets the selection and restores the full list", () => {
@@ -368,20 +368,20 @@ describe("repo multiselect", () => {
     threeRepos();
     fireEvent.click(screen.getByText("Filter repos"));
     // Scoped to the popup list — "web" also appears as a service chip on the
-    // ASM-2 card, so an unscoped getByText would match multiple nodes.
+    // PROJ-2 card, so an unscoped getByText would match multiple nodes.
     const repoList = document.querySelector(".repo-list") as HTMLElement;
-    fireEvent.mouseDown(within(repoList).getByText("web").closest(".repo-opt")!); // only ASM-2 touches web
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    fireEvent.mouseDown(within(repoList).getByText("web").closest(".repo-opt")!); // only PROJ-2 touches web
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
     fireEvent.mouseDown(screen.getByText("Clear"));
-    expect(screen.getByText("ASM-1")).toBeInTheDocument();
-    expect(screen.getByText("ASM-2")).toBeInTheDocument();
-    expect(screen.getByText("ASM-3")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-2")).toBeInTheDocument();
+    expect(screen.getByText("PROJ-3")).toBeInTheDocument();
   });
 
   it("hides the multiselect when filters.repo is off", () => {
     render(<App />);
     authed("PR initiated", { size: true, status: true, repo: false, search: true });
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", services: ["web"] })] });
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", services: ["web"] })] });
     expect(document.querySelector(".repo-select")).toBeNull();
   });
 });
@@ -392,9 +392,9 @@ describe("multi-select & parallel launch", () => {
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "ASM-1", summary: "one", services: ["api"] }),
-        mkTask({ key: "ASM-2", summary: "two", services: ["api"] }),
-        mkTask({ key: "ASM-3", summary: "three", services: ["billing"] }),
+        mkTask({ key: "PROJ-1", summary: "one", services: ["api"] }),
+        mkTask({ key: "PROJ-2", summary: "two", services: ["api"] }),
+        mkTask({ key: "PROJ-3", summary: "three", services: ["billing"] }),
       ],
     });
   // Open the repo multiselect popup and toggle a repo option by name.
@@ -416,7 +416,7 @@ describe("multi-select & parallel launch", () => {
     render(<App />);
     authed();
     apiPool();
-    selectRepo("api"); // narrows the pool to ASM-1 + ASM-2
+    selectRepo("api"); // narrows the pool to PROJ-1 + PROJ-2
     expect(checks().length).toBe(2);
   });
 
@@ -429,7 +429,7 @@ describe("multi-select & parallel launch", () => {
     const repoList = document.querySelector(".repo-list") as HTMLElement;
     fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
     fireEvent.mouseDown(within(repoList).getByText("billing").closest(".repo-opt")!);
-    expect(checks().length).toBe(3); // ASM-1, ASM-2 (api) + ASM-3 (billing)
+    expect(checks().length).toBe(3); // PROJ-1, PROJ-2 (api) + PROJ-3 (billing)
   });
 
   it("launches the checked, visible tasks with the filtered repo name", () => {
@@ -437,10 +437,10 @@ describe("multi-select & parallel launch", () => {
     authed();
     apiPool();
     selectRepo("api");
-    fireEvent.click(checks()[0]); // ASM-1
-    fireEvent.click(checks()[1]); // ASM-2
+    fireEvent.click(checks()[0]); // PROJ-1
+    fireEvent.click(checks()[1]); // PROJ-2
     fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1", "ASM-2"], repos: ["api"] });
+    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["PROJ-1", "PROJ-2"], repos: ["api"] });
   });
 
   it("does not expand a card when its checkbox is clicked", () => {
@@ -482,17 +482,17 @@ describe("multi-select & parallel launch", () => {
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "ASM-1", summary: "alpha rate", services: ["api"] }),
-        mkTask({ key: "ASM-2", summary: "beta cache", services: ["api"] }),
+        mkTask({ key: "PROJ-1", summary: "alpha rate", services: ["api"] }),
+        mkTask({ key: "PROJ-2", summary: "beta cache", services: ["api"] }),
       ],
     });
     selectRepo("api");
-    fireEvent.click(checks()[0]); // ASM-1
-    fireEvent.click(checks()[1]); // ASM-2
-    // Search narrows the visible list to ASM-1; ASM-2 is still checked in state but hidden.
+    fireEvent.click(checks()[0]); // PROJ-1
+    fireEvent.click(checks()[1]); // PROJ-2
+    // Search narrows the visible list to PROJ-1; PROJ-2 is still checked in state but hidden.
     fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "alpha" } });
     fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["ASM-1"], repos: ["api"] });
+    expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["PROJ-1"], repos: ["api"] });
   });
 
   it("titles the launch button with a properly pluralised task count", () => {
@@ -515,12 +515,12 @@ describe("multi-select & parallel launch", () => {
     const repoList = document.querySelector(".repo-list") as HTMLElement;
     fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
     fireEvent.mouseDown(within(repoList).getByText("billing").closest(".repo-opt")!);
-    fireEvent.click(checks()[0]); // ASM-1 (api)
-    fireEvent.click(checks()[2]); // ASM-3 (billing)
+    fireEvent.click(checks()[0]); // PROJ-1 (api)
+    fireEvent.click(checks()[2]); // PROJ-3 (billing)
     fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
     expect(sent).toHaveBeenCalledWith({
       type: "takeBatch",
-      keys: ["ASM-1", "ASM-3"],
+      keys: ["PROJ-1", "PROJ-3"],
       repos: ["api", "billing"],
     });
   });
@@ -533,9 +533,9 @@ describe("fuzzy title search", () => {
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "ASM-1", summary: "Fix rate limiter dropping bursts", services: ["api"] }),
-        mkTask({ key: "ASM-2", summary: "Billing webhook retries", services: ["billing"] }),
-        mkTask({ key: "ASM-3", summary: "Rate-limit config per tenant", services: ["api"] }),
+        mkTask({ key: "PROJ-1", summary: "Fix rate limiter dropping bursts", services: ["api"] }),
+        mkTask({ key: "PROJ-2", summary: "Billing webhook retries", services: ["billing"] }),
+        mkTask({ key: "PROJ-3", summary: "Rate-limit config per tenant", services: ["api"] }),
       ],
     });
 
@@ -544,8 +544,8 @@ describe("fuzzy title search", () => {
     authed();
     pool();
     fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "ratelim" } });
-    expect(keys()).toEqual(expect.arrayContaining(["ASM-1", "ASM-3"]));
-    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument();
+    expect(keys()).toEqual(expect.arrayContaining(["PROJ-1", "PROJ-3"]));
+    expect(screen.queryByText("PROJ-2")).not.toBeInTheDocument();
   });
 
   it("orders fuzzy matches best-match-first", () => {
@@ -553,11 +553,11 @@ describe("fuzzy title search", () => {
     authed();
     pool();
     // Under the app's fuse config (keys: ["summary"], threshold: 0.4, ignoreLocation: true),
-    // "ratelim" scores "Rate-limit config per tenant" (ASM-3, ~0.378) closer than
-    // "Fix rate limiter dropping bursts" (ASM-1, ~0.419) — verified empirically by running
+    // "ratelim" scores "Rate-limit config per tenant" (PROJ-3, ~0.378) closer than
+    // "Fix rate limiter dropping bursts" (PROJ-1, ~0.419) — verified empirically by running
     // fuse.search("ratelim") against this exact pool. The visible list must reflect that order.
     fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "ratelim" } });
-    expect(keys()).toEqual(["ASM-3", "ASM-1"]);
+    expect(keys()).toEqual(["PROJ-3", "PROJ-1"]);
   });
 
   it("shows a text-specific empty state when nothing matches", () => {
@@ -575,24 +575,24 @@ describe("fuzzy title search", () => {
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "ASM-1", summary: "Fix rate limiter dropping bursts", services: ["api"] }),
-        mkTask({ key: "ASM-2", summary: "Billing webhook retries", services: ["billing"] }),
-        mkTask({ key: "ASM-3", summary: "Rate-limit config per tenant", services: ["api"] }),
+        mkTask({ key: "PROJ-1", summary: "Fix rate limiter dropping bursts", services: ["api"] }),
+        mkTask({ key: "PROJ-2", summary: "Billing webhook retries", services: ["billing"] }),
+        mkTask({ key: "PROJ-3", summary: "Rate-limit config per tenant", services: ["api"] }),
         // In the selected repo ("api") but its title doesn't fuzzy-match "rate" — correct AND
         // must exclude it; a buggy repo-OR-text combination would wrongly include it.
-        mkTask({ key: "ASM-4", summary: "Deploy pipeline", services: ["api"] }),
+        mkTask({ key: "PROJ-4", summary: "Deploy pipeline", services: ["api"] }),
       ],
     });
     fireEvent.click(screen.getByText("Filter repos"));
     // Scoped to the popup list — "api" also appears as a service chip on the
-    // ASM-1/ASM-3 cards, so an unscoped getByText would match multiple nodes
+    // PROJ-1/PROJ-3 cards, so an unscoped getByText would match multiple nodes
     // (same ambiguity already guarded against in the "repo multiselect" tests above).
     const repoList = document.querySelector(".repo-list") as HTMLElement;
     fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
     fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "rate" } });
-    expect(keys()).toEqual(expect.arrayContaining(["ASM-1", "ASM-3"]));
-    expect(screen.queryByText("ASM-2")).not.toBeInTheDocument(); // billing filtered out by repo
-    expect(screen.queryByText("ASM-4")).not.toBeInTheDocument(); // api but no "rate" match — AND must exclude it
+    expect(keys()).toEqual(expect.arrayContaining(["PROJ-1", "PROJ-3"]));
+    expect(screen.queryByText("PROJ-2")).not.toBeInTheDocument(); // billing filtered out by repo
+    expect(screen.queryByText("PROJ-4")).not.toBeInTheDocument(); // api but no "rate" match — AND must exclude it
   });
 
   it("hides the search box when filters.search is off", () => {
@@ -670,16 +670,16 @@ describe("optimistic list updates", () => {
   it("removes a card when a status change reports removal", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", status: "To Do" })] });
-    host({ type: "statusChanged", key: "ASM-1", status: "Done", category: "done", removed: true });
-    expect(screen.queryByText("ASM-1")).not.toBeInTheDocument();
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", status: "To Do" })] });
+    host({ type: "statusChanged", key: "PROJ-1", status: "Done", category: "done", removed: true });
+    expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
   });
 
   it("updates a card's status in place when not removed", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", status: "To Do" })] });
-    host({ type: "statusChanged", key: "ASM-1", status: "In Progress", category: "indeterminate", removed: false });
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", status: "To Do" })] });
+    host({ type: "statusChanged", key: "PROJ-1", status: "In Progress", category: "indeterminate", removed: false });
     // Target the card's status button (a status-filter chip now shares the "In Progress" label).
     expect(screen.getByTitle("Change status")).toHaveTextContent("In Progress");
   });
@@ -687,8 +687,8 @@ describe("optimistic list updates", () => {
   it("reflects a moved-to-sprint assignee update", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "ASM-1", assignee: "Unassigned" })] });
-    host({ type: "movedToSprint", key: "ASM-1", assignee: "Jane Doe", removed: false });
+    host({ type: "tasks", filter: "unassigned", tasks: [mkTask({ key: "PROJ-1", assignee: "Unassigned" })] });
+    host({ type: "movedToSprint", key: "PROJ-1", assignee: "Jane Doe", removed: false });
     expect(screen.getByText("Jane Doe")).toBeInTheDocument();
   });
 });
@@ -707,9 +707,9 @@ describe("toasts", () => {
 
   it("keeps an error toast up past the auto-dismiss window", () => {
     render(<App />);
-    host({ type: "toast", level: "error", message: "Couldn't update ASM-1. Resolution is required." });
+    host({ type: "toast", level: "error", message: "Couldn't update PROJ-1. Resolution is required." });
     act(() => vi.advanceTimersByTime(30000));
-    expect(screen.getByText("Couldn't update ASM-1. Resolution is required.")).toBeInTheDocument();
+    expect(screen.getByText("Couldn't update PROJ-1. Resolution is required.")).toBeInTheDocument();
   });
 
   it("dismisses an error toast on click", () => {
@@ -724,12 +724,12 @@ describe("toasts", () => {
     host({
       type: "toast",
       level: "error",
-      message: "Couldn't update ASM-1.",
-      action: { label: "Open in Jira", url: "https://jira/browse/ASM-1" },
+      message: "Couldn't update PROJ-1.",
+      action: { label: "Open in Jira", url: "https://jira/browse/PROJ-1" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Open in Jira" }));
-    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/browse/ASM-1" });
-    expect(screen.getByText("Couldn't update ASM-1.")).toBeInTheDocument();
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/browse/PROJ-1" });
+    expect(screen.getByText("Couldn't update PROJ-1.")).toBeInTheDocument();
   });
 });
 
@@ -741,31 +741,31 @@ describe("task card actions", () => {
   };
 
   it("takes a task", () => {
-    withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
+    withTask(mkTask({ key: "PROJ-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByRole("button", { name: "Take" }));
-    expect(sent).toHaveBeenCalledWith({ type: "take", key: "ASM-1", services: undefined });
+    expect(sent).toHaveBeenCalledWith({ type: "take", key: "PROJ-1", services: undefined });
   });
 
   it("marks a card with its ticket type", () => {
-    withTask(mkTask({ key: "ASM-1", type: "Bug" }));
+    withTask(mkTask({ key: "PROJ-1", type: "Bug" }));
     expect(screen.getByRole("img", { name: "Type: Bug" })).toHaveClass("ty-bug");
   });
 
   // A project's own type still gets a marker, named for what the project calls it.
   it("marks a type it does not recognise, under the source's own name", () => {
-    withTask(mkTask({ key: "ASM-1", type: "Spike" }));
+    withTask(mkTask({ key: "PROJ-1", type: "Spike" }));
     expect(screen.getByRole("img", { name: "Type: Spike" })).toHaveClass("ty-other");
   });
 
   it("still marks a task whose source named no type", () => {
-    withTask(mkTask({ key: "ASM-1" }));
+    withTask(mkTask({ key: "PROJ-1" }));
     expect(screen.getByRole("img", { name: "Type: unknown" })).toHaveClass("ty-other");
   });
 
   // Left of the key, and inside the top row — not floated into the action cluster.
   it("puts the marker before the key in the card's top row", () => {
-    withTask(mkTask({ key: "ASM-1", summary: "Fix the bug", type: "Story", url: "https://jira/browse/ASM-1" }));
-    const keyLink = screen.getByRole("link", { name: "ASM-1" });
+    withTask(mkTask({ key: "PROJ-1", summary: "Fix the bug", type: "Story", url: "https://jira/browse/PROJ-1" }));
+    const keyLink = screen.getByRole("link", { name: "PROJ-1" });
     const top = keyLink.closest(".card-top")!;
     const marker = within(top as HTMLElement).getByRole("img", { name: "Type: Story" });
     expect(marker.compareDocumentPosition(keyLink)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
@@ -775,8 +775,8 @@ describe("task card actions", () => {
     render(<App />);
     authed();
     host({ type: "tasks", filter: "mine", tasks: [
-      mkTask({ key: "ASM-1", summary: "Moving", statusCategory: "indeterminate", priority: "Highest" }),
-      mkTask({ key: "ASM-2", summary: "Not started", statusCategory: "new", priority: "Low" }),
+      mkTask({ key: "PROJ-1", summary: "Moving", statusCategory: "indeterminate", priority: "Highest" }),
+      mkTask({ key: "PROJ-2", summary: "Not started", statusCategory: "new", priority: "Low" }),
     ] });
     expect(screen.getByText("Moving").closest(".card")).toHaveClass("s-progress");
     expect(screen.getByText("Not started").closest(".card")).toHaveClass("s-new");
@@ -786,58 +786,58 @@ describe("task card actions", () => {
     render(<App />);
     authed();
     host({ type: "tasks", filter: "mine", tasks: [
-      mkTask({ key: "ASM-1", summary: "Urgent", priority: "Highest" }),
-      mkTask({ key: "ASM-2", summary: "Ordinary", priority: "High" }),
+      mkTask({ key: "PROJ-1", summary: "Urgent", priority: "Highest" }),
+      mkTask({ key: "PROJ-2", summary: "Ordinary", priority: "High" }),
     ] });
     expect(within(screen.getByText("Urgent").closest(".card")!).getByText("Highest")).toBeInTheDocument();
     expect(within(screen.getByText("Ordinary").closest(".card")!).queryByText("Highest")).not.toBeInTheDocument();
   });
 
   it("shows an Address PR button on a card in the configured PR-review status", () => {
-    withTask(mkTask({ key: "ASM-9", status: "PR initiated", statusCategory: "indeterminate" }));
+    withTask(mkTask({ key: "PROJ-9", status: "PR initiated", statusCategory: "indeterminate" }));
     expect(screen.getByRole("button", { name: /Address PR/i })).toBeInTheDocument();
   });
 
   it("kicks off a PR review with the task key when clicked", () => {
-    withTask(mkTask({ key: "ASM-9", status: "PR initiated", statusCategory: "indeterminate" }));
+    withTask(mkTask({ key: "PROJ-9", status: "PR initiated", statusCategory: "indeterminate" }));
     fireEvent.click(screen.getByRole("button", { name: /Address PR/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "addressPr", key: "ASM-9", services: undefined });
+    expect(sent).toHaveBeenCalledWith({ type: "addressPr", key: "PROJ-9", services: undefined });
   });
 
   it("hides the Address PR button when the status does not match", () => {
-    withTask(mkTask({ key: "ASM-9", status: "In Progress", statusCategory: "indeterminate" }));
+    withTask(mkTask({ key: "PROJ-9", status: "In Progress", statusCategory: "indeterminate" }));
     expect(screen.queryByRole("button", { name: /Address PR/i })).not.toBeInTheDocument();
   });
 
   it("honors a custom PR-review status, matched case-insensitively", () => {
     render(<App />);
     authed("PR Approved");
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-9", status: "pr approved", statusCategory: "indeterminate" })] });
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-9", status: "pr approved", statusCategory: "indeterminate" })] });
     expect(screen.getByRole("button", { name: /Address PR/i })).toBeInTheDocument();
   });
 
   it("adds an unassigned task to my sprint", () => {
-    withTask(mkTask({ key: "ASM-1", assignee: "Unassigned" }));
+    withTask(mkTask({ key: "PROJ-1", assignee: "Unassigned" }));
     fireEvent.click(screen.getByRole("button", { name: /Add to my sprint/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "addToMySprint", key: "ASM-1" });
+    expect(sent).toHaveBeenCalledWith({ type: "addToMySprint", key: "PROJ-1" });
   });
 
   it("shows Remove on the My sprint tab and sends removeFromSprint", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "ASM-1", assignee: "Jane", inOpenSprint: true })] });
+    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "PROJ-1", assignee: "Jane", inOpenSprint: true })] });
     fireEvent.click(screen.getByRole("button", { name: /Remove/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "removeFromSprint", key: "ASM-1", size: "any" });
+    expect(sent).toHaveBeenCalledWith({ type: "removeFromSprint", key: "PROJ-1", size: "any" });
   });
 
   it("keeps Remove reachable by name once its label goes", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "ASM-1", summary: "In sprint" })] });
-    const remove = screen.getByRole("button", { name: /Remove ASM-1 from your active sprint/i });
+    host({ type: "tasks", filter: "mysprint", tasks: [mkTask({ key: "PROJ-1", summary: "In sprint" })] });
+    const remove = screen.getByRole("button", { name: /Remove PROJ-1 from your active sprint/i });
     expect(remove).toBeInTheDocument();
     expect(remove).toHaveTextContent("");
-    expect(remove).toHaveAttribute("aria-label", expect.stringContaining("ASM-1"));
+    expect(remove).toHaveAttribute("aria-label", expect.stringContaining("PROJ-1"));
   });
 
   it("never offers Add and Remove on the same card", () => {
@@ -852,8 +852,8 @@ describe("task card actions", () => {
       type: "tasks",
       filter: "mysprint",
       tasks: [
-        mkTask({ key: "ASM-1", assignee: "Jane", inOpenSprint: false }),
-        mkTask({ key: "ASM-2", assignee: "Unassigned", inOpenSprint: false }),
+        mkTask({ key: "PROJ-1", assignee: "Jane", inOpenSprint: false }),
+        mkTask({ key: "PROJ-2", assignee: "Unassigned", inOpenSprint: false }),
       ],
     });
     expect(screen.queryAllByRole("button", { name: /Add to my sprint/i })).toHaveLength(0);
@@ -863,7 +863,7 @@ describe("task card actions", () => {
   it("does not show Remove on other tabs", () => {
     render(<App />);
     authed();
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", assignee: "Jane", inOpenSprint: true })] });
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", assignee: "Jane", inOpenSprint: true })] });
     expect(screen.queryByRole("button", { name: /Remove/i })).not.toBeInTheDocument();
   });
 
@@ -873,84 +873,84 @@ describe("task card actions", () => {
     host({
       type: "tasks",
       filter: "mysprint",
-      tasks: [mkTask({ key: "ASM-1", summary: "First card" }), mkTask({ key: "ASM-2", summary: "Second card" })],
+      tasks: [mkTask({ key: "PROJ-1", summary: "First card" }), mkTask({ key: "PROJ-2", summary: "Second card" })],
     });
-    host({ type: "removedFromSprint", key: "ASM-1" });
+    host({ type: "removedFromSprint", key: "PROJ-1" });
     expect(screen.queryByText("First card")).not.toBeInTheDocument();
     expect(screen.getByText("Second card")).toBeInTheDocument();
   });
 
   it("hides Add-to-my-sprint for a task assigned to someone else", () => {
-    withTask(mkTask({ key: "ASM-1", assignee: "Someone Else" }));
+    withTask(mkTask({ key: "PROJ-1", assignee: "Someone Else" }));
     expect(screen.queryByText(/Add to my sprint/i)).not.toBeInTheDocument();
   });
 
   it("shows Add-to-my-sprint for my own task that is not yet in a sprint", () => {
     // current user is "Jane" (set by authed()); own task, not in an open sprint
-    withTask(mkTask({ key: "ASM-1", assignee: "Jane", inOpenSprint: false }));
+    withTask(mkTask({ key: "PROJ-1", assignee: "Jane", inOpenSprint: false }));
     fireEvent.click(screen.getByRole("button", { name: /Add to my sprint/i }));
-    expect(sent).toHaveBeenCalledWith({ type: "addToMySprint", key: "ASM-1" });
+    expect(sent).toHaveBeenCalledWith({ type: "addToMySprint", key: "PROJ-1" });
   });
 
   it("hides Add-to-my-sprint for my own task already in a sprint", () => {
-    withTask(mkTask({ key: "ASM-1", assignee: "Jane", inOpenSprint: true }));
+    withTask(mkTask({ key: "PROJ-1", assignee: "Jane", inOpenSprint: true }));
     expect(screen.queryByText(/Add to my sprint/i)).not.toBeInTheDocument();
   });
 
   it("opens the status menu", () => {
-    withTask(mkTask({ key: "ASM-1", status: "To Do", statusCategory: "new" }));
+    withTask(mkTask({ key: "PROJ-1", status: "To Do", statusCategory: "new" }));
     // getByTitle targets the card's status button, not the same-labelled filter chip.
     fireEvent.click(screen.getByTitle("Change status"));
-    expect(sent).toHaveBeenCalledWith({ type: "changeStatus", key: "ASM-1" });
+    expect(sent).toHaveBeenCalledWith({ type: "changeStatus", key: "PROJ-1" });
   });
 
   it("requests ticket detail when a card is expanded", () => {
-    withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
+    withTask(mkTask({ key: "PROJ-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByText("Fix bug"));
-    expect(sent).toHaveBeenCalledWith({ type: "detail", key: "ASM-1" });
+    expect(sent).toHaveBeenCalledWith({ type: "detail", key: "PROJ-1" });
   });
 
   it("renders the estimate and service chips", () => {
-    withTask(mkTask({ key: "ASM-1", estimateSeconds: 3600, services: ["centaur"] }));
+    withTask(mkTask({ key: "PROJ-1", estimateSeconds: 3600, services: ["webapp"] }));
     expect(screen.getByText(/1h/)).toBeInTheDocument();
     // ~ marks it as inferred, matching the Deck's ~inferred convention.
-    expect(screen.getByText("~centaur")).toBeInTheDocument();
+    expect(screen.getByText("~webapp")).toBeInTheDocument();
   });
 
   it("runs the animated logo while the ticket detail is in flight, and stops once it lands", () => {
-    withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
+    withTask(mkTask({ key: "PROJ-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByText("Fix bug"));
     expect(document.querySelector(".detail svg.lmark")).toBeInTheDocument();
-    host({ type: "detail", key: "ASM-1", descriptionText: "The full description", inferred: [], repos: [], sourceComponents: [], mappable: {} });
+    host({ type: "detail", key: "PROJ-1", descriptionText: "The full description", inferred: [], repos: [], sourceComponents: [], mappable: {} });
     expect(document.querySelector(".detail svg.lmark")).not.toBeInTheDocument();
   });
 
   it("shows ticket detail once it arrives", () => {
-    withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
+    withTask(mkTask({ key: "PROJ-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByText("Fix bug"));
-    host({ type: "detail", key: "ASM-1", descriptionText: "The full description", inferred: [], repos: ["centaur"], sourceComponents: [], mappable: {} });
+    host({ type: "detail", key: "PROJ-1", descriptionText: "The full description", inferred: [], repos: ["webapp"], sourceComponents: [], mappable: {} });
     expect(screen.getByText("The full description")).toBeInTheDocument();
   });
 
-  /** Expand ASM-1 and deliver a detail. `sourceComponents` / `mappable` decide the
+  /** Expand PROJ-1 and deliver a detail. `sourceComponents` / `mappable` decide the
    *  chip states: account-service is on the ticket (A), pricing-api maps but is not
    *  on it (B), scratch-tool maps to nothing (C). `mappable` is checked for
    *  presence, not just truthiness — an explicit `null` (the unreadable-list case)
    *  must not fall back to the default map the way an omitted override would. */
   const withChips = (over: Partial<{ inferred: string[]; sourceComponents: string[]; mappable: Record<string, string> | null }> = {}) => {
-    withTask(mkTask({ key: "ASM-1", summary: "Fix bug" }));
+    withTask(mkTask({ key: "PROJ-1", summary: "Fix bug" }));
     fireEvent.click(screen.getByText("Fix bug"));
     host({
       type: "detail",
-      key: "ASM-1",
+      key: "PROJ-1",
       descriptionText: "desc",
-      repos: ["account-service", "pricing-api", "scratch-tool", "centaur"],
+      repos: ["account-service", "pricing-api", "scratch-tool", "webapp"],
       inferred: over.inferred ?? ["account-service", "pricing-api", "scratch-tool"],
       sourceComponents: over.sourceComponents ?? ["Account-Service"],
       mappable:
         "mappable" in over
           ? over.mappable ?? null
-          : { "account-service": "Account-Service", "pricing-api": "Pricing-Api", centaur: "Centaur" },
+          : { "account-service": "Account-Service", "pricing-api": "Pricing-Api", webapp: "Webapp" },
     });
   };
 
@@ -962,7 +962,7 @@ describe("task card actions", () => {
     const chip = chipFor("account-service");
     expect(chip.className).not.toContain("off-ticket");
     expect(chip).not.toHaveAttribute("title");
-    expect(within(chip).getByTitle("Remove Account-Service from ASM-1")).toBeInTheDocument();
+    expect(within(chip).getByTitle("Remove Account-Service from PROJ-1")).toBeInTheDocument();
     expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
   });
 
@@ -970,7 +970,7 @@ describe("task card actions", () => {
     withChips();
     const chip = chipFor("pricing-api");
     expect(chip.className).toContain("off-ticket");
-    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Jira — ↑ adds it");
+    expect(chip).toHaveAttribute("title", "Not on PROJ-1 in Jira — ↑ adds it");
     // The × is local-only here: there is no component on the ticket to remove.
     expect(within(chip).getByTitle("Remove")).toBeInTheDocument();
   });
@@ -979,7 +979,7 @@ describe("task card actions", () => {
     withChips();
     const chip = chipFor("scratch-tool");
     expect(chip.className).toContain("off-ticket");
-    expect(chip).toHaveAttribute("title", "No ASM component named “scratch-tool” — this selection stays local");
+    expect(chip).toHaveAttribute("title", "No PROJ component named “scratch-tool” — this selection stays local");
     expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
     expect(within(chip).getByTitle("Remove")).toBeInTheDocument();
   });
@@ -992,7 +992,7 @@ describe("task card actions", () => {
     for (const name of ["account-service", "pricing-api", "scratch-tool"]) {
       const chip = chipFor(name);
       expect(chip.className).not.toContain("off-ticket");
-      expect(chip).toHaveAttribute("title", "Couldn't read ASM's components — can't tell which are on ASM-1");
+      expect(chip).toHaveAttribute("title", "Couldn't read PROJ's components — can't tell which are on PROJ-1");
       expect(within(chip).queryByText("↑")).not.toBeInTheDocument();
     }
     sent.mockClear();
@@ -1021,14 +1021,14 @@ describe("task card actions", () => {
   it("writes an add when a mappable repo is picked, moving the chip too", () => {
     withChips();
     sent.mockClear();
-    pick("centaur");
-    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "ASM-1", repo: "centaur", on: true, movedChip: true });
+    pick("webapp");
+    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "PROJ-1", repo: "webapp", on: true, movedChip: true });
     // Optimistic: the new chip is already solid, before any verdict.
-    expect(chipFor("centaur").className).not.toContain("off-ticket");
+    expect(chipFor("webapp").className).not.toContain("off-ticket");
   });
 
   it("sends nothing when an unmappable repo is picked, and marks it local-only", () => {
-    withChips({ inferred: [], mappable: { centaur: "Centaur" } });
+    withChips({ inferred: [], mappable: { webapp: "Webapp" } });
     sent.mockClear();
     pick("scratch-tool");
     expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "setComponent" }));
@@ -1038,16 +1038,16 @@ describe("task card actions", () => {
   it("pushes a state-B chip without moving it, and shows it solid at once", () => {
     withChips();
     sent.mockClear();
-    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to ASM-1"));
-    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "ASM-1", repo: "pricing-api", on: true, movedChip: false });
+    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to PROJ-1"));
+    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "PROJ-1", repo: "pricing-api", on: true, movedChip: false });
     expect(chipFor("pricing-api").className).not.toContain("off-ticket");
   });
 
   it("writes a remove when a state-A chip is dismissed", () => {
     withChips();
     sent.mockClear();
-    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove Account-Service from ASM-1"));
-    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "ASM-1", repo: "account-service", on: false, movedChip: true });
+    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove Account-Service from PROJ-1"));
+    expect(sent).toHaveBeenCalledWith({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: false, movedChip: true });
     expect(chipFor("account-service")).toBeUndefined();
   });
 
@@ -1063,29 +1063,29 @@ describe("task card actions", () => {
 
   it("keeps the optimistic state when the host reports ok", () => {
     withChips();
-    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to ASM-1"));
-    host({ type: "componentsChanged", key: "ASM-1", repo: "pricing-api", on: true, movedChip: false, ok: true });
+    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to PROJ-1"));
+    host({ type: "componentsChanged", key: "PROJ-1", repo: "pricing-api", on: true, movedChip: false, ok: true });
     expect(chipFor("pricing-api").className).not.toContain("off-ticket");
   });
 
   it("undoes a rejected push — the chip goes dashed again but stays in the list", () => {
     withChips();
-    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to ASM-1"));
-    host({ type: "componentsChanged", key: "ASM-1", repo: "pricing-api", on: true, movedChip: false, ok: false });
+    fireEvent.click(within(chipFor("pricing-api")).getByTitle("Add Pricing-Api to PROJ-1"));
+    host({ type: "componentsChanged", key: "PROJ-1", repo: "pricing-api", on: true, movedChip: false, ok: false });
     expect(chipFor("pricing-api").className).toContain("off-ticket");
   });
 
   it("undoes a rejected picker add — the chip disappears again", () => {
     withChips();
-    pick("centaur");
-    host({ type: "componentsChanged", key: "ASM-1", repo: "centaur", on: true, movedChip: true, ok: false });
-    expect(chipFor("centaur")).toBeUndefined();
+    pick("webapp");
+    host({ type: "componentsChanged", key: "PROJ-1", repo: "webapp", on: true, movedChip: true, ok: false });
+    expect(chipFor("webapp")).toBeUndefined();
   });
 
   it("undoes a rejected remove — the chip comes back solid", () => {
     withChips();
-    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove Account-Service from ASM-1"));
-    host({ type: "componentsChanged", key: "ASM-1", repo: "account-service", on: false, movedChip: true, ok: false });
+    fireEvent.click(within(chipFor("account-service")).getByTitle("Remove Account-Service from PROJ-1"));
+    host({ type: "componentsChanged", key: "PROJ-1", repo: "account-service", on: false, movedChip: true, ok: false });
     expect(chipFor("account-service")).toBeDefined();
     expect(chipFor("account-service").className).not.toContain("off-ticket");
   });
@@ -1093,7 +1093,7 @@ describe("task card actions", () => {
   it("ignores a verdict for a ticket with no loaded detail", () => {
     withChips();
     expect(() =>
-      host({ type: "componentsChanged", key: "ASM-99", repo: "centaur", on: true, movedChip: true, ok: false }),
+      host({ type: "componentsChanged", key: "PROJ-99", repo: "webapp", on: true, movedChip: true, ok: false }),
     ).not.toThrow();
   });
 });
@@ -1189,13 +1189,13 @@ describe("capability gating", () => {
     host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "FX-1", summary: "First fixture task" })] });
     fireEvent.click(screen.getByText("First fixture task"));
     host({
-      type: "detail", key: "FX-1", descriptionText: "A fixture task.", inferred: ["centaur"],
-      repos: ["centaur", "pricing-api"], sourceComponents: [], mappable: null,
+      type: "detail", key: "FX-1", descriptionText: "A fixture task.", inferred: ["webapp"],
+      repos: ["webapp", "pricing-api"], sourceComponents: [], mappable: null,
     });
 
     expect(screen.getByText("Repos this task touches")).toBeInTheDocument();
     expect(screen.getByText(/add repo/i)).toBeInTheDocument();
-    const chip = [...document.querySelectorAll(".chips .chip")].find((c) => c.textContent?.startsWith("centaur")) as HTMLElement;
+    const chip = [...document.querySelectorAll(".chips .chip")].find((c) => c.textContent?.startsWith("webapp")) as HTMLElement;
     // Plain: no dashed "not on the ticket" state, no push affordance, and no title
     // blaming an unreadable component list for a capability the source never had.
     expect(chip.className).not.toContain("off-ticket");
@@ -1241,17 +1241,17 @@ describe("capability gating", () => {
     render(<App />);
     host({
       type: "state", sourceLabel: "Acme", caps: JIRA_CAPS, authed: true, configured: true,
-      project: "ASM", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS,
+      project: "PROJ", me: "Jane", prReviewStatus: "PR initiated", filters: ALL_FILTERS,
     });
-    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "ASM-1", summary: "Fix bug" })] });
-    expect(screen.getByText("ASM-1")).toHaveAttribute("title", "Open in Acme");
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", summary: "Fix bug" })] });
+    expect(screen.getByText("PROJ-1")).toHaveAttribute("title", "Open in Acme");
     fireEvent.click(screen.getByText("Fix bug"));
     host({
-      type: "detail", key: "ASM-1", descriptionText: "desc", repos: ["pricing-api"],
+      type: "detail", key: "PROJ-1", descriptionText: "desc", repos: ["pricing-api"],
       inferred: ["pricing-api"], sourceComponents: [], mappable: { "pricing-api": "Pricing-Api" },
     });
     const chip = [...document.querySelectorAll(".chips .chip")].find((c) => c.textContent?.startsWith("pricing-api")) as HTMLElement;
-    expect(chip).toHaveAttribute("title", "Not on ASM-1 in Acme — ↑ adds it");
+    expect(chip).toHaveAttribute("title", "Not on PROJ-1 in Acme — ↑ adds it");
   });
 
   it("names the configured source on every gate screen, not Jira", () => {

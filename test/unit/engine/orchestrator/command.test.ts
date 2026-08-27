@@ -230,7 +230,7 @@ describe("runCommand", () => {
 });
 
 describe("chainSourcePlace", () => {
-  const place = (id: string, runKey = "ASM-1", repo = "aws-ops"): FlowNode =>
+  const place = (id: string, runKey = "PROJ-1", repo = "aws-ops"): FlowNode =>
     ({ id, kind: "place", x: 0, y: 0, join: "any", runKey, repo });
   const cmd = (id: string): FlowNode => ({ id, kind: "command", x: 0, y: 0, join: "any", run: "x" });
   const edge = (id: string, from: string, to: string): FlowEdge =>
@@ -266,7 +266,7 @@ describe("chainSourcePlace", () => {
     // unattended deploy must not change directory between passes. This is the
     // FALLBACK — see the performer case below.
     const f = flow(
-      [place("n1", "ASM-1", "aws-ops"), place("n9", "ASM-9", "web"), cmd("n2")],
+      [place("n1", "PROJ-1", "aws-ops"), place("n9", "PROJ-9", "web"), cmd("n2")],
       [edge("e1", "n1", "n2"), edge("e2", "n9", "n2")],
     );
     expect(chainSourcePlace(f, "n2")?.id).toBe("n1");
@@ -279,7 +279,7 @@ describe("chainSourcePlace", () => {
     // whichever sorted first meant a chained `smoke.sh` could run in the branch that
     // never fired: unattended shell in a checkout the user did not intend.
     const f = flow(
-      [place("n1", "ASM-1", "aws-ops"), place("n9", "ASM-9", "web"), cmd("n2")],
+      [place("n1", "PROJ-1", "aws-ops"), place("n9", "PROJ-9", "web"), cmd("n2")],
       // e2 is second in flow order AND is the one that ran, so flow order and the
       // performer disagree — which is what makes this fixture discriminating.
       [edge("e1", "n1", "n2"), { ...edge("e2", "n9", "n2"), firedAt: 5, performed: true }],
@@ -293,10 +293,10 @@ describe("chainSourcePlace", () => {
     // resolve must not shadow a sibling that can, or a resolvable chain would refuse.
     const planned: FlowNode = {
       id: "n0", kind: "planned", x: 0, y: 0, join: "any",
-      ticketKey: "ASM-2", repos: ["aws-ops"], mode: "tdd", dest: "worktree",
+      ticketKey: "PROJ-2", repos: ["aws-ops"], mode: "tdd", dest: "worktree",
     };
     const f = flow(
-      [planned, place("n1", "ASM-1", "aws-ops"), cmd("n2")],
+      [planned, place("n1", "PROJ-1", "aws-ops"), cmd("n2")],
       [edge("e1", "n1", "n2"), { ...edge("e2", "n0", "n2"), firedAt: 5, performed: true }],
     );
     expect(chainSourcePlace(f, "n2")?.id).toBe("n1");
@@ -307,7 +307,7 @@ describe("chainSourcePlace", () => {
     // must refuse such a rule rather than guess one.
     const planned: FlowNode = {
       id: "n0", kind: "planned", x: 0, y: 0, join: "any",
-      ticketKey: "ASM-2", repos: ["aws-ops"], mode: "tdd", dest: "worktree",
+      ticketKey: "PROJ-2", repos: ["aws-ops"], mode: "tdd", dest: "worktree",
     };
     const f = flow([planned, cmd("n2")], [edge("e1", "n0", "n2")]);
     expect(chainSourcePlace(f, "n2")).toBeUndefined();

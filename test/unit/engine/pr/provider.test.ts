@@ -30,30 +30,30 @@ function scripted(...replies: (string | Error)[]): { run: Runner; calls: { file:
 describe("GhProvider.fetch — argv", () => {
   it("asks gh for the head branch first, in the repo directory, with every field", async () => {
     const { run, calls } = scripted(JSON.stringify([pr()]));
-    await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(calls).toHaveLength(1);
     expect(calls[0].file).toBe(GH);
     expect(calls[0].cwd).toBe("/r/api");
     expect(calls[0].args).toEqual([
-      "pr", "list", "--head", "feat/ASM-1", "--state", "all", "--limit", "10", "--json", PR_JSON_FIELDS,
+      "pr", "list", "--head", "feat/PROJ-1", "--state", "all", "--limit", "10", "--json", PR_JSON_FIELDS,
     ]);
   });
 
   it("falls back to a Jira-key title search when the branch has no PR", async () => {
     const { run, calls } = scripted("[]", JSON.stringify([pr({ number: 77 })]));
-    const res = await provider(run).fetch("/r/api", "feat/ASM-1", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "feat/PROJ-1", "PROJ-1");
 
     expect(calls).toHaveLength(2);
     expect(calls[1].args).toEqual([
-      "pr", "list", "--search", "ASM-1 in:title", "--state", "all", "--limit", "10", "--json", PR_JSON_FIELDS,
+      "pr", "list", "--search", "PROJ-1 in:title", "--state", "all", "--limit", "10", "--json", PR_JSON_FIELDS,
     ]);
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 77 }) });
   });
 
   it("goes straight to the key search when the repo has no branch", async () => {
     const { run, calls } = scripted(JSON.stringify([pr()]));
-    await provider(run).fetch("/r/api", null, "ASM-1");
+    await provider(run).fetch("/r/api", null, "PROJ-1");
 
     expect(calls).toHaveLength(1);
     expect(calls[0].args).toContain("--search");
@@ -61,7 +61,7 @@ describe("GhProvider.fetch — argv", () => {
 
   it("passes the 10s timeout to the runner", async () => {
     const run = vi.fn<Runner>(async () => "[]");
-    await provider(run).fetch("/r/api", "b", "ASM-1");
+    await provider(run).fetch("/r/api", "b", "PROJ-1");
     expect(GH_TIMEOUT_MS).toBe(10_000);
     expect(run).toHaveBeenCalledWith(GH, expect.any(Array), { cwd: "/r/api", timeoutMs: 10_000 });
   });
@@ -74,7 +74,7 @@ describe("GhProvider.fetch — argv", () => {
       JSON.stringify([pr({ reviewDecision: "APPROVED" })]),
       JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: { nodes: [] } } } } }),
     );
-    await provider(run).fetch("/r/api", "b", "ASM-1");
+    await provider(run).fetch("/r/api", "b", "PROJ-1");
     expect(calls).toHaveLength(2);
     expect(calls.map((c) => c.file)).toEqual([GH, GH]);
   });
@@ -83,7 +83,7 @@ describe("GhProvider.fetch — argv", () => {
     // Nothing is lost by still asking: on a platform whose install dirs we do not
     // list, the OS's own PATH resolution is the only chance left.
     const { run, calls } = scripted("[]", "[]");
-    await new GhProvider(run, () => null).fetch("/r/api", "b", "ASM-1");
+    await new GhProvider(run, () => null).fetch("/r/api", "b", "PROJ-1");
     expect(calls[0].file).toBe("gh");
   });
 });
@@ -91,28 +91,28 @@ describe("GhProvider.fetch — argv", () => {
 describe("GhProvider.fetch — results", () => {
   it("reports no PR when both lookups come back empty", async () => {
     const { run } = scripted("[]", "[]");
-    expect(await provider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: true, facts: null });
+    expect(await provider(run).fetch("/r/api", "b", "PROJ-1")).toEqual({ ok: true, facts: null });
   });
 
   it("prefers OPEN over MERGED when a branch has both", async () => {
     const { run } = scripted(JSON.stringify([pr({ number: 1, state: "MERGED" }), pr({ number: 2, state: "OPEN" })]));
-    const res = await provider(run).fetch("/r/api", "b", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "b", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ number: 2, state: "OPEN" }) });
   });
 
   it("reports failure — not 'no PR' — when gh errors", async () => {
     const { run } = scripted(new Error("gh: command not found"));
-    expect(await provider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: false });
+    expect(await provider(run).fetch("/r/api", "b", "PROJ-1")).toEqual({ ok: false });
   });
 
   it("reports failure on unparseable stdout", async () => {
     const { run } = scripted("not json");
-    expect(await provider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: false });
+    expect(await provider(run).fetch("/r/api", "b", "PROJ-1")).toEqual({ ok: false });
   });
 
   it("reports failure when gh returns a non-array payload", async () => {
     const { run } = scripted(JSON.stringify({ message: "Not Found" }));
-    expect(await provider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: false });
+    expect(await provider(run).fetch("/r/api", "b", "PROJ-1")).toEqual({ ok: false });
   });
 
   it("reports failure rather than throwing when statusCheckRollup contains a malformed entry", async () => {
@@ -121,7 +121,7 @@ describe("GhProvider.fetch — results", () => {
     // as `{ ok: false }` — an uncaught throw here would leave enqueuePr's write
     // unreached and re-arm this repo's fetch on every tick, forever (F1).
     const { run } = scripted(JSON.stringify([pr({ statusCheckRollup: [null] })]));
-    expect(await provider(run).fetch("/r/api", "b", "ASM-1")).toEqual({ ok: false });
+    expect(await provider(run).fetch("/r/api", "b", "PROJ-1")).toEqual({ ok: false });
   });
 });
 
@@ -131,7 +131,7 @@ describe("GhProvider.fetch — review threads", () => {
 
   it("skips the GraphQL call when there is no review decision", async () => {
     const { run, calls } = scripted(JSON.stringify([pr({ reviewDecision: null })]));
-    const res = await provider(run).fetch("/r/api", "b", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "b", "PROJ-1");
     expect(calls).toHaveLength(1);
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: null }) });
   });
@@ -146,7 +146,7 @@ describe("GhProvider.fetch — review threads", () => {
         { isResolved: false, isOutdated: true },
       ]),
     );
-    const res = await provider(run).fetch("/r/api", "b", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "b", "PROJ-1");
 
     expect(calls).toHaveLength(2);
     expect(calls[1].args[0]).toBe("api");
@@ -159,13 +159,13 @@ describe("GhProvider.fetch — review threads", () => {
 
   it("keeps the PR facts with a null count when the GraphQL call fails", async () => {
     const { run } = scripted(JSON.stringify([pr({ reviewDecision: "APPROVED" })]), new Error("rate limited"));
-    const res = await provider(run).fetch("/r/api", "b", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "b", "PROJ-1");
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ review: "approved", unresolved: null }) });
   });
 
   it("skips the GraphQL call when the PR url has no parseable owner/repo", async () => {
     const { run, calls } = scripted(JSON.stringify([pr({ reviewDecision: "APPROVED", url: "https://example.com/x" })]));
-    const res = await provider(run).fetch("/r/api", "b", "ASM-1");
+    const res = await provider(run).fetch("/r/api", "b", "PROJ-1");
     expect(calls).toHaveLength(1);
     expect(res).toEqual({ ok: true, facts: expect.objectContaining({ unresolved: null }) });
   });

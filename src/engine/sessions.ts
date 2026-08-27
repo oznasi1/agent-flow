@@ -70,7 +70,7 @@ export function readOpenSessions(dir: string): OpenSession[] {
 
 /**
  * Sessions grouped by the git repo root containing their cwd, so one started in
- * `centaur/src` groups with one started in `centaur` — and so a place compares
+ * `webapp/src` groups with one started in `webapp` — and so a place compares
  * equal to a run record's repo path, which is always a root. A cwd in no repo
  * groups under itself. Keys are canonicalised, so /var and /private/var
  * spellings of one directory land in one group.

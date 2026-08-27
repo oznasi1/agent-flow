@@ -400,10 +400,10 @@ describe("resolveOwnership — sessions", () => {
 
   it("attributes a multi-repo run's session through whichever repo it runs in", () => {
     const o = resolveOwnership({
-      runs: [run("ASM-1", NOW - 60 * MIN, "/w/api", "/w/web")],
+      runs: [run("PROJ-1", NOW - 60 * MIN, "/w/api", "/w/web")],
       sessionsByPlace: places({ "/w/web": [sess("s1", NOW - 30 * MIN)] }),
     });
-    expect(o.sessionOwner.get("s1")).toBe("ASM-1");
+    expect(o.sessionOwner.get("s1")).toBe("PROJ-1");
   });
 });
 
@@ -428,11 +428,11 @@ describe("resolveOwnership — paths", () => {
 
   it("gives every repo of a sole holder to that run", () => {
     const o = resolveOwnership({
-      runs: [run("ASM-1", NOW, "/w/api", "/w/web")],
+      runs: [run("PROJ-1", NOW, "/w/api", "/w/web")],
       sessionsByPlace: new Map(),
     });
-    expect(o.pathOwner.get("/w/api")).toBe("ASM-1");
-    expect(o.pathOwner.get("/w/web")).toBe("ASM-1");
+    expect(o.pathOwner.get("/w/api")).toBe("PROJ-1");
+    expect(o.pathOwner.get("/w/web")).toBe("PROJ-1");
   });
 
   it("records no owner for a path no run holds", () => {
@@ -837,7 +837,7 @@ describe("shelf", () => {
   it("keeps an active ticket run on the board with no agent and no PR", async () => {
     h.runs = [mkRun()]; // mkRun's url is a real Jira url, so isTicketRun is true
     await openPanel();
-    expect(shelfOf("ASM-1")).toBe("board");
+    expect(shelfOf("PROJ-1")).toBe("board");
   });
 
   it("closes a notepad run with no agent, no PR and a clean tree", async () => {

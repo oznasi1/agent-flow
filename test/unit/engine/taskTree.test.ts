@@ -8,22 +8,22 @@ function fetchFrom(tree: Record<string, { key: string; summary: string }[]>) {
 
 describe("buildTree", () => {
   it("returns no leaves for a ticket with no children", async () => {
-    const out = await buildTree("ASM-1", fetchFrom({}));
+    const out = await buildTree("PROJ-1", fetchFrom({}));
     expect(out).toEqual({ leaves: [], dropped: [] });
   });
 
   it("never treats the root itself as a leaf", async () => {
-    const out = await buildTree("ASM-1", fetchFrom({}));
-    expect(out.leaves.map((l) => l.key)).not.toContain("ASM-1");
+    const out = await buildTree("PROJ-1", fetchFrom({}));
+    expect(out.leaves.map((l) => l.key)).not.toContain("PROJ-1");
   });
 
   it("returns direct children as leaves at depth 1", async () => {
-    const out = await buildTree("ASM-1", fetchFrom({
-      "ASM-1": [{ key: "ASM-2", summary: "a" }, { key: "ASM-3", summary: "b" }],
+    const out = await buildTree("PROJ-1", fetchFrom({
+      "PROJ-1": [{ key: "PROJ-2", summary: "a" }, { key: "PROJ-3", summary: "b" }],
     }));
     expect(out.leaves).toEqual([
-      { key: "ASM-2", summary: "a", depth: 1, parentKey: "ASM-1" },
-      { key: "ASM-3", summary: "b", depth: 1, parentKey: "ASM-1" },
+      { key: "PROJ-2", summary: "a", depth: 1, parentKey: "PROJ-1" },
+      { key: "PROJ-3", summary: "b", depth: 1, parentKey: "PROJ-1" },
     ]);
   });
 

@@ -1561,7 +1561,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 <>
                   <span style={{ fontSize: "var(--t-body)" }}>{ACTION_LABEL[derived]}</span>
                   {/* The target's name — an identifier, so mono — is part of the
-                      sentence for launch and seed ("THEN launch ASM-12"). Notify
+                      sentence for launch and seed ("THEN launch PROJ-12"). Notify
                       already reads complete on its own, and a `run`'s target is
                       named by the USING picker right below, which is a control
                       rather than a label: printing it here too would give one

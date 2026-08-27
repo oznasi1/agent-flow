@@ -16,11 +16,11 @@ vi.mock("../../src/engine/claudeAssetsFs", () => ({ fsReader: h.fsReader, claude
 import { MarketplacePanel } from "../../src/marketplaceView";
 
 const view = (over: Partial<ClaudeAssetsView> = {}): ClaudeAssetsView => ({
-  marketplaces: [{ name: "atbay", kind: "github", origin: "org/atbay", pluginCount: 1, stale: false }],
+  marketplaces: [{ name: "acme", kind: "github", origin: "org/acme", pluginCount: 1, stale: false }],
   plugins: [],
   assets: [{
-    type: "skill", name: "build", description: "d", plugin: "cicd", marketplace: "atbay",
-    file: "/home/u/.claude/plugins/cache/atbay/cicd/1/skills/build/SKILL.md",
+    type: "skill", name: "build", description: "d", plugin: "cicd", marketplace: "acme",
+    file: "/home/u/.claude/plugins/cache/acme/cicd/1/skills/build/SKILL.md",
     rel: "skills/build/SKILL.md", enabled: true, state: "installed", category: "deployment",
   }],
   notSetUp: false,
@@ -172,7 +172,7 @@ describe("MarketplacePanel", () => {
 });
 
 describe("MarketplacePanel file preview", () => {
-  const FILE = "/home/u/.claude/plugins/cache/atbay/cicd/1/skills/build/SKILL.md";
+  const FILE = "/home/u/.claude/plugins/cache/acme/cicd/1/skills/build/SKILL.md";
 
   it("returns a listed file's contents", async () => {
     h.readFile.mockReturnValue("# Build\n");
@@ -204,7 +204,7 @@ describe("MarketplacePanel file preview", () => {
   it("serves a plugin README, which the scan lists alongside asset files", async () => {
     h.scanClaudeAssets.mockReturnValue(view({
       plugins: [{
-        name: "cicd", marketplace: "atbay", description: "d", state: "installed", enabled: true,
+        name: "cicd", marketplace: "acme", description: "d", state: "installed", enabled: true,
         scopes: [], version: "", counts: { skill: 0, command: 0, agent: 0, hook: 0 },
         category: "deployment", readme: "/mk/cicd/README.md", installCommand: "",
       }],

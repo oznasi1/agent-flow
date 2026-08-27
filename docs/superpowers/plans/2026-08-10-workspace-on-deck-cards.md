@@ -183,12 +183,12 @@ const ws = (identity: string, roots: string[]) =>
 describe("groupPlacesByWindow", () => {
   it("folds two places of one multi-root window into a single group", () => {
     expect(groupPlacesByWindow(
-      ["/r/automation_e2e", "/r/centaur"],
-      [ws("/ws/centaur+e2e.code-workspace", ["/r/centaur", "/r/automation_e2e"])],
+      ["/r/e2e_suite", "/r/webapp"],
+      [ws("/ws/webapp+e2e.code-workspace", ["/r/webapp", "/r/e2e_suite"])],
     )).toEqual([{
-      workspaceFile: "/ws/centaur+e2e.code-workspace",
-      roots: ["/r/centaur", "/r/automation_e2e"],
-      places: ["/r/automation_e2e", "/r/centaur"],
+      workspaceFile: "/ws/webapp+e2e.code-workspace",
+      roots: ["/r/webapp", "/r/e2e_suite"],
+      places: ["/r/e2e_suite", "/r/webapp"],
     }]);
   });
 
@@ -196,12 +196,12 @@ describe("groupPlacesByWindow", () => {
     // The whole point: the card names both repos even though Claude only runs
     // in one of them.
     expect(groupPlacesByWindow(
-      ["/r/automation_e2e"],
-      [ws("/ws/centaur+e2e.code-workspace", ["/r/centaur", "/r/automation_e2e"])],
+      ["/r/e2e_suite"],
+      [ws("/ws/webapp+e2e.code-workspace", ["/r/webapp", "/r/e2e_suite"])],
     )).toEqual([{
-      workspaceFile: "/ws/centaur+e2e.code-workspace",
-      roots: ["/r/centaur", "/r/automation_e2e"],
-      places: ["/r/automation_e2e"],
+      workspaceFile: "/ws/webapp+e2e.code-workspace",
+      roots: ["/r/webapp", "/r/e2e_suite"],
+      places: ["/r/e2e_suite"],
     }]);
   });
 
@@ -214,18 +214,18 @@ describe("groupPlacesByWindow", () => {
     // An older extension host wrote no roots. Claiming nothing is exactly the
     // behavior before this feature.
     expect(groupPlacesByWindow(
-      ["/r/centaur"],
+      ["/r/webapp"],
       [{ identity: "/ws/x.code-workspace", kind: "workspace" as const }],
-    )).toEqual([{ workspaceFile: null, roots: ["/r/centaur"], places: ["/r/centaur"] }]);
+    )).toEqual([{ workspaceFile: null, roots: ["/r/webapp"], places: ["/r/webapp"] }]);
   });
 
   it("leaves a place alone when its window has a single root", () => {
     // A one-folder window is the place. Grouping it would rename the card after
     // a workspace file that adds nothing.
     expect(groupPlacesByWindow(
-      ["/r/centaur"],
-      [{ identity: "/r/centaur", kind: "folder" as const, roots: ["/r/centaur"] }],
-    )).toEqual([{ workspaceFile: null, roots: ["/r/centaur"], places: ["/r/centaur"] }]);
+      ["/r/webapp"],
+      [{ identity: "/r/webapp", kind: "folder" as const, roots: ["/r/webapp"] }],
+    )).toEqual([{ workspaceFile: null, roots: ["/r/webapp"], places: ["/r/webapp"] }]);
   });
 
   it("keeps two windows' places apart, in first-place order", () => {
@@ -349,53 +349,53 @@ The old `(place, sessions, git, ticket, nowMs)` signature is replaced, not kept 
 Replace the existing `describe("localRunFor", ...)` block's calls with the group form and add the workspace cases:
 
 ```ts
-const GIT = (root: string) => ({ isGit: true, branch: root === "/r/centaur" ? "ASM-1-x" : "main" });
+const GIT = (root: string) => ({ isGit: true, branch: root === "/r/webapp" ? "PROJ-1-x" : "main" });
 const solo = (place: string) => ({ workspaceFile: null, roots: [place], places: [place] });
 
 describe("localRunFor", () => {
   it("keeps one repo and a per-window mode for a lone place", () => {
-    const run = localRunFor(solo("/r/centaur"), [sess()], GIT, null, NOW);
+    const run = localRunFor(solo("/r/webapp"), [sess()], GIT, null, NOW);
     expect(run.mode).toBe("per-window");
     expect(run.workspaceFile).toBeUndefined();
-    expect(run.repos).toEqual([{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-1-x" }]);
-    expect(run.summary).toBe("centaur");
+    expect(run.repos).toEqual([{ name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-1-x" }]);
+    expect(run.summary).toBe("webapp");
     expect(run.kind).toBe("local");
   });
 
   it("carries every root of a workspace group, each with its own branch", () => {
     const run = localRunFor(
-      { workspaceFile: "/ws/centaur+e2e.code-workspace", roots: ["/r/centaur", "/r/automation_e2e"], places: ["/r/automation_e2e"] },
-      [sess({ cwd: "/r/automation_e2e" })], GIT, null, NOW,
+      { workspaceFile: "/ws/webapp+e2e.code-workspace", roots: ["/r/webapp", "/r/e2e_suite"], places: ["/r/e2e_suite"] },
+      [sess({ cwd: "/r/e2e_suite" })], GIT, null, NOW,
     );
     expect(run.repos).toEqual([
-      { name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-1-x" },
-      { name: "automation_e2e", path: "/r/automation_e2e", isGit: true, branch: "main" },
+      { name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-1-x" },
+      { name: "e2e_suite", path: "/r/e2e_suite", isGit: true, branch: "main" },
     ]);
-    expect(run.workspaceFile).toBe("/ws/centaur+e2e.code-workspace");
+    expect(run.workspaceFile).toBe("/ws/webapp+e2e.code-workspace");
     expect(run.mode).toBe("multiroot");
   });
 
   it("names a ticketless workspace card after the workspace, not a folder", () => {
     const run = localRunFor(
-      { workspaceFile: "/ws/centaur+e2e.code-workspace", roots: ["/r/centaur", "/r/automation_e2e"], places: ["/r/automation_e2e"] },
-      [sess({ cwd: "/r/automation_e2e" })], GIT, null, NOW,
+      { workspaceFile: "/ws/webapp+e2e.code-workspace", roots: ["/r/webapp", "/r/e2e_suite"], places: ["/r/e2e_suite"] },
+      [sess({ cwd: "/r/e2e_suite" })], GIT, null, NOW,
     );
-    expect(run.summary).toBe("centaur+e2e");
+    expect(run.summary).toBe("webapp+e2e");
   });
 
   it("prefers the inferred ticket's summary and url over the workspace name", () => {
     const run = localRunFor(
-      { workspaceFile: "/ws/centaur+e2e.code-workspace", roots: ["/r/centaur"], places: ["/r/centaur"] },
-      [sess()], GIT, { key: "ASM-1", url: "https://jira/browse/ASM-1", summary: "team table" }, NOW,
+      { workspaceFile: "/ws/webapp+e2e.code-workspace", roots: ["/r/webapp"], places: ["/r/webapp"] },
+      [sess()], GIT, { key: "PROJ-1", url: "https://jira/browse/PROJ-1", summary: "team table" }, NOW,
     );
     expect(run.summary).toBe("team table");
-    expect(run.url).toBe("https://jira/browse/ASM-1");
+    expect(run.url).toBe("https://jira/browse/PROJ-1");
   });
 
   it("keys a workspace group off the workspace file, so both its sessions land on one card", () => {
-    const g = { workspaceFile: "/ws/centaur+e2e.code-workspace", roots: ["/r/centaur", "/r/automation_e2e"], places: ["/r/centaur"] };
+    const g = { workspaceFile: "/ws/webapp+e2e.code-workspace", roots: ["/r/webapp", "/r/e2e_suite"], places: ["/r/webapp"] };
     expect(localRunFor(g, [sess()], GIT, null, NOW).key)
-      .toBe(localRunFor({ ...g, places: ["/r/automation_e2e"] }, [sess()], GIT, null, NOW).key);
+      .toBe(localRunFor({ ...g, places: ["/r/e2e_suite"] }, [sess()], GIT, null, NOW).key);
   });
 
   it("omits a branch a root does not have", () => {
@@ -404,8 +404,8 @@ describe("localRunFor", () => {
   });
 
   it("starts at the earliest session and falls back to now", () => {
-    expect(localRunFor(solo("/r/centaur"), [sess({ startedAt: 900 }), sess({ startedAt: 500 })], GIT, null, NOW).createdAt).toBe(500);
-    expect(localRunFor(solo("/r/centaur"), [sess({ startedAt: 0 })], GIT, null, NOW).createdAt).toBe(NOW);
+    expect(localRunFor(solo("/r/webapp"), [sess({ startedAt: 900 }), sess({ startedAt: 500 })], GIT, null, NOW).createdAt).toBe(500);
+    expect(localRunFor(solo("/r/webapp"), [sess({ startedAt: 0 })], GIT, null, NOW).createdAt).toBe(NOW);
   });
 });
 ```
@@ -418,7 +418,7 @@ Expected: FAIL — `localRunFor` still expects a string place, so `run.repos` co
 - [ ] **Step 3: Rewrite `localRunFor`**
 
 ```ts
-/** A workspace file's display name — "centaur+e2e.code-workspace" → "centaur+e2e". */
+/** A workspace file's display name — "webapp+e2e.code-workspace" → "webapp+e2e". */
 function workspaceName(file: string): string {
   return path.basename(file).replace(/\.code-workspace$/, "");
 }
@@ -515,68 +515,68 @@ vi.mock("../../src/engine/presence", () => ({
 Then add to `describe("DeckPanel local cards", ...)`:
 
 ```ts
-  const WS = { identity: "/ws/centaur+e2e.code-workspace", kind: "workspace" as const,
-    roots: ["/r/centaur", "/r/automation_e2e"] };
+  const WS = { identity: "/ws/webapp+e2e.code-workspace", kind: "workspace" as const,
+    roots: ["/r/webapp", "/r/e2e_suite"] };
 
   it("makes one card for two sessions in the same workspace", async () => {
     h.runs = [];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" }),
-      sess({ sessionId: "s2", cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" }),
+      sess({ sessionId: "s2", cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show();
     await settled();
     expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
-    expect(builtLocal().agents.map((a) => a.session.name).sort()).toEqual(["centaur-7e", "e2e-3a"]);
+    expect(builtLocal().agents.map((a) => a.session.name).sort()).toEqual(["webapp-7e", "e2e-3a"]);
   });
 
   it("carries every workspace root, including one with no session in it", async () => {
     h.runs = [];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show();
     await settled();
-    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["centaur", "automation_e2e"]);
-    expect(builtLocal().run.workspaceFile).toBe("/ws/centaur+e2e.code-workspace");
+    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["webapp", "e2e_suite"]);
+    expect(builtLocal().run.workspaceFile).toBe("/ws/webapp+e2e.code-workspace");
   });
 
   it("tags each agent with the root it runs in, not the run's first repo", async () => {
     h.runs = [];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show();
     await settled();
-    expect(builtLocal().agents.map((a) => a.repo)).toEqual(["automation_e2e"]);
+    expect(builtLocal().agents.map((a) => a.repo)).toEqual(["e2e_suite"]);
   });
 
   it("infers the ticket from the first root whose branch names one", async () => {
-    // h.branch is the branch of /r/centaur; every other path reads "main".
+    // h.branch is the branch of /r/webapp; every other path reads "main".
     h.runs = [];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/automation_e2e", name: "e2e-3a" })];
+    h.openSessions = [sess({ cwd: "/r/e2e_suite", name: "e2e-3a" })];
     show(true);
     await settled();
-    expect(builtLocal().run.url).toContain("/browse/ASM-5641");
+    expect(builtLocal().run.url).toContain("/browse/PROJ-5641");
   });
 
   it("still makes a per-place card when the window record has no roots", async () => {
     h.runs = [];
-    h.liveWindows = [{ identity: "/ws/centaur+e2e.code-workspace", kind: "workspace" }];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.liveWindows = [{ identity: "/ws/webapp+e2e.code-workspace", kind: "workspace" }];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show();
     await settled();
-    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["centaur"]);
+    expect(builtLocal().run.repos.map((r) => r.name)).toEqual(["webapp"]);
     expect(builtLocal().run.workspaceFile).toBeUndefined();
   });
 
   it("does not fold a root a tracked run already owns into a local card", async () => {
-    h.runs = [mkRun({ key: "ASM-1", repos: [{ name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-1-x" }] })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-1-x" }] })];
     h.liveWindows = [WS];
-    h.openSessions = [sess({ cwd: "/r/centaur", name: "centaur-7e" })];
+    h.openSessions = [sess({ cwd: "/r/webapp", name: "webapp-7e" })];
     show();
     await settled();
     // The tracked run claimed the only live place: one card, and it is the tracked one.
     expect(h.buildRunStatus).toHaveBeenCalledTimes(1);
-    expect(h.buildRunStatus.mock.calls[0][0].run.key).toBe("ASM-1");
+    expect(h.buildRunStatus.mock.calls[0][0].run.key).toBe("PROJ-1");
   });
 ```
 
@@ -677,17 +677,17 @@ Add to `test/webview/DeckApp.test.tsx`:
 ```ts
 const wsStatus = () => mkStatus({
   run: {
-    key: "ASM-9", summary: "e2e flake", url: "https://jira/ASM-9", createdAt: 1,
-    mode: "multiroot", workspaceFile: "/ws/centaur+e2e.code-workspace",
+    key: "PROJ-9", summary: "e2e flake", url: "https://jira/PROJ-9", createdAt: 1,
+    mode: "multiroot", workspaceFile: "/ws/webapp+e2e.code-workspace",
     repos: [
-      { name: "centaur", path: "/r/centaur", isGit: true, branch: "ASM-9-x" },
-      { name: "automation_e2e", path: "/r/automation_e2e", isGit: true, branch: "main" },
+      { name: "webapp", path: "/r/webapp", isGit: true, branch: "PROJ-9-x" },
+      { name: "e2e_suite", path: "/r/e2e_suite", isGit: true, branch: "main" },
     ],
     briefPaths: [],
   },
   repos: [
-    { name: "centaur", path: "/r/centaur", branch: "ASM-9-x", dirty: true, ahead: 0, added: 0, removed: 0, files: 0 },
-    { name: "automation_e2e", path: "/r/automation_e2e", branch: "main", dirty: false, ahead: 1, added: 12, removed: 2, files: 3 },
+    { name: "webapp", path: "/r/webapp", branch: "PROJ-9-x", dirty: true, ahead: 0, added: 0, removed: 0, files: 0 },
+    { name: "e2e_suite", path: "/r/e2e_suite", branch: "main", dirty: false, ahead: 1, added: 12, removed: 2, files: 3 },
   ],
 });
 
@@ -696,7 +696,7 @@ describe("workspace chip", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
     const chip = container.querySelector(".c-ws .ws")!;
-    expect(chip.textContent).toContain("centaur+e2e");
+    expect(chip.textContent).toContain("webapp+e2e");
     expect(chip.textContent).toContain("2 repos");
     expect(chip.textContent).not.toContain(".code-workspace");
   });
@@ -706,7 +706,7 @@ describe("workspace chip", () => {
     host(runsMsg([wsStatus()]));
     const fold = container.querySelector(".c-ws .ws-fold")!;
     expect(Array.from(fold.querySelectorAll(".repo")).map((r) => r.textContent))
-      .toEqual(["centaur●", "automation_e2e+12−2↑1"]);
+      .toEqual(["webapp●", "e2e_suite+12−2↑1"]);
   });
 
   it("replaces the flat chip row, so the card says the workspace once", () => {
@@ -854,12 +854,12 @@ git commit -m "feat: a multi-root card names its workspace and unfolds its repos
 
 ```ts
   it("shows the branch of the repo this agent runs in", () => {
-    // repos[0] is centaur on ASM-9-x; the agent runs in automation_e2e on main.
+    // repos[0] is webapp on PROJ-9-x; the agent runs in e2e_suite on main.
     const s = wsStatus();
     const agent: CardAgent = {
-      session: { pid: 2, sessionId: "s9", cwd: "/r/automation_e2e", startedAt: 1, name: "e2e-3a" },
+      session: { pid: 2, sessionId: "s9", cwd: "/r/e2e_suite", startedAt: 1, name: "e2e-3a" },
       activity: { state: "working", lastActivityMs: 2_000, slug: null },
-      repo: "automation_e2e",
+      repo: "e2e_suite",
     };
     // The board mounts on the Agents lens (DeckApp.tsx:364), so this run renders
     // as one card per agent with no toggling.
@@ -871,14 +871,14 @@ git commit -m "feat: a multi-root card names its workspace and unfolds its repos
   it("falls back to the run's first repo on a card with no agent", () => {
     const { container } = render(<DeckApp />);
     host(runsMsg([wsStatus()]));
-    expect(container.querySelector(".c-branch .bn")!.textContent).toContain("ASM-9-x");
+    expect(container.querySelector(".c-branch .bn")!.textContent).toContain("PROJ-9-x");
   });
 ```
 
 - [ ] **Step 2: Run them and watch the first fail**
 
 Run: `npx vitest run test/webview/DeckApp.test.tsx -t "branch"`
-Expected: the agent case FAILs with "ASM-9-x" — `repos[0]`'s branch.
+Expected: the agent case FAILs with "PROJ-9-x" — `repos[0]`'s branch.
 
 - [ ] **Step 3: Read the branch off the agent's repo**
 

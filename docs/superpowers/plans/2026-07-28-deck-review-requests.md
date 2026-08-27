@@ -270,7 +270,7 @@ import { mapRollupState, mapGraphMergeable, parseSearch, REVIEW_SEARCH_Q } from 
 
 const node = (over: Record<string, unknown> = {}) => ({
   number: 8491,
-  title: "[ASM-5752] isolate renew queue",
+  title: "[PROJ-5752] isolate renew queue",
   url: "https://github.com/CyberJackGit/aws-ops/pull/8491",
   isDraft: false,
   createdAt: "2026-07-23T07:28:26Z",
@@ -669,10 +669,10 @@ const searchPayload = JSON.stringify({
       issueCount: 1,
       nodes: [{
         number: 850, title: "Encrypt only Synqly credential",
-        url: "https://github.com/CyberJackGit/centaur/pull/850",
+        url: "https://github.com/CyberJackGit/webapp/pull/850",
         isDraft: false, createdAt: "2026-07-27T14:31:30Z", updatedAt: "2026-07-28T06:23:08Z",
         additions: 409, deletions: 50, changedFiles: 8,
-        author: { login: "OshriBay" }, repository: { nameWithOwner: "CyberJackGit/centaur" },
+        author: { login: "OshriBay" }, repository: { nameWithOwner: "CyberJackGit/webapp" },
         reviewDecision: null, mergeable: "MERGEABLE",
         commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
       }],
@@ -688,7 +688,7 @@ describe("GhReviewProvider.search", () => {
     const run = runner(async () => searchPayload);
     const out = await new GhReviewProvider(run, locate).search();
     expect(out!.issueCount).toBe(1);
-    expect(out!.requests[0].id).toBe("CyberJackGit/centaur#850");
+    expect(out!.requests[0].id).toBe("CyberJackGit/webapp#850");
     const [file, args, opts] = (run as ReturnType<typeof vi.fn>).mock.calls[0];
     expect(file).toBe("/opt/homebrew/bin/gh");
     expect(args[0]).toBe("api");
@@ -2163,7 +2163,7 @@ import { runKind, isTicketRun } from "../../src/types";
 import type { Run } from "../../src/types";
 
 const run = (over: Partial<Run> = {}): Run => ({
-  key: "ASM-1", summary: "s", url: "https://jira/ASM-1", createdAt: 1,
+  key: "PROJ-1", summary: "s", url: "https://jira/PROJ-1", createdAt: 1,
   mode: "per-window", repos: [], briefPaths: [], ...over,
 });
 
@@ -2229,7 +2229,7 @@ export function runKind(run: Run): "task" | "explore" | "review" {
  * poll, and `gh pr list --head <default-branch>` can only return a pull request
  * belonging to somebody else. A **review** run is excluded for the opposite
  * reason — it has a url, but it is a PR's, and polling Jira for
- * `review-centaur-850` would 404 every 30 seconds forever. Tolerates an older or
+ * `review-webapp-850` would 404 every 30 seconds forever. Tolerates an older or
  * hand-edited record with no url field at all. */
 export function isTicketRun(run: Run): boolean {
   if (runKind(run) === "review") return false;
@@ -2271,7 +2271,7 @@ Append to `test/unit/deckView.test.ts`:
 ```ts
   it("keeps review runs off the board", async () => {
     h.runs = [
-      { key: "ASM-1", summary: "s", url: "https://jira/ASM-1", createdAt: 2, mode: "per-window", repos: [], briefPaths: [] },
+      { key: "PROJ-1", summary: "s", url: "https://jira/PROJ-1", createdAt: 2, mode: "per-window", repos: [], briefPaths: [] },
       { key: "review-aws-ops-8491", summary: "review", url: "https://gh/pr/8491", createdAt: 1, kind: "review", mode: "per-window", repos: [], briefPaths: [] },
     ];
     show();

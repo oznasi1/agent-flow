@@ -36,7 +36,7 @@ that lets you register those repos and see what's inside them.
 
 1. **Read-only browse + copy install command** (not one-click install, not a generic bookmark list).
 2. **`gh` CLI** for reading repo contents (not raw URLs, not a stored PAT) — reuses existing
-   auth, works for private At-Bay repos.
+   auth, works for private org repos.
 3. **Manage the repo list inside the Marketplace panel** (not the VS Code Settings UI, not a
    separate settings webview) — self-contained Add/remove, list persisted to global config.
 4. **Button left of the Deck button**, order in the title bar: **Marketplace · Deck · Refresh**.
@@ -222,7 +222,7 @@ Added to the message unions:
 
 Vitest against `src/engine/marketplace.ts`:
 
-- **Fixtures** captured from real repos: `atbay-plugins` (many plugins, `pluginRoot`),
+- **Fixtures** captured from real repos: `acme-plugins` (many plugins, `pluginRoot`),
   `claude-plugins-official` (`commit-commands` = commands-only, no skills), and a
   `plugin.json`-declared custom skills path (`ui-ux-pro-max` shape).
 - Assert `buildMarketplaceView` derives the right plugins and skill/agent/command lists

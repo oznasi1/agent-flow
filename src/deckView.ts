@@ -1023,7 +1023,7 @@ export class DeckPanel {
           // A successful launch or seed already announces itself by opening a
           // window; a notification on top of the toast would be noise. A
           // failure has no such announcement — "Couldn't create a git worktree
-          // in bite-me — not launching ASM-12" is exactly the message that must
+          // in bite-me — not launching PROJ-12" is exactly the message that must
           // not die inside an unfocused panel — so it escalates past the toast.
           //
           // `showErrorMessage`, not `showInformationMessage`: this is the first
@@ -1543,7 +1543,7 @@ export class DeckPanel {
    *
    * `node.cwdRepo` wins when set, and is resolved against the SOURCE PLACE's run
    * first, falling back to the checkouts on this machine. Order matters: a place's
-   * repo path is that run's WORKTREE (`/repos/aws-ops-ASM-12`), while `discoverRepos`
+   * repo path is that run's WORKTREE (`/repos/aws-ops-PROJ-12`), while `discoverRepos`
    * only knows the main checkout (`/repos/aws-ops`) — so for a repo that belongs to
    * the chain's own run, the run's copy is the one the user means.
    *
@@ -4088,7 +4088,7 @@ export class DeckPanel {
       writePlanFile({ key: ticketKey, createdAt: Date.now(), seedAgent: true, matches });
     }
     // Collected rather than one toast per failing match: a multi-repo run with
-    // two dead windows would otherwise show the identical "Couldn't open ASM-1."
+    // two dead windows would otherwise show the identical "Couldn't open PROJ-1."
     // twice, telling the user nothing about which repo actually failed.
     const failedRepos: string[] = [];
     for (const p of plan.toOpen) {

@@ -195,4 +195,4 @@ cloning not-yet-checked-out repos, multi-project.
 
 ## License
 
-[MIT](LICENSE) © 2026 Oz Nasi ([oznasi1](https://github.com/oznasi1)) and At-Bay.
+[MIT](LICENSE) © 2026 Oz Nasi ([oznasi1](https://github.com/oznasi1)).

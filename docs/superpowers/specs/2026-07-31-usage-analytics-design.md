@@ -11,7 +11,7 @@ counts on the Marketplace are the only signal, and they say nothing about whethe
 ever completed a single **Take**.
 
 This design adds a **usage analytics layer** that reports anonymous, shape-only events to
-**PostHog** (a personal project, not an At-Bay one). It answers four questions: which
+**PostHog** (a personal project, not an employer's). It answers four questions: which
 features get used at all, where multi-step flows are abandoned, whether a fresh install
 ever reaches a successful Take and comes back, and what fails for real users.
 
@@ -38,7 +38,7 @@ Settled during brainstorming, recorded so the plan does not relitigate them:
 
 | Question | Decision |
 |---|---|
-| Which backend? | **PostHog**, the author's personal project. Not At-Bay's Mixpanel — this is not an At-Bay product. |
+| Which backend? | **PostHog**, the author's personal project. Not an employer's Mixpanel — this is not a company product. |
 | Consent model? | **On by default with a kill switch.** Honours VS Code's `telemetry.telemetryLevel` *and* a dedicated `agentFlow.telemetry.enabled`. One-time non-blocking first-run notice. |
 | How much detail in properties? | **Shape only** — enums, counts, booleans, durations. Salted hashes only where grouping is genuinely needed. |
 | Unhandled errors? | **Class + path-stripped stack, never the message.** Messages embed paths and ticket keys; stacks of a single bundled file do not. |

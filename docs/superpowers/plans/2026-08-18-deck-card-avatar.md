@@ -244,7 +244,7 @@ harness:
       expect(hd.querySelector(".hd-t .c-title")!.textContent).toContain("Export fails on large accounts");
       // Its own slot, not sharing a row with the branch and the diff: a truncated
       // ticket key is the one identifier on this card nobody can reconstruct.
-      expect(hd.querySelector(".hd-k .key")!.textContent).toBe("ASM-1");
+      expect(hd.querySelector(".hd-k .key")!.textContent).toBe("PROJ-1");
     });
 
     it("gives a notepad card the notepad mark, not the ticket one", () => {
@@ -269,7 +269,7 @@ harness:
       const card = oneCard();
       fireEvent.click(card.querySelector(".hd-k .key")!);
       expect(card.className).not.toContain("sel");
-      expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/ASM-1" });
+      expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/PROJ-1" });
     });
 
     it("puts the state on its own row under a hairline, with spend and age in mono", () => {

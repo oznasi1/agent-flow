@@ -80,14 +80,14 @@ const flowWith = (nodes: FlowNode[], edges: FlowEdge[]): Flow =>
 
 describe("applyFired", () => {
   it("stamps firedAt and a note on a performed edge", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
     expect(out.edges[0].firedAt).toBe(NOW);
     expect(out.edges[0].firedNote).toBeTruthy();
   });
 
   it("does not mutate the flow it is given", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "done")], [edge("e1", "a", "z")]);
     const before = JSON.stringify(flow);
     applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
     expect(JSON.stringify(flow)).toBe(before);
@@ -95,7 +95,7 @@ describe("applyFired", () => {
 
   it("stamps a perform:false edge too — an unstamped junction sibling re-evaluates forever", () => {
     const flow = flowWith(
-      [place("a", "ASM-1"), place("b", "ASM-2"), notify("z", "both landed", "all")],
+      [place("a", "PROJ-1"), place("b", "PROJ-2"), notify("z", "both landed", "all")],
       [edge("e1", "a", "z"), edge("e2", "b", "z")],
     );
     const out = applyFired(
@@ -108,7 +108,7 @@ describe("applyFired", () => {
 
   it("distinguishes a performed note from a stamped-only one", () => {
     const flow = flowWith(
-      [place("a", "ASM-1"), place("b", "ASM-2"), notify("z", "both landed", "all")],
+      [place("a", "PROJ-1"), place("b", "PROJ-2"), notify("z", "both landed", "all")],
       [edge("e1", "a", "z"), edge("e2", "b", "z")],
     );
     const out = applyFired(
@@ -122,14 +122,14 @@ describe("applyFired", () => {
   });
 
   it("leaves an edge that did not fire completely alone", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("y", "one"), notify("z", "two")], [edge("e1", "a", "y"), edge("e2", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("y", "one"), notify("z", "two")], [edge("e1", "a", "y"), edge("e2", "a", "z")]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
     expect(out.edges[1].firedAt).toBeUndefined();
     expect(out.edges[1].firedNote).toBeUndefined();
   });
 
   it("keeps every other field of the flow and of each edge", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z", { cond: { kind: "ci-failed" } })]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "done")], [edge("e1", "a", "z", { cond: { kind: "ci-failed" } })]);
     const out = applyFired(flow, [{ edge: flow.edges[0], perform: true }], NOW);
     expect(out.name).toBe("Ship the migration");
     expect(out.armed).toBe(true);
@@ -138,14 +138,14 @@ describe("applyFired", () => {
   });
 
   it("returns an equal flow when nothing fired", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "done")], [edge("e1", "a", "z")]);
     expect(applyFired(flow, [], NOW)).toEqual(flow);
   });
 
   it("ignores a fired edge whose id is not in the flow", () => {
     // Defensive: the runner is handed edges by the evaluator, but a stale
     // EvalResult must not be able to invent an edge.
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "done")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "done")], [edge("e1", "a", "z")]);
     const out = applyFired(flow, [{ edge: edge("ghost", "a", "z"), perform: true }], NOW);
     expect(out.edges).toHaveLength(1);
     expect(out.edges[0].firedAt).toBeUndefined();
@@ -154,7 +154,7 @@ describe("applyFired", () => {
 
 describe("notifyLines", () => {
   it("names the flow and the notify node's own message", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "the migration has landed")], [edge("e1", "a", "z")]);
     const lines = notifyLines(flow, [{ edge: flow.edges[0], perform: true }]);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("Ship the migration");
@@ -162,19 +162,19 @@ describe("notifyLines", () => {
   });
 
   it("says nothing for a stamped-only edge — it performed nothing", () => {
-    const flow = flowWith([place("a", "ASM-1"), notify("z", "done", "all")], [edge("e1", "a", "z")]);
+    const flow = flowWith([place("a", "PROJ-1"), notify("z", "done", "all")], [edge("e1", "a", "z")]);
     expect(notifyLines(flow, [{ edge: flow.edges[0], perform: false }])).toEqual([]);
   });
 
   it("says nothing for an action that is not notify", () => {
     // launch and seed do not exist in this phase; if one appears in a
     // hand-edited flow it must not produce a toast claiming it ran.
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b", { action: "launch" })]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b", { action: "launch" })]);
     expect(notifyLines(flow, [{ edge: flow.edges[0], perform: true }])).toEqual([]);
   });
 
   it("falls back gracefully when the target is not a notify node", () => {
-    const flow = flowWith([place("a", "ASM-1"), place("b", "ASM-2")], [edge("e1", "a", "b")]);
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2")], [edge("e1", "a", "b")]);
     // action is notify but the target is a place — a hand-edited flow. One line,
     // no crash, and no invented message.
     const lines = notifyLines(flow, [{ edge: flow.edges[0], perform: true }]);
@@ -184,7 +184,7 @@ describe("notifyLines", () => {
 
   it("returns one line per performed notify edge", () => {
     const flow = flowWith(
-      [place("a", "ASM-1"), notify("y", "first"), notify("z", "second")],
+      [place("a", "PROJ-1"), notify("y", "first"), notify("z", "second")],
       [edge("e1", "a", "y"), edge("e2", "a", "z")],
     );
     const lines = notifyLines(flow, [
@@ -504,7 +504,7 @@ describe("an armed flow advances on refresh", () => {
     ...mkFlow("f1", "Ship the migration"),
     armed: true,
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -514,8 +514,8 @@ describe("an armed flow advances on refresh", () => {
   it("stamps a met rule and posts a toast naming the flow", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    // The status the evaluator will see: ASM-1's aws-ops PR is merged.
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    // The status the evaluator will see: PROJ-1's aws-ops PR is merged.
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { p } = await openPanel();
     await settle();
     const written = h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
@@ -527,7 +527,7 @@ describe("an armed flow advances on refresh", () => {
   it("fires once and not again on the next refresh", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { p } = await openPanel();
     await settle();
     // The store now returns the stamped flow, as it would on disk.
@@ -540,7 +540,7 @@ describe("an armed flow advances on refresh", () => {
   it("does nothing for a disarmed flow whose condition is met", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow({ armed: false })];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     await openPanel();
     await settle();
     expect(h.writeFlow).not.toHaveBeenCalled();
@@ -549,7 +549,7 @@ describe("an armed flow advances on refresh", () => {
   it("does nothing when the setting is off, even for an armed flow", async () => {
     setConfig({ orchestrator: false });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     await openPanel();
     await settle();
     expect(h.writeFlow).not.toHaveBeenCalled();
@@ -558,7 +558,7 @@ describe("an armed flow advances on refresh", () => {
   it("does not fire when the condition is not met", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     await openPanel();
     await settle();
     expect(h.writeFlow).not.toHaveBeenCalled();
@@ -571,7 +571,7 @@ describe("an armed flow advances on refresh", () => {
     h.flows = [armedFlow({
       edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
     })];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { p } = await openPanel();
     await settle();
     expect(h.openInEditor).not.toHaveBeenCalled();
@@ -726,7 +726,7 @@ describe("the resume gate", () => {
     ...mkFlow("f1", "Ship the migration"),
     armed: true,
     nodes: [
-      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "ASM-1", repo: "aws-ops" },
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
       { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
@@ -735,7 +735,7 @@ describe("the resume gate", () => {
   it("does not act on the first pass — it reports what is ready", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { p } = await openPanel();
     await settle();
     expect(h.writeFlow).not.toHaveBeenCalled();
@@ -748,7 +748,7 @@ describe("the resume gate", () => {
   it("fires on the pass after approval", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { send } = await openPanel();
     await settle();
     await send({ type: "flow:resumeApprove", id: "f1" });
@@ -759,7 +759,7 @@ describe("the resume gate", () => {
   it("disarms instead, if that is what you choose", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { send } = await openPanel();
     await settle();
     await send({ type: "flow:resumeDisarm", id: "f1" });
@@ -773,7 +773,7 @@ describe("the resume gate", () => {
   it("holds the gate across several passes until you answer", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     await openPanel();
     await settle();
     await settle();
@@ -784,7 +784,7 @@ describe("the resume gate", () => {
   it("does not gate a flow with nothing ready — there is nothing to approve", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     const { p } = await openPanel();
     await settle();
     expect(posts(p).findLast((m) => m.type === "deck:flows").pendingResume).toEqual([]);
@@ -794,10 +794,10 @@ describe("the resume gate", () => {
     // The gate protects the moment you come back, not every future firing.
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(openStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
     await openPanel();
     await settle();
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     await settle();
     expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0].firedAt).toBeTypeOf("number");
   });
@@ -805,7 +805,7 @@ describe("the resume gate", () => {
   it("ignores an approval for an id it is not holding", async () => {
     setConfig({ orchestrator: true });
     h.flows = [armedFlow()];
-    h.buildRunStatus.mockReturnValue(mergedStatus("ASM-1", "aws-ops"));
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
     const { send } = await openPanel();
     await settle();
     await send({ type: "flow:resumeApprove", id: "nope" });
@@ -1037,7 +1037,7 @@ describe("arm, disarm and reset", () => {
     }];
     const stale: Flow = {
       ...mkFlow("f1", "n"),
-      nodes: [{ id: "n1", kind: "place", x: 99, y: 99, join: "any", runKey: "ASM-1", repo: "r" }],
+      nodes: [{ id: "n1", kind: "place", x: 99, y: 99, join: "any", runKey: "PROJ-1", repo: "r" }],
       edges: [{ id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify" }],
     };
     const { send } = await openPanel();
@@ -1290,7 +1290,7 @@ describe("the resume banner", () => {
 describe("Reset", () => {
   const firedFlow = () => flow({
     nodes: [
-      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "ASM-1", repo: "agent-flow" },
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
       { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "landed" },
     ],
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you: landed" }],

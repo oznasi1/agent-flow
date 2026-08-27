@@ -13,7 +13,7 @@ const REPO = { workspace: "acme", slug: "api-service" };
  * arrive. */
 const ROW = {
   id: 42, title: "Add export", state: "OPEN",
-  author: "Ada Lovelace", source: "feat/ASM-1", destination: "main",
+  author: "Ada Lovelace", source: "feat/PROJ-1", destination: "main",
 };
 
 describe("toProjectedFacts", () => {

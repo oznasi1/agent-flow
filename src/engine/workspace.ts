@@ -488,7 +488,7 @@ export async function openWorkspace(req: OpenRequest): Promise<OpenResult> {
     // other live window.
     //
     // Mentions resolve against THIS window's roots and are dropped for anything outside
-    // them: `@centaur/src/x.ts` when centaur isn't a root here would send the agent to a
+    // them: `@webapp/src/x.ts` when webapp isn't a root here would send the agent to a
     // different checkout, which is worse than no mention at all. `{brief}` is absolute
     // for the same reason its relative form can't be trusted off-root.
     const mentions = services.flatMap((s) =>
@@ -659,7 +659,7 @@ export function mergeReposIntoWorkspace(
 
   const wsDir = path.dirname(file);
   // Resolved against the file's directory and canonicalized, exactly as workspaceFolders
-  // does — a raw relative "centaur" would contain nothing. Only the path is needed here,
+  // does — a raw relative "webapp" would contain nothing. Only the path is needed here,
   // so the `name` field is not carried across.
   const roots: WorkspaceFolder[] = (Array.isArray(doc.folders) ? doc.folders : [])
     .map((f) => f?.path)
@@ -740,7 +740,7 @@ export function workspaceFolderPaths(file: string): string[] {
 
 /** A folder that might be added to an existing workspace. `label` is the folder name
  *  written into the file; `repoName` is the bare repo name dedup compares on — batch
- *  a worktree's label is key-qualified (`api-ASM-1`) but must still dedup against a
+ *  a worktree's label is key-qualified (`api-PROJ-1`) but must still dedup against a
  *  folder the workspace already calls `api`. */
 export interface MergeCandidate {
   label: string;
@@ -820,7 +820,7 @@ export function containingRoot(
  *  are `roots`. The repo is a root → `@<root>/<rel>`. The repo is INSIDE a root →
  *  `@<root>/<repo's path from that root>/<rel>`, which is the worktree case, since
  *  worktrees live at `<repo>/.claude/worktrees/<KEY>`. Inside no root → undefined, and
- *  the caller drops the mention: `@centaur/src/x.ts` when the root named `centaur` is
+ *  the caller drops the mention: `@webapp/src/x.ts` when the root named `webapp` is
  *  the MAIN checkout would send the agent to the wrong tree. */
 export function mentionInWorkspace(
   roots: WorkspaceFolder[],

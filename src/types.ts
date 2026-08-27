@@ -207,7 +207,7 @@ export interface OpenSession {
  * poll, and `gh pr list --head <default-branch>` can only return a pull request
  * belonging to somebody else. A **review** run is excluded for the opposite
  * reason — it has a url, but it is a PR's, and polling Jira for
- * `review-centaur-850` would 404 every 30 seconds forever. Tolerates an older or
+ * `review-webapp-850` would 404 every 30 seconds forever. Tolerates an older or
  * hand-edited record with no url field at all. */
 export function isTicketRun(run: Run): boolean {
   if (runKind(run) === "review") return false;

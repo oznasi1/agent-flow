@@ -72,7 +72,7 @@ describe("containingRoot", () => {
 
   it("matches a worktree several levels under a root", () => {
     expect(
-      containingRoot(roots("/repos/api"), "/repos/api/.claude/worktrees/ASM-1")?.path,
+      containingRoot(roots("/repos/api"), "/repos/api/.claude/worktrees/PROJ-1")?.path,
     ).toBe("/repos/api");
   });
 
@@ -185,38 +185,38 @@ Add to `test/unit/engine/worktree.test.ts`, after the existing `describe("branch
 ```ts
 describe("repoRootOfWorktree", () => {
   it("returns the repo a worktree belongs to", () => {
-    expect(repoRootOfWorktree("/repos/centaur/.claude/worktrees/ASM-1")).toBe("/repos/centaur");
+    expect(repoRootOfWorktree("/repos/webapp/.claude/worktrees/PROJ-1")).toBe("/repos/webapp");
   });
 
   it("keeps any path below the worktree attached to the same repo", () => {
-    expect(repoRootOfWorktree("/repos/centaur/.claude/worktrees/ASM-1/src/x.ts")).toBe(
-      "/repos/centaur",
+    expect(repoRootOfWorktree("/repos/webapp/.claude/worktrees/PROJ-1/src/x.ts")).toBe(
+      "/repos/webapp",
     );
   });
 
   it("unwinds a worktree nested inside a worktree to the outermost repo", () => {
     // Splitting on the FIRST marker undoes the whole cascade in one step: a polluted
-    // workspace could otherwise hand us .../ASM-1/.claude/worktrees/ASM-2 and we would
-    // treat ASM-1 as the repo.
+    // workspace could otherwise hand us .../PROJ-1/.claude/worktrees/PROJ-2 and we would
+    // treat PROJ-1 as the repo.
     expect(
-      repoRootOfWorktree("/repos/centaur/.claude/worktrees/ASM-1/.claude/worktrees/ASM-2"),
-    ).toBe("/repos/centaur");
+      repoRootOfWorktree("/repos/webapp/.claude/worktrees/PROJ-1/.claude/worktrees/PROJ-2"),
+    ).toBe("/repos/webapp");
   });
 
   it("returns undefined for a plain repo path", () => {
-    expect(repoRootOfWorktree("/repos/centaur")).toBeUndefined();
+    expect(repoRootOfWorktree("/repos/webapp")).toBeUndefined();
   });
 
   it("returns undefined for a .claude path that is not a worktree", () => {
-    expect(repoRootOfWorktree("/repos/centaur/.claude/settings.json")).toBeUndefined();
+    expect(repoRootOfWorktree("/repos/webapp/.claude/settings.json")).toBeUndefined();
   });
 
   it("returns undefined for the worktrees directory itself", () => {
-    expect(repoRootOfWorktree("/repos/centaur/.claude/worktrees")).toBeUndefined();
+    expect(repoRootOfWorktree("/repos/webapp/.claude/worktrees")).toBeUndefined();
   });
 
   it("returns undefined when there is no repo prefix", () => {
-    expect(repoRootOfWorktree("/.claude/worktrees/ASM-1")).toBeUndefined();
+    expect(repoRootOfWorktree("/.claude/worktrees/PROJ-1")).toBeUndefined();
   });
 });
 ```
@@ -287,9 +287,9 @@ Add these to the existing `describe("planWorkspaceMerge", …)` group in `test/u
     // The root is the repos parent, so no name matches — only containment can see this.
     readFileSync.mockReturnValue('{ "folders": [{ "path": "/Users/me/projects" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("centaur", "/Users/me/projects/centaur/.claude/worktrees/ASM-1"),
+      cand("webapp", "/Users/me/projects/webapp/.claude/worktrees/PROJ-1"),
     ]);
-    expect(plan.redundant.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.redundant.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.add).toEqual([]);
     expect(plan.duplicates).toEqual([]);
   });
@@ -299,34 +299,34 @@ Add these to the existing `describe("planWorkspaceMerge", …)` group in `test/u
       '{ "folders": [{ "name": "monorepo", "path": "/Users/me/projects" }] }',
     );
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("centaur", "/Users/me/projects/centaur"),
+      cand("webapp", "/Users/me/projects/webapp"),
     ]);
-    expect(plan.redundant.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.redundant.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.add).toEqual([]);
   });
 
   it("keeps name precedence: a worktree of a same-named root is still a duplicate", () => {
     // Regression guard on the precedence decision. This candidate satisfies BOTH rules;
     // moving it to `redundant` would change the launch toast's wording.
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("centaur", "/repos/centaur/.claude/worktrees/ASM-1"),
+      cand("webapp", "/repos/webapp/.claude/worktrees/PROJ-1"),
     ]);
-    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["centaur"]);
+    expect(plan.duplicates.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.redundant).toEqual([]);
   });
 
   it("keeps an exact root match in present, not redundant", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
-    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("centaur", "/repos/centaur")]);
-    expect(plan.present.map((c) => c.repoName)).toEqual(["centaur"]);
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
+    const plan = planWorkspaceMerge("/ws/t.code-workspace", [cand("webapp", "/repos/webapp")]);
+    expect(plan.present.map((c) => c.repoName)).toEqual(["webapp"]);
     expect(plan.redundant).toEqual([]);
   });
 
   it("still adds a repo that is inside no root and shares no name", () => {
-    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/centaur" }] }');
+    readFileSync.mockReturnValue('{ "folders": [{ "path": "/repos/webapp" }] }');
     const plan = planWorkspaceMerge("/ws/t.code-workspace", [
-      cand("infra", "/elsewhere/infra/.claude/worktrees/ASM-1"),
+      cand("infra", "/elsewhere/infra/.claude/worktrees/PROJ-1"),
     ]);
     expect(plan.add.map((c) => c.repoName)).toEqual(["infra"]);
     expect(plan.redundant).toEqual([]);
@@ -429,7 +429,7 @@ Add to the existing `describe("mergeReposIntoWorkspace", …)` group in `test/un
     // must still not be able to nest a root inside a root.
     readFileSync.mockReturnValue('{ "folders": [{ "path": "/Users/me/projects" }] }');
     const res = mergeReposIntoWorkspace("/ws/t.code-workspace", [
-      { name: "centaur", path: "/Users/me/projects/centaur/.claude/worktrees/ASM-1" },
+      { name: "webapp", path: "/Users/me/projects/webapp/.claude/worktrees/PROJ-1" },
     ]);
     expect(res).toEqual({ added: [], ok: true });
     expect(writeFileSync).not.toHaveBeenCalled();
@@ -457,7 +457,7 @@ Add to the existing `describe("mergeReposIntoWorkspace", …)` group in `test/un
 - [ ] **Step 2: Run the tests to verify they fail**
 
 Run: `npx vitest run test/unit/engine/workspace.test.ts -t "mergeReposIntoWorkspace"`
-Expected: the first new test FAILS — it currently returns `{ added: ["centaur"], ok: true }` and `writeFileSync` was called. The other two pass already; they are regression guards.
+Expected: the first new test FAILS — it currently returns `{ added: ["webapp"], ok: true }` and `writeFileSync` was called. The other two pass already; they are regression guards.
 
 - [ ] **Step 3: Replace the path-set check with a containment check**
 
@@ -495,7 +495,7 @@ with:
 ```ts
   const wsDir = path.dirname(file);
   // Resolved against the file's directory and canonicalized, exactly as workspaceFolders
-  // does — a raw relative "centaur" would contain nothing. Only the path is needed here,
+  // does — a raw relative "webapp" would contain nothing. Only the path is needed here,
   // so the `name` field is not carried across.
   const roots: WorkspaceFolder[] = (Array.isArray(doc.folders) ? doc.folders : [])
     .map((f) => f?.path)
@@ -580,13 +580,13 @@ These go in the existing `describe("explore — open target", …)` block (start
 
 ```ts
   it("derives the repo, not a phantom, from a workspace folder that is a worktree", async () => {
-    // A folder left behind by an older version points at .../worktrees/ASM-5111, whose
+    // A folder left behind by an older version points at .../worktrees/PROJ-5111, whose
     // basename is a ticket key. Taken at face value it becomes a phantom repo — and since a
     // worktree's .git is a pointer FILE it even passes the isGit check, so the next
     // createWorktrees would nest a worktree inside that worktree.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
-    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
-    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/centaur/.claude/worktrees/ASM-5111"]);
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["webapp"]));
+    vi.mocked(workspaceFolderPaths).mockReturnValue(["/repos/webapp/.claude/worktrees/PROJ-5111"]);
     vi.mocked(listWorkspaceFiles).mockReturnValue([
       { file: "/ws/team.code-workspace", folders: 1, mtimeMs: 1 },
     ]);
@@ -599,17 +599,17 @@ These go in the existing `describe("explore — open target", …)` block (start
 
     expect(openWorkspace).toHaveBeenCalledWith(
       expect.objectContaining({
-        services: [expect.objectContaining({ name: "centaur", path: "/repos/centaur" })],
+        services: [expect.objectContaining({ name: "webapp", path: "/repos/webapp" })],
       }),
     );
   });
 
   it("collapses a repo and a worktree of that repo to one service", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
-    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["centaur"]));
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["webapp"]));
     vi.mocked(workspaceFolderPaths).mockReturnValue([
-      "/repos/centaur",
-      "/repos/centaur/.claude/worktrees/ASM-5885",
+      "/repos/webapp",
+      "/repos/webapp/.claude/worktrees/PROJ-5885",
     ]);
     vi.mocked(listWorkspaceFiles).mockReturnValue([
       { file: "/ws/team.code-workspace", folders: 2, mtimeMs: 1 },
@@ -622,7 +622,7 @@ These go in the existing `describe("explore — open target", …)` block (start
     await runExplore();
 
     const services = vi.mocked(openWorkspace).mock.calls.at(-1)![0].services;
-    expect(services.map((s) => s.path)).toEqual(["/repos/centaur"]);
+    expect(services.map((s) => s.path)).toEqual(["/repos/webapp"]);
   });
 ```
 
@@ -643,7 +643,7 @@ This one needs `resolveWorkspaceAdditions`, which explore never calls — only `
       add: [],
       duplicates: [],
       redundant: [
-        { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/ASM-1" },
+        { label: "api", repoName: "api", path: "/repos/api/.claude/worktrees/PROJ-1" },
       ],
       present: [],
       ok: true,
@@ -668,7 +668,7 @@ This one needs `resolveWorkspaceAdditions`, which explore never calls — only `
 - [ ] **Step 5: Run the tests to verify they fail**
 
 Run: `npx vitest run test/unit/tasksView.test.ts -t "worktree of that repo"` and `npx vitest run test/unit/tasksView.test.ts -t "not a phantom"`
-Expected: FAIL — the first reports a service at `/repos/centaur/.claude/worktrees/ASM-5111` named `ASM-5111`; the second reports two services instead of one.
+Expected: FAIL — the first reports a service at `/repos/webapp/.claude/worktrees/PROJ-5111` named `PROJ-5111`; the second reports two services instead of one.
 
 Run: `npx vitest run test/unit/tasksView.test.ts -t "already in the workspace"`
 Expected: FAIL — the toast lacks the clause, because `skipped` is still built from `duplicates` alone.
@@ -732,7 +732,7 @@ npm run typecheck
 git add src/tasksView.ts test/unit/tasksView.test.ts
 git commit -m "fix(tasksView): unwind worktree folders when deriving a destination's repos
 
-A folder pointing at .../worktrees/ASM-1 has a ticket key for a basename and
+A folder pointing at .../worktrees/PROJ-1 has a ticket key for a basename and
 a .git pointer file, so it passed as a repo and the next take nested a
 worktree inside it. Unwind to the owning repo and dedup."
 ```
@@ -780,6 +780,6 @@ Then merge to `main`. If `package-lock.json` picks up registry URL changes, disc
 ## Notes for the implementer
 
 - **`vi.mock("fs")` is hoisted** in the engine test files, so `fs.realpathSync` is a mock. `test/unit/engine/workspace.test.ts` sets it to identity in `beforeEach` (`realpathSync.mockReset().mockImplementation((p) => String(p))`), which is why `canon` is a no-op there and the literal paths in these tests compare equal. Do not add a `realpathSync` mock of your own.
-- **`test/unit/tasksView.test.ts` does NOT mock `fs`.** `fs.existsSync(path.join(p, ".git"))` runs for real against paths like `/repos/centaur` and returns `false`, so a synthesized `ServiceRef` there gets `isGit: false`. That is expected; don't try to make it `true`.
+- **`test/unit/tasksView.test.ts` does NOT mock `fs`.** `fs.existsSync(path.join(p, ".git"))` runs for real against paths like `/repos/webapp` and returns `false`, so a synthesized `ServiceRef` there gets `isGit: false`. That is expected; don't try to make it `true`.
 - **Path separators.** `repoRootOfWorktree` builds its marker from `path.sep`, and `containingRoot` uses `path.sep`. The tests use POSIX literals because the suite runs on macOS/Linux. Do not hardcode `"/"` in `src/`.
 - **Do not touch** `prefillPathsForTarget`, `chooseOpenTarget`, `targetToOpenArgs`, `pickExistingWorkspace`, `workspaceFolders`, `workspaceFolderPaths`, the approval prompt or its copy, or anything in `batchWorkspace.ts`. The spec lists them as unchanged and the existing tests will tell you if you drifted.

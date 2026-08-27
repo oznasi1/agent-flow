@@ -30,7 +30,7 @@ halo.
 `package.json` contribution. Point them at the project and the signed-in user:
 
 ```
-title       = <project key>   e.g. "ASM"     (falls back to "Tasks")
+title       = <project key>   e.g. "PROJ"     (falls back to "Tasks")
 description = <display name>  e.g. "Oz Nasi" (absent when signed out)
 ```
 
