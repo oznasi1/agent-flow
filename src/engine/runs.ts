@@ -37,7 +37,9 @@ export function readRuns(dir: string): Run[] {
       /* skip a corrupt/half-written record rather than blow up the whole deck */
     }
   }
-  return runs.sort((a, b) => b.createdAt - a.createdAt);
+  // Coerced: a record missing createdAt (admitted by the key-only guard above)
+  // would feed NaN into the comparator and make the whole ordering undefined.
+  return runs.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
 }
 
 /** Forget a run (e.g. after it's merged/archived). */

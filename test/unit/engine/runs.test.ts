@@ -64,6 +64,41 @@ describe("runs store", () => {
   });
 });
 
+describe("readRuns — malformed record files", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-runs-bad-"));
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it.each([
+    ["null", "null"],
+    ["a bare number", "5"],
+    ["a bare string", '"text"'],
+    ["an empty array", "[]"],
+  ])("skips a file whose JSON is %s (valid JSON, wrong type) without throwing", (_label, content) => {
+    fs.writeFileSync(path.join(dir, "bad.json"), content);
+    writeRun(dir, mkRun("PROJ-1", 100));
+    expect(readRuns(dir).map((r) => r.key)).toEqual(["PROJ-1"]);
+  });
+
+  it("sorts a record with no createdAt oldest, deterministically", () => {
+    // A missing createdAt used to feed NaN into the sort comparator, making
+    // the whole ordering implementation-defined.
+    fs.writeFileSync(path.join(dir, "A-1.json"), JSON.stringify({ key: "A-1" }));
+    writeRun(dir, mkRun("B-1", 100));
+    writeRun(dir, mkRun("C-1", 300));
+    expect(readRuns(dir).map((r) => r.key)).toEqual(["C-1", "B-1", "A-1"]);
+  });
+
+  it("sorts a record whose createdAt is not a number oldest too", () => {
+    fs.writeFileSync(path.join(dir, "A-1.json"), JSON.stringify({ key: "A-1", createdAt: "soon" }));
+    writeRun(dir, mkRun("B-1", 100));
+    writeRun(dir, mkRun("C-1", 300));
+    expect(readRuns(dir).map((r) => r.key)).toEqual(["C-1", "B-1", "A-1"]);
+  });
+});
+
 describe("runTarget", () => {
   const base = { key: "K-1", summary: "s", url: "u", createdAt: 1, mode: "per-window" as const, briefPaths: [] };
 
