@@ -372,4 +372,20 @@ describe("parseLines hardening — raw on-disk lines (via readSessionActivity)",
     writeRaw("with-scalars", content, NOW - 1000);
     expect(readSessionActivity(root, cwd, "with-scalars", NOW).state).toBe("needs-you");
   });
+
+  it("tolerates a truncated trailing line — a transcript mid-flush still derives", () => {
+    // Claude Code appends lines live; reading between flushes sees the file
+    // end mid-record. The complete lines above it must still derive, no throw.
+    const content =
+      [
+        JSON.stringify({ type: "user" }),
+        JSON.stringify({ type: "assistant", slug: "whole", message: { stop_reason: "end_turn" } }),
+      ].join("\n") +
+      "\n" +
+      '{"type":"assist';
+    writeRaw("truncated", content, NOW - 1000);
+    const a = readSessionActivity(root, cwd, "truncated", NOW);
+    expect(a.state).toBe("needs-you");
+    expect(a.slug).toBe("whole");
+  });
 });
