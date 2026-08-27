@@ -298,6 +298,21 @@ describe("removeFlow", () => {
   });
 });
 
+describe("readFlows — a createdAt that is not a number", () => {
+  it("sorts it as oldest, deterministically, instead of letting NaN scramble the order", () => {
+    // `(b.createdAt ?? 0) - (a.createdAt ?? 0)` with a string createdAt gives a
+    // NaN comparison — an inconsistent comparator, so the whole listing's order
+    // becomes arbitrary, valid flows included. A record that cannot say when it
+    // was created sorts with the ones that never said at all: as oldest.
+    const { io } = fakeIo({
+      [path.join(DIR, "y.json")]: JSON.stringify({ ...flow({ id: "y" }), createdAt: "yesterday" }),
+      [path.join(DIR, "b.json")]: JSON.stringify(flow({ id: "b", createdAt: 5 })),
+      [path.join(DIR, "c.json")]: JSON.stringify(flow({ id: "c", createdAt: 9 })),
+    });
+    expect(readFlows(io, DIR).map((f) => f.id)).toEqual(["c", "b", "y"]);
+  });
+});
+
 describe("readFlows — a node with no usable join", () => {
   it('reads a missing join as "all" — the junction that cannot fire prematurely', () => {
     // Every released build has written `join` on every node since the model

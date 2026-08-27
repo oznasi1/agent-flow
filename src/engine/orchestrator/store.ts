@@ -222,10 +222,13 @@ export function readFlows(io: FlowIo, dir: string): Flow[] {
       /* skip a corrupt/half-written/unreadable flow rather than empty the drawer */
     }
   }
-  // `?? 0` rather than trusting the field: a record written before `createdAt`
-  // existed, or hand-edited without it, must sort as oldest and not as NaN —
-  // which would make the comparator inconsistent and the order arbitrary.
-  return flows.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  // `Number(...) || 0` rather than trusting the field: a record written before
+  // `createdAt` existed, hand-edited without it, or hand-edited into a STRING
+  // must sort as oldest and not as NaN — which would make the comparator
+  // inconsistent and the whole listing's order arbitrary, valid flows included.
+  // (`?? 0` caught only the absent case; `Number(undefined)` and `Number("x")`
+  // are both NaN, and `|| 0` folds them with it.)
+  return flows.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
 }
 
 export function removeFlow(io: FlowIo, dir: string, id: string): void {
