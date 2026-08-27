@@ -413,6 +413,13 @@ export class DeckPanel {
   /** Keyed `${key}:${repo}#${number}` — a card can only merge one PR, but the key
    * says exactly which write is in flight rather than which card is busy. */
   private readonly mergesInFlight = new Set<string>();
+  /** Review ids with a launch in flight — `launchReviewFor` or a batch. Same
+   * shape, same reason, as `reviewSubmitsInFlight` above: `onMessage` dispatches
+   * fire-and-forget, and the seconds `createWorktrees` + `openWorkspace` take
+   * are exactly the window a double click lands in. Two launches of one PR
+   * would start two paid review sessions — and `reviewRunKey` is deterministic,
+   * so the second `writeRun` silently orphans the first launch's worktree. */
+  private readonly reviewLaunchesInFlight = new Set<string>();
   private forgeProbe: Promise<ForgeGap | null> | null = null;
   /** undefined until the probe resolves; null means the forge is usable, and a
    * gap disables PR facts with a footer note. */
@@ -2285,6 +2292,22 @@ export class DeckPanel {
   }
 
   private async launchReviewFor(id: string): Promise<void> {
+    // Deliberately silent, exactly as submitReview's own guard is: this gate is
+    // only reachable while a genuine launch for this same id is still in
+    // flight, and that launch — not this rejected duplicate — owns posting the
+    // eventual outcome.
+    if (this.reviewLaunchesInFlight.has(id)) return;
+    this.reviewLaunchesInFlight.add(id);
+    try {
+      await this.launchReviewForHeld(id);
+    } finally {
+      this.reviewLaunchesInFlight.delete(id);
+    }
+  }
+
+  /** The body of one row's launch, with its id held in `reviewLaunchesInFlight`
+   * by the caller above. */
+  private async launchReviewForHeld(id: string): Promise<void> {
     const req = this.reviewById(id);
     if (!req) return; // the queue moved on before the click landed
     const cfg = getConfig();
@@ -2351,6 +2374,23 @@ export class DeckPanel {
    *  Deliberately not a batch *submit*: approve/comment/request-changes stay one row and
    *  one confirmation at a time. */
   private async launchReviewBatch(ids: string[]): Promise<void> {
+    // The same guard, per id, as launchReviewFor's, and just as silent: a batch
+    // click can race a row's own launch — or a second batch click — for the
+    // same PR. Ids already in flight are dropped rather than failing the whole
+    // batch, so the rest still launches.
+    const fresh = ids.filter((id) => !this.reviewLaunchesInFlight.has(id));
+    if (!fresh.length) return;
+    for (const id of fresh) this.reviewLaunchesInFlight.add(id);
+    try {
+      await this.launchReviewBatchHeld(fresh);
+    } finally {
+      for (const id of fresh) this.reviewLaunchesInFlight.delete(id);
+    }
+  }
+
+  /** The body of a batch launch, with every id held in `reviewLaunchesInFlight`
+   * by the caller above. */
+  private async launchReviewBatchHeld(ids: string[]): Promise<void> {
     const cfg = getConfig();
     const requests = ids.map((id) => this.reviewById(id)).filter((r): r is ReviewRequest => !!r);
     if (!requests.length) return; // the queue moved on before the click landed

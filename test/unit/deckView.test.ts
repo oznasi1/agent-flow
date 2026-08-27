@@ -10117,3 +10117,62 @@ describe("switching the forge account", () => {
     expect(lastRunsPost().ghAccount).toEqual({ cli: "gh", login: "oznasi1", canSwitch: true });
   });
 });
+
+// ── Hardening: defensive guards appended by the deckView hardening pass ──────
+
+describe("hardening — review launch double-click", () => {
+  it("ignores a second launch for the same review while the first is still in flight", async () => {
+    // launchReview is where the worktree is cut and the window opened — the
+    // seconds it takes are exactly the window a double click lands in. Two
+    // launches of one PR would start two paid review sessions, and the
+    // deterministic reviewRunKey means the second writeRun orphans the first's
+    // worktree.
+    const releases: (() => void)[] = [];
+    h.launchReview.mockImplementation(
+      () => new Promise((res) => releases.push(() => res({ ok: true, runKey: "review-aws-ops-8491", provider: "claude-code" }))),
+    );
+    const p = await showAndWarm();
+    const first = p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    const second = p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    await settled();
+    // The first click's launch is still unresolved; the second click must not
+    // have started another one for the same PR.
+    expect(h.launchReview).toHaveBeenCalledTimes(1);
+    releases.forEach((r) => r());
+    await Promise.all([first, second]);
+    expect(h.launchReview).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a second batch launch naming the same review while the first is still asking", async () => {
+    // The batch always asks its mode question (batchReviewModes holds at least
+    // two entries), so the picker is the natural place the second click lands.
+    const picks: ((v: unknown) => void)[] = [];
+    window.showQuickPick.mockImplementation(() => new Promise((res) => picks.push(res)));
+    const p = await showAndWarm();
+    const first = p._fire({ type: "deck:reviewBatch", ids: ["CyberJackGit/aws-ops#8491"] });
+    const second = p._fire({ type: "deck:reviewBatch", ids: ["CyberJackGit/aws-ops#8491"] });
+    await settled();
+    // One question on screen, not a queued duplicate behind it.
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    picks.forEach((r) => r(undefined)); // dismiss — nothing launches either way
+    await Promise.all([first, second]);
+    expect(h.launchReview).not.toHaveBeenCalled();
+  });
+
+  it("a row launch already in flight also blocks a batch naming that id", async () => {
+    const releases: (() => void)[] = [];
+    h.launchReview.mockImplementation(
+      () => new Promise((res) => releases.push(() => res({ ok: true, runKey: "review-aws-ops-8491", provider: "claude-code" }))),
+    );
+    const p = await showAndWarm();
+    const row = p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    await settled();
+    const batch = p._fire({ type: "deck:reviewBatch", ids: ["CyberJackGit/aws-ops#8491"] });
+    await settled();
+    // The batch had nothing left to launch, so it never asked its mode question.
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    releases.forEach((r) => r());
+    await Promise.all([row, batch]);
+    expect(h.launchReview).toHaveBeenCalledTimes(1);
+  });
+});
