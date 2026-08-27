@@ -7311,15 +7311,17 @@ describe("take — in-flight guard", () => {
 });
 
 describe("takeTask — palette (command) failure surfacing", () => {
-  it("resolves without throwing and toasts when the ticket read fails on a command take", async () => {
-    // The palette command is registered as a bare handler in extension.ts, so a
+  it("toasts and logs when the ticket read fails on a command take, not just the host's generic error", async () => {
+    // The palette command is registered as a bare handler in extension.ts, so the
     // rethrow from a command-sourced take surfaces only VS Code's generic
-    // "command failed" notification — no toast, no output-channel line.
+    // "command failed" notification — no toast, no output-channel line. The panel
+    // must say what failed before the error propagates. (The rethrow itself is a
+    // released behaviour pinned by the Take-funnel tests above, so it stays.)
     clientStub.getDetail.mockRejectedValueOnce(
       parseJiraError(404, JSON.stringify({ errorMessages: ["Issue does not exist"] })),
     );
     const { provider, messages, logged } = setup();
-    await expect(provider.takeTask("BILL-1234", "command", ["acme-billing"])).resolves.toBeUndefined();
+    await expect(provider.takeTask("BILL-1234", "command", ["acme-billing"])).rejects.toThrow();
     expect(messages).toContainEqual(
       expect.objectContaining({ type: "toast", level: "error", message: expect.stringContaining("Issue does not exist") }),
     );
@@ -7332,14 +7334,74 @@ describe("takeTask — palette (command) failure surfacing", () => {
   it("re-gates the panel instead of toasting when a command take fails on a dead credential", async () => {
     clientStub.getDetail.mockRejectedValueOnce(new JiraAuthError("Jira auth failed (401). Sign in again."));
     const { provider, messages } = setup();
-    await expect(provider.takeTask("BILL-1234", "command", ["acme-billing"])).resolves.toBeUndefined();
+    await expect(provider.takeTask("BILL-1234", "command", ["acme-billing"])).rejects.toThrow();
     expect(messages).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
     expect(messages).not.toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
   });
 
-  it("keeps the card path byte-identical: a failing card take still rethrows to the dispatcher", async () => {
+  it("keeps the card path byte-identical: a failing card take rethrows without toasting here", async () => {
+    // The card path's dispatcher (onMessage's catch) owns its toast; takeTask
+    // itself must add nothing, or the user would see two.
     clientStub.getDetail.mockRejectedValueOnce(new Error("boom"));
-    const { provider } = setup();
+    const { provider, messages } = setup();
     await expect(provider.takeTask("BILL-1234", "card", ["acme-billing"])).rejects.toThrow("boom");
+    expect(messages).not.toContainEqual(expect.objectContaining({ type: "toast" }));
+  });
+});
+
+describe("fetch — overlapping fetches", () => {
+  it("lets the later-started lens win when an earlier fetch resolves last, and honors a subsequent sprint reorder", async () => {
+    // Without a sequence token, an older fetch resolving late posts its (stale)
+    // list over the newer one AND leaves lastFilter pointing at the newer lens —
+    // or, started the other way round, leaves lastFilter pointing at the OLD lens
+    // while the sprint list is on screen, so the user's next drag is silently
+    // discarded by the reorder guard.
+    let resolveBacklog!: (t: unknown) => void;
+    let resolveSprint!: (t: unknown) => void;
+    clientStub.fetchTasks
+      .mockImplementationOnce(() => new Promise((r) => { resolveBacklog = r; }))
+      .mockImplementationOnce(() => new Promise((r) => { resolveSprint = r; }));
+    const { send, messages, workspaceState } = setup();
+    const backlogFetch = send({ type: "fetch", filter: "backlog", size: "any" });
+    const sprintFetch = send({ type: "fetch", filter: "mysprint", size: "any" });
+    await vi.waitFor(() => expect(clientStub.fetchTasks).toHaveBeenCalledTimes(2));
+    // Out of order: the later-started (mysprint) fetch completes first…
+    resolveSprint([
+      { key: "A", summary: "", labels: [], components: [] },
+      { key: "B", summary: "", labels: [], components: [] },
+    ]);
+    await sprintFetch;
+    // …and the stale backlog fetch lands last.
+    resolveBacklog([{ key: "Z", summary: "", labels: [], components: [] }]);
+    await backlogFetch;
+    const taskPosts = messages.filter((m) => m.type === "tasks") as { filter: string; tasks: { key: string }[] }[];
+    expect(taskPosts.at(-1)!.filter).toBe("mysprint");
+    expect(taskPosts.at(-1)!.tasks.map((t) => t.key)).toEqual(["A", "B"]);
+    // The panel is on My sprint, so a drag there must be honored.
+    await send({ type: "reorder", order: ["B", "A"] });
+    expect(workspaceState.update).toHaveBeenLastCalledWith("agentFlow.sprintOrder", ["B", "A"]);
+  });
+
+  it("keeps lastFilter on the rendered lens when the stale fetch was the sprint one", async () => {
+    // The drag-discard direction: mysprint started first, backlog started second;
+    // the stale mysprint completion must not post its list over the backlog view.
+    let resolveSprint!: (t: unknown) => void;
+    let resolveBacklog!: (t: unknown) => void;
+    clientStub.fetchTasks
+      .mockImplementationOnce(() => new Promise((r) => { resolveSprint = r; }))
+      .mockImplementationOnce(() => new Promise((r) => { resolveBacklog = r; }));
+    const { send, messages, workspaceState } = setup();
+    const sprintFetch = send({ type: "fetch", filter: "mysprint", size: "any" });
+    const backlogFetch = send({ type: "fetch", filter: "backlog", size: "any" });
+    await vi.waitFor(() => expect(clientStub.fetchTasks).toHaveBeenCalledTimes(2));
+    resolveBacklog([{ key: "Z", summary: "", labels: [], components: [] }]);
+    await backlogFetch;
+    resolveSprint([{ key: "A", summary: "", labels: [], components: [] }]);
+    await sprintFetch;
+    const taskPosts = messages.filter((m) => m.type === "tasks") as { filter: string; tasks: { key: string }[] }[];
+    expect(taskPosts.at(-1)!.filter).toBe("backlog");
+    // Backlog is the rendered lens, so a (stale-webview) reorder must stay ignored.
+    await send({ type: "reorder", order: ["A"] });
+    expect(workspaceState.update).not.toHaveBeenCalledWith("agentFlow.sprintOrder", ["A"]);
   });
 });

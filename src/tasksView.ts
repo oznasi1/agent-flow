@@ -205,6 +205,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * the second one down. Checked and set synchronously at the top of `takeTask`,
    * before its first await, so the duplicate can never slip in between. */
   private readonly takesInFlight = new Set<string>();
+  /** Monotonic id of the latest-started `fetch`. Only the fetch holding the
+   * current value may post its list, prune the saved order, set `lastFilter`,
+   * or clear the loading bar — a slower, older fetch resolving after a newer one
+   * would otherwise render a stale lens the reorder guard then contradicts. */
+  private fetchSeq = 0;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -686,14 +691,20 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             return;
           }
           this.post({ type: "loading", loading: true });
+          // Overlapping fetches resolve in any order, and only the latest-started
+          // one may speak for the panel: a stale completion that posted its list,
+          // pruned the saved order, or set lastFilter would desync the rendered
+          // lens from the reorder guard below and silently discard the next drag.
+          const seq = ++this.fetchSeq;
           const provider = this.provider();
           // A webview left open across a `taskSource` change can send a filter the
           // current source no longer supports — clamp rather than ask for it. Both
           // `lastFilter` and the posted `filter` carry the clamped lens, so the tab
           // the webview highlights is the one that was actually fetched.
           const lens = effectiveFilter(m.filter, provider.caps.supportedFilters);
-          this.lastFilter = lens;
           const tasks = await provider.list(lens, m.size);
+          if (seq !== this.fetchSeq) break; // a newer fetch owns the panel now
+          this.lastFilter = lens;
           const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
           for (const t of tasks) t.services = this.guessServices(t, repos);
           let outgoing = tasks;
@@ -2216,10 +2227,11 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     } catch (e) {
       track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), failure_class: classifyFailure(e), task_fp: taskFp });
       // A palette Take has no webview dispatcher above it — extension.ts registers
-      // the command as a bare handler, so a rethrow surfaces only VS Code's generic
-      // "command failed" notification: no toast, no output-channel line, no re-gate.
-      // Give it the same user-facing handling the card path's dispatcher applies —
-      // the sign-in gate for a dead credential, a toast for everything else.
+      // the command as a bare handler, so for source "command" the rethrow below
+      // surfaces only VS Code's generic "command failed" notification: no toast,
+      // no output-channel line, no re-gate. Give it the same user-facing handling
+      // the card path's dispatcher applies — the sign-in gate for a dead
+      // credential, a toast for everything else — before the error propagates.
       if (source === "command") {
         const msg = e instanceof Error ? e.message : String(e);
         this.log(`take ${key}: failed — ${msg}`);
@@ -2228,7 +2240,6 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         } else {
           this.toast("error", msg);
         }
-        return;
       }
       throw e; // onMessage's existing catch (tasksView.ts:255) still owns the card path's user-facing handling.
     }
