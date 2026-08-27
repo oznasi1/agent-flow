@@ -429,9 +429,14 @@ export const ORCH_CSS = `
      quietest container this sheet has — a hairline and a 3% wash, no accent
      border. Capped and scrolling rather than growing: a flow with twenty rules
      must not push the graph it is describing off the bottom of the drawer. */
-  .orch-dry { flex: none; margin-bottom: 12px; padding: 9px 11px; max-height: 190px; overflow: auto;
+  .orch-dry { flex: none; margin-bottom: 12px; padding: 9px 11px;
+    display: flex; flex-direction: column; max-height: 210px;
     border: 1px solid var(--hair); border-radius: var(--r-card);
     background: color-mix(in srgb, var(--vscode-foreground) 3%, transparent); }
+  /* The rows are the only part that scrolls: the eyebrow above and the footer
+     below are both claims about the whole panel, and a footer that scrolls out of
+     sight is a disclaimer nobody reads (see the JSX's own comment). */
+  .orch-dry .rows { flex: 1; min-height: 0; overflow: auto; }
   .orch-dry .hd { display: flex; align-items: center; gap: 7px; margin-bottom: 7px;
     font-size: var(--t-micro); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
   .orch-dry .hd .sp { flex: 1; }

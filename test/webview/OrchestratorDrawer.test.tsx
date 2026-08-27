@@ -3515,6 +3515,19 @@ describe("the dry run", () => {
     expect(openDryRun().textContent).toMatch(/first spend still asks/i);
   });
 
+  it("keeps that disclaimer out of the scrolling region", () => {
+    // Structure, not layout, because jsdom has neither. The rows scroll and the
+    // footer must not: six rules already overflow the panel, and a disclaimer
+    // that scrolls out of sight is one nobody reads. Caught by screenshotting
+    // the real panel, which jsdom cannot do — so this pins the shape instead.
+    const panel = openDryRun();
+    const rows = panel.querySelector(".rows");
+    const ft = panel.querySelector(".ft");
+    expect(rows).not.toBeNull();
+    expect(ft).not.toBeNull();
+    expect(rows!.contains(ft!)).toBe(false);
+  });
+
   it("closes again", () => {
     render(<OrchestratorDrawer {...props({ flows: [wired()], runs: [merged()] })} />);
     const btn = screen.getByRole("button", { name: /what would fire/i });

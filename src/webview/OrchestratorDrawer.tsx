@@ -1264,6 +1264,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   </span>
                 )}
             </div>
+            {/* The rows scroll, the footer below does NOT. A flow with six rules
+                already overflows this panel's height, and the footer is the one
+                line that must never fall below a fold: it is what keeps the
+                verdict from being read as a promise. */}
+            <div className="rows">
             {dry.length === 0 ? (
               // Every rule has fired or failed — there is nothing an arm would do.
               // Said plainly rather than shown as an empty list, which reads as a
@@ -1288,6 +1293,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 </div>
               );
             })}
+            </div>
             {/* The honesty line, and not decoration. `previewFlow` answers for
                 `evaluateFlow` alone, which knows nothing about deckView's
                 per-target dedupe, its resume gate, or the ask on a flow's first
