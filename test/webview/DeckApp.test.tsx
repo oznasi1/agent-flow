@@ -285,6 +285,52 @@ describe("DeckApp", () => {
     expect(container.querySelector(".status.tone-attn")).not.toBeNull();
   });
 
+  // Coverage the design's own test plan called for and nothing pinned before
+  // this fix wave: "both label maps render the new arm, with and without
+  // pendingTool." Before this test, deleting the onTool(...) call from
+  // stateView's `blocked`/`stalled` arms would still pass the whole suite.
+  it("labels a blocked agent and names the tool it is waiting on", () => {
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "needs",
+      agent: { state: "blocked", lastActivityMs: Date.now(), slug: null, pendingTool: "Bash" },
+    })]));
+    expect(screen.getByText(/blocked · waiting on Bash ·/i)).toBeInTheDocument();
+    expect(container.querySelector(".status.tone-attn")).not.toBeNull();
+  });
+
+  it("labels a blocked agent with no dangling separator when the tool name could not be read", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "needs",
+      agent: { state: "blocked", lastActivityMs: Date.now(), slug: null, pendingTool: null },
+    })]));
+    // No "waiting on" phrase, and no leftover " · ·" from a blank onTool() result.
+    expect(screen.queryByText(/waiting on/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/undefined/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^blocked ·/i)).toBeInTheDocument();
+    expect(screen.queryByText(/blocked · ·/i)).not.toBeInTheDocument();
+  });
+
+  it("labels a stalled agent and names its tool too", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "needs",
+      agent: { state: "stalled", lastActivityMs: Date.now(), slug: null, pendingTool: "Agent" },
+    })]));
+    expect(screen.getByText(/stalled · waiting on Agent ·/i)).toBeInTheDocument();
+  });
+
+  it("labels a stalled agent with no dangling separator when there is no pendingTool", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus({
+      column: "needs",
+      agent: { state: "stalled", lastActivityMs: Date.now(), slug: null, pendingTool: undefined },
+    })]));
+    expect(screen.queryByText(/waiting on/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^stalled ·/i)).toBeInTheDocument();
+  });
+
   it("shows the branch on the card's signal line, and a launched-ago time in its drawer", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));

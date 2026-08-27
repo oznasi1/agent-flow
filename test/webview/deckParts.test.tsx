@@ -62,3 +62,18 @@ describe("AgentsRow model", () => {
     expect(container.querySelector(".ag-model .plus")).toBeNull();
   });
 });
+
+describe("AgentsRow blocked state", () => {
+  // AGENT_STATE's exhaustive-over-the-union map is what makes TypeScript force
+  // a new arm the moment AgentState grows — but nothing pinned the arm itself
+  // (text, tone) until this test, so a typo here (or a regression to a plain
+  // "attn" -> "danger" tone) would have passed the whole suite.
+  it("renders the blocked arm bare, with the attention tone, in this fixed-width slot", () => {
+    const { container } = render(<AgentsRow agents={[mkAgent("svc-7e", "blocked")]} defaultOpen />);
+    const stateEl = container.querySelector(".ag-state") as HTMLElement;
+    // Per-session row deliberately never calls onTool (see its doc comment in
+    // deckParts.tsx) — it stays "blocked", never "blocked · waiting on Bash".
+    expect(stateEl.textContent).toBe("blocked");
+    expect(stateEl.className).toContain("tone-attn");
+  });
+});
