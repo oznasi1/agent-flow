@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.50.0] — 2026-08-27
+
 ### Changed
 
 - **Only ticket-confirmed repos attach by default.** A repo the ticket merely
