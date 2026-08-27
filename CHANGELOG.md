@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.54.0] — 2026-08-28
+
 ### Added
 
 - **Every condition is now editable in the orchestrator drawer.** `branch CI passed`,
