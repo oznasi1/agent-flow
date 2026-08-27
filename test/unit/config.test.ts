@@ -1360,3 +1360,78 @@ describe("forge-flavoured shipped prompts", () => {
     expect(shippedReviewRequestModes("wat")).toBe(DEFAULT_REVIEW_REQUEST_MODES);
   });
 });
+
+describe("getConfig — non-numeric setting values fall back to the documented default", () => {
+  // A settings.json hand-edit can hold any JSON type; `c.get<number>` is a cast,
+  // not a check, and `Math.max(1, "six")` is NaN. NaN then poisons every
+  // comparison downstream — `authorising > cfg.batchLaunchConfirmThreshold` is
+  // always false, so the batch-launch safety modal silently never appears.
+  it("batchLaunchConfirmThreshold: a string value reads as the default 6", () => {
+    setConfig({ batchLaunchConfirmThreshold: "six" });
+    expect(getConfig().batchLaunchConfirmThreshold).toBe(6);
+  });
+
+  it("batchLaunchConfirmThreshold: NaN reads as the default 6", () => {
+    setConfig({ batchLaunchConfirmThreshold: NaN });
+    expect(getConfig().batchLaunchConfirmThreshold).toBe(6);
+  });
+
+  it("prFactsTtlSeconds: a string value reads as the default 120", () => {
+    setConfig({ prFactsTtlSeconds: "two minutes" });
+    expect(getConfig().prFactsTtlSeconds).toBe(120);
+  });
+
+  it("reviewRequestsTtlSeconds: a string value reads as the default 300", () => {
+    setConfig({ reviewRequestsTtlSeconds: "later" });
+    expect(getConfig().reviewRequestsTtlSeconds).toBe(300);
+  });
+
+  it("retire windows: string values read as their defaults", () => {
+    setConfig({
+      retireFinishedAfterHours: "a day",
+      retireAbandonedAfterDays: "a week",
+      retireClosedAfterHours: "24h",
+      retireInPlaceAfterHours: "never",
+    });
+    const c = getConfig();
+    expect(c.retireFinishedAfterHours).toBe(24);
+    expect(c.retireAbandonedAfterDays).toBe(7);
+    expect(c.retireClosedAfterHours).toBe(24);
+    expect(c.retireInPlaceAfterHours).toBe(0);
+  });
+
+  it("Infinity is refused too — the fallback is Number.isFinite, not typeof", () => {
+    setConfig({ prFactsTtlSeconds: Infinity });
+    expect(getConfig().prFactsTtlSeconds).toBe(120);
+  });
+
+  // The clamps must survive the helper unchanged: a finite but out-of-range
+  // number still clamps to the floor rather than falling back to the default.
+  it("keeps every existing floor clamp for finite out-of-range numbers", () => {
+    setConfig({
+      batchLaunchConfirmThreshold: 0,
+      prFactsTtlSeconds: 1,
+      reviewRequestsTtlSeconds: 5,
+      retireFinishedAfterHours: -5,
+      retireAbandonedAfterDays: -1,
+      retireClosedAfterHours: -3,
+      retireInPlaceAfterHours: -2,
+    });
+    const c = getConfig();
+    expect(c.batchLaunchConfirmThreshold).toBe(1);
+    expect(c.prFactsTtlSeconds).toBe(30);
+    expect(c.reviewRequestsTtlSeconds).toBe(60);
+    expect(c.retireFinishedAfterHours).toBe(0);
+    expect(c.retireAbandonedAfterDays).toBe(0);
+    expect(c.retireClosedAfterHours).toBe(0);
+    expect(c.retireInPlaceAfterHours).toBe(0);
+  });
+
+  it("still honors in-range explicit numbers through the finite check", () => {
+    setConfig({ batchLaunchConfirmThreshold: 3, prFactsTtlSeconds: 300, retireInPlaceAfterHours: 0 });
+    const c = getConfig();
+    expect(c.batchLaunchConfirmThreshold).toBe(3);
+    expect(c.prFactsTtlSeconds).toBe(300);
+    expect(c.retireInPlaceAfterHours).toBe(0);
+  });
+});
