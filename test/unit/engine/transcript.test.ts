@@ -185,6 +185,62 @@ describe("deriveActivity", () => {
     expect(deriveActivity([userMsg, asstToolNamed("Bash")], NOW - 60_000, NOW).state).toBe("stalled");
     expect(deriveActivity([userMsg, asstToolNamed("AskUserQuestion")], NOW - 60_000, NOW).state).toBe("stalled");
   });
+
+  // Thresholds are measured, not assumed — see the spec's calibration table.
+  // Each pair below pins BOTH sides of a ceiling, because a ceiling asserted
+  // from one side only passes against a rule that ignores the tool entirely.
+  it.each([
+    // tool,               justUnder, justOver
+    ["AskUserQuestion",    null,      46_000],
+    ["ExitPlanMode",       null,      46_000],
+    ["Edit",               50_000,    61_000],
+    ["Write",              50_000,    61_000],
+    ["NotebookEdit",       50_000,    61_000],
+    ["Bash",               719_000,   721_000],
+  ])("%s is stalled under its ceiling and blocked over it", (tool, under, over) => {
+    if (under !== null) {
+      expect(deriveActivity([userMsg, asstToolNamed(tool)], NOW - under, NOW).state).toBe("stalled");
+    }
+    expect(deriveActivity([userMsg, asstToolNamed(tool)], NOW - over, NOW).state).toBe("blocked");
+  });
+
+  it("still reads working inside the 45s window, whatever the tool", () => {
+    expect(deriveActivity([userMsg, asstToolNamed("AskUserQuestion")], NOW - 10_000, NOW).state).toBe("working");
+    expect(deriveActivity([userMsg, asstToolNamed("Edit")], NOW - 44_000, NOW).state).toBe("working");
+  });
+
+  // Gated but UNBOUNDED: a backgrounded subagent legitimately pends for 46
+  // minutes (measured max 2,775s). Any ceiling here would flag every one of them.
+  it.each(["Agent", "Workflow", "TaskOutput", "Monitor", "mcp__github__merge_pull_request"])(
+    "%s stays stalled however long it pends — no ceiling can be honest",
+    (tool) => {
+      expect(deriveActivity([userMsg, asstToolNamed(tool)], NOW - 3_000_000, NOW).state).toBe("stalled");
+    },
+  );
+
+  // Bounded but NOT GATED: a hung read is a wedged host, not a question. Calling
+  // it blocked would claim somebody is being asked something when nobody is.
+  it.each(["Read", "Grep", "Glob", "TodoWrite"])("%s stays stalled — nobody is being asked anything", (tool) => {
+    expect(deriveActivity([userMsg, asstToolNamed(tool)], NOW - 3_000_000, NOW).state).toBe("stalled");
+  });
+
+  it("falls through to stalled when the tool name cannot be read", () => {
+    // The additive property the whole ungated ship rests on: an unreadable line
+    // derives exactly what it derived before this feature existed.
+    expect(deriveActivity([userMsg, asstTool], NOW - 3_000_000, NOW).state).toBe("stalled");
+  });
+
+  it("carries the tool name onto the blocked reading, so the card can say why", () => {
+    const a = deriveActivity([userMsg, asstToolNamed("Bash")], NOW - 800_000, NOW);
+    expect(a.state).toBe("blocked");
+    expect(a.pendingTool).toBe("Bash");
+  });
+
+  it("leaves a quiet-but-alive transcript reading idle — no pending tool, nothing owed", () => {
+    // The Done-when's second half. A transcript whose last line is a user line
+    // has work owed but no tool outstanding, so no class can apply.
+    expect(deriveActivity([asstTool, userMsg], NOW - 3_000_000, NOW).state).toBe("idle");
+  });
 });
 
 describe("readAgentActivity", () => {
