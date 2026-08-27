@@ -13,11 +13,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   been a deliberate hedge — a tool call outstanding for over 45 seconds is a
   permission prompt *or* a long command, and the transcript says the same thing
   for both. Where the pending tool's name settles it, the card now reads
-  **blocked** and names what it is waiting on: `blocked · waiting on Bash · 12m
+  **blocked** and names what it is waiting on: `blocked · waiting on Bash · 20m
   ago`. That covers a pending question, a plan awaiting approval, and an edit or
   command left at the prompt. Every other tool keeps reading `stalled`, which now
   names its tool too — a backgrounded session can legitimately sit for
   three quarters of an hour, and nothing pretends to know better.
+
+### Changed
+
+- **Two orchestrator conditions no longer fire on a session sitting at a
+  permission prompt.** `blocked` is deliberately excluded from the idle-like
+  states, because auto-nudging past a modal dialog would be worse than doing
+  nothing — but that means an armed **"Agent idle over N minutes"** flow
+  (`agent-idle-over`) now stays quiet on exactly the case it used to catch: a
+  stale session with a gated tool (`AskUserQuestion`, `ExitPlanMode`, `Edit`,
+  `Write`, `NotebookEdit`, `Bash`) still pending reads `blocked`, not `stalled`,
+  and `blocked` is not idle-like. **"Agent ended turn"** (`agent-ended-turn`)
+  can also go quiet on a place holding both a session that ended its turn and
+  one frozen at a gated tool, since `blocked` now outranks "ended turn" in the
+  reduction and wins the card. There is no `blocked` condition to arm instead —
+  that is deliberately its own future task — so if either flow catches a stuck
+  session for you today, treat this as a heads-up to watch the board directly
+  for a `blocked` card rather than trusting the flow to page you about it.
 
 ### Fixed
 
@@ -28,7 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   sidebar badge to match, six seconds at a time. The read now reports whether it
   succeeded, and a card is only called exited when its process is known to be
   gone. Expect one or two cards that used to read `exited` to read `working`,
-  `idle` or `stalled` instead.
+  `idle` or `stalled` instead — and, less often, the reverse: a run whose only
+  live signal is a stale session frozen at a gated tool now outranks one that
+  merely ended its turn, so a card that used to settle on "ended turn" can now
+  read `blocked` and, with no live session behind it, promote straight to
+  `exited`.
 
 ## [0.51.0] — 2026-08-27
 
