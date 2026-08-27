@@ -48,6 +48,17 @@ const flowWith = (nodes: FlowNode[], edges: FlowEdge[], armed = true): Flow =>
 const run = (flow: Flow, statuses: RunStatus[], maxLaunches?: number) =>
   evaluateFlow({ flow, statuses, nowMs: NOW, maxLaunches });
 
+describe("evaluateFlow — a condition kind this build does not know", () => {
+  it("reads a newer build's unknown kind as not met, and does not throw", () => {
+    // The forward-compat contract the store already tests from its side: an
+    // unknown `cond.kind` is KEPT on read, so an armed flow written by a newer
+    // build hands this pass one every 6s. It must wait — not fire, not crash.
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { cond: { kind: "moon-is-full" } as unknown as FlowEdge["cond"] })]);
+    expect(run(flow, [status("PROJ-1", { merged: true })]).fired).toEqual([]);
+  });
+});
+
 describe("evaluateFlow — arming and the latch", () => {
   it("yields nothing for a disarmed flow, even when the condition is met", () => {
     const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z")], false);
