@@ -199,6 +199,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** The last attention count, held so a tick that fires before VS Code has
    * resolved this view is not simply lost — see `setAttention`. */
   private attention = 0;
+  /** Task keys with a Take currently running. A double-click on a card's Take (or a
+   * card Take racing the palette command) fired two whole takes for one ticket —
+   * two windows, two worktrees — whenever the settings needed no QuickPick to slow
+   * the second one down. Checked and set synchronously at the top of `takeTask`,
+   * before its first await, so the duplicate can never slip in between. */
+  private readonly takesInFlight = new Set<string>();
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -2096,6 +2102,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * palette. It is deliberately not inferred from `preselected`: a one-click Take
    * from a collapsed card sends no selection and is still a card Take. */
   public async takeTask(key: string, source: TakeSource, preselected?: string[]): Promise<void> {
+    // Synchronous, ahead of every await: a second Take for a key already being
+    // taken is a duplicate gesture, not a second intent — ignore it rather than
+    // open a second window and a second set of worktrees for one ticket.
+    if (this.takesInFlight.has(key)) {
+      this.log(`take ${key}: already in flight — ignoring the duplicate`);
+      return;
+    }
+    this.takesInFlight.add(key);
+    try {
+      await this.takeTaskGuarded(key, source, preselected);
+    } finally {
+      this.takesInFlight.delete(key);
+    }
+  }
+
+  private async takeTaskGuarded(key: string, source: TakeSource, preselected?: string[]): Promise<void> {
     const cfg = getConfig();
     // Ahead of take_started deliberately: the take never begins, so the funnel gets
     // neither a start nor a terminator rather than a phantom "cancelled".

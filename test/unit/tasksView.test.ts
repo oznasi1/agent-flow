@@ -7245,3 +7245,67 @@ describe("setAttention", () => {
     expect(second.badge).toEqual({ value: 1, tooltip: "1 session is waiting on you — open the Deck" });
   });
 });
+
+describe("take — in-flight guard", () => {
+  it("a double-fired Take for one key launches once, not two windows", async () => {
+    // A double-click on the card's Take with openIn:"new-window" and worktree
+    // settings that need no QuickPick fires two whole takes for one ticket —
+    // two windows, two worktrees. The first take holds the key while it runs.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    let release!: () => void;
+    vi.mocked(openWorkspace).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({
+              mode: "per-window",
+              workspaceFile: undefined,
+              briefs: [],
+              opened: ["/repos/acme-billing"],
+              remoteControl: false,
+              provider: "claude-code",
+            } as never);
+        }),
+    );
+    const { send } = setup();
+    const first = send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    const second = send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    await second; // the duplicate must return without launching anything
+    // The first take is still mid-flight — wait until it reaches the (deferred)
+    // window open, then let it finish.
+    await vi.waitFor(() => expect(vi.mocked(openWorkspace)).toHaveBeenCalled());
+    release();
+    await first;
+    expect(vi.mocked(openWorkspace)).toHaveBeenCalledTimes(1);
+  });
+
+  it("covers the palette command source too, and releases the key when the take settles", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    let release!: () => void;
+    vi.mocked(openWorkspace).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({
+              mode: "per-window",
+              workspaceFile: undefined,
+              briefs: [],
+              opened: ["/repos/acme-billing"],
+              remoteControl: false,
+              provider: "claude-code",
+            } as never);
+        }),
+    );
+    const { provider } = setup();
+    const first = provider.takeTask("BILL-1234", "command", ["acme-billing"]);
+    const dup = provider.takeTask("BILL-1234", "command", ["acme-billing"]);
+    await dup;
+    await vi.waitFor(() => expect(vi.mocked(openWorkspace)).toHaveBeenCalled());
+    release();
+    await first;
+    expect(vi.mocked(openWorkspace)).toHaveBeenCalledTimes(1);
+    // Settled: the key is released, so a deliberate second take still works.
+    await provider.takeTask("BILL-1234", "command", ["acme-billing"]);
+    expect(vi.mocked(openWorkspace)).toHaveBeenCalledTimes(2);
+  });
+});
