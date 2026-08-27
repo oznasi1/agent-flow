@@ -68,6 +68,14 @@ describe("deriveBucket", () => {
       prOpen: false, prBlocked: false, prReady: false })).toBe("needs");
   });
 
+  it("routes blocked to needs — a permission prompt is a human being asked something", () => {
+    expect(deriveBucket({ agentState: "blocked" })).toBe("needs");
+  });
+
+  it("lets a landed merge outrank blocked, like every other agent state", () => {
+    expect(deriveBucket({ agentState: "blocked", prMerged: true })).toBe("merge");
+  });
+
   it("still does not route an idle agent to needs", () => {
     expect(deriveBucket({ ticketStatus: null, agentState: "idle",
       prOpen: false, prBlocked: false, prReady: false })).not.toBe("needs");

@@ -69,9 +69,15 @@ function isReviewStatus(name?: string | null): boolean {
  */
 export function deriveBucket(i: BucketInput): DeckColumn {
   if (i.prMerged) return "merge";
-  // stalled and exited join needs-you here: all three mean a human has to do
-  // something, and all three used to arrive as "idle" and land in progress.
-  if (i.agentState === "needs-you" || i.agentState === "stalled" || i.agentState === "exited") {
+  // blocked joins needs-you, stalled and exited here: all four mean a human has
+  // to do something. blocked is the one that says which human question, and it
+  // is split out of stalled rather than added beside it — see deriveActivity.
+  if (
+    i.agentState === "blocked" ||
+    i.agentState === "needs-you" ||
+    i.agentState === "stalled" ||
+    i.agentState === "exited"
+  ) {
     return "needs";
   }
   // Same rung a blocked PR always held — above the merge you have yet to press,

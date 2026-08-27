@@ -85,12 +85,14 @@ export interface FlowCommand {
 
 // ── The Deck: in-flight orchestration board ─────────────────────────────────────
 
-/** `stalled` and `exited` both mean "look at this", and both were `idle` before:
- * an agent waiting at a permission prompt and one that died mid-tool used to
- * render in the calmest tone on the board. `stalled` is derived from the
- * transcript alone; `exited` needs session liveness and so is assigned by
+/** `blocked`, `stalled` and `exited` all mean "look at this", and all three were
+ * `idle` before: an agent waiting at a permission prompt and one that died
+ * mid-tool used to render in the calmest tone on the board. `stalled` and
+ * `blocked` are derived from the transcript alone — `blocked` where the pending
+ * tool's name settles what `stalled` can only hedge about (see
+ * `deriveActivity`); `exited` needs session liveness and so is assigned by
  * `buildRunStatus` (see AgentActivity.midWork). */
-export type AgentState = "working" | "needs-you" | "stalled" | "exited" | "idle" | "unknown";
+export type AgentState = "working" | "needs-you" | "blocked" | "stalled" | "exited" | "idle" | "unknown";
 
 /** The board column a run lands in, in board order. Attention rises left to
  * right and ends at the merge: something is running, something wants you,

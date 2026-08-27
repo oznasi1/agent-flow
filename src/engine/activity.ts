@@ -26,7 +26,13 @@ import { AgentActivity, AgentState } from "../types";
 // stalled — a turn that handed control back is more actionable than a tool that
 // has not returned. `exited` is assigned by buildRunStatus AFTER this reduction,
 // so it never competes as an input; its rank exists only for totality.
+//
+// blocked outranks needs-you for the same reason needs-you outranks working: a
+// session stopped at a permission prompt cannot make progress at all, and a run
+// holding one alongside a session that ended its turn is a run about the frozen
+// one. Letting the polite session bury it is the identical bug.
 const STATE_RANK: Record<AgentState, number> = {
+  blocked: 6,
   "needs-you": 5,
   stalled: 4,
   exited: 3,
@@ -48,7 +54,10 @@ export const UNKNOWN_ACTIVITY: AgentActivity = { state: "unknown", lastActivityM
  * it silently drops back to pre-widening behaviour the next time the union grows
  * — see conditions.ts's `agent-idle-over`, which did exactly that until this set
  * was introduced. `needs-you`, `working` and `unknown` are deliberately absent:
- * each already means something an idle-style rule must not fire on. */
+ * each already means something an idle-style rule must not fire on. `blocked`
+ * must not join this set either: a session waiting on your approval is not
+ * idle, and `agent-idle-over` firing on it would auto-nudge past a modal
+ * dialog. */
 export const IDLE_LIKE: ReadonlySet<AgentState> = new Set<AgentState>(["idle", "stalled", "exited"]);
 
 /** Is this state "idle-like" — see `IDLE_LIKE` above for what that means and why

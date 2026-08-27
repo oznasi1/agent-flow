@@ -22,7 +22,7 @@ import { JUST_LAUNCHED_MS } from "./visibility";
 
 /** `deriveBucket`'s needs rung, named once so the cost ladder and its test agree. */
 export const NEEDS_STATES: ReadonlySet<AgentState> = new Set<AgentState>([
-  "needs-you", "stalled", "exited",
+  "blocked", "needs-you", "stalled", "exited",
 ]);
 
 export interface AttentionDeps {
