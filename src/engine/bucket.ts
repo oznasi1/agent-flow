@@ -16,7 +16,7 @@ function isReviewStatus(name?: string | null): boolean {
 
 /**
  * Decide which board column a run belongs in. Precedence, most-decisive first:
- *   the landed merge → an agent waiting on you (needs-you, stalled, exited) → a
+ *   the landed merge → an agent waiting on you (needs-you, blocked, stalled, exited) → a
  *   blocked PR → the merge you have yet to press → the live "working" signal →
  *   review (an open PR / Jira review status) → else "progress" as the in-flight
  *   catch-all.

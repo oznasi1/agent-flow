@@ -42,6 +42,8 @@ export interface SessionsProbe {
 /**
  * `readOpenSessions`, plus whether the directory could be read. See
  * `SessionsProbe.readable` for why the difference is worth a return type.
+ * The narrowing rules applied to each record — skip on parse failure, drop a
+ * dead pid, keep an absent `kind` — are documented on `readOpenSessions` below.
  */
 export function readOpenSessionsProbe(dir: string): SessionsProbe {
   let names: string[];
@@ -83,8 +85,9 @@ export function readOpenSessionsProbe(dir: string): SessionsProbe {
  * An absent `kind` is kept on purpose: a future Claude Code that stops writing
  * the field should degrade to showing sessions, not to showing none.
  *
- * Best-effort throughout — an unreadable directory yields [] and the Deck falls
- * back to the board it renders today.
+ * Best-effort throughout — an unreadable directory yields [] with no way for
+ * the caller to tell that from a genuinely empty one. A caller that needs to
+ * tell the two apart wants `readOpenSessionsProbe` instead.
  */
 export function readOpenSessions(dir: string): OpenSession[] {
   return readOpenSessionsProbe(dir).sessions;
