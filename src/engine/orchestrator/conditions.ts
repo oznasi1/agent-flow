@@ -173,6 +173,16 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
         "evalCond cannot answer command-succeeded: it is decided in evaluate.ts's " +
           "commandSucceeded from the whole Flow, never from one place's CondContext.",
       );
+    default:
+      // A kind this build does not know — a flow file written by a NEWER build.
+      // `store.ts`'s `validEdge` deliberately KEEPS such an edge so the rule
+      // survives a downgrade, which means an armed flow hands this switch one
+      // every 6s pass. Not-met is the forward-compatible answer this arm used to
+      // give implicitly, by falling off the switch to `undefined`; it is explicit
+      // now because two arms above throw on purpose, and a future
+      // `default: throw` would crash every pass in every window over one
+      // newer-build rule. Waiting costs nothing; crashing stops every flow.
+      return false;
   }
 }
 

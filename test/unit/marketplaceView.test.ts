@@ -237,3 +237,67 @@ describe("MarketplacePanel file preview", () => {
     expect(posts(p).at(-1).truncated).toBe(false);
   });
 });
+
+describe("MarketplacePanel post-after-dispose", () => {
+  it("mkt:copy still resolves when the panel was disposed during the clipboard await", async () => {
+    // A disposed panel's postMessage throws synchronously — the same race
+    // deckView's post() already absorbs: the user closes the panel while the
+    // `await clipboard.writeText` is still in flight, and the success toast
+    // lands on a dead webview. That must not become an unhandled rejection.
+    show();
+    const p = lastPanel();
+    p.webview.postMessage.mockImplementation(() => {
+      throw new Error("Webview is disposed");
+    });
+    await expect(p._fire({ type: "mkt:copy", text: "/plugin install x@y" })).resolves.toBeUndefined();
+    expect(env.clipboard.writeText).toHaveBeenCalledWith("/plugin install x@y");
+  });
+
+  it("a scan render onto a disposed panel resolves too", async () => {
+    show();
+    const p = lastPanel();
+    p.webview.postMessage.mockImplementation(() => {
+      throw new Error("Webview is disposed");
+    });
+    await expect(p._fire({ type: "mkt:ready" })).resolves.toBeUndefined();
+  });
+});
+
+describe("MarketplacePanel message handling never dies silently", () => {
+  it("toasts an error when a listed file was deleted between scan and click", async () => {
+    // The file passed the allow-list at scan time but is gone by click time:
+    // openTextDocument rejects, and the discarded promise used to make the row
+    // do nothing forever with nothing logged.
+    const log = vi.fn();
+    MarketplacePanel.show(fakeContext().context as any, log);
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    workspace.openTextDocument.mockRejectedValue(new Error("cannot open file:///gone.md"));
+    await expect(p._fire({ type: "mkt:open", file: view().assets[0].file })).resolves.toBeUndefined();
+    expect(posts(p).some((m) => m.type === "toast" && m.level === "error")).toBe(true);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("cannot open"));
+  });
+
+  it("ignores an openExternal with no url instead of parsing undefined", async () => {
+    // The test mock's Uri.parse is lenient; the real one throws on undefined.
+    // What is pinned here is the guard: no url, no call.
+    show();
+    const p = lastPanel();
+    await expect(p._fire({ type: "openExternal" })).resolves.toBeUndefined();
+    expect(env.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("ignores a mkt:copy with no text rather than writing undefined to the clipboard", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:copy" });
+    expect(env.clipboard.writeText).not.toHaveBeenCalled();
+  });
+
+  it("logs an unknown message type instead of letting it vanish", async () => {
+    const log = vi.fn();
+    MarketplacePanel.show(fakeContext().context as any, log);
+    await lastPanel()._fire({ type: "mkt:definitely-not-a-thing" });
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("mkt:definitely-not-a-thing"));
+  });
+});

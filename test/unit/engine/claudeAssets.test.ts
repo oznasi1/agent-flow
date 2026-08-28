@@ -462,6 +462,34 @@ describe("scanClaudeAssets", () => {
   });
 });
 
+describe("scanClaudeAssets — malformed settings-level hooks", () => {
+  it("survives an entry whose inner hooks is an object, keeping the rest of the scan", () => {
+    // The outer Array.isArray guards only the per-event list; for..of over an
+    // object inner `hooks` threw — blanking the whole Marketplace scan and
+    // breaking scanClaudeAssets' never-throws contract.
+    const tree = fixture();
+    tree[`${CLAUDE}/settings.json`] = JSON.stringify({
+      hooks: {
+        SessionStart: [{ hooks: {} }],
+        PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "ok.sh" }] }],
+      },
+    });
+    const v = scan(tree);
+    expect(v.plugins.some((p) => p.name === "installed-one")).toBe(true);
+    const hooks = v.assets.filter((a) => a.type === "hook");
+    expect(hooks).toHaveLength(1);
+    expect(hooks[0]).toMatchObject({ name: "PreToolUse", description: "ok.sh" });
+  });
+
+  it("survives an inner hooks that is a number", () => {
+    const tree = fixture();
+    tree[`${CLAUDE}/settings.json`] = JSON.stringify({ hooks: { SessionStart: [{ hooks: 5 }] } });
+    const v = scan(tree);
+    expect(v.assets.filter((a) => a.type === "hook")).toEqual([]);
+    expect(v.plugins.some((p) => p.name === "installed-one")).toBe(true);
+  });
+});
+
 describe("scanClaudeAssets categories", () => {
   const tree = (over: Record<string, string> = {}) => ({
     "/h/.claude/plugins/known_marketplaces.json": JSON.stringify({

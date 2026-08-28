@@ -151,3 +151,78 @@ describe("Forge.branchCi", () => {
     expect(cwd).toBe("/r/api");
   });
 });
+
+describe("Forge.branchCi — the GitHub cwd pin", () => {
+  // The cwd pin above only covered gitlab. gh's graphql call resolves its
+  // {owner}/{repo} placeholders from the cwd's git remote, so a cwd regression
+  // here would silently query ANOTHER repo's CI and grade the gate on it.
+  it("runs the GitHub call in the given repo directory", async () => {
+    let cwd = "";
+    const run: Runner = async (_f, _a, opts) => {
+      cwd = opts.cwd;
+      return JSON.stringify({ data: { repository: { ref: { target: { statusCheckRollup: { state: "SUCCESS" } } } } } });
+    };
+    expect(await resolveForge("github", () => {}, run).branchCi("/r/api", "main")).toBe("passed");
+    expect(cwd).toBe("/r/api");
+  });
+});
+
+describe("the Bitbucket forge's wiring, end to end through the registry", () => {
+  /** A scripted atlassian-cli plus git: answers the api-mode probe as a
+   * passthrough build, hands back the repo's Bitbucket remote, empty PR
+   * searches, and one successful pipeline — recording every call. */
+  function scripted() {
+    const calls: { file: string; args: string[]; cwd: string }[] = [];
+    let probes = 0;
+    const run: Runner = async (file, args, opts) => {
+      calls.push({ file, args, cwd: opts.cwd });
+      if (file === "git") return "git@bitbucket.org:acme/api.git\n";
+      if (args[0] === "bb" && args[1] === "api" && args[2] === "--help") {
+        probes++;
+        return "Usage: atlassian-cli bb api <PATH>";
+      }
+      if (args[0] === "bb" && args[1] === "api" && args[2].includes("/pipelines?")) {
+        return JSON.stringify({ values: [{ state: { name: "COMPLETED", result: { name: "SUCCESSFUL" } } }] });
+      }
+      return JSON.stringify({ values: [] }); // both PR searches: no PR
+    };
+    return { run, calls, probes: () => probes };
+  }
+
+  it("probes the CLI's mode exactly once across resolveCaps, a PR fetch, and branch CI", async () => {
+    const { run, probes } = scripted();
+    const f = resolveForge("bitbucket", () => {}, run);
+    await expect(f.resolveCaps?.()).resolves.toEqual({ changesRequested: true, reviewSearch: false, accounts: false });
+    await expect(f.prs.fetch("/r/api", "main", "KEY-1")).resolves.toEqual({ ok: true, facts: null });
+    await expect(f.branchCi("/r/api", "main")).resolves.toBe("passed");
+    // Memoized apiMode: providers and resolveCaps share one probe — otherwise
+    // every card on every 6s tick would spawn the --help call again.
+    expect(probes()).toBe(1);
+  });
+
+  it("hands branchCi (repoPath, branch) unswapped — repoPath as cwd, branch in the query", async () => {
+    const { run, calls } = scripted();
+    const f = resolveForge("bitbucket", () => {}, run);
+    await f.branchCi("/r/api", "feat/thing");
+    const pipeline = calls.find((c) => c.args[0] === "bb" && c.args[1] === "api" && c.args[2]?.includes("/pipelines?"));
+    expect(pipeline).toBeDefined();
+    expect(pipeline?.cwd).toBe("/r/api");
+    expect(pipeline?.args[2]).toContain(`target.ref_name=${encodeURIComponent("feat/thing")}`);
+    expect(pipeline?.args[2]).toContain("/2.0/repositories/acme/api/pipelines?");
+    // The git remote read happens in the repo too — that is where the remote lives.
+    const git = calls.find((c) => c.file === "git");
+    expect(git?.cwd).toBe("/r/api");
+  });
+
+  it("resolveCaps never rejects when the probe itself rejects — it answers the weaker mode", async () => {
+    const run: Runner = async () => {
+      throw new Error("spawn atlassian-cli ENOENT");
+    };
+    const f = resolveForge("bitbucket", () => {}, run);
+    await expect(f.resolveCaps?.()).resolves.toEqual({
+      changesRequested: false,
+      reviewSearch: false,
+      accounts: false,
+    });
+  });
+});

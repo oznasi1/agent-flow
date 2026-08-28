@@ -199,6 +199,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   /** The last attention count, held so a tick that fires before VS Code has
    * resolved this view is not simply lost — see `setAttention`. */
   private attention = 0;
+  /** Task keys with a Take currently running. A double-click on a card's Take (or a
+   * card Take racing the palette command) fired two whole takes for one ticket —
+   * two windows, two worktrees — whenever the settings needed no QuickPick to slow
+   * the second one down. Checked and set synchronously at the top of `takeTask`,
+   * before its first await, so the duplicate can never slip in between. */
+  private readonly takesInFlight = new Set<string>();
+  /** Monotonic id of the latest-started `fetch`. Only the fetch holding the
+   * current value may post its list, prune the saved order, set `lastFilter`,
+   * or clear the loading bar — a slower, older fetch resolving after a newer one
+   * would otherwise render a stale lens the reorder guard then contradicts. */
+  private fetchSeq = 0;
 
   constructor(
     private readonly context: vscode.ExtensionContext,
@@ -649,9 +660,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
-    const cfg = getConfig();
-    this.log(`webview → host: ${m.type}`);
     try {
+      // Inside the try, not above it: a disposed output channel makes `this.log`
+      // throw, and getConfig can throw on a malformed settings value. Either
+      // landing outside the try rejected out of the message handler unhandled —
+      // nothing posted, no error surfaced, and any spinner already on stayed on.
+      const cfg = getConfig();
+      this.log(`webview → host: ${m.type}`);
       switch (m.type) {
         case "ready":
         case "retry": {
@@ -680,14 +695,20 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             return;
           }
           this.post({ type: "loading", loading: true });
+          // Overlapping fetches resolve in any order, and only the latest-started
+          // one may speak for the panel: a stale completion that posted its list,
+          // pruned the saved order, or set lastFilter would desync the rendered
+          // lens from the reorder guard below and silently discard the next drag.
+          const seq = ++this.fetchSeq;
           const provider = this.provider();
           // A webview left open across a `taskSource` change can send a filter the
           // current source no longer supports — clamp rather than ask for it. Both
           // `lastFilter` and the posted `filter` carry the clamped lens, so the tab
           // the webview highlights is the one that was actually fetched.
           const lens = effectiveFilter(m.filter, provider.caps.supportedFilters);
-          this.lastFilter = lens;
           const tasks = await provider.list(lens, m.size);
+          if (seq !== this.fetchSeq) break; // a newer fetch owns the panel now
+          this.lastFilter = lens;
           const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
           for (const t of tasks) t.services = this.guessServices(t, repos);
           let outgoing = tasks;
@@ -1100,13 +1121,23 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // Undo: put it back into the active sprint and refetch so the card returns.
     const choice = await vscode.window.showInformationMessage(`${key} removed from your sprint`, "Undo");
     if (choice !== "Undo") return;
-    const sprintId = await ops.activeId();
-    if (sprintId == null) {
-      this.toast("error", `No active sprint on the ${this.connector.info().scopeValue} board.`);
-      return;
+    try {
+      const sprintId = await ops.activeId();
+      if (sprintId == null) {
+        this.toast("error", `No active sprint on the ${this.connector.info().scopeValue} board.`);
+        return;
+      }
+      await ops.add(sprintId, key);
+      this.log(`removeFromSprint ${key}: undo → sprint ${sprintId}`);
+    } catch (e) {
+      // The remove already succeeded — the ticket really is out of the sprint. A
+      // throwing undo used to escape into the dispatcher's generic catch: a raw
+      // error toast with no refetch, and the card already gone read as an undone
+      // removal. Say what failed, then refetch below so the list shows reality.
+      const msg = e instanceof Error ? e.message : String(e);
+      this.log(`removeFromSprint ${key}: undo failed — ${msg}`);
+      this.toast("error", `Undo failed — ${key} is still out of the sprint. ${msg}`);
     }
-    await ops.add(sprintId, key);
-    this.log(`removeFromSprint ${key}: undo → sprint ${sprintId}`);
     await this.onMessage({ type: "fetch", filter: "mysprint", size });
   }
 
@@ -2096,6 +2127,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * palette. It is deliberately not inferred from `preselected`: a one-click Take
    * from a collapsed card sends no selection and is still a card Take. */
   public async takeTask(key: string, source: TakeSource, preselected?: string[]): Promise<void> {
+    // Synchronous, ahead of every await: a second Take for a key already being
+    // taken is a duplicate gesture, not a second intent — ignore it rather than
+    // open a second window and a second set of worktrees for one ticket.
+    if (this.takesInFlight.has(key)) {
+      this.log(`take ${key}: already in flight — ignoring the duplicate`);
+      return;
+    }
+    this.takesInFlight.add(key);
+    try {
+      await this.takeTaskGuarded(key, source, preselected);
+    } finally {
+      this.takesInFlight.delete(key);
+    }
+  }
+
+  private async takeTaskGuarded(key: string, source: TakeSource, preselected?: string[]): Promise<void> {
     const cfg = getConfig();
     // Ahead of take_started deliberately: the take never begins, so the funnel gets
     // neither a start nor a terminator rather than a phantom "cancelled".
@@ -2193,7 +2240,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       track({ name: "take_completed", flow_id: flow.id, outcome: launched ? "launched" : "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), task_fp: taskFp });
     } catch (e) {
       track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), failure_class: classifyFailure(e), task_fp: taskFp });
-      throw e; // onMessage's existing catch (tasksView.ts:255) still owns the user-facing handling.
+      // A palette Take has no webview dispatcher above it — extension.ts registers
+      // the command as a bare handler, so for source "command" the rethrow below
+      // surfaces only VS Code's generic "command failed" notification: no toast,
+      // no output-channel line, no re-gate. Give it the same user-facing handling
+      // the card path's dispatcher applies — the sign-in gate for a dead
+      // credential, a toast for everything else — before the error propagates.
+      if (source === "command") {
+        const msg = e instanceof Error ? e.message : String(e);
+        this.log(`take ${key}: failed — ${msg}`);
+        if (e instanceof TaskAuthError) {
+          this.postState(false, this.connector.isConfigured(), null);
+        } else {
+          this.toast("error", msg);
+        }
+      }
+      throw e; // onMessage's existing catch (tasksView.ts:255) still owns the card path's user-facing handling.
     }
   }
 

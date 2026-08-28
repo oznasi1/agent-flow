@@ -999,3 +999,17 @@ describe("getActiveSprintId — board reuse", () => {
     await expect(c.getActiveSprintId()).rejects.toThrow();
   });
 });
+
+describe("getDetail — empty 200 body", () => {
+  it("rejects with a Jira-shaped error, not a TypeError, when a proxy answers 200 with no body", async () => {
+    // request() maps an empty body to null (the 204 contract), and getDetail was
+    // the one sibling that dereferenced `data` directly — a field-stripping proxy
+    // answering 200 with nothing crashed it with a TypeError instead of the
+    // JiraApiError every other failed read produces.
+    installFetch([emptyResponse(200)]);
+    const err = await client().getDetail("PROJ-9").catch((e) => e);
+    expect(err).not.toBeInstanceOf(TypeError);
+    expect(err).toBeInstanceOf(mod.JiraApiError);
+    expect(err.message).toContain("PROJ-9");
+  });
+});

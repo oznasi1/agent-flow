@@ -1,7 +1,7 @@
 import { JiraAuth } from "./auth";
 import { buildJql, stripPriorityOrder, stripSprint } from "./jql";
 import { childrenJql } from "./childJql";
-import { parseJiraError } from "./errors";
+import { JiraApiError, parseJiraError } from "./errors";
 import { TransitionFieldMeta } from "./transitionFields";
 import { Filter, Task, Size } from "../../types";
 import { markTaskNetworkFailure, TaskAuthError } from "../provider";
@@ -286,7 +286,15 @@ export class JiraClient {
     const data = await this.request(
       `/rest/api/3/issue/${encodeURIComponent(key)}?fields=${DETAIL_FIELDS.join(",")}`,
     );
-    const f = data.fields ?? {};
+    // request() maps an empty body to null (the 204 contract), and some proxies
+    // answer 200 with no body. Every sibling reads `data?.…`, but a detail with no
+    // key or summary is a husk the take flow would seed a blank brief from — a
+    // failed read has to look like one, in the same JiraApiError shape every other
+    // failed read produces.
+    if (data == null) {
+      throw new JiraApiError(200, `Jira answered with an empty response for ${key}.`, {}, []);
+    }
+    const f = data?.fields ?? {};
     return {
       key: data.key,
       summary: f.summary ?? "",

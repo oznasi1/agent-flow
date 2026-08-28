@@ -332,3 +332,112 @@ describe("readSessionActivity", () => {
     expect(readSessionActivity(root, "/nowhere", "x", NOW)).toEqual(UNKNOWN_ACTIVITY);
   });
 });
+
+describe("readAgentActivity — empty project dir", () => {
+  const NOW = 1_800_000_000_000;
+  let root: string;
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-tx-empty-"));
+  });
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it("is unknown (no throw) when the dir exists but holds no transcript", () => {
+    // Claude Code creates the project dir before the first .jsonl lands in it;
+    // without the zero-files guard, files[0].path throws into the Deck poll.
+    const cwd = "/repo/no-transcripts-yet";
+    fs.mkdirSync(path.join(root, encodeProjectDir(cwd)), { recursive: true });
+    expect(readAgentActivity(root, cwd, null, NOW)).toEqual(UNKNOWN_ACTIVITY);
+  });
+
+  it("ignores non-transcript files in the dir the same way", () => {
+    const cwd = "/repo/only-strays";
+    const dir = path.join(root, encodeProjectDir(cwd));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "notes.txt"), "hello");
+    expect(readAgentActivity(root, cwd, "some-branch", NOW)).toEqual(UNKNOWN_ACTIVITY);
+  });
+});
+
+describe("deriveActivity — clock skew", () => {
+  const NOW = 1_800_000_000_000;
+  const userMsg: TranscriptLine = { type: "user", message: { role: "user" } };
+  const asstTool: TranscriptLine = { type: "assistant", message: { role: "assistant", stop_reason: "tool_use" } };
+  const asstEnd: TranscriptLine = { type: "assistant", message: { role: "assistant", stop_reason: "end_turn" } };
+
+  it("clamps a future mtime so lastActivityMs never sits ahead of the clock", () => {
+    // mtime ahead of nowMs (skew, a restored file) gave a negative age; the
+    // state may momentarily read working, but the timestamp must not be in
+    // the future — everything downstream renders and sorts by it.
+    const a = deriveActivity([userMsg, asstTool], NOW + 60_000, NOW);
+    expect(a.state).toBe("working");
+    expect(a.lastActivityMs).toBe(NOW);
+  });
+
+  it("clamps the finished-turn timestamp too", () => {
+    const a = deriveActivity([userMsg, asstEnd], NOW + 60_000, NOW);
+    expect(a.state).toBe("needs-you");
+    expect(a.lastActivityMs).toBe(NOW);
+  });
+
+  it("leaves a past mtime untouched", () => {
+    expect(deriveActivity([userMsg, asstTool], NOW - 10_000, NOW).lastActivityMs).toBe(NOW - 10_000);
+  });
+});
+
+describe("parseLines hardening — raw on-disk lines (via readSessionActivity)", () => {
+  const NOW = 1_800_000_000_000;
+  const cwd = "/Users/dev/projects/webapp";
+  let root: string;
+
+  const writeRaw = (id: string, content: string, mtimeMs: number): void => {
+    const dir = path.join(root, encodeProjectDir(cwd));
+    fs.mkdirSync(dir, { recursive: true });
+    const file = path.join(dir, `${id}.jsonl`);
+    fs.writeFileSync(file, content);
+    fs.utimesSync(file, new Date(mtimeMs), new Date(mtimeMs));
+  };
+
+  beforeAll(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-txraw-"));
+  });
+  afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it("tolerates a line that is exactly `null` and derives from the real lines", () => {
+    // "null" is a non-empty string, so .filter(Boolean) keeps the row, and it
+    // parses to null — reading `.slug` off it used to throw into the Deck poll.
+    const content =
+      [
+        JSON.stringify({ type: "user" }),
+        "null",
+        JSON.stringify({ type: "assistant", slug: "real", message: { stop_reason: "end_turn" } }),
+      ].join("\n") + "\n";
+    writeRaw("with-null", content, NOW - 1000);
+    const a = readSessionActivity(root, cwd, "with-null", NOW);
+    expect(a.state).toBe("needs-you");
+    expect(a.slug).toBe("real");
+  });
+
+  it("drops a line holding a bare number or string (valid JSON, not a record)", () => {
+    const content =
+      ["5", '"text"', JSON.stringify({ type: "assistant", message: { stop_reason: "end_turn" } })].join("\n") + "\n";
+    writeRaw("with-scalars", content, NOW - 1000);
+    expect(readSessionActivity(root, cwd, "with-scalars", NOW).state).toBe("needs-you");
+  });
+
+  it("tolerates a truncated trailing line — a transcript mid-flush still derives", () => {
+    // Claude Code appends lines live; reading between flushes sees the file
+    // end mid-record. The complete lines above it must still derive, no throw.
+    const content =
+      [
+        JSON.stringify({ type: "user" }),
+        JSON.stringify({ type: "assistant", slug: "whole", message: { stop_reason: "end_turn" } }),
+      ].join("\n") +
+      "\n" +
+      '{"type":"assist';
+    writeRaw("truncated", content, NOW - 1000);
+    const a = readSessionActivity(root, cwd, "truncated", NOW);
+    expect(a.state).toBe("needs-you");
+    expect(a.slug).toBe("whole");
+  });
+});

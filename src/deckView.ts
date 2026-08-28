@@ -413,6 +413,19 @@ export class DeckPanel {
   /** Keyed `${key}:${repo}#${number}` — a card can only merge one PR, but the key
    * says exactly which write is in flight rather than which card is busy. */
   private readonly mergesInFlight = new Set<string>();
+  /** Review ids with a launch in flight — `launchReviewFor` or a batch. Same
+   * shape, same reason, as `reviewSubmitsInFlight` above: `onMessage` dispatches
+   * fire-and-forget, and the seconds `createWorktrees` + `openWorkspace` take
+   * are exactly the window a double click lands in. Two launches of one PR
+   * would start two paid review sessions — and `reviewRunKey` is deterministic,
+   * so the second `writeRun` silently orphans the first launch's worktree. */
+  private readonly reviewLaunchesInFlight = new Set<string>();
+  /** Run keys with a `seedPrWork` in flight — same shape, same reason, as
+   * `reviewSubmitsInFlight` above: `onMessage` dispatches fire-and-forget, and
+   * the destination picker can sit open for as long as the user thinks. A
+   * second click would queue a second picker behind it and, once both are
+   * answered, write the plan file twice and seed the same window twice. */
+  private readonly prWorkSeedsInFlight = new Set<string>();
   private forgeProbe: Promise<ForgeGap | null> | null = null;
   /** undefined until the probe resolves; null means the forge is usable, and a
    * gap disables PR facts with a footer note. */
@@ -430,6 +443,10 @@ export class DeckPanel {
   /** How many run records `Clear stale` would take right now — the sweep's own
    * verdict with both time gates ignored. Recomputed on every `buildAll`. */
   private staleCount = 0;
+  /** Is a Clear stale pass running right now — its confirm modal included? Not
+   * a Set: there is only ever one bulk clear, so a boolean is the honest shape.
+   * See the guard's own comment in `clearStale`. */
+  private clearStaleInFlight = false;
   /** The candidates the last `buildAll` pass built, for `latestCandidates()`.
    * `null` before the first pass ever completes. */
   private attentionCandidates: { candidates: AttentionCandidate[]; at: number } | null = null;
@@ -438,6 +455,13 @@ export class DeckPanel {
    * that listed the runs directory before `deck:forget` removed a file would
    * otherwise put the forgotten card straight back on the board. */
   private refreshSeq = 0;
+  /** Set the moment the panel is disposed. A refresh already past its build
+   * used to carry on after dispose(): acquiring the global flows lock, running
+   * commands, launching sessions, or raising askFirstSpend from a dead panel —
+   * contradicting the close dialog's promise that closing the Deck stops flows
+   * advancing. Checked in `refresh()` after its await boundary, before the
+   * stages with side effects. */
+  private disposed = false;
   /** How many refreshes are in flight. Only the last one out clears the webview's
    * busy indicator — an inner `finally` must not stop the spinner while an
    * overlapping refresh is still working. */
@@ -1695,7 +1719,14 @@ export class DeckPanel {
    */
   private usageFor(key: string): void {
     const run = this.run(key);
-    if (!run) return;
+    if (!run) {
+      // No record any more — forgotten or retired between the click and here.
+      // Answer anyway: the webview asks once per drawer opening and treats
+      // no-reply as loading forever, while null already renders as "couldn't
+      // read this task's transcripts".
+      this.post({ type: "deck:usage", key, usage: null });
+      return;
+    }
     let usage: UsageTotals | null;
     try {
       usage = this.usage.readRun(claudeProjectsRoot(), run.repos.map((r) => r.path));
@@ -2285,6 +2316,22 @@ export class DeckPanel {
   }
 
   private async launchReviewFor(id: string): Promise<void> {
+    // Deliberately silent, exactly as submitReview's own guard is: this gate is
+    // only reachable while a genuine launch for this same id is still in
+    // flight, and that launch — not this rejected duplicate — owns posting the
+    // eventual outcome.
+    if (this.reviewLaunchesInFlight.has(id)) return;
+    this.reviewLaunchesInFlight.add(id);
+    try {
+      await this.launchReviewForHeld(id);
+    } finally {
+      this.reviewLaunchesInFlight.delete(id);
+    }
+  }
+
+  /** The body of one row's launch, with its id held in `reviewLaunchesInFlight`
+   * by the caller above. */
+  private async launchReviewForHeld(id: string): Promise<void> {
     const req = this.reviewById(id);
     if (!req) return; // the queue moved on before the click landed
     const cfg = getConfig();
@@ -2351,6 +2398,23 @@ export class DeckPanel {
    *  Deliberately not a batch *submit*: approve/comment/request-changes stay one row and
    *  one confirmation at a time. */
   private async launchReviewBatch(ids: string[]): Promise<void> {
+    // The same guard, per id, as launchReviewFor's, and just as silent: a batch
+    // click can race a row's own launch — or a second batch click — for the
+    // same PR. Ids already in flight are dropped rather than failing the whole
+    // batch, so the rest still launches.
+    const fresh = ids.filter((id) => !this.reviewLaunchesInFlight.has(id));
+    if (!fresh.length) return;
+    for (const id of fresh) this.reviewLaunchesInFlight.add(id);
+    try {
+      await this.launchReviewBatchHeld(fresh);
+    } finally {
+      for (const id of fresh) this.reviewLaunchesInFlight.delete(id);
+    }
+  }
+
+  /** The body of a batch launch, with every id held in `reviewLaunchesInFlight`
+   * by the caller above. */
+  private async launchReviewBatchHeld(ids: string[]): Promise<void> {
     const cfg = getConfig();
     const requests = ids.map((id) => this.reviewById(id)).filter((r): r is ReviewRequest => !!r);
     if (!requests.length) return; // the queue moved on before the click landed
@@ -2887,7 +2951,11 @@ export class DeckPanel {
     // every surviving root, tracked or local, live session or not, since the
     // chips show every root regardless of who is voting on the card.
     const cfg = getConfig();
-    this.localRuns.clear();
+    // Built into a fresh map and swapped in only once every group has been
+    // rebuilt: clearing `localRuns` up front meant a throw mid-loop left it
+    // empty, so every local card still on screen answered Open/Diff/Track with
+    // "No run record" until the next successful pass.
+    const nextLocalRuns = new Map<string, Run>();
     const locals: Run[] = [];
     // Local grouped run key -> the roots that actually have a live session right
     // now (F2). Read by the PR gates below and threaded into buildRunStatus's
@@ -2944,7 +3012,7 @@ export class DeckPanel {
         .find((t) => t !== null) ?? null;
       const sessions = group.places.flatMap((place) => places.get(place) ?? []);
       const run = localRunFor(liveGroup, sessions, git, ticket, now);
-      this.localRuns.set(run.key, run);
+      nextLocalRuns.set(run.key, run);
       localActiveRootsByKey.set(run.key, placeSet);
       agentsByKey.set(
         run.key,
@@ -2958,6 +3026,11 @@ export class DeckPanel {
       );
       locals.push(run);
     }
+    // The swap — the loop above finished, so the new picture is complete. The
+    // field stays the same (readonly) Map on purpose: `track()` deletes from it
+    // between passes, and swapping the reference would strand that.
+    this.localRuns.clear();
+    for (const [key, run] of nextLocalRuns) this.localRuns.set(key, run);
     const all = [...tracked, ...locals];
     // One round trip per run, all at once. Serially this was the bulk of a cold
     // refresh, and back then every Forget waited on the whole pass before its card
@@ -3171,23 +3244,33 @@ export class DeckPanel {
    * confirmation.
    */
   private async clearStale(): Promise<void> {
+    // Deliberately silent, exactly as submitReview's own guard is: the confirm
+    // modal can sit open for as long as the user thinks, VS Code queues modals
+    // rather than dropping one, and a second confirmed pass would retire and
+    // sweep everything twice. Same shape as `advanceInFlight` above.
+    if (this.clearStaleInFlight) return;
     const n = this.staleCount;
     if (n === 0) return;
-    const label = `Clear ${n}`;
-    const answer = await vscode.window.showWarningMessage(
-      `Retire ${n} stale run record${n === 1 ? "" : "s"}? Worktrees, branches and commits are left untouched.`,
-      { modal: true },
-      label,
-    );
-    if (answer !== label) return;
-    const nowMs = Date.now();
-    const livePlaces = new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys());
-    for (const status of await this.buildAll()) {
-      if (runKind(status.run) === "local") continue;
-      this.applyVerdict(status.run, this.verdictFor(status, livePlaces, nowMs, true));
+    this.clearStaleInFlight = true;
+    try {
+      const label = `Clear ${n}`;
+      const answer = await vscode.window.showWarningMessage(
+        `Retire ${n} stale run record${n === 1 ? "" : "s"}? Worktrees, branches and commits are left untouched.`,
+        { modal: true },
+        label,
+      );
+      if (answer !== label) return;
+      const nowMs = Date.now();
+      const livePlaces = new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys());
+      for (const status of await this.buildAll()) {
+        if (runKind(status.run) === "local") continue;
+        this.applyVerdict(status.run, this.verdictFor(status, livePlaces, nowMs, true));
+      }
+      this.sweepReviewRuns(livePlaces, nowMs, true);
+      await this.refreshBusy();
+    } finally {
+      this.clearStaleInFlight = false;
     }
-    this.sweepReviewRuns(livePlaces, nowMs, true);
-    await this.refreshBusy();
   }
 
   /** The verdict for one run. `overrideGates` ignores both time windows — that is
@@ -3278,6 +3361,11 @@ export class DeckPanel {
     try {
       const runs = await this.buildAll();
       if (seq !== this.refreshSeq) return; // a newer pass owns the board
+      // Disposed while the build was in flight: nothing below may run — see the
+      // `disposed` field's own comment. Everything between here and
+      // `advanceArmedFlows` is one synchronous stretch, so this single check
+      // covers the account read, the board post, and the flows pass alike.
+      if (this.disposed) return;
       this.startForgeAccountsRead();
       // Counted off the very runs being posted, so neither slot can claim a
       // number the board does not show. A run counts once however many of its
@@ -3391,10 +3479,40 @@ export class DeckPanel {
     if (e.affectsConfiguration("agentFlow.deckGrouping")) {
       this.post({ type: "deck:grouping", grouping: cfg.deckGrouping });
     }
+    // The usage sweep's timer was only ever armed in startPolling, so flipping
+    // the total on mid-session showed a confident $0 until the next reload —
+    // and flipping it off left a 60s transcript-parsing timer running for a
+    // figure nothing on screen shows any more. Armed only while the board's own
+    // poll is running (`this.timer`), exactly as startPolling would: a hidden
+    // panel picks the setting up on its next visibility change instead.
+    if (e.affectsConfiguration("agentFlow.deck.showTokenTotal")) {
+      if (cfg.showTokenTotal && this.timer && !this.usageTimer) {
+        // The same eager-sweep-then-cadence shape startPolling arms.
+        void Promise.resolve().then(() => this.sweepUsage(this.sweepTargets()));
+        this.usageTimer = setInterval(() => this.sweepUsage(this.sweepTargets()), USAGE_POLL_MS);
+      } else if (!cfg.showTokenTotal && this.usageTimer) {
+        clearInterval(this.usageTimer);
+        this.usageTimer = undefined;
+      }
+    }
     if (touched) await this.refreshBusy();
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
+    try {
+      await this.dispatch(m);
+    } catch (e) {
+      // A throwing handler used to become a silent unhandled rejection — and
+      // the webview has often already acted optimistically by then
+      // (deck:forget drops the card before removeRun runs, so an EACCES there
+      // resurrected it on the next poll with no explanation). Log the cause
+      // and tell the user which click failed.
+      this.log(`deck: handling ${m.type} failed: ${e}`);
+      this.toast("error", `Something went wrong handling ${m.type} — the Agent Flow Deck output channel has the reason.`);
+    }
+  }
+
+  private async dispatch(m: InboundMessage): Promise<void> {
     switch (m.type) {
       case "deck:ready":
         // Before the board build, not after it. `refresh()` only reaches
@@ -3724,6 +3842,12 @@ export class DeckPanel {
         await vscode.env.openExternal(u);
         break;
       }
+      default:
+        // A type this build does not know — most plausibly a webview newer
+        // than the host, since the panel survives an extension update until
+        // its window reloads. Logged rather than silently dropped so the
+        // mismatch is diagnosable.
+        this.log(`deck: unhandled message type ${(m as { type?: string }).type}`);
     }
   }
 
@@ -4036,6 +4160,22 @@ export class DeckPanel {
    * `open -a`, which focuses an existing window rather than opening a second one.
    */
   private async seedPrWork(key: string, reason: PrWorkReason, detail?: string): Promise<void> {
+    // Deliberately silent, exactly as submitReview's own guard is: this gate is
+    // only reachable while a genuine seed for this same key is still in flight
+    // — parked on the destination picker, routinely — and that seed, not this
+    // rejected duplicate, owns whatever toast the click ends in.
+    if (this.prWorkSeedsInFlight.has(key)) return;
+    this.prWorkSeedsInFlight.add(key);
+    try {
+      await this.seedPrWorkHeld(key, reason, detail);
+    } finally {
+      this.prWorkSeedsInFlight.delete(key);
+    }
+  }
+
+  /** The body of one card's PR-work seed, with its key held in
+   * `prWorkSeedsInFlight` by the caller above. */
+  private async seedPrWorkHeld(key: string, reason: PrWorkReason, detail?: string): Promise<void> {
     const run = this.run(key);
     if (!run) {
       this.toast("error", `No run record for ${key}.`);
@@ -4170,6 +4310,7 @@ export class DeckPanel {
   }
 
   private dispose(): void {
+    this.disposed = true;
     DeckPanel.current = undefined;
     this.stopPolling();
     while (this.disposables.length) this.disposables.pop()?.dispose();

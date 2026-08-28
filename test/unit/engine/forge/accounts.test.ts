@@ -142,3 +142,40 @@ describe("accountSlot", () => {
     expect(accountSlot({ ...base, capsAccounts: false, unreadRuns: 6 })).toBeNull();
   });
 });
+
+describe("an ACTIVE account whose token has gone bad", () => {
+  // The hazard this file's own header documents: gh exits 0 with --json even
+  // when the ACTIVE account's token is bad ("unless there is a fatal error"),
+  // so a clean exit is not proof every account is usable. The dropped-account
+  // rule was pinned above only for an INACTIVE bad entry — this pins the active
+  // one, whose failure mode is worse: it is the identity the footer would name.
+  const ACTIVE_BAD = JSON.stringify({
+    hosts: {
+      "github.com": [
+        { state: "error", active: true, host: "github.com", login: "broken",
+          tokenSource: "keyring", scopes: "repo", error: "token invalid" },
+        { state: "success", active: false, host: "github.com", login: "healthy",
+          tokenSource: "keyring", scopes: "repo" },
+        { state: "success", active: false, host: "github.com", login: "spare",
+          tokenSource: "keyring", scopes: "repo" },
+      ],
+    },
+  });
+
+  it("drops the active bad account rather than offering it as a switch target", () => {
+    expect(parseGhAccounts(ACTIVE_BAD, "github.com")).toEqual([
+      { login: "healthy", active: false, scopes: "repo" },
+      { login: "spare", active: false, scopes: "repo" },
+    ]);
+  });
+
+  it("names no identity for that list — the slot stays free for the probe's signed-out warning", () => {
+    // Two survivors, so the two-account silence rule is NOT what suppresses the
+    // row: it is the no-active rule. That is the whole surfacing story for a bad
+    // active account — probe() reports signed-out, and this function stands down
+    // instead of labelling the board with an account gh cannot use.
+    const accounts = parseGhAccounts(ACTIVE_BAD, "github.com");
+    expect(accounts.length).toBeGreaterThanOrEqual(2);
+    expect(accountSlot({ accounts, gap: null, prFacts: true, capsAccounts: true, cli: "gh" })).toBeNull();
+  });
+});

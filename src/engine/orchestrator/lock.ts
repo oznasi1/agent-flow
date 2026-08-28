@@ -47,10 +47,15 @@ function tokenOf(raw: string): string {
 }
 
 /** A lock nobody can be holding: past its TTL, or unparseable — half-written or
- * hand-mangled, which must not wedge every window forever. */
+ * hand-mangled, which must not wedge every window forever. `Math.abs`, not a
+ * plain age: a `heldAt` in the FUTURE (clock skew plus a crash) makes the age
+ * negative forever, so a one-sided check reads it as eternally fresh — an
+ * immortal lock that silently stops the orchestrator in every window. More than
+ * one TTL ahead is a stamp nobody live can have written, and it dies the same
+ * way; within one TTL either side is ordinary skew between live windows. */
 function isDead(raw: string, nowMs: number, ttlMs: number): boolean {
   const heldAt = Number(raw.slice(0, raw.indexOf(":")));
-  return !Number.isFinite(heldAt) || nowMs - heldAt > ttlMs;
+  return !Number.isFinite(heldAt) || Math.abs(nowMs - heldAt) > ttlMs;
 }
 
 /** Take the lock, or report that someone else holds it.

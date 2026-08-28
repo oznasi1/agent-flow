@@ -158,7 +158,10 @@ export function flattenHooks(json: string | null, file: string, rel: string, att
   for (const [event, entries] of Object.entries<any>(byEvent)) {
     if (!Array.isArray(entries)) continue;
     for (const entry of entries) {
-      for (const h of entry?.hooks ?? []) {
+      // The Array.isArray above guards only the per-event list; an inner
+      // `hooks` that is an object or a number is not iterable and would throw.
+      const inner = Array.isArray(entry?.hooks) ? entry.hooks : [];
+      for (const h of inner) {
         if (!h || typeof h !== "object") continue;
         const matcher = typeof entry.matcher === "string" ? entry.matcher : "";
         // Several hooks routinely share an event and matcher and differ only by

@@ -96,7 +96,36 @@ function coerceFlow(v: unknown): Flow | null {
   const f = v as Partial<Flow>;
   if (typeof f.id !== "string" || !VALID_FLOW_ID.test(f.id)) return null;
   if (!Array.isArray(f.nodes) || !Array.isArray(f.edges)) return null;
-  const shaped = { ...(v as Flow), nodes: f.nodes.filter(validNode), edges: f.edges.filter(validEdge) };
+  // Two edges sharing one id (a hand-edit or a file merge — every released build
+  // mints ids unique) would share every piece of per-edge bookkeeping downstream:
+  // evaluate.ts's met memo (the second fires on the FIRST's condition — silent
+  // spend), applyFired's stamps and its outcomes map, and Reset. Dropped HERE, at
+  // the one door bad data comes through, so those id-keyed invariants stay true
+  // for every consumer. First occurrence wins, like everything else in flow order.
+  const seenEdgeIds = new Set<string>();
+  const dedupedEdges = f.edges.filter(validEdge).filter((e) => {
+    if (seenEdgeIds.has(e.id)) return false;
+    seenEdgeIds.add(e.id);
+    return true;
+  });
+  const shaped = {
+    ...(v as Flow),
+    // Only the boolean `true` a released build writes arms. `evaluateFlow` gates
+    // on `!flow.armed`, so a truthy non-boolean — a hand-edited `"false"` is the
+    // nastiest shape — would read as ARMED, and an armed flow launches paid
+    // sessions and runs shell with no ask. Disarmed is the reading that costs a
+    // toggle, not money.
+    armed: f.armed === true,
+    // A `join` that is not one of the two modes reads as "all". Every released
+    // build has written the field on every node since the model existed, so a
+    // missing or mangled join is only ever hand-authored — and `evaluate.ts`
+    // asks `join === "all"`, so leaving it absent silently means "any": an
+    // intended wait-for-both junction firing on the FIRST met edge, a paid
+    // launch the wiring said to wait on. "all" is the fail-safe reading — a
+    // junction that waits too hard costs a look at the drawer, never money.
+    nodes: f.nodes.filter(validNode).map((n) => (n.join === "any" || n.join === "all" ? n : { ...n, join: "all" as const })),
+    edges: dedupedEdges,
+  };
   return latchActionMismatches(shaped);
 }
 
@@ -182,15 +211,24 @@ export function readFlows(io: FlowIo, dir: string): Flow[] {
       const text = io.readFile(path.join(dir, name));
       if (text === null) continue;
       const flow = coerceFlow(JSON.parse(text) as unknown);
-      if (flow) flows.push(flow);
+      // The filename must be the one this record's own id resolves to. The store
+      // only ever writes `<id>.json` (`fileFor`), so a mismatch is never
+      // store-authored — it is a copied file (`cp f1.json f1-backup.json`), and
+      // accepting it makes an ARMED duplicate that `removeFlow` (which deletes by
+      // id) cannot reach: it resurrects on every pass and can keep launching.
+      // Same posture as the id-charset skip in `coerceFlow`: malformed, one item.
+      if (flow && name === `${flow.id}.json`) flows.push(flow);
     } catch {
       /* skip a corrupt/half-written/unreadable flow rather than empty the drawer */
     }
   }
-  // `?? 0` rather than trusting the field: a record written before `createdAt`
-  // existed, or hand-edited without it, must sort as oldest and not as NaN —
-  // which would make the comparator inconsistent and the order arbitrary.
-  return flows.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  // `Number(...) || 0` rather than trusting the field: a record written before
+  // `createdAt` existed, hand-edited without it, or hand-edited into a STRING
+  // must sort as oldest and not as NaN — which would make the comparator
+  // inconsistent and the whole listing's order arbitrary, valid flows included.
+  // (`?? 0` caught only the absent case; `Number(undefined)` and `Number("x")`
+  // are both NaN, and `|| 0` folds them with it.)
+  return flows.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
 }
 
 export function removeFlow(io: FlowIo, dir: string, id: string): void {
