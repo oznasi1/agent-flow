@@ -6403,13 +6403,19 @@ describe("notepad", () => {
       expect(notepadActions.at(-1)).toMatchObject({ action: "run" });
     });
 
-    it("emits only explore_completed with cancel_point 'remote-control' when the RC block refuses", async () => {
+    it("emits explore_completed with cancel_point 'remote-control' (no explore_started) when the RC block refuses, but still emits notepad_action{run}", async () => {
       vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on", agentProvider: "copilot" });
       const { store, sendMsg } = mkProvider();
       await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
       await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
       expect(names()).not.toContain("explore_started");
       expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "remote-control", mode: "general", repo_count: 0 });
+      // notepad_action{run} is tracked at the dispatcher itself, before runNotepadItem
+      // is even called — it must survive a refusal deep inside that method untouched.
+      // `find` would return the earlier notepad_action{add} from the add call above,
+      // so read the LAST one instead of the first.
+      const notepadActions = events().filter((e) => e.name === "notepad_action");
+      expect(notepadActions.at(-1)).toMatchObject({ action: "run" });
     });
 
     it("emits only explore_completed with cancel_point 'repos' when no repos are found", async () => {
