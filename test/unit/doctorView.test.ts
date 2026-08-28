@@ -150,6 +150,29 @@ describe("collectInputs — the agent provider", () => {
     expect(i.agentProvider).toBe("ask");
   });
 
+  it("probes the codex CLI under codex and reports where it was found", async () => {
+    const which = vi.fn((bin: string) => (bin === "codex" ? "/usr/local/bin/codex" : `/usr/bin/${bin}`));
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "codex" }), which }));
+    expect(which).toHaveBeenCalledWith("codex");
+    expect(i.codexCli).toEqual({ foundAt: "/usr/local/bin/codex" });
+  });
+
+  it("probes the codex CLI under ask too — codex is on every host's picker", async () => {
+    const which = vi.fn((bin: string) => (bin === "codex" ? null : `/usr/bin/${bin}`));
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "ask" }), which }));
+    expect(i.codexCli).toEqual({ foundAt: null });
+  });
+
+  it("does not probe the codex CLI under a provider that cannot be codex", async () => {
+    const which = vi.fn((bin: string) => `/usr/bin/${bin}`);
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "claude-code" }), which }));
+    expect(which).not.toHaveBeenCalledWith("codex");
+    expect(i.codexCli).toBeUndefined();
+  });
+
   it("also probes the chat command under ask — any host agent could be the one that runs", async () => {
     const chatCommand = vi.fn(async () => ({ available: true }));
     const cfg = deps().config;
@@ -160,13 +183,13 @@ describe("collectInputs — the agent provider", () => {
 
   it("supplies the host's agent providers so runChecks can show ask's full set", async () => {
     env.uriScheme = "vscode";
-    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "copilot"]);
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "copilot", "codex"]);
 
     env.uriScheme = "cursor";
-    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "cursor"]);
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "cursor", "codex"]);
 
     env.uriScheme = "windsurf";
-    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code"]);
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "codex"]);
   });
 });
 
@@ -293,5 +316,131 @@ describe("probeChatCommand", () => {
   it("treats a failed command lookup as unavailable rather than throwing", async () => {
     commands.getCommands.mockRejectedValue(new Error("boom"));
     await expect(probeChatCommand()).resolves.toEqual({ available: false });
+  });
+});
+
+// Doctor exists for exactly the machines where probes fail — a rejecting probe
+// must become a failing row in the report, never a generic host error with no
+// report at all.
+describe("collectInputs — a broken machine still gets a report", () => {
+  const econnreset = () => Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+
+  it("a rejecting source probe becomes a failing auth row instead of aborting", async () => {
+    const log = vi.fn();
+    const i = await collectInputs(
+      deps({
+        log,
+        probe: async () => {
+          throw econnreset();
+        },
+      }),
+    );
+    expect(i.authProbe).toEqual({ ok: false, reason: "network", message: expect.stringContaining("ECONNRESET") });
+    expect(i.projectProbe).toBeUndefined();
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("ECONNRESET"));
+  });
+
+  it("a rejecting credentials check reads as signed out rather than aborting", async () => {
+    const i = await collectInputs(
+      deps({
+        hasCredentials: async () => {
+          throw new Error("SecretStorage unavailable");
+        },
+      }),
+    );
+    expect(i.hasCredentials).toBe(false);
+    expect(i.authProbe).toBeUndefined();
+  });
+
+  it("a throwing repo scan reads as an empty root rather than aborting", async () => {
+    const i = await collectInputs(
+      deps({
+        repos: () => {
+          throw new Error("EACCES: permission denied");
+        },
+      }),
+    );
+    expect(i.reposRoot).toMatchObject({ repos: 0, gitRepos: 0 });
+  });
+
+  it("a rejecting forge probe becomes a fail row, never a clean bill of health", async () => {
+    const i = await collectInputs(
+      deps({
+        forgeProbe: async () => {
+          throw econnreset();
+        },
+      }),
+    );
+    expect(i.forge.gap).toEqual({ kind: "missing", detail: expect.stringContaining("ECONNRESET") });
+  });
+
+  it("a rejecting forge mode probe reads as no mode to report", async () => {
+    const i = await collectInputs(
+      deps({
+        forgeMode: async () => {
+          throw new Error("spawn bb ENOENT");
+        },
+      }),
+    );
+    expect(i.forge.mode).toBeNull();
+  });
+
+  it("a throwing runs reader reads as zero runs rather than aborting", async () => {
+    const i = await collectInputs(
+      deps({
+        runs: () => {
+          throw new Error("EACCES: permission denied");
+        },
+      }),
+    );
+    expect(i.runs).toBe(0);
+  });
+
+  it("a throwing PR-reads summary reads as nothing to report", async () => {
+    const i = await collectInputs(
+      deps({
+        prReads: () => {
+          throw new Error("corrupt cache");
+        },
+      }),
+    );
+    expect(i.prReads).toBeUndefined();
+  });
+});
+
+describe("showDoctor — never rejects on the machines it diagnoses", () => {
+  it("resolves and still renders the QuickPick with a failure when the source probe rejects", async () => {
+    await expect(
+      showDoctor(
+        deps({
+          probe: async () => {
+            throw Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" });
+          },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+    const [items, opts] = window.showQuickPick.mock.calls[0];
+    // The engine reads a network-shaped probe failure as a warning (the site,
+    // not the user, is at fault) — the point pinned here is that the failure
+    // SURFACES in a rendered report instead of killing the command.
+    expect((opts as { title: string }).title).toContain("1 warning");
+    const labels = (items as { label: string }[]).map((i) => i.label);
+    expect(labels.some((l) => l.includes("$(warning)"))).toBe(true);
+  });
+
+  it("resolves with an error message rather than rejecting when even the config read throws", async () => {
+    const log = vi.fn();
+    await expect(
+      showDoctor(
+        deps({
+          log,
+          config: () => {
+            throw new Error("config exploded");
+          },
+        }),
+      ),
+    ).resolves.toBeUndefined();
+    expect(window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("config exploded"));
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("config exploded"));
   });
 });

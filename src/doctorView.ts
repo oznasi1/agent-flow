@@ -92,8 +92,31 @@ export interface DoctorDeps {
  *  moved behind `d.probe()` on the connector (Task 6); this function is now pure
  *  forwarding plus the one gate below. */
 export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
+  const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+  // A probe that dies must become a row in the report, never a dead Doctor:
+  // this command exists for exactly the machines where probes fail, and an
+  // uncaught rejection here used to abort the whole command with a generic host
+  // error — no report, on the machine that needed one most. Each fallible input
+  // is guarded individually so one broken seam cannot hide the others' verdicts.
+  const guard = <T>(label: string, fallback: T, run: () => T): T => {
+    try {
+      return run();
+    } catch (e) {
+      d.log(`doctor: ${label} failed: ${message(e)}`);
+      return fallback;
+    }
+  };
+  const guardAsync = async <T>(label: string, fallback: T, run: () => Promise<T>): Promise<T> => {
+    try {
+      return await run();
+    } catch (e) {
+      d.log(`doctor: ${label} failed: ${message(e)}`);
+      return fallback;
+    }
+  };
+
   const cfg = d.config();
-  const hasCredentials = await d.hasCredentials();
+  const hasCredentials = await guardAsync("credentials check", false, () => d.hasCredentials());
 
   // No casts: TaskConnector.probe() returns AuthProbe/ProjectProbe directly, so
   // a connector that classifies a failure into the wrong shape is a compile
@@ -101,24 +124,49 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
   // Gating on `hasCredentials` here is redundant with `probe()`'s own gate on
   // `isAuthenticated()` — kept anyway so a never-signed-in user gets a `skip`
   // even from a connector that forgot its own gate.
-  const { auth: authProbe, scope: projectProbe } = hasCredentials ? await d.probe() : {};
+  let authProbe: AuthProbe | undefined;
+  let projectProbe: ProjectProbe | undefined;
+  if (hasCredentials) {
+    try {
+      ({ auth: authProbe, scope: projectProbe } = await d.probe());
+    } catch (e) {
+      // The probe dying IS the diagnosis: a connector that classifies its own
+      // failures never rejects, so whatever escaped is a transport-level break —
+      // surface it as the failing reachability row rather than aborting.
+      d.log(`doctor: source probe failed: ${message(e)}`);
+      authProbe = { ok: false, reason: "network", message: message(e) };
+    }
+  }
 
-  const repos = d.repos();
+  const repos = guard("repo scan", { repos: 0, gitRepos: 0 }, () => d.repos());
   // Resolved unconditionally — describing the forge is cheap — while the probe
   // itself stays gated on `prFacts` so a Deck with PR facts off does not pay for
   // an `auth status` call.
   const f = d.forge();
-  // Gated on `prFacts` exactly like `gap` above — and, separately, left
+  // Gated on `prFacts` exactly like `gap` below — and, separately, left
   // `undefined` rather than forced to `null` when `forgeMode` isn't supplied at
   // all (every `DoctorDeps` test double predating this member), so a forge with
   // no mode to report and a forge nobody asked about read identically to
   // `DoctorInputs.forge`'s optional `mode` field and to `toEqual` callers that
   // built their expectation before this member existed.
-  const mode = cfg.prFacts && d.forgeMode ? await d.forgeMode() : undefined;
-  const forge = { ...f, gap: cfg.prFacts ? await d.forgeProbe() : null, foundAt: d.which(f.cli), mode };
+  const mode = cfg.prFacts && d.forgeMode ? await guardAsync("forge mode probe", null, () => d.forgeMode!()) : undefined;
+  // A rejecting forge probe maps to a `missing` gap — the fail row — because the
+  // usual escape here is the spawn itself failing (ENOENT, PATH), which is what
+  // that row's wording already describes. Healthy is `null`; a rejection must
+  // never read as healthy.
+  let gap: { kind: "missing" | "signed-out"; detail: string } | null = null;
+  if (cfg.prFacts) {
+    try {
+      gap = await d.forgeProbe();
+    } catch (e) {
+      d.log(`doctor: forge probe failed: ${message(e)}`);
+      gap = { kind: "missing", detail: message(e) };
+    }
+  }
+  const forge = { ...f, gap, foundAt: guard(`${f.cli} lookup`, null, () => d.which(f.cli)), mode };
   // Same gate as the probe above, for the same reason: PR facts off means nothing
   // was ever read, so there is no failure to report and no cache worth walking.
-  const prReads = cfg.prFacts ? d.prReads?.() : undefined;
+  const prReads = guard("PR reads summary", undefined, () => (cfg.prFacts ? d.prReads?.() : undefined));
   return {
     sourceLabel: cfg.sourceLabel,
     scopeNoun: cfg.scopeNoun,
@@ -129,21 +177,36 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
     hasCredentials,
     authProbe,
     projectProbe,
-    gitOnPath: !!d.which("git"),
+    gitOnPath: !!guard("git lookup", null, () => d.which("git")),
     // Only existence matters for the repos root — nothing writes there.
-    reposRoot: { path: cfg.reposRoot, exists: d.statDir(cfg.reposRoot).exists, ...repos },
-    workspaceDir: { path: cfg.workspaceDir, ...d.statDir(cfg.workspaceDir) },
+    reposRoot: {
+      path: cfg.reposRoot,
+      exists: guard("repos root stat", { exists: false, writable: false }, () => d.statDir(cfg.reposRoot)).exists,
+      ...repos,
+    },
+    workspaceDir: {
+      path: cfg.workspaceDir,
+      ...guard("workspace dir stat", { exists: false, writable: false }, () => d.statDir(cfg.workspaceDir)),
+    },
     prFacts: cfg.prFacts,
     forge,
     prReads,
-    claudeCode: d.claudeExtension(),
-    claudeProjectsReadable: d.claudeProjectsReadable(),
-    runs: d.runs(),
+    claudeCode: guard("Claude Code extension probe", { installed: false, version: null }, () => d.claudeExtension()),
+    claudeProjectsReadable: guard("session files probe", false, () => d.claudeProjectsReadable()),
+    runs: guard("runs scan", 0, () => d.runs()),
     agentProvider: cfg.agentProvider,
     hostProviders: hostProviders(),
     // Probed whenever a chat-panel agent could be the one that runs — which under
     // `ask` is any host that offers one.
-    chatCommand: cfg.agentProvider !== "claude-code" ? await d.chatCommand() : { available: false },
+    chatCommand:
+      cfg.agentProvider !== "claude-code"
+        ? await guardAsync("chat command probe", { available: false }, () => d.chatCommand())
+        : { available: false },
+    // Probed whenever Codex could be the agent that runs — a fixed `codex`
+    // setting, or `ask`, where Codex is on every host's picker.
+    ...(cfg.agentProvider === "codex" || cfg.agentProvider === "ask"
+      ? { codexCli: guard("codex lookup", { foundAt: null }, () => ({ foundAt: d.which("codex") })) }
+      : {}),
   };
 }
 
@@ -195,37 +258,48 @@ async function applyAction(action: DoctorAction): Promise<void> {
 /** Probe everything, show the verdict, and run the fix the user clicks. Read-only
  *  apart from the clipboard: nothing here repairs anything on its own. */
 export async function showDoctor(d: DoctorDeps): Promise<void> {
-  const inputs = await collectInputs(d);
-  const checks = runChecks(inputs);
-  const summary = summarize(checks);
-  d.log(`doctor: ${summary}`);
-  // Same counts summarize() bases its title on — recomputed here rather than
-  // parsed back out of that string, since summarize()'s job is a title, not a
-  // machine-readable pair.
-  const fails = checks.filter((c) => c.status === "fail").length;
-  const warns = checks.filter((c) => c.status === "warn").length;
+  // Belt to `collectInputs`' braces: every probe in there is guarded
+  // individually, but Doctor must never die with a generic host error on
+  // exactly the machines it exists to diagnose — so anything that still
+  // escapes (a throwing config read, a QuickPick failure) is caught, logged,
+  // and reported rather than rethrown into the command frame.
+  try {
+    const inputs = await collectInputs(d);
+    const checks = runChecks(inputs);
+    const summary = summarize(checks);
+    d.log(`doctor: ${summary}`);
+    // Same counts summarize() bases its title on — recomputed here rather than
+    // parsed back out of that string, since summarize()'s job is a title, not a
+    // machine-readable pair.
+    const fails = checks.filter((c) => c.status === "fail").length;
+    const warns = checks.filter((c) => c.status === "warn").length;
 
-  const picked = await vscode.window.showQuickPick(buildItems(checks), {
-    title: `Agent Flow Deck Doctor — ${summary}`,
-    placeHolder: "Pick a problem to fix, or copy the report",
-    ignoreFocusOut: true,
-  });
-  if (!picked) {
+    const picked = await vscode.window.showQuickPick(buildItems(checks), {
+      title: `Agent Flow Deck Doctor — ${summary}`,
+      placeHolder: "Pick a problem to fix, or copy the report",
+      ignoreFocusOut: true,
+    });
+    if (!picked) {
+      track({ name: "doctor_run", fails, warns, outcome: "dismissed" });
+      return;
+    }
+    if (picked.copy) {
+      await vscode.env.clipboard.writeText(formatReport(checks, inputs.sourceLabel));
+      track({ name: "doctor_run", fails, warns, outcome: "copied" });
+      return;
+    }
+    if (picked.check?.action) {
+      await applyAction(picked.check.action);
+      track({ name: "doctor_run", fails, warns, outcome: "action", action_kind: picked.check.action.kind });
+      return;
+    }
+    // A passing row with no action to apply: nothing was fixed, same as an Escape.
     track({ name: "doctor_run", fails, warns, outcome: "dismissed" });
-    return;
+  } catch (e) {
+    const detail = e instanceof Error ? e.message : String(e);
+    d.log(`doctor: failed: ${detail}`);
+    vscode.window.showErrorMessage(`Agent Flow Deck Doctor could not finish: ${detail}`);
   }
-  if (picked.copy) {
-    await vscode.env.clipboard.writeText(formatReport(checks, inputs.sourceLabel));
-    track({ name: "doctor_run", fails, warns, outcome: "copied" });
-    return;
-  }
-  if (picked.check?.action) {
-    await applyAction(picked.check.action);
-    track({ name: "doctor_run", fails, warns, outcome: "action", action_kind: picked.check.action.kind });
-    return;
-  }
-  // A passing row with no action to apply: nothing was fixed, same as an Escape.
-  track({ name: "doctor_run", fails, warns, outcome: "dismissed" });
 }
 
 /** Nothing in the extension checked this before: `workspace.ts` calls Claude Code's

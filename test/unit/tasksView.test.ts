@@ -3394,6 +3394,7 @@ describe("takeBatch", () => {
     expect(agentPicks()[0][0]).toEqual([
       { label: "Claude Code", provider: "claude-code" },
       { label: "Cursor", provider: "cursor" },
+      { label: "Codex", provider: "codex" },
     ]);
   });
 
@@ -3448,16 +3449,25 @@ describe("takeBatch", () => {
     expect(vi.mocked(openWorkspace).mock.calls[0][0].planMd).toContain("Claude Code");
   });
 
-  it("raises no batch agent picker on a host with only one possible agent", async () => {
-    // `hostProviders()` is exactly ["claude-code"] outside VS Code and Cursor, so the
-    // picker there could only be answered one way — and `ignoreFocusOut` would hold
-    // that one-item modal open on every launch.
+  it("raises the batch agent picker even on a host with no editor-specific agent", async () => {
+    // Codex is on every host's picker, so outside VS Code and Cursor `hostProviders()`
+    // is ["claude-code", "codex"] — two real answers, which is a question worth the
+    // modal that a one-item list never was.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     env.uriScheme = "windsurf";
+    vi.mocked(window.showQuickPick).mockImplementation(
+      async (_items: unknown, opts?: unknown) =>
+        ((opts as { title?: string } | undefined)?.title === "Which tool?"
+          ? { label: "Claude Code", provider: "claude-code" }
+          : { shared: false }) as never,
+    );
     const { provider } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
-    expect(agentPicks()).toHaveLength(0);
+    expect(agentPicks()[0][0]).toEqual([
+      { label: "Claude Code", provider: "claude-code" },
+      { label: "Codex", provider: "codex" },
+    ]);
     expect(openWorkspace).toHaveBeenCalledTimes(2);
     for (const call of vi.mocked(openWorkspace).mock.calls) expect(call[0].provider).toBe("claude-code");
   });
@@ -4296,6 +4306,15 @@ describe("takeBatch", () => {
     await provider.takeBatch(twoKeys, ["api"]);
     const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
     expect(toast.message).toBe("Launched 2 of 2 in one shared window. A worktree + Cursor session per task.");
+  });
+
+  it("names Codex in the per-task note across separate windows", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "codex", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Codex session per task.");
   });
 
   it("names the agent the batch's ask picker chose, not Claude", async () => {
@@ -7771,5 +7790,313 @@ describe("setAttention", () => {
     first.dispose();
     provider.setAttention(["BITE-1"]);
     expect(second.badge).toEqual({ value: 1, tooltip: "1 session is waiting on you — open the Deck" });
+  });
+});
+
+describe("take — in-flight guard", () => {
+  it("a double-fired Take for one key launches once, not two windows", async () => {
+    // A double-click on the card's Take with openIn:"new-window" and worktree
+    // settings that need no QuickPick fires two whole takes for one ticket —
+    // two windows, two worktrees. The first take holds the key while it runs.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    let release!: () => void;
+    vi.mocked(openWorkspace).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({
+              mode: "per-window",
+              workspaceFile: undefined,
+              briefs: [],
+              opened: ["/repos/acme-billing"],
+              remoteControl: false,
+              provider: "claude-code",
+            } as never);
+        }),
+    );
+    const { send } = setup();
+    const first = send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    const second = send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    await second; // the duplicate must return without launching anything
+    // The first take is still mid-flight — wait until it reaches the (deferred)
+    // window open, then let it finish.
+    await vi.waitFor(() => expect(vi.mocked(openWorkspace)).toHaveBeenCalled());
+    release();
+    await first;
+    expect(vi.mocked(openWorkspace)).toHaveBeenCalledTimes(1);
+  });
+
+  it("covers the palette command source too, and releases the key when the take settles", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
+    let release!: () => void;
+    vi.mocked(openWorkspace).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () =>
+            resolve({
+              mode: "per-window",
+              workspaceFile: undefined,
+              briefs: [],
+              opened: ["/repos/acme-billing"],
+              remoteControl: false,
+              provider: "claude-code",
+            } as never);
+        }),
+    );
+    const { provider } = setup();
+    const first = provider.takeTask("BILL-1234", "command", ["acme-billing"]);
+    const dup = provider.takeTask("BILL-1234", "command", ["acme-billing"]);
+    await dup;
+    await vi.waitFor(() => expect(vi.mocked(openWorkspace)).toHaveBeenCalled());
+    release();
+    await first;
+    expect(vi.mocked(openWorkspace)).toHaveBeenCalledTimes(1);
+    // Settled: the key is released, so a deliberate second take still works.
+    await provider.takeTask("BILL-1234", "command", ["acme-billing"]);
+    expect(vi.mocked(openWorkspace)).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("takeTask — palette (command) failure surfacing", () => {
+  it("toasts and logs when the ticket read fails on a command take, not just the host's generic error", async () => {
+    // The palette command is registered as a bare handler in extension.ts, so the
+    // rethrow from a command-sourced take surfaces only VS Code's generic
+    // "command failed" notification — no toast, no output-channel line. The panel
+    // must say what failed before the error propagates. (The rethrow itself is a
+    // released behaviour pinned by the Take-funnel tests above, so it stays.)
+    clientStub.getDetail.mockRejectedValueOnce(
+      parseJiraError(404, JSON.stringify({ errorMessages: ["Issue does not exist"] })),
+    );
+    const { provider, messages, logged } = setup();
+    await expect(provider.takeTask("BILL-1234", "command", ["acme-billing"])).rejects.toThrow();
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: expect.stringContaining("Issue does not exist") }),
+    );
+    expect(logged.join("\n")).toContain("Issue does not exist");
+    // The Take funnel still gets its terminator exactly as before.
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done.outcome).toBe("failed");
+  });
+
+  it("re-gates the panel instead of toasting when a command take fails on a dead credential", async () => {
+    clientStub.getDetail.mockRejectedValueOnce(new JiraAuthError("Jira auth failed (401). Sign in again."));
+    const { provider, messages } = setup();
+    await expect(provider.takeTask("BILL-1234", "command", ["acme-billing"])).rejects.toThrow();
+    expect(messages).toContainEqual(expect.objectContaining({ type: "state", authed: false }));
+    expect(messages).not.toContainEqual(expect.objectContaining({ type: "toast", level: "error" }));
+  });
+
+  it("keeps the card path byte-identical: a failing card take rethrows without toasting here", async () => {
+    // The card path's dispatcher (onMessage's catch) owns its toast; takeTask
+    // itself must add nothing, or the user would see two.
+    clientStub.getDetail.mockRejectedValueOnce(new Error("boom"));
+    const { provider, messages } = setup();
+    await expect(provider.takeTask("BILL-1234", "card", ["acme-billing"])).rejects.toThrow("boom");
+    expect(messages).not.toContainEqual(expect.objectContaining({ type: "toast" }));
+  });
+});
+
+describe("no repos found — first-run path", () => {
+  // discoverRepos → [] is the first-run state (agentFlow.reposRoot unset or
+  // pointing nowhere). Every launch entry point must stop with the actionable
+  // toast and open nothing.
+  const NO_REPOS_TOAST = "No repos found under /repos. Check agentFlow.reposRoot.";
+
+  it("explore stops with the reposRoot toast and opens nothing", async () => {
+    vi.mocked(discoverRepos).mockReturnValue([]);
+    const { send, messages } = setup();
+    await send({ type: "explore" });
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: NO_REPOS_TOAST }),
+    );
+    expect(vi.mocked(openWorkspace)).not.toHaveBeenCalled();
+    // It stops before any picker — the action QuickPick never shows.
+    expect(vi.mocked(window.showQuickPick)).not.toHaveBeenCalled();
+  });
+
+  it("notepad:run stops with the reposRoot toast and opens nothing", async () => {
+    vi.mocked(discoverRepos).mockReturnValue([]);
+    const { send, messages, globalState } = setup();
+    globalState.store.set("agentFlow.notepad", [{ id: "n1", title: "t", body: "", done: false, createdAt: 1 }]);
+    await send({ type: "notepad:run", id: "n1" });
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: NO_REPOS_TOAST }),
+    );
+    expect(vi.mocked(openWorkspace)).not.toHaveBeenCalled();
+    // The note keeps no pointer to a run that was never created.
+    const notes = globalState.store.get("agentFlow.notepad") as { lastRunKey?: string }[];
+    expect(notes[0].lastRunKey).toBeUndefined();
+  });
+
+  it("take stops with the reposRoot toast, opens nothing, and reports the funnel outcome as cancelled", async () => {
+    vi.mocked(discoverRepos).mockReturnValue([]);
+    const { send, messages } = setup();
+    await send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: NO_REPOS_TOAST }),
+    );
+    expect(vi.mocked(openWorkspace)).not.toHaveBeenCalled();
+    // resolveKickoff answering undefined reports as a cancellation, not a failure —
+    // pinning what the code actually tracks today.
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done).toBeDefined();
+    expect(done.outcome).toBe("cancelled");
+  });
+});
+
+describe("fetch — truncated My-sprint pool (known limitation)", () => {
+  it("documents that a truncated fetch prunes saved order (known limitation)", async () => {
+    // fetchTasks caps at maxResults=50 with no pagination. On a sprint of 60
+    // tasks the fetch silently truncates to 50, and the full-view prune runs
+    // against that truncated list — so the manual order of every task past #50
+    // is PERMANENTLY discarded from workspaceState, even though those tasks are
+    // still in the sprint. Pagination is feature work; this pin exists so the
+    // data loss is named, not rediscovered.
+    const allKeys = Array.from({ length: 60 }, (_, i) => `PROJ-${i + 1}`);
+    const fetched = allKeys.slice(0, 50); // what a truncated fetch actually returns
+    clientStub.fetchTasks.mockResolvedValue(
+      fetched.map((key) => ({ key, summary: "", labels: [], components: [] })),
+    );
+    const { send, workspaceState } = setup({
+      workspaceState: { "agentFlow.sprintOrder": [...allKeys] },
+    });
+    await send({ type: "fetch", filter: "mysprint", size: "any" });
+    // Today's behaviour: the saved order is pruned to the 50 fetched keys —
+    // PROJ-51…PROJ-60 lose their manual rank for good.
+    expect(workspaceState.update).toHaveBeenCalledWith("agentFlow.sprintOrder", fetched);
+    const savedNow = workspaceState.store.get("agentFlow.sprintOrder") as string[];
+    expect(savedNow).toHaveLength(50);
+    expect(savedNow).not.toContain("PROJ-51");
+    expect(savedNow).not.toContain("PROJ-60");
+  });
+});
+
+describe("onMessage — throwing log fn", () => {
+  it("a fetch still settles, posts the error, and clears loading when the output channel's log throws", async () => {
+    // A disposed output channel makes the injected log throw. getConfig() and
+    // this.log() sat ABOVE onMessage's try, so the rejection escaped the handler
+    // unhandled and the panel got nothing — no error post, no loading:false.
+    const { context } = fakeContext();
+    const auth = fakeAuth({ authed: true });
+    const provider = new TasksViewProvider(context, jiraConnector(auth), () => {
+      throw new Error("Channel has been closed");
+    });
+    const messages: OutboundMessage[] = [];
+    let handler: (m: InboundMessage) => Promise<void> = async () => {};
+    provider.resolveWebviewView({
+      title: "Tasks",
+      description: undefined,
+      onDidDispose: () => ({ dispose() {} }),
+      webview: {
+        options: {},
+        html: "",
+        asWebviewUri: (u: unknown) => u,
+        cspSource: "vscode-resource:",
+        postMessage: (m: OutboundMessage) => void messages.push(m),
+        onDidReceiveMessage: (cb: (m: InboundMessage) => Promise<void>) => {
+          handler = cb;
+          return { dispose() {} };
+        },
+      },
+    } as never);
+    await expect(handler({ type: "fetch", filter: "mine", size: "any" })).resolves.toBeUndefined();
+    expect(messages).toContainEqual({ type: "loading", loading: false });
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "error", message: "Channel has been closed" }),
+    );
+  });
+});
+
+describe("removeFromSprint — failed Undo", () => {
+  it("says the undo failed and refetches when the sprint re-add write rejects", async () => {
+    // The remove itself succeeded — the ticket really is out of the sprint. A
+    // throwing undo used to escape into the dispatcher's generic catch: raw
+    // error toast, no refetch, and the panel read as an undone removal.
+    vi.mocked(window.showInformationMessage).mockResolvedValue("Undo" as never);
+    clientStub.addIssueToSprint.mockRejectedValueOnce(new Error("sprint write refused"));
+    const { send, messages } = setup();
+    await send({ type: "removeFromSprint", key: "PROJ-1", size: "any" });
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "toast",
+        level: "error",
+        message: expect.stringMatching(/undo failed/i),
+      }),
+    );
+    // The refetch still runs, so the list shows reality (ticket out of the sprint).
+    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mysprint", "any", 50);
+  });
+
+  it("treats a throwing active-sprint lookup during undo the same way", async () => {
+    vi.mocked(window.showInformationMessage).mockResolvedValue("Undo" as never);
+    clientStub.getActiveSprintId.mockRejectedValueOnce(new Error("board list unreadable"));
+    const { send, messages } = setup();
+    await send({ type: "removeFromSprint", key: "PROJ-1", size: "any" });
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "toast",
+        level: "error",
+        message: expect.stringMatching(/undo failed/i),
+      }),
+    );
+    expect(clientStub.addIssueToSprint).not.toHaveBeenCalled();
+    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mysprint", "any", 50);
+  });
+});
+
+describe("fetch — overlapping fetches", () => {
+  it("lets the later-started lens win when an earlier fetch resolves last, and honors a subsequent sprint reorder", async () => {
+    // Without a sequence token, an older fetch resolving late posts its (stale)
+    // list over the newer one AND leaves lastFilter pointing at the newer lens —
+    // or, started the other way round, leaves lastFilter pointing at the OLD lens
+    // while the sprint list is on screen, so the user's next drag is silently
+    // discarded by the reorder guard.
+    let resolveBacklog!: (t: unknown) => void;
+    let resolveSprint!: (t: unknown) => void;
+    clientStub.fetchTasks
+      .mockImplementationOnce(() => new Promise((r) => { resolveBacklog = r; }))
+      .mockImplementationOnce(() => new Promise((r) => { resolveSprint = r; }));
+    const { send, messages, workspaceState } = setup();
+    const backlogFetch = send({ type: "fetch", filter: "backlog", size: "any" });
+    const sprintFetch = send({ type: "fetch", filter: "mysprint", size: "any" });
+    await vi.waitFor(() => expect(clientStub.fetchTasks).toHaveBeenCalledTimes(2));
+    // Out of order: the later-started (mysprint) fetch completes first…
+    resolveSprint([
+      { key: "A", summary: "", labels: [], components: [] },
+      { key: "B", summary: "", labels: [], components: [] },
+    ]);
+    await sprintFetch;
+    // …and the stale backlog fetch lands last.
+    resolveBacklog([{ key: "Z", summary: "", labels: [], components: [] }]);
+    await backlogFetch;
+    const taskPosts = messages.filter((m) => m.type === "tasks") as { filter: string; tasks: { key: string }[] }[];
+    expect(taskPosts.at(-1)!.filter).toBe("mysprint");
+    expect(taskPosts.at(-1)!.tasks.map((t) => t.key)).toEqual(["A", "B"]);
+    // The panel is on My sprint, so a drag there must be honored.
+    await send({ type: "reorder", order: ["B", "A"] });
+    expect(workspaceState.update).toHaveBeenLastCalledWith("agentFlow.sprintOrder", ["B", "A"]);
+  });
+
+  it("keeps lastFilter on the rendered lens when the stale fetch was the sprint one", async () => {
+    // The drag-discard direction: mysprint started first, backlog started second;
+    // the stale mysprint completion must not post its list over the backlog view.
+    let resolveSprint!: (t: unknown) => void;
+    let resolveBacklog!: (t: unknown) => void;
+    clientStub.fetchTasks
+      .mockImplementationOnce(() => new Promise((r) => { resolveSprint = r; }))
+      .mockImplementationOnce(() => new Promise((r) => { resolveBacklog = r; }));
+    const { send, messages, workspaceState } = setup();
+    const sprintFetch = send({ type: "fetch", filter: "mysprint", size: "any" });
+    const backlogFetch = send({ type: "fetch", filter: "backlog", size: "any" });
+    await vi.waitFor(() => expect(clientStub.fetchTasks).toHaveBeenCalledTimes(2));
+    resolveBacklog([{ key: "Z", summary: "", labels: [], components: [] }]);
+    await backlogFetch;
+    resolveSprint([{ key: "A", summary: "", labels: [], components: [] }]);
+    await sprintFetch;
+    const taskPosts = messages.filter((m) => m.type === "tasks") as { filter: string; tasks: { key: string }[] }[];
+    expect(taskPosts.at(-1)!.filter).toBe("backlog");
+    // Backlog is the rendered lens, so a (stale-webview) reorder must stay ignored.
+    await send({ type: "reorder", order: ["A"] });
+    expect(workspaceState.update).not.toHaveBeenCalledWith("agentFlow.sprintOrder", ["A"]);
   });
 });

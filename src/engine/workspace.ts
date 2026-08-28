@@ -37,6 +37,9 @@ const CLI: Record<AgentProvider, { cmd: string; label: string; bootMs: number }>
   // it is a separate install, so the `command not found` fallback is reached more
   // often here than for the other two.
   cursor: { cmd: "cursor-agent", label: "Cursor", bootMs: 2000 },
+  // UNVERIFIED — like cursor-agent, `codex` is its own install (npm i -g
+  // @openai/codex), so `command not found` is this entry's common failure too.
+  codex: { cmd: "codex", label: "Codex", bootMs: 2000 },
 };
 
 /** Wrap text so the terminal delivers it as a *paste*. renderPrompt appends the
@@ -907,21 +910,37 @@ async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) =>
     try {
       plan = JSON.parse(fs.readFileSync(full, "utf8"));
     } catch {
-      continue;
-    }
-    if (now - plan.createdAt > PLAN_TTL_MS) {
+      // A plan that cannot be parsed will never seed — clear it the way the
+      // expired branch below already clears stale ones. These files are
+      // transient 15-minute handshakes; leaving one wedges nothing, but it
+      // would sit there forever.
       fs.rmSync(full, { force: true });
       continue;
     }
-    if (!plan.seedAgent) continue;
-    const match = plan.matches.find((m) => canon(m.matchPath) === identity);
-    log(`plan ${plan.key}: ${match ? "MATCHED this window" : "no match"}`);
-    if (!match) continue;
-    if (context.globalState.get<boolean>(seededGuard(plan, identity))) {
-      log(`plan ${plan.key}: already seeded this window — skipping`);
-      continue;
+    // Everything past the parse is wrapped too: one malformed plan (e.g. no
+    // `matches`) used to throw out of the whole pass, blocking every other
+    // plan in every window — and with a corrupt createdAt its TTL never
+    // elapsed, so the wedge was permanent.
+    try {
+      const age = now - plan.createdAt;
+      // NaN (missing/corrupt createdAt) and a future stamp both read as
+      // expired — either way the 15-minute TTL could otherwise never elapse.
+      if (!(age >= 0) || age > PLAN_TTL_MS) {
+        fs.rmSync(full, { force: true });
+        continue;
+      }
+      if (!plan.seedAgent) continue;
+      const match = plan.matches.find((m) => canon(m.matchPath) === identity);
+      log(`plan ${plan.key}: ${match ? "MATCHED this window" : "no match"}`);
+      if (!match) continue;
+      if (context.globalState.get<boolean>(seededGuard(plan, identity))) {
+        log(`plan ${plan.key}: already seeded this window — skipping`);
+        continue;
+      }
+      due.push(plan);
+    } catch {
+      fs.rmSync(full, { force: true });
     }
-    due.push(plan);
   }
   if (!due.length) return;
 
@@ -1145,7 +1164,11 @@ async function seedAgentSession(opts: {
   // the plan file. Flipping it therefore also affects plans already on disk, which is
   // what a preference should do. The provider is resolved the same way, one level up
   // in seedProvider, which also gets to honor a plan's own recorded choice.
-  if (readAgentSurface() === "terminal") {
+  //
+  // Codex has no extension surface: workbench.action.chat.open belongs to Copilot
+  // and Cursor, and Codex's IDE extension publishes no open-with-prompt command —
+  // so under either surface setting a Codex seed lands in a terminal.
+  if (readAgentSurface() === "terminal" || provider === "codex") {
     if (await seedViaTerminal(provider, seedText, key, matchPath, log)) {
       announceRemoteControl();
       return;

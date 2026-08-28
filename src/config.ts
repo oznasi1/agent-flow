@@ -183,6 +183,9 @@ export function hostProviders(): AgentProvider[] {
     "claude-code",
     ...(isVSCodeHost() ? (["copilot"] as const) : []),
     ...(isCursorHost() ? (["cursor"] as const) : []),
+    // The Codex CLI is editor-independent — it runs in any host's integrated
+    // terminal — so, like Claude Code, it is on every host's picker.
+    "codex",
   ];
 }
 
@@ -191,10 +194,12 @@ export function hostProviders(): AgentProvider[] {
  * means Claude Code, so a typo in settings.json degrades rather than breaking
  * seeding. `copilot` and `cursor` each additionally require their own host: settings
  * sync carries values between editors, so each value degrades in the wrong editor
- * instead of failing at seed time. This runtime guard — not the manifest — is what
- * makes the behavior correct, and it is the reason the manifest needs no `when`
- * clause at all. Called with no argument from the seeding path, which reads at seed
- * time rather than capturing at activation. */
+ * instead of failing at seed time. `codex` is host-independent like Claude Code —
+ * its CLI runs in any host's terminal — so it passes through everywhere. This
+ * runtime guard — not the manifest — is what makes the behavior correct, and it is
+ * the reason the manifest needs no `when` clause at all. Called with no argument
+ * from the seeding path, which reads at seed time rather than capturing at
+ * activation. */
 export function readAgentProviderSetting(
   c: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration("agentFlow"),
 ): AgentProviderSetting {
@@ -202,12 +207,13 @@ export function readAgentProviderSetting(
   if (raw === "ask") return "ask";
   if (raw === "copilot" && isVSCodeHost()) return "copilot";
   if (raw === "cursor" && isCursorHost()) return "cursor";
+  if (raw === "codex") return "codex";
   return "claude-code";
 }
 
 /** The agent's name, for copy that tells the user what was just seeded. */
 export function providerLabel(p: AgentProvider): string {
-  return p === "copilot" ? "Copilot" : p === "cursor" ? "Cursor" : "Claude Code";
+  return p === "copilot" ? "Copilot" : p === "cursor" ? "Cursor" : p === "codex" ? "Codex" : "Claude Code";
 }
 
 /** The agent a launch actually starts when nothing has resolved `ask` into a concrete
@@ -714,6 +720,16 @@ export function getConfig(): AgentFlowConfig {
   // Hoisted so the membership check below and the resolved `mergeMethod` value
   // read the same call instead of asking `c.get` for it twice.
   const mergeMethodRaw = c.get<string>("mergeMethod");
+  // `c.get<number>` is a cast, not a check: a hand-edited settings.json can hold
+  // any JSON type, and `Math.max(1, "six")` is NaN — which then poisons every
+  // downstream comparison (`>` against NaN is always false, so e.g. the
+  // batch-launch confirmation would silently never fire). Fall back to the
+  // documented default unless the value is a finite number; the clamps below
+  // still apply to finite out-of-range values.
+  const finiteNumber = (key: string, def: number): number => {
+    const v = c.get<number>(key);
+    return typeof v === "number" && Number.isFinite(v) ? v : def;
+  };
   return {
     taskSource: c.get<string>("taskSource") || "jira",
     forge,
@@ -769,25 +785,25 @@ export function getConfig(): AgentFlowConfig {
       const v = c.get<string>("remoteControl");
       return v === "on" || v === "ask" ? v : "off";
     })(),
-    batchLaunchConfirmThreshold: Math.max(1, c.get<number>("batchLaunchConfirmThreshold") ?? 6),
+    batchLaunchConfirmThreshold: Math.max(1, finiteNumber("batchLaunchConfirmThreshold", 6)),
     trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
     telemetryEnabled: c.get<boolean>("telemetry.enabled") ?? true,
     prFacts: c.get<boolean>("prFacts") ?? true,
-    prFactsTtlSeconds: Math.max(30, c.get<number>("prFactsTtlSeconds") ?? 120),
+    prFactsTtlSeconds: Math.max(30, finiteNumber("prFactsTtlSeconds", 120)),
     openAgents: c.get<boolean>("openAgents") ?? true,
     deckGrouping: c.get<string>("deckGrouping") === "workspaces" ? "workspaces" : "agents",
     // Floored, not defaulted: 0 is meaningful (disable the window) and must
     // survive, while a negative value is a typo that would retire on a clock
     // running backwards.
-    retireFinishedAfterHours: Math.max(0, c.get<number>("retireFinishedAfterHours") ?? 24),
-    retireAbandonedAfterDays: Math.max(0, c.get<number>("retireAbandonedAfterDays") ?? 7),
-    retireClosedAfterHours: Math.max(0, c.get<number>("retireClosedAfterHours") ?? 24),
-    retireInPlaceAfterHours: Math.max(0, c.get<number>("retireInPlaceAfterHours") ?? 0),
+    retireFinishedAfterHours: Math.max(0, finiteNumber("retireFinishedAfterHours", 24)),
+    retireAbandonedAfterDays: Math.max(0, finiteNumber("retireAbandonedAfterDays", 7)),
+    retireClosedAfterHours: Math.max(0, finiteNumber("retireClosedAfterHours", 24)),
+    retireInPlaceAfterHours: Math.max(0, finiteNumber("retireInPlaceAfterHours", 0)),
     inflightShowAll: c.get<boolean>("inflightShowAll") ?? false,
     notifyOnActionRequired: c.get<boolean>("notifyOnActionRequired") ?? false,
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
     reviewRequestsAlwaysVisible: c.get<boolean>("reviewRequestsAlwaysVisible") ?? true,
-    reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
+    reviewRequestsTtlSeconds: Math.max(60, finiteNumber("reviewRequestsTtlSeconds", 300)),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,
     mergeWrites: c.get<boolean>("mergeWrites") ?? false,
     // Unlike `worktree` above — whose `|| "ask"` fallback lets any hand-edited

@@ -93,7 +93,14 @@ export class MarketplacePanel {
   }
 
   private post(msg: OutboundMessage): void {
-    void this.panel.webview.postMessage(msg);
+    try {
+      void this.panel.webview.postMessage(msg);
+    } catch {
+      // A disposed panel's `postMessage` throws synchronously — a normal race
+      // (the user closed the Marketplace while an async step, e.g. mkt:copy's
+      // clipboard await, was still in flight), not a bug worth logging. Letting
+      // it escape used to strand whatever ran after this call in the caller.
+    }
   }
   private toast(level: "success" | "error" | "info", message: string): void {
     this.post({ type: "toast", level, message });
@@ -143,54 +150,73 @@ export class MarketplacePanel {
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
-    switch (m.type) {
-      case "mkt:ready":
-      case "mkt:refresh":
-        this.render();
-        break;
-      case "mkt:open": {
-        const allowed = this.allowed(m.file);
-        track({ name: "marketplace_action", action: "open", allowed });
-        if (!allowed) return;
-        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(m.file));
-        await vscode.window.showTextDocument(doc, { preview: true });
-        break;
+    // The promise this returns is discarded by onDidReceiveMessage's caller, so
+    // anything that escapes here is an unhandled rejection and a row that
+    // silently does nothing forever — e.g. mkt:open on a file deleted between
+    // scan and click. Missing payload fields are guarded per-arm (the mock-free
+    // real `Uri.parse(undefined)` throws); everything else lands in the catch
+    // below as a log line plus an error toast.
+    try {
+      switch (m.type) {
+        case "mkt:ready":
+        case "mkt:refresh":
+          this.render();
+          break;
+        case "mkt:open": {
+          if (!m.file) return;
+          const allowed = this.allowed(m.file);
+          track({ name: "marketplace_action", action: "open", allowed });
+          if (!allowed) return;
+          const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(m.file));
+          await vscode.window.showTextDocument(doc, { preview: true });
+          break;
+        }
+        case "mkt:reveal": {
+          if (!m.file) return;
+          const allowed = this.allowed(m.file);
+          track({ name: "marketplace_action", action: "reveal", allowed });
+          if (!allowed) return;
+          await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(m.file));
+          break;
+        }
+        case "mkt:read": {
+          if (!m.file || !this.allowed(m.file)) return;
+          const raw = fsReader().readFile(m.file) ?? "";
+          const truncated = raw.length > MAX_PREVIEW;
+          track({ name: "marketplace_action", action: "read", truncated });
+          this.post({
+            type: "mkt:file",
+            file: m.file,
+            text: truncated ? raw.slice(0, MAX_PREVIEW) : raw,
+            truncated,
+          });
+          break;
+        }
+        case "mkt:copy":
+          if (!m.text) return;
+          await vscode.env.clipboard.writeText(m.text);
+          track({ name: "marketplace_action", action: "copy" });
+          this.toast("success", "Copied to clipboard.");
+          break;
+        case "openExternal": {
+          if (!m.url) return;
+          track({ name: "marketplace_action", action: "open_external" });
+          const u = vscode.Uri.parse(m.url);
+          // Mirrors deckView's own openExternal guard: a check-run or plugin manifest
+          // URL is not a trusted source for a scheme handed straight to the OS (e.g. a
+          // vscode://<publisher>.<ext>/… reaching another extension's UriHandler).
+          if (u.scheme !== "https" && u.scheme !== "http") break;
+          await vscode.env.openExternal(u);
+          break;
+        }
+        default:
+          // A webview build ahead of (or behind) the host, or a typo'd type:
+          // named in the log rather than vanishing without a trace.
+          this.log(`marketplace: unknown message type ${(m as { type?: string }).type}`);
       }
-      case "mkt:reveal": {
-        const allowed = this.allowed(m.file);
-        track({ name: "marketplace_action", action: "reveal", allowed });
-        if (!allowed) return;
-        await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(m.file));
-        break;
-      }
-      case "mkt:read": {
-        if (!this.allowed(m.file)) return;
-        const raw = fsReader().readFile(m.file) ?? "";
-        const truncated = raw.length > MAX_PREVIEW;
-        track({ name: "marketplace_action", action: "read", truncated });
-        this.post({
-          type: "mkt:file",
-          file: m.file,
-          text: truncated ? raw.slice(0, MAX_PREVIEW) : raw,
-          truncated,
-        });
-        break;
-      }
-      case "mkt:copy":
-        await vscode.env.clipboard.writeText(m.text);
-        track({ name: "marketplace_action", action: "copy" });
-        this.toast("success", "Copied to clipboard.");
-        break;
-      case "openExternal": {
-        track({ name: "marketplace_action", action: "open_external" });
-        const u = vscode.Uri.parse(m.url);
-        // Mirrors deckView's own openExternal guard: a check-run or plugin manifest
-        // URL is not a trusted source for a scheme handed straight to the OS (e.g. a
-        // vscode://<publisher>.<ext>/… reaching another extension's UriHandler).
-        if (u.scheme !== "https" && u.scheme !== "http") break;
-        await vscode.env.openExternal(u);
-        break;
-      }
+    } catch (e) {
+      this.log(`marketplace: handling ${m.type} failed: ${e}`);
+      this.toast("error", `That didn't work: ${e instanceof Error ? e.message : e}`);
     }
   }
 

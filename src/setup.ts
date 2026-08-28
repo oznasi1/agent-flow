@@ -36,7 +36,31 @@ function abort(log: Log, reason: string): false {
  * `configure()` would already have overwritten their site URL and project key by
  * then — no undo, no toast, and the log line still saying nothing happened.
  */
+/** The wizard currently on screen, if any. `runSetup` is reachable from the
+ * palette command and from the lingering first-run welcome toast at the same
+ * time; without this latch the two invocations interleave — two wizards
+ * fighting over focus, duplicate credential prompts. A second caller joins the
+ * in-flight run and gets its result. */
+let setupInFlight: Promise<boolean> | undefined;
+
 export async function runSetup(
+  context: vscode.ExtensionContext,
+  connector: TaskConnector,
+  log: Log,
+  refresh?: Refresh,
+  source: "offer" | "command" = "command",
+): Promise<boolean> {
+  if (setupInFlight) {
+    log("setup: already running — joining the in-flight wizard");
+    return setupInFlight;
+  }
+  setupInFlight = doRunSetup(context, connector, log, refresh, source).finally(() => {
+    setupInFlight = undefined;
+  });
+  return setupInFlight;
+}
+
+async function doRunSetup(
   context: vscode.ExtensionContext,
   connector: TaskConnector,
   log: Log,
@@ -73,9 +97,22 @@ export async function runSetup(
   // worktrees live inside each repo (.claude/worktrees/<KEY>), so there's no root
   // to configure.
   const cleanRoot = reposRoot.trim().replace(/\/+$/, "");
-  await commitSource();
-  await updateGlobal("reposRoot", cleanRoot);
-  await updateGlobal("workspaceDir", cleanRoot);
+  // The one block that writes. It can still fail after the last cancellable step
+  // — a read-only settings.json rejects `update()` — and letting that escape
+  // would leave a half-written config with SETUP_COMPLETE_KEY unset, no message,
+  // and an unhandled rejection. Failing the wizard loudly keeps the promise the
+  // comment above makes: setup either completes or is safely re-runnable.
+  try {
+    await commitSource();
+    await updateGlobal("reposRoot", cleanRoot);
+    await updateGlobal("workspaceDir", cleanRoot);
+  } catch (e) {
+    vscode.window.showWarningMessage(
+      `Agent Flow Deck: saving settings failed (${e instanceof Error ? e.message : e}). ` +
+        "Check that your settings.json is writable, then re-run setup.",
+    );
+    return abort(log, `settings write failed: ${e}`);
+  }
   // `info()` re-reads settings, so this sees the scope the commit above just wrote
   // (e.g. the Jira project key) — which is also why the commit runs first, not last:
   // generic wording since this file no longer knows the source, but the value itself

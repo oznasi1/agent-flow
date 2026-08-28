@@ -297,3 +297,131 @@ describe("removeFlow", () => {
     expect(readFlows(io, DIR)).toEqual([]);
   });
 });
+
+describe("readFlows — a createdAt that is not a number", () => {
+  it("sorts it as oldest, deterministically, instead of letting NaN scramble the order", () => {
+    // `(b.createdAt ?? 0) - (a.createdAt ?? 0)` with a string createdAt gives a
+    // NaN comparison — an inconsistent comparator, so the whole listing's order
+    // becomes arbitrary, valid flows included. A record that cannot say when it
+    // was created sorts with the ones that never said at all: as oldest.
+    const { io } = fakeIo({
+      [path.join(DIR, "y.json")]: JSON.stringify({ ...flow({ id: "y" }), createdAt: "yesterday" }),
+      [path.join(DIR, "b.json")]: JSON.stringify(flow({ id: "b", createdAt: 5 })),
+      [path.join(DIR, "c.json")]: JSON.stringify(flow({ id: "c", createdAt: 9 })),
+    });
+    expect(readFlows(io, DIR).map((f) => f.id)).toEqual(["c", "b", "y"]);
+  });
+});
+
+describe("readFlows — a node with no usable join", () => {
+  it('reads a missing join as "all" — the junction that cannot fire prematurely', () => {
+    // Every released build has written `join` on every node since the model
+    // existed, so a join-less node is only ever hand-authored. `evaluate.ts`
+    // asks `target.join === "all"`, so absent read as "any" — and an intended
+    // wait-for-both junction fired on the FIRST met edge: a paid launch the
+    // wiring said to wait on. "all" is the fail-safe reading: a junction that
+    // waits too hard costs a look at the drawer, never money.
+    const p = path.join(DIR, "f1.json");
+    const { io } = fakeIo({
+      [p]: JSON.stringify({
+        ...flow(),
+        nodes: [
+          { id: "n1", kind: "notify", x: 0, y: 0, message: "m" }, // no join
+          { id: "n2", kind: "notify", x: 0, y: 0, join: "sometimes", message: "m" }, // not a JoinMode
+        ],
+      }),
+    });
+    expect(readFlows(io, DIR)[0].nodes.map((n) => n.join)).toEqual(["all", "all"]);
+  });
+
+  it("keeps a valid join untouched", () => {
+    const p = path.join(DIR, "f1.json");
+    const { io } = fakeIo({
+      [p]: JSON.stringify({
+        ...flow(),
+        nodes: [
+          { id: "n1", kind: "notify", x: 0, y: 0, join: "any", message: "m" },
+          { id: "n2", kind: "notify", x: 0, y: 0, join: "all", message: "m" },
+        ],
+      }),
+    });
+    expect(readFlows(io, DIR)[0].nodes.map((n) => n.join)).toEqual(["any", "all"]);
+  });
+});
+
+describe("readFlows — two edges sharing one id", () => {
+  it("keeps only the first, so no per-edge bookkeeping is ever shared", () => {
+    // Everything downstream keys per-edge state by `e.id`: evaluate.ts's met
+    // memo (the second edge would fire on the FIRST's condition — a silent paid
+    // launch), applyFired's stamps and its outcomes map, and Reset. Ids are
+    // minted unique by every released build, so a duplicate is only ever a
+    // hand-edit or a file merge; the first occurrence wins, like everything
+    // else in flow order.
+    const p = path.join(DIR, "f1.json");
+    const { io } = fakeIo({
+      [p]: JSON.stringify({
+        ...flow(),
+        edges: [
+          { id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify" },
+          { id: "e1", from: "b", to: "z", cond: { kind: "ci-passed" }, action: "notify" },
+          { id: "e2", from: "c", to: "z", cond: { kind: "ci-failed" }, action: "notify" },
+        ],
+      }),
+    });
+    const edges = readFlows(io, DIR)[0].edges;
+    expect(edges.map((e) => e.id)).toEqual(["e1", "e2"]);
+    expect(edges[0].cond).toEqual({ kind: "pr-merged" });
+  });
+});
+
+describe("readFlows — an armed flag that is not a boolean", () => {
+  it("reads every non-boolean armed value back as disarmed", () => {
+    // `evaluateFlow` gates on `if (!flow.armed)`, so a truthy non-boolean — the
+    // string "false" is the nastiest — would evaluate the flow as ARMED, and an
+    // armed flow can launch paid sessions and run shell with no ask. Released
+    // builds only ever write the booleans, so only the boolean `true` arms.
+    const { io } = fakeIo({
+      [path.join(DIR, "a.json")]: JSON.stringify({ ...flow({ id: "a" }), armed: "false" }),
+      [path.join(DIR, "b.json")]: JSON.stringify({ ...flow({ id: "b" }), armed: 1 }),
+      [path.join(DIR, "c.json")]: JSON.stringify({ ...flow({ id: "c" }), armed: {} }),
+    });
+    const read = readFlows(io, DIR);
+    expect(read).toHaveLength(3);
+    expect(read.every((f) => f.armed === false)).toBe(true);
+  });
+
+  it("keeps a boolean true armed and a boolean false disarmed", () => {
+    const { io } = fakeIo({
+      [path.join(DIR, "on.json")]: JSON.stringify(flow({ id: "on", armed: true })),
+      [path.join(DIR, "off.json")]: JSON.stringify(flow({ id: "off", armed: false })),
+    });
+    const byId = new Map(readFlows(io, DIR).map((f) => [f.id, f.armed]));
+    expect(byId.get("on")).toBe(true);
+    expect(byId.get("off")).toBe(false);
+  });
+});
+
+describe("readFlows — a filename that does not match the record's own id", () => {
+  it("skips a record whose filename is not <id>.json", () => {
+    // `cp f1.json f1-backup.json` puts two records claiming the same id in the
+    // store, and `removeFlow` only ever deletes `<id>.json` — so without this
+    // skip the copy is an ARMED duplicate that resurrects on every 6s pass and
+    // cannot be deleted from the UI. The store itself always writes `<id>.json`
+    // (`fileFor`), so a mismatched name is never store-authored: treat it as
+    // malformed, exactly like the path-escape skip above.
+    const { io } = fakeIo({
+      [path.join(DIR, "f1.json")]: JSON.stringify(flow({ armed: true })),
+      [path.join(DIR, "f1-backup.json")]: JSON.stringify(flow({ armed: true })),
+    });
+    expect(readFlows(io, DIR).map((f) => f.id)).toEqual(["f1"]);
+  });
+
+  it("leaves nothing readable behind after removeFlow, even when a copy existed", () => {
+    const { io } = fakeIo({
+      [path.join(DIR, "f1.json")]: JSON.stringify(flow({ armed: true })),
+      [path.join(DIR, "f1-backup.json")]: JSON.stringify(flow({ armed: true })),
+    });
+    removeFlow(io, DIR, "f1");
+    expect(readFlows(io, DIR)).toEqual([]);
+  });
+});

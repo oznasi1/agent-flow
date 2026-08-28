@@ -162,7 +162,7 @@ export interface SettingsSnapshot {
    *  separately: the interesting question is whether people answer it differently for a
    *  five-minute review than for a day's work. */
   review_open_in: "ask" | "new-window" | "this-window" | "pick-existing" | "invalid";
-  agent_provider: "claude-code" | "copilot" | "cursor" | "ask" | "invalid";
+  agent_provider: "claude-code" | "copilot" | "cursor" | "codex" | "ask" | "invalid";
   agent_surface: "extension" | "terminal" | "invalid";
   explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "supervise" | "verify" | "invalid";
   /** A registered connector id, or "invalid". Validated against the registry, so
@@ -275,7 +275,7 @@ export type UsageEvent =
   // launch never lays anything out. The review body never reaches this event.
   | {
       name: "review_launched"; outcome: Outcome; mode: TaskModeProp; mode_was_pinned: boolean;
-      destination?: DestinationProp; provider?: "claude-code" | "copilot" | "cursor";
+      destination?: DestinationProp; provider?: "claude-code" | "copilot" | "cursor" | "codex";
       seeded_in_place?: boolean; batch: boolean; requested_count: number; launched_count: number;
       failed_count: number; skipped_count: number; layout?: "separate" | "shared"; layout_asked?: boolean;
     }
@@ -321,7 +321,7 @@ export type UsageEvent =
       name: "explore_completed"; flow_id: string; outcome: Outcome; mode: ExploreModeProp;
       cancel_point?: "remote-control" | "repos" | "action" | "topic" | "env" | "kickoff" | "agent";
       env_picked?: "listed" | "custom"; destination?: DestinationProp;
-      provider?: "claude-code" | "copilot" | "cursor"; seeded_in_place?: boolean;
+      provider?: "claude-code" | "copilot" | "cursor" | "codex"; seeded_in_place?: boolean;
       repo_count: number; duration_ms: number; failure_class?: FailureClass;
     }
   // One per `flow:*` gesture that actually did something — the membership checks

@@ -278,6 +278,16 @@ export function App(): JSX.Element {
             const kept = [...prev].filter((s) => present.has(s));
             return kept.length === prev.size ? prev : new Set(kept);
           });
+          // Same pruning for repo selections: a selected repo missing from the
+          // fresh pool would keep filtering while the multiselect (which renders
+          // nothing on an empty pool) unmounts — "No tasks touch the selected
+          // repos." with no control left to clear it.
+          setSelectedRepos((prev) => {
+            if (prev.size === 0) return prev;
+            const present = new Set(m.tasks.flatMap((t) => t.services ?? []));
+            const kept = [...prev].filter((r) => present.has(r));
+            return kept.length === prev.size ? prev : new Set(kept);
+          });
           break;
         case "detail":
           setDetails((prev) => ({

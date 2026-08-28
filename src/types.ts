@@ -190,7 +190,7 @@ export function runKind(run: Run): "task" | "explore" | "review" | "local" | "no
  * config.ts because the webview renders a per-provider mark and must not import a
  * module that touches `vscode`; config.ts re-exports it, so every existing importer
  * keeps working. */
-export type AgentProvider = "claude-code" | "copilot" | "cursor";
+export type AgentProvider = "claude-code" | "copilot" | "cursor" | "codex";
 
 /** One open Claude Code session, as ~/.claude/sessions/<pid>.json records it.
  * Only the fields the Deck reads; the file carries more. Declared here rather

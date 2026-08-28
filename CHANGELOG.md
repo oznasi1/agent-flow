@@ -17,6 +17,78 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Telemetry durations are monotonic, Jira HTTP failures classify by status, and
   cancelled Takes no longer inflate the custom-prompt-mode bucket.
 
+## [0.56.0] — 2026-08-28
+
+### Added
+
+- **OpenAI Codex as a session tool.** `agentFlow.agentProvider` accepts `codex`,
+  which starts sessions by running the Codex CLI in an integrated terminal with
+  the task prompt pre-typed — in any editor, whatever `agentFlow.agentSurface`
+  says, because Codex has no chat panel to pre-fill. Codex appears on every
+  host's `ask` picker (so a host that is neither VS Code nor Cursor now offers a
+  choice of two), Doctor checks the `codex` CLI is on PATH, and — like Copilot
+  and Cursor — Codex sessions don't appear as live cards on the Deck, which
+  reads Claude Code's session files.
+- **A way to say thanks** — a Buy me a coffee link
+  ([buymeacoffee.com/oznasi1](https://buymeacoffee.com/oznasi1)) as a README badge and
+  Support section, a GitHub Sponsor button (`.github/FUNDING.yml`), and a sponsor link on
+  the Marketplace listing (`sponsor` in the manifest).
+
+## [0.55.0] — 2026-08-28
+
+### Fixed
+
+- **A hardening sweep over every path that reads state the extension does not
+  own.** Five audits (engine, orchestrator, Deck, Tasks panel, host panels)
+  produced ~40 verified findings; the crashes, silent-spend, and stuck-UI
+  classes are fixed, each behind a test that failed first:
+  - **Malformed on-disk files no longer crash background passes.** A session
+    record or transcript line holding literal `null`, a run record missing
+    `summary` or `repos`, a settings-hooks entry whose inner `hooks` is not an
+    array, and a truncated plan file each used to throw out of the 6-second
+    attention/Deck pass (or blank the whole Marketplace scan); all now degrade
+    to skipping the one bad record. A corrupt or future-dated plan file is
+    deleted instead of wedging session seeding for every window forever.
+  - **The orchestrator can no longer be tricked into spending.** A copied flow
+    file (same id, different filename) used to resurrect as an undeletable
+    armed zombie; a string `"armed": "false"` read as armed; duplicate edge ids
+    shared one memoized verdict so the second edge fired on the first's
+    condition; a missing `join` turned a wait-for-both junction into
+    fire-on-first; and a future-dated advance lock wedged every window
+    permanently. All fixed at the store/lock layer, plus a pinned
+    forward-compat contract: an unknown condition kind from a newer build reads
+    as not-met, never a throw.
+  - **Double-clicks no longer pay twice.** Take, review launch (row and
+    batch), and Address PR each launch once per gesture now — the second click
+    within the worktree-creation window used to open a second window, seed a
+    second session, and orphan the first worktree's run record.
+  - **Closing the Deck now actually stops it.** An in-flight refresh used to
+    keep going after dispose — able to acquire the global flows lock, advance
+    armed flows, and run flow commands from a closed panel.
+  - **Stuck UI states unstuck.** The drawer's Spend row no longer hangs on
+    "Reading transcripts…" when the run vanished; the sidebar's repo filter no
+    longer becomes an inescapable dead end when a refresh empties the repo
+    pool; a fetch raced by a lens switch can no longer desync the list from
+    the sprint-reorder guard (silently discarded drags); the one stuck-spinner
+    shape in the Tasks panel (a throw before the message handler's try) is
+    closed; and turning the token total on mid-session now arms the sweep
+    instead of showing a confident $0 until reload.
+  - **Failures now say so.** A palette-sourced Take failure toasts instead of
+    vanishing into a generic host error; a failed sprint-remove Undo tells you
+    the ticket is still out and refetches; Deck and Marketplace message
+    handlers log and toast on an unexpected throw instead of silently dropping
+    it; Doctor now renders a report with failure rows on exactly the broken
+    machines it exists to diagnose, instead of dying with a generic error; the
+    setup wizard warns and aborts cleanly when settings cannot be written, and
+    two concurrent wizard invocations join instead of interleaving.
+  - **A non-numeric numeric setting no longer disables a safety net.** A
+    value like `"six"` for `agentFlow.batchLaunchConfirmThreshold` used to
+    make the "Launch N tasks in parallel?" confirmation silently never appear
+    (`NaN` comparisons); all numeric settings now fall back to their
+    documented defaults.
+  - **Jira detail on an empty 200 body** (some proxies) now fails with a
+    Jira-shaped error instead of a TypeError.
+
 ## [0.54.0] — 2026-08-28
 
 ### Added

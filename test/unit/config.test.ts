@@ -657,8 +657,18 @@ describe("getConfig — agentProvider", () => {
 
   it("falls back to claude-code for an unrecognized value", () => {
     env.uriScheme = "vscode";
-    setConfig({ agentProvider: "codex" });
+    setConfig({ agentProvider: "zed" });
     expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  // Unlike copilot and cursor, the Codex CLI is not tied to an editor — it runs in
+  // any host's integrated terminal — so the value survives every host unchanged.
+  it("keeps codex in every host", () => {
+    for (const scheme of ["cursor", "vscode", "windsurf"]) {
+      env.uriScheme = scheme;
+      setConfig({ agentProvider: "codex" });
+      expect(getConfig().agentProvider).toBe("codex");
+    }
   });
 
   it("keeps cursor in a Cursor host", () => {
@@ -702,19 +712,19 @@ describe("hostProviders", () => {
     env.uriScheme = "cursor";
   });
 
-  it("offers Claude Code and Copilot in VS Code", () => {
+  it("offers Claude Code, Copilot, and Codex in VS Code", () => {
     env.uriScheme = "vscode";
-    expect(hostProviders()).toEqual(["claude-code", "copilot"]);
+    expect(hostProviders()).toEqual(["claude-code", "copilot", "codex"]);
   });
 
-  it("offers Claude Code and Cursor in Cursor", () => {
+  it("offers Claude Code, Cursor, and Codex in Cursor", () => {
     env.uriScheme = "cursor";
-    expect(hostProviders()).toEqual(["claude-code", "cursor"]);
+    expect(hostProviders()).toEqual(["claude-code", "cursor", "codex"]);
   });
 
-  it("offers only Claude Code in an unrelated host", () => {
+  it("offers Claude Code and Codex in an unrelated host", () => {
     env.uriScheme = "windsurf";
-    expect(hostProviders()).toEqual(["claude-code"]);
+    expect(hostProviders()).toEqual(["claude-code", "codex"]);
   });
 });
 
@@ -736,6 +746,7 @@ describe("isCursorHost / providerLabel", () => {
     expect(providerLabel("claude-code")).toBe("Claude Code");
     expect(providerLabel("copilot")).toBe("Copilot");
     expect(providerLabel("cursor")).toBe("Cursor");
+    expect(providerLabel("codex")).toBe("Codex");
   });
 });
 
@@ -745,6 +756,7 @@ describe("resolvedProvider", () => {
     expect(resolvedProvider("claude-code")).toBe("claude-code");
     expect(resolvedProvider("copilot")).toBe("copilot");
     expect(resolvedProvider("cursor")).toBe("cursor");
+    expect(resolvedProvider("codex")).toBe("codex");
   });
 
   // Every copy site that names an agent composes providerLabel over resolvedProvider,
@@ -752,9 +764,9 @@ describe("resolvedProvider", () => {
   // the label as a product name ("a X agent", "3 X sessions", "The X prompt"), and a
   // label that is not one breaks all of them. Pinned so nobody reintroduces a phrase.
   it("always yields a bare product name, never a phrase, for every setting", () => {
-    for (const setting of ["claude-code", "copilot", "cursor", "ask"] as const) {
+    for (const setting of ["claude-code", "copilot", "cursor", "codex", "ask"] as const) {
       const label = providerLabel(resolvedProvider(setting));
-      expect(["Claude Code", "Copilot", "Cursor"]).toContain(label);
+      expect(["Claude Code", "Copilot", "Cursor", "Codex"]).toContain(label);
       expect(label).not.toMatch(/^(your|the|a|an) /i);
     }
   });
@@ -1358,5 +1370,80 @@ describe("forge-flavoured shipped prompts", () => {
     // and whose forge disagree about which tool the session should reach for.
     expect(shippedPrReviewPrompt("wat")).toBe(DEFAULT_PR_REVIEW_PROMPT);
     expect(shippedReviewRequestModes("wat")).toBe(DEFAULT_REVIEW_REQUEST_MODES);
+  });
+});
+
+describe("getConfig — non-numeric setting values fall back to the documented default", () => {
+  // A settings.json hand-edit can hold any JSON type; `c.get<number>` is a cast,
+  // not a check, and `Math.max(1, "six")` is NaN. NaN then poisons every
+  // comparison downstream — `authorising > cfg.batchLaunchConfirmThreshold` is
+  // always false, so the batch-launch safety modal silently never appears.
+  it("batchLaunchConfirmThreshold: a string value reads as the default 6", () => {
+    setConfig({ batchLaunchConfirmThreshold: "six" });
+    expect(getConfig().batchLaunchConfirmThreshold).toBe(6);
+  });
+
+  it("batchLaunchConfirmThreshold: NaN reads as the default 6", () => {
+    setConfig({ batchLaunchConfirmThreshold: NaN });
+    expect(getConfig().batchLaunchConfirmThreshold).toBe(6);
+  });
+
+  it("prFactsTtlSeconds: a string value reads as the default 120", () => {
+    setConfig({ prFactsTtlSeconds: "two minutes" });
+    expect(getConfig().prFactsTtlSeconds).toBe(120);
+  });
+
+  it("reviewRequestsTtlSeconds: a string value reads as the default 300", () => {
+    setConfig({ reviewRequestsTtlSeconds: "later" });
+    expect(getConfig().reviewRequestsTtlSeconds).toBe(300);
+  });
+
+  it("retire windows: string values read as their defaults", () => {
+    setConfig({
+      retireFinishedAfterHours: "a day",
+      retireAbandonedAfterDays: "a week",
+      retireClosedAfterHours: "24h",
+      retireInPlaceAfterHours: "never",
+    });
+    const c = getConfig();
+    expect(c.retireFinishedAfterHours).toBe(24);
+    expect(c.retireAbandonedAfterDays).toBe(7);
+    expect(c.retireClosedAfterHours).toBe(24);
+    expect(c.retireInPlaceAfterHours).toBe(0);
+  });
+
+  it("Infinity is refused too — the fallback is Number.isFinite, not typeof", () => {
+    setConfig({ prFactsTtlSeconds: Infinity });
+    expect(getConfig().prFactsTtlSeconds).toBe(120);
+  });
+
+  // The clamps must survive the helper unchanged: a finite but out-of-range
+  // number still clamps to the floor rather than falling back to the default.
+  it("keeps every existing floor clamp for finite out-of-range numbers", () => {
+    setConfig({
+      batchLaunchConfirmThreshold: 0,
+      prFactsTtlSeconds: 1,
+      reviewRequestsTtlSeconds: 5,
+      retireFinishedAfterHours: -5,
+      retireAbandonedAfterDays: -1,
+      retireClosedAfterHours: -3,
+      retireInPlaceAfterHours: -2,
+    });
+    const c = getConfig();
+    expect(c.batchLaunchConfirmThreshold).toBe(1);
+    expect(c.prFactsTtlSeconds).toBe(30);
+    expect(c.reviewRequestsTtlSeconds).toBe(60);
+    expect(c.retireFinishedAfterHours).toBe(0);
+    expect(c.retireAbandonedAfterDays).toBe(0);
+    expect(c.retireClosedAfterHours).toBe(0);
+    expect(c.retireInPlaceAfterHours).toBe(0);
+  });
+
+  it("still honors in-range explicit numbers through the finite check", () => {
+    setConfig({ batchLaunchConfirmThreshold: 3, prFactsTtlSeconds: 300, retireInPlaceAfterHours: 0 });
+    const c = getConfig();
+    expect(c.batchLaunchConfirmThreshold).toBe(3);
+    expect(c.prFactsTtlSeconds).toBe(300);
+    expect(c.retireInPlaceAfterHours).toBe(0);
   });
 });

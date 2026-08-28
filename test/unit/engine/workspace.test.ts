@@ -1094,6 +1094,48 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     });
   });
 
+  describe("seedAgentSession — codex", () => {
+    beforeEach(() => {
+      setConfig({ agentProvider: "codex", agentSurface: "terminal" });
+      window.createTerminal.mockClear();
+      commands.executeCommand.mockClear();
+    });
+
+    afterEach(() => {
+      setConfig({ agentProvider: undefined, agentSurface: undefined });
+    });
+
+    it("names the terminal for Codex and runs the codex CLI", async () => {
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal).toHaveBeenCalledTimes(1);
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Codex · PROJ-1" });
+      expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "codex", true);
+      // The prompt is pasted, not submitted.
+      expect(terminalAt(0).sendText.mock.calls[1][1]).toBe(false);
+      expect(terminalAt(0).sendText.mock.calls[1][0]).toContain("do it");
+    });
+
+    // Codex has no extension panel to seed — workbench.action.chat.open belongs to
+    // Copilot and Cursor — so the extension surface still lands in a terminal
+    // rather than pre-filling a panel Codex does not serve.
+    it("seeds via terminal even under the extension surface", async () => {
+      setConfig({ agentSurface: undefined });
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal).toHaveBeenCalledTimes(1);
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Codex · PROJ-1" });
+      expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "codex", true);
+      expect(commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.chat.open", expect.anything());
+    });
+  });
+
   it("uses the extension panel and no terminal when agentSurface is unset", async () => {
     setConfig({ agentSurface: undefined });
     window.createTerminal.mockClear();
@@ -2162,8 +2204,8 @@ describe("openWorkspace — ask", () => {
     window.showQuickPick.mockResolvedValueOnce({ label: "Cursor", provider: "cursor" });
     await openWorkspace(baseReq({ seedAgent: true }));
     const items = window.showQuickPick.mock.calls[0][0] as { label: string; provider: string }[];
-    expect(items.map((i) => i.provider)).toEqual(["claude-code", "cursor"]);
-    expect(items.map((i) => i.label)).toEqual(["Claude Code", "Cursor"]);
+    expect(items.map((i) => i.provider)).toEqual(["claude-code", "cursor", "codex"]);
+    expect(items.map((i) => i.label)).toEqual(["Claude Code", "Cursor", "Codex"]);
   });
 
   it("titles the picker exactly, and holds it open until it is answered", async () => {
@@ -2188,7 +2230,7 @@ describe("openWorkspace — ask", () => {
     window.showQuickPick.mockResolvedValueOnce({ label: "Copilot", provider: "copilot" });
     const result = await openWorkspace(baseReq({ seedAgent: true }));
     const items = window.showQuickPick.mock.calls[0][0] as { provider: string }[];
-    expect(items.map((i) => i.provider)).toEqual(["claude-code", "copilot"]);
+    expect(items.map((i) => i.provider)).toEqual(["claude-code", "copilot", "codex"]);
     expect(result.provider).toBe("copilot");
     expect(planOf().provider).toBe("copilot");
   });
@@ -2218,14 +2260,17 @@ describe("openWorkspace — ask", () => {
   });
 
   // A picker with one item is not a question — it is a modal, held open by
-  // `ignoreFocusOut`, that can only be answered one way. On a host that is neither VS
-  // Code nor Cursor, `hostProviders()` is exactly `["claude-code"]`, so `ask` there
-  // used to raise that dialog on every single launch.
-  it("does not prompt on a host with only one possible agent", async () => {
+  // `ignoreFocusOut`, that can only be answered one way, so a one-agent host skips
+  // it. Since codex joined every host's picker no real host has fewer than two
+  // agents, so the short-circuit is pinned here through the picker's contents: even
+  // a host that is neither VS Code nor Cursor asks, offering Claude Code and Codex.
+  it("still prompts on a host with no editor-specific agent — Codex makes it two", async () => {
     setConfig({ agentProvider: "ask" });
     env.uriScheme = "windsurf";
+    window.showQuickPick.mockResolvedValueOnce({ label: "Claude Code", provider: "claude-code" });
     const result = await openWorkspace(baseReq({ seedAgent: true }));
-    expect(window.showQuickPick).not.toHaveBeenCalled();
+    const items = window.showQuickPick.mock.calls[0][0] as { provider: string }[];
+    expect(items.map((i) => i.provider)).toEqual(["claude-code", "codex"]);
     expect(result.provider).toBe("claude-code");
     // Still a resolved `ask`, so the answer is pinned into the plan exactly as a
     // picked or caller-pinned one is.
@@ -2772,5 +2817,105 @@ describe("writeBriefInto", () => {
     expect(logged).toEqual([
       "brief api: could not write into /repos/parent/.claude/worktrees/PROJ-2/api (Error: EACCES)",
     ]);
+  });
+});
+
+describe("maybeSeedAgent — malformed plan files", () => {
+  const IDENTITY = "/ws/PROJ-1.code-workspace";
+  // Pinned, not inherited: the seed route asserted below exists only for the
+  // claude-code provider, and leftover setConfig state from earlier describes
+  // must not be what selects it.
+  beforeEach(() => setConfig({ agentProvider: "claude-code", agentSurface: undefined }));
+  const withWorkspaceFile = () => {
+    workspace.workspaceFile = { scheme: "file", fsPath: IDENTITY };
+  };
+  const goodPlan = (prompt = "do it") =>
+    JSON.stringify({
+      key: "PROJ-1",
+      // Firmly in the past: this builder runs lazily inside the readFileSync
+      // mock, AFTER runSeedPass has captured `now` — a live Date.now() here can
+      // land 1ms ahead of it under load, and the future-stamp rule under test
+      // would then (correctly) delete the plan this test needs seeded.
+      createdAt: Date.now() - 60_000,
+      seedAgent: true,
+      matches: [{ matchPath: IDENTITY, prompt }],
+    });
+
+  it("seeds the good plan beside one missing `matches`, and removes the bad one", async () => {
+    // plan.matches.find used to throw OUTSIDE the read/parse try, aborting the
+    // whole pass — and with no createdAt the TTL never elapsed, so the wedge
+    // was permanent for every window.
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["BAD-1.json", "PROJ-1-1.json"] as never);
+    readFileSync.mockImplementation((p) =>
+      String(p).includes("BAD-1")
+        ? JSON.stringify({ key: "BAD-1", createdAt: Date.now(), seedAgent: true })
+        : goodPlan(),
+    );
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    expect(rmSync).toHaveBeenCalledWith(expect.stringContaining("BAD-1"), { force: true });
+  });
+
+  it("removes a future-dated plan instead of seeding it", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
+    readFileSync.mockReturnValue(
+      JSON.stringify({
+        key: "PROJ-1",
+        createdAt: Date.now() + 60 * 60 * 1000,
+        seedAgent: true,
+        matches: [{ matchPath: IDENTITY, prompt: "do it" }],
+      }),
+    );
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(rmSync).toHaveBeenCalledWith(expect.stringContaining("PROJ-1-1.json"), { force: true });
+    expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+  });
+
+  it("removes a plan with no createdAt at all — a TTL that can never elapse", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
+    readFileSync.mockReturnValue(
+      JSON.stringify({ key: "PROJ-1", seedAgent: true, matches: [{ matchPath: IDENTITY, prompt: "do it" }] }),
+    );
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(rmSync).toHaveBeenCalledWith(expect.stringContaining("PROJ-1-1.json"), { force: true });
+    expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+  });
+
+  it("removes a plan file that fails to parse, so it cannot linger past its TTL", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
+    readFileSync.mockReturnValue("{ not json");
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(rmSync).toHaveBeenCalledWith(expect.stringContaining("PROJ-1-1.json"), { force: true });
+  });
+
+  it("still seeds a plan written this very millisecond (age 0 is not expired)", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
+    readFileSync.mockReturnValue(goodPlan("fresh"));
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "fresh");
   });
 });

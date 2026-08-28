@@ -6602,6 +6602,14 @@ describe("a met launch rule acts", () => {
     expect(toast.message).toContain("Cursor pre-seeded — press Enter to start.");
   });
 
+  it("names Codex in the launch receipt when Codex is configured", async () => {
+    h.agentProvider = "codex";
+    const { p, send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain("Codex pre-seeded — press Enter to start.");
+  });
+
   it.each([["claude-code"], ["ask"], ["copilot"]])(
     "keeps the launch receipt saying Claude Code under %s",
     async (agentProvider) => {
@@ -11111,5 +11119,296 @@ describe("orchestrator telemetry", () => {
       name: "flow_armed", armed: false, node_count: 4, edge_count: 3,
       unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0, source: "auto-skip",
     }]);
+  });
+});
+
+// ── Hardening: defensive guards appended by the deckView hardening pass ──────
+
+describe("hardening — review launch double-click", () => {
+  it("ignores a second launch for the same review while the first is still in flight", async () => {
+    // launchReview is where the worktree is cut and the window opened — the
+    // seconds it takes are exactly the window a double click lands in. Two
+    // launches of one PR would start two paid review sessions, and the
+    // deterministic reviewRunKey means the second writeRun orphans the first's
+    // worktree.
+    const releases: (() => void)[] = [];
+    h.launchReview.mockImplementation(
+      () => new Promise((res) => releases.push(() => res({ ok: true, runKey: "review-aws-ops-8491", provider: "claude-code" }))),
+    );
+    const p = await showAndWarm();
+    const first = p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    const second = p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    await settled();
+    // The first click's launch is still unresolved; the second click must not
+    // have started another one for the same PR.
+    expect(h.launchReview).toHaveBeenCalledTimes(1);
+    releases.forEach((r) => r());
+    await Promise.all([first, second]);
+    expect(h.launchReview).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a second batch launch naming the same review while the first is still asking", async () => {
+    // The batch always asks its mode question (batchReviewModes holds at least
+    // two entries), so the picker is the natural place the second click lands.
+    const picks: ((v: unknown) => void)[] = [];
+    window.showQuickPick.mockImplementation(() => new Promise((res) => picks.push(res)));
+    const p = await showAndWarm();
+    const first = p._fire({ type: "deck:reviewBatch", ids: ["CyberJackGit/aws-ops#8491"] });
+    const second = p._fire({ type: "deck:reviewBatch", ids: ["CyberJackGit/aws-ops#8491"] });
+    await settled();
+    // One question on screen, not a queued duplicate behind it.
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    picks.forEach((r) => r(undefined)); // dismiss — nothing launches either way
+    await Promise.all([first, second]);
+    expect(h.launchReview).not.toHaveBeenCalled();
+  });
+
+  it("a row launch already in flight also blocks a batch naming that id", async () => {
+    const releases: (() => void)[] = [];
+    h.launchReview.mockImplementation(
+      () => new Promise((res) => releases.push(() => res({ ok: true, runKey: "review-aws-ops-8491", provider: "claude-code" }))),
+    );
+    const p = await showAndWarm();
+    const row = p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    await settled();
+    const batch = p._fire({ type: "deck:reviewBatch", ids: ["CyberJackGit/aws-ops#8491"] });
+    await settled();
+    // The batch had nothing left to launch, so it never asked its mode question.
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    releases.forEach((r) => r());
+    await Promise.all([row, batch]);
+    expect(h.launchReview).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("hardening — PR-work double-seed", () => {
+  it("seeds once for a double click across the destination picker", async () => {
+    // The shipped default (prWorkOpenIn: "ask") parks seedPrWork on a picker,
+    // which is exactly where a second click lands: without a guard it queues a
+    // second picker and, once both are answered, writes the plan file twice and
+    // seeds the same window twice.
+    h.runs = [mkRun()];
+    const picks: ((v: unknown) => void)[] = [];
+    window.showQuickPick.mockImplementation(() => new Promise((res) => picks.push(res)));
+    show();
+    const p = lastPanel();
+    const first = p._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
+    const second = p._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
+    await settled();
+    // One destination question on screen, not a queued duplicate behind it.
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    picks.forEach((r) => r({ target: { kind: "stay" } }));
+    await Promise.all([first, second]);
+    expect(h.writePlanFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("still seeds a second time once the first is done", async () => {
+    // The guard is about overlap, not about once-per-session: a deliberate
+    // second Address PR after the first finished must keep working.
+    h.runs = [mkRun()];
+    window.showQuickPick.mockResolvedValue({ target: { kind: "stay" } });
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
+    await p._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
+    expect(h.writePlanFile).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("hardening — a refresh outliving the panel", () => {
+  it("performs nothing once the panel is disposed mid-build", async () => {
+    // The close dialog promises that closing the Deck stops flows advancing —
+    // but a refresh already past its build used to carry on after dispose():
+    // acquiring the global flows lock, running commands, launching sessions,
+    // or raising askFirstSpend from a dead panel.
+    setConfig({ orchestrator: true });
+    const releases: (() => void)[] = [];
+    h.getStatus.mockImplementation(
+      () => new Promise((res) => releases.push(() => res({ status: "In Review", category: "indeterminate" }))),
+    );
+    show(true);
+    const p = lastPanel();
+    await settled(); // the constructor's refresh is now parked on the ticket read
+    expect(h.acquire).not.toHaveBeenCalled();
+    p._fireDispose();
+    releases.forEach((r) => r());
+    await settled();
+    await settled();
+    // Neither the flows lock nor the board post — the pass died with the panel.
+    expect(h.acquire).not.toHaveBeenCalled();
+    expect(posts(p).some((m) => m.type === "deck:runs")).toBe(false);
+  });
+});
+
+describe("hardening — usageFor answers for a missing run", () => {
+  it("posts a null usage for a key with no run, instead of leaving the drawer loading forever", async () => {
+    // The webview asks once per drawer opening and treats no-reply as loading:
+    // a silent return leaves "Reading transcripts…" on screen until the panel
+    // reloads. null is the shape it already renders as "couldn't read".
+    show();
+    const p = lastPanel();
+    await settled();
+    await p._fire({ type: "deck:usageFor", key: "PROJ-GONE" });
+    const post = posts(p).filter((m) => m.type === "deck:usage").at(-1);
+    expect(post).toEqual({ type: "deck:usage", key: "PROJ-GONE", usage: null });
+  });
+});
+
+describe("hardening — onMessage failures surface", () => {
+  /** Like `show()`, but with a log this describe can read. */
+  const showWithLog = () => {
+    const log = vi.fn();
+    DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
+    return log;
+  };
+
+  it("logs and toasts when a handler throws, instead of a silent unhandled rejection", async () => {
+    // deck:forget is the sharpest case: the webview drops the card
+    // optimistically before removeRun runs, so a throw here (EACCES on the
+    // runs directory, say) used to resurrect the card on the next poll with no
+    // explanation at all.
+    const log = showWithLog();
+    const p = lastPanel();
+    await settled();
+    h.removeRun.mockImplementationOnce(() => { throw new Error("EACCES: /runs"); });
+    await p._fire({ type: "deck:forget", key: "PROJ-1" }); // resolves — the throw is owned
+    expect(log.mock.calls.some((c) => String(c[0]).includes("deck:forget") && String(c[0]).includes("EACCES"))).toBe(true);
+    expect(posts(p)).toContainEqual(expect.objectContaining({
+      type: "toast", level: "error", message: expect.stringContaining("deck:forget"),
+    }));
+  });
+
+  it("logs a message type it does not know instead of dropping it silently", async () => {
+    // Most plausibly a webview newer than the host — the panel survives an
+    // extension update until its window reloads.
+    const log = showWithLog();
+    const p = lastPanel();
+    await settled();
+    await p._fire({ type: "deck:not-a-thing" });
+    expect(log.mock.calls.some((c) => String(c[0]).includes("deck:not-a-thing"))).toBe(true);
+  });
+});
+
+describe("hardening — Clear stale re-entrancy and failure", () => {
+  /** The same landed-run fixture the Clear stale describe above uses. */
+  const landed = () => {
+    setConfig({ retireFinishedAfterHours: 999 });
+    h.runs = [mkRun({ key: "PROJ-DONE" })];
+    h.getStatus.mockResolvedValue({ status: "Done", category: "done" });
+  };
+
+  it("runs one clear for a double click across the confirm modal", async () => {
+    // The confirm modal can sit open for as long as the user thinks; VS Code
+    // queues modals rather than dropping one, so without a guard a second
+    // click confirms a second full retire-and-sweep pass.
+    landed();
+    show(true);
+    await settled();
+    const p = lastPanel();
+    const answers: (() => void)[] = [];
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      (_m: string, _o: unknown, ...items: string[]) => new Promise((res) => answers.push(() => res(items[0]))),
+    );
+    const first = p._fire({ type: "deck:clearStale" });
+    const second = p._fire({ type: "deck:clearStale" });
+    await settled();
+    // One confirm on screen, not a queued duplicate behind it.
+    expect(answers).toHaveLength(1);
+    answers.forEach((a) => a());
+    await Promise.all([first, second]);
+    await settled();
+    expect(h.removeRun.mock.calls.filter((c) => c[1] === "PROJ-DONE")).toHaveLength(1);
+  });
+
+  it("tells the user when the rebuild behind a confirmed Clear stale throws", async () => {
+    // A destructive bulk op must not fail silently after the user confirmed
+    // it: the throw is owned by onMessage's catch (logged and toasted), pinned
+    // here specifically for this path.
+    landed();
+    show(true);
+    await settled();
+    const p = lastPanel();
+    h.buildRunStatus.mockImplementation(() => { throw new Error("EACCES: /runs"); });
+    await p._fire({ type: "deck:clearStale" }); // the default modal answer confirms
+    expect(posts(p)).toContainEqual(expect.objectContaining({
+      type: "toast", level: "error", message: expect.stringContaining("deck:clearStale"),
+    }));
+  });
+});
+
+describe("hardening — flipping the token total mid-session", () => {
+  // Fake timers for the same reason "the poll and the close confirmation"
+  // above uses them: the usage cadence never fires under real timers within a
+  // test's lifetime. Same settle shape, too.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const settle = async (ms = 0) => {
+    await vi.advanceTimersByTimeAsync(ms);
+  };
+
+  it("arms the usage sweep when the setting turns on, without a reload", async () => {
+    // The sweep timer was only ever armed in startPolling, so flipping the
+    // setting on mid-session showed a confident $0 forever.
+    h.showTokenTotal = false;
+    show();
+    await settle();
+    h.usageReadRun.mockClear();
+    h.showTokenTotal = true;
+    fireConfigurationChanged("agentFlow.deck.showTokenTotal");
+    await settle();
+    expect(h.usageReadRun).toHaveBeenCalled(); // the eager sweep, exactly as startPolling's
+    h.usageReadRun.mockClear();
+    await settle(USAGE_POLL_MS + 1);
+    expect(h.usageReadRun).toHaveBeenCalled(); // and the cadence behind it
+  });
+
+  it("clears the sweep timer when the setting turns off, instead of leaking it", async () => {
+    h.showTokenTotal = true;
+    show();
+    await settle();
+    h.showTokenTotal = false;
+    fireConfigurationChanged("agentFlow.deck.showTokenTotal");
+    await settle();
+    h.usageReadRun.mockClear();
+    await settle(USAGE_POLL_MS * 2 + 1);
+    expect(h.usageReadRun).not.toHaveBeenCalled();
+  });
+});
+
+describe("hardening — local cards survive a failed rebuild", () => {
+  it("still resolves a local card's run after a rebuild threw mid-loop", async () => {
+    // buildAll used to clear localRuns up front and repopulate it as it went:
+    // a throw mid-loop left the map empty, so every local card still on screen
+    // answered Open/Diff/Track with "No run record" until the next successful
+    // pass.
+    h.runs = [];
+    h.openSessions = [
+      sess({ cwd: "/r/aaa", sessionId: "sA", pid: 1, name: "aaa-1x" }),
+      sess({ cwd: "/r/webapp", sessionId: "sB", pid: 2, name: "webapp-7e" }),
+    ];
+    show();
+    await settled();
+    const p = lastPanel();
+    const webappKey = h.buildRunStatus.mock.calls
+      .map((c) => c[0] as { run: Run })
+      .filter((i) => i.run.kind === "local" && i.run.repos[0]?.path === "/r/webapp")
+      .at(-1)!.run.key;
+    // The next rebuild dies on the FIRST group (/r/aaa), before it ever gets
+    // to /r/webapp's.
+    h.sessionActivity.mockImplementation((_root: string, cwd: string) => {
+      if (cwd === "/r/aaa") throw new Error("EACCES: transcript");
+      return { state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" };
+    });
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    await p._fire({ type: "deck:inspect", key: webappKey, action: "open" });
+    expect(posts(p)).not.toContainEqual(
+      expect.objectContaining({ type: "toast", message: `No run record for ${webappKey}.` }),
+    );
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/webapp");
   });
 });

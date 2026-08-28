@@ -538,3 +538,15 @@ describe("evalCond and describeCond — command-succeeded is unreachable here, l
     expect(() => describeCond({ kind: "command-succeeded" }, ctx())).toThrow();
   });
 });
+
+describe("evalCond — a condition kind this build does not know", () => {
+  it("answers not-met, never a throw — the forward-compat contract the store already keeps", () => {
+    // `store.ts`'s `validEdge` deliberately keeps an edge whose `cond.kind` it
+    // does not recognise, so a newer build's rule survives an older build — and
+    // this switch WILL be handed one, on an armed flow, every 6s pass. Two arms
+    // above now throw on purpose, so a future `default: throw` is one refactor
+    // away from crashing every pass in every window over one newer-build rule.
+    // Not-met is the explicit answer: the rule renders, waits, and costs nothing.
+    expect(evalCond({ kind: "moon-is-full" } as unknown as Condition, ctx())).toBe(false);
+  });
+});

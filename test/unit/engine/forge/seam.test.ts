@@ -97,3 +97,38 @@ describe("the Bitbucket forge's account capability", () => {
     expect(res.ok === false && res.message).toMatch(/switch/i);
   });
 });
+
+describe("a failed GitHub switch names gh's complaint, never the argv", () => {
+  // execRunner attaches gh's stderr separately from `.message`, which for a real
+  // spawn failure is Node's reconstructed "Command failed: <file> <full argv>" —
+  // carrying the account name and hostname flags a toast must never echo back
+  // ahead of what gh actually said (docs/FORGES.md §4).
+  const ARGV_MESSAGE = "Command failed: /usr/bin/gh auth switch --hostname github.com --user nobody";
+
+  it("prefers gh's own stderr over Node's reconstructed message", async () => {
+    const run: Runner = async () => {
+      throw Object.assign(new Error(ARGV_MESSAGE), { stderr: "X no accounts matched that criteria\n" });
+    };
+    const res = await resolveForge("github", () => {}, run).switchAccount("nobody");
+    expect(res).toEqual({ ok: false, message: "X no accounts matched that criteria" });
+  });
+
+  it("says something fixed and argv-free when gh wrote no stderr at all", async () => {
+    const run: Runner = async () => {
+      throw new Error(ARGV_MESSAGE);
+    };
+    const res = await resolveForge("github", () => {}, run).switchAccount("nobody");
+    expect(res.ok).toBe(false);
+    expect(res.ok === false && res.message).not.toContain("nobody");
+    expect(res.ok === false && res.message).not.toContain("Command failed");
+    expect(res.ok === false && res.message).toContain("check gh directly");
+  });
+
+  it("treats whitespace-only stderr as no stderr, falling through to the message path", async () => {
+    const run: Runner = async () => {
+      throw Object.assign(new Error("plain failure with no argv"), { stderr: "  \n" });
+    };
+    const res = await resolveForge("github", () => {}, run).switchAccount("nobody");
+    expect(res).toEqual({ ok: false, message: "plain failure with no argv" });
+  });
+});
