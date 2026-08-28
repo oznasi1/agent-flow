@@ -2951,7 +2951,11 @@ export class DeckPanel {
     // every surviving root, tracked or local, live session or not, since the
     // chips show every root regardless of who is voting on the card.
     const cfg = getConfig();
-    this.localRuns.clear();
+    // Built into a fresh map and swapped in only once every group has been
+    // rebuilt: clearing `localRuns` up front meant a throw mid-loop left it
+    // empty, so every local card still on screen answered Open/Diff/Track with
+    // "No run record" until the next successful pass.
+    const nextLocalRuns = new Map<string, Run>();
     const locals: Run[] = [];
     // Local grouped run key -> the roots that actually have a live session right
     // now (F2). Read by the PR gates below and threaded into buildRunStatus's
@@ -3008,7 +3012,7 @@ export class DeckPanel {
         .find((t) => t !== null) ?? null;
       const sessions = group.places.flatMap((place) => places.get(place) ?? []);
       const run = localRunFor(liveGroup, sessions, git, ticket, now);
-      this.localRuns.set(run.key, run);
+      nextLocalRuns.set(run.key, run);
       localActiveRootsByKey.set(run.key, placeSet);
       agentsByKey.set(
         run.key,
@@ -3022,6 +3026,11 @@ export class DeckPanel {
       );
       locals.push(run);
     }
+    // The swap — the loop above finished, so the new picture is complete. The
+    // field stays the same (readonly) Map on purpose: `track()` deletes from it
+    // between passes, and swapping the reference would strand that.
+    this.localRuns.clear();
+    for (const [key, run] of nextLocalRuns) this.localRuns.set(key, run);
     const all = [...tracked, ...locals];
     // One round trip per run, all at once. Serially this was the bulk of a cold
     // refresh, and back then every Forget waited on the whole pass before its card

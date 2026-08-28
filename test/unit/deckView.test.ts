@@ -10374,3 +10374,37 @@ describe("hardening — flipping the token total mid-session", () => {
     expect(h.usageReadRun).not.toHaveBeenCalled();
   });
 });
+
+describe("hardening — local cards survive a failed rebuild", () => {
+  it("still resolves a local card's run after a rebuild threw mid-loop", async () => {
+    // buildAll used to clear localRuns up front and repopulate it as it went:
+    // a throw mid-loop left the map empty, so every local card still on screen
+    // answered Open/Diff/Track with "No run record" until the next successful
+    // pass.
+    h.runs = [];
+    h.openSessions = [
+      sess({ cwd: "/r/aaa", sessionId: "sA", pid: 1, name: "aaa-1x" }),
+      sess({ cwd: "/r/webapp", sessionId: "sB", pid: 2, name: "webapp-7e" }),
+    ];
+    show();
+    await settled();
+    const p = lastPanel();
+    const webappKey = h.buildRunStatus.mock.calls
+      .map((c) => c[0] as { run: Run })
+      .filter((i) => i.run.kind === "local" && i.run.repos[0]?.path === "/r/webapp")
+      .at(-1)!.run.key;
+    // The next rebuild dies on the FIRST group (/r/aaa), before it ever gets
+    // to /r/webapp's.
+    h.sessionActivity.mockImplementation((_root: string, cwd: string) => {
+      if (cwd === "/r/aaa") throw new Error("EACCES: transcript");
+      return { state: "working", lastActivityMs: 4242, slug: "svc-7e-slug" };
+    });
+    await p._fire({ type: "deck:refresh" });
+    await settled();
+    await p._fire({ type: "deck:inspect", key: webappKey, action: "open" });
+    expect(posts(p)).not.toContainEqual(
+      expect.objectContaining({ type: "toast", message: `No run record for ${webappKey}.` }),
+    );
+    expect(h.openInEditor).toHaveBeenCalledWith("/r/webapp");
+  });
+});
