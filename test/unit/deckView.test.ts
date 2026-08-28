@@ -10284,3 +10284,50 @@ describe("hardening — onMessage failures surface", () => {
     expect(log.mock.calls.some((c) => String(c[0]).includes("deck:not-a-thing"))).toBe(true);
   });
 });
+
+describe("hardening — Clear stale re-entrancy and failure", () => {
+  /** The same landed-run fixture the Clear stale describe above uses. */
+  const landed = () => {
+    setConfig({ retireFinishedAfterHours: 999 });
+    h.runs = [mkRun({ key: "PROJ-DONE" })];
+    h.getStatus.mockResolvedValue({ status: "Done", category: "done" });
+  };
+
+  it("runs one clear for a double click across the confirm modal", async () => {
+    // The confirm modal can sit open for as long as the user thinks; VS Code
+    // queues modals rather than dropping one, so without a guard a second
+    // click confirms a second full retire-and-sweep pass.
+    landed();
+    show(true);
+    await settled();
+    const p = lastPanel();
+    const answers: (() => void)[] = [];
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      (_m: string, _o: unknown, ...items: string[]) => new Promise((res) => answers.push(() => res(items[0]))),
+    );
+    const first = p._fire({ type: "deck:clearStale" });
+    const second = p._fire({ type: "deck:clearStale" });
+    await settled();
+    // One confirm on screen, not a queued duplicate behind it.
+    expect(answers).toHaveLength(1);
+    answers.forEach((a) => a());
+    await Promise.all([first, second]);
+    await settled();
+    expect(h.removeRun.mock.calls.filter((c) => c[1] === "PROJ-DONE")).toHaveLength(1);
+  });
+
+  it("tells the user when the rebuild behind a confirmed Clear stale throws", async () => {
+    // A destructive bulk op must not fail silently after the user confirmed
+    // it: the throw is owned by onMessage's catch (logged and toasted), pinned
+    // here specifically for this path.
+    landed();
+    show(true);
+    await settled();
+    const p = lastPanel();
+    h.buildRunStatus.mockImplementation(() => { throw new Error("EACCES: /runs"); });
+    await p._fire({ type: "deck:clearStale" }); // the default modal answer confirms
+    expect(posts(p)).toContainEqual(expect.objectContaining({
+      type: "toast", level: "error", message: expect.stringContaining("deck:clearStale"),
+    }));
+  });
+});

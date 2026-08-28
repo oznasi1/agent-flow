@@ -443,6 +443,10 @@ export class DeckPanel {
   /** How many run records `Clear stale` would take right now — the sweep's own
    * verdict with both time gates ignored. Recomputed on every `buildAll`. */
   private staleCount = 0;
+  /** Is a Clear stale pass running right now — its confirm modal included? Not
+   * a Set: there is only ever one bulk clear, so a boolean is the honest shape.
+   * See the guard's own comment in `clearStale`. */
+  private clearStaleInFlight = false;
   /** The candidates the last `buildAll` pass built, for `latestCandidates()`.
    * `null` before the first pass ever completes. */
   private attentionCandidates: { candidates: AttentionCandidate[]; at: number } | null = null;
@@ -3231,23 +3235,33 @@ export class DeckPanel {
    * confirmation.
    */
   private async clearStale(): Promise<void> {
+    // Deliberately silent, exactly as submitReview's own guard is: the confirm
+    // modal can sit open for as long as the user thinks, VS Code queues modals
+    // rather than dropping one, and a second confirmed pass would retire and
+    // sweep everything twice. Same shape as `advanceInFlight` above.
+    if (this.clearStaleInFlight) return;
     const n = this.staleCount;
     if (n === 0) return;
-    const label = `Clear ${n}`;
-    const answer = await vscode.window.showWarningMessage(
-      `Retire ${n} stale run record${n === 1 ? "" : "s"}? Worktrees, branches and commits are left untouched.`,
-      { modal: true },
-      label,
-    );
-    if (answer !== label) return;
-    const nowMs = Date.now();
-    const livePlaces = new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys());
-    for (const status of await this.buildAll()) {
-      if (runKind(status.run) === "local") continue;
-      this.applyVerdict(status.run, this.verdictFor(status, livePlaces, nowMs, true));
+    this.clearStaleInFlight = true;
+    try {
+      const label = `Clear ${n}`;
+      const answer = await vscode.window.showWarningMessage(
+        `Retire ${n} stale run record${n === 1 ? "" : "s"}? Worktrees, branches and commits are left untouched.`,
+        { modal: true },
+        label,
+      );
+      if (answer !== label) return;
+      const nowMs = Date.now();
+      const livePlaces = new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys());
+      for (const status of await this.buildAll()) {
+        if (runKind(status.run) === "local") continue;
+        this.applyVerdict(status.run, this.verdictFor(status, livePlaces, nowMs, true));
+      }
+      this.sweepReviewRuns(livePlaces, nowMs, true);
+      await this.refreshBusy();
+    } finally {
+      this.clearStaleInFlight = false;
     }
-    this.sweepReviewRuns(livePlaces, nowMs, true);
-    await this.refreshBusy();
   }
 
   /** The verdict for one run. `overrideGates` ignores both time windows — that is
