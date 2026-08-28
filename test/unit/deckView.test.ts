@@ -16,6 +16,18 @@ import type { FlowCommand } from "../../src/types";
 import { attentionKeys } from "../../src/engine/attention";
 import { forgeNote } from "../../src/deckView";
 
+// Telemetry: mocked wholesale so the deck_opened/deck_action/operation_failed
+// assertions below observe track()/trackError() calls without a real singleton —
+// same pattern as tasksView.test.ts's Take-funnel mock.
+const trackSpy = vi.fn();
+const trackErrorSpy = vi.fn();
+vi.mock("../../src/telemetry/telemetry", () => ({
+  track: (...a: unknown[]) => trackSpy(...a),
+  trackError: (...a: unknown[]) => trackErrorSpy(...a),
+  startFlow: () => ({ id: "flow-1", elapsedMs: () => 42 }),
+  fingerprint: () => "0123456789abcdef",
+}));
+
 /** The shape `child_process.exec`'s callback is invoked with, narrowed to the four
  * fields `shellCommandRunner` actually branches on. A real `ExecException` carries
  * more, but a test that built one would be asserting against Node's own class
@@ -678,6 +690,8 @@ const sess = (over: Partial<OpenSession> = {}): OpenSession => ({
 });
 
 beforeEach(() => {
+  trackSpy.mockClear();
+  trackErrorSpy.mockClear();
   h.runs = [mkRun()];
   h.openInEditor.mockClear().mockResolvedValue(true);
   h.openWorkspace.mockClear().mockResolvedValue({ mode: "per-window", briefs: [], opened: [], remoteControl: false });
@@ -1313,6 +1327,126 @@ describe("DeckPanel", () => {
     await Promise.all([first, second]);
     const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
     expect(loads).toEqual([true, false]);
+  });
+});
+
+describe("deck telemetry", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  it("emits deck_opened once on a fresh open, with revealed:false", async () => {
+    await openPanel();
+    const opened = trackSpy.mock.calls.flat().filter((e: any) => e.name === "deck_opened");
+    expect(opened).toHaveLength(1);
+    expect(opened[0].revealed).toBe(false);
+    expect(typeof opened[0].flow_count).toBe("number");
+  });
+
+  it("emits deck_opened with revealed:true when an already-open panel is revealed instead of recreated", async () => {
+    await openPanel();
+    trackSpy.mockClear();
+    show(); // second show() on an existing panel takes the reveal branch
+    const opened = trackSpy.mock.calls.flat().filter((e: any) => e.name === "deck_opened");
+    expect(opened).toHaveLength(1);
+    expect(opened[0].revealed).toBe(true);
+  });
+
+  it("emits deck_action for a grouping change, carrying the grouping enum", async () => {
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "deck:setGrouping", grouping: "workspaces" });
+    const act = trackSpy.mock.calls.flat().find((e: any) => e.name === "deck_action");
+    expect(act).toMatchObject({ action: "set_grouping", grouping: "workspaces" });
+  });
+
+  // `grouping` is typed "agents" | "workspaces" at compile time only — a webview
+  // message is untyped at runtime. The gesture still counts (deck_action fires
+  // either way); only the unrecognised value is withheld.
+  it("still counts the gesture but omits grouping when the value is out of union", async () => {
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "deck:setGrouping", grouping: "not-a-real-grouping" as never });
+    const act = trackSpy.mock.calls.flat().find((e: any) => e.name === "deck_action");
+    expect(act).toMatchObject({ action: "set_grouping" });
+    expect(act).not.toHaveProperty("grouping");
+  });
+
+  it("emits deck_action inspect_open / inspect_diff from the same deck:inspect message, keyed by payload", async () => {
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "deck:inspect", key: "PROJ-1", action: "open" });
+    await send({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
+    const actions = trackSpy.mock.calls.flat().filter((e: any) => e.name === "deck_action").map((e: any) => e.action);
+    expect(actions).toEqual(["inspect_open", "inspect_diff"]);
+    // The event carries only the action enum, never the key the message was sent with.
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+  });
+
+  it("emits deck_action for refresh, clear stale, forget, and open external", async () => {
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    await send({ type: "deck:clearStale" });
+    await send({ type: "deck:forget", key: "PROJ-1" });
+    await send({ type: "openExternal", url: "https://example.com" });
+    const actions = trackSpy.mock.calls.flat().filter((e: any) => e.name === "deck_action").map((e: any) => e.action);
+    expect(actions).toEqual(["refresh", "clear_stale", "forget", "open_external"]);
+  });
+
+  it("emits no deck_action for read-plumbing messages like deck:reviewExpand", async () => {
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "deck:reviewExpand", id: "PROJ-1" });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "deck_action")).toBeUndefined();
+  });
+
+  it("emits operation_failed from the new onMessage catch and never a user string", async () => {
+    const { send } = await openPanel();
+    const panel = (DeckPanel as any).current;
+    vi.spyOn(panel, "refreshBusy").mockRejectedValueOnce(new Error("boom"));
+    trackErrorSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    const err = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(err).toBeDefined();
+    expect(err.op).toBe("pr_lookup");
+    expect(err.retryable).toBe(false);
+  });
+
+  // Unlike the case above, `deck:refresh` carries no key — so a leak check against it
+  // is true no matter what the emit does, and would not catch a real regression. Force
+  // the failure on a message that DOES carry a real key (`deck:forget`, key "PROJ-1"),
+  // by making the engine call that case makes first (`removeRun`) throw, and check the
+  // key never reaches either spy's serialized calls.
+  it("never leaks the message's key into operation_failed or any deck_action, even when the failing handler was given one", async () => {
+    const { send } = await openPanel();
+    h.removeRun.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    trackSpy.mockClear();
+    trackErrorSpy.mockClear();
+    await send({ type: "deck:forget", key: "PROJ-1" });
+    const err = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(err).toBeDefined();
+    // "deck:forget" is absent from DECK_MESSAGE_OPS, so it falls back to the default op.
+    expect(err.op).toBe("workspace_write");
+    expect(err.retryable).toBe(false);
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+    expect(JSON.stringify(trackErrorSpy.mock.calls.flat())).not.toContain("PROJ-1");
+  });
+
+  it("does not report operation_failed for a message absent from the op map, falling back to workspace_write", async () => {
+    const { send } = await openPanel();
+    const panel = (DeckPanel as any).current;
+    vi.spyOn(panel as any, "switchForgeAccount").mockRejectedValueOnce(new Error("boom"));
+    trackErrorSpy.mockClear();
+    await send({ type: "deck:switchAccount" });
+    const err = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(err).toBeDefined();
+    expect(err.op).toBe("workspace_write");
   });
 });
 
@@ -3363,6 +3497,50 @@ describe("DeckPanel review launch", () => {
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(true);
   });
 
+  it("emits review_launched with outcome launched for a single review", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "launched", mode: "stock", mode_was_pinned: true, destination: "new",
+      provider: "claude-code", seeded_in_place: false, batch: false,
+      requested_count: 1, launched_count: 1, failed_count: 0, skipped_count: 0,
+    });
+  });
+
+  it("emits review_launched with outcome cancelled when the mode picker is dismissed", async () => {
+    setConfig({ reviewRequestModes: TWO_MODES });
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev.outcome).toBe("cancelled");
+    expect(ev.batch).toBe(false);
+    expect(ev.requested_count).toBe(1);
+  });
+
+  it("emits review_launched with outcome failed when this window loses identity between the destination pick and the launch", async () => {
+    // Same loss `targetToOpenArgs` documents for "current": the window vanishes
+    // between the destination QuickPick answering "This window" and the second,
+    // fresh `currentWindow()` read just before `launchReview`. Simulated inside the
+    // picker's own resolution, the one async gap between the two reads.
+    setConfig({ reviewOpenIn: "ask" });
+    const HERE = { identity: "/repos/aws-ops", kind: "folder" as const, roots: [{ path: "/repos/aws-ops" }] };
+    h.currentWindow = HERE;
+    window.showQuickPick.mockImplementationOnce(async (items: unknown) => {
+      const row = (items as { label: string }[]).find((i) => i.label.includes("This window"));
+      h.currentWindow = undefined;
+      return row;
+    });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(h.launchReview).not.toHaveBeenCalled();
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "failed", batch: false, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+    });
+  });
+
   it("still names Claude Code pre-seeded in the launch toast by default", async () => {
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
@@ -3593,6 +3771,20 @@ describe("DeckPanel review launch", () => {
     expect(h.openSharedWorkspace).not.toHaveBeenCalled();
   });
 
+  it("reports mode_was_pinned:true when the cost confirm is declined for a genuinely pinned mode", async () => {
+    // resolveReviewMode(modes, cfg.reviewRequestMode) is a pure function of config —
+    // whether it finds a pin has nothing to do with whether the cost-confirm dialog
+    // even ran. A pinned mode declined here must still report true, not the "nothing
+    // was resolved yet" false the mode/destination pickers' own dismissals report.
+    setConfig({ batchLaunchConfirmThreshold: 1, reviewRequestMode: "full" });
+    twoQueued();
+    const p = await showAndWarm();
+    window.showWarningMessage.mockResolvedValueOnce(undefined); // refused
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({ outcome: "cancelled", mode_was_pinned: true, batch: true, requested_count: 2 });
+  });
+
   it("does not confirm a batch at or below the threshold", async () => {
     twoQueued();
     shareThisWindow();
@@ -3664,6 +3856,12 @@ describe("DeckPanel review launch", () => {
     // Not merely "a toast mentioning worktrees" — the refusal, and nothing launched.
     expect(h.launchReview).not.toHaveBeenCalled();
     expect(toastText(p)).toMatch(/Couldn't create a git worktree/i);
+    // Every worktree in the batch failed, so this terminal must count as a real
+    // failure — not a silent no-op the way a dismissed picker is.
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "failed", batch: true, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+    });
   });
 
   it("asks how to lay out a multi-PR new window, and separate windows goes one at a time", async () => {
@@ -3675,6 +3873,20 @@ describe("DeckPanel review launch", () => {
     // Separate windows IS the single-PR path, N times — worktree included.
     expect(h.launchReview).toHaveBeenCalledTimes(2);
     expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("emits review_launched with outcome cancelled when the layout picker is dismissed", async () => {
+    twoQueued();
+    const p = await showAndWarm(); // stock reviewOpenIn: a new window, asked nothing
+    pickMode(readOnlyReviewMode("github"));
+    window.showQuickPick.mockResolvedValueOnce(undefined); // the layout picker
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    expect(h.launchReview).not.toHaveBeenCalled();
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "cancelled", batch: true, requested_count: 2, launched_count: 0, failed_count: 0, skipped_count: 0,
+    });
   });
 
   it("asks no layout question when the destination is already one window", async () => {
@@ -3704,6 +3916,41 @@ describe("DeckPanel review launch", () => {
     await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
     expect(h.openSharedWorkspace).not.toHaveBeenCalled();
     expect(toastText(p)).toMatch(/no longer hold a session/i);
+    // Not a user gesture — the window vanished out from under the launch — so
+    // "failed", not "cancelled", and the one ready item counts as failed too.
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "failed", batch: true, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+    });
+  });
+
+  it("emits review_launched with outcome cancelled when the agent picker is dismissed", async () => {
+    // Read-only needs no worktree, so `ready` fills without touching createWorktrees
+    // (reset to a bare `vi.fn()` between tests) — isolating this from the picker.
+    shareThisWindow();
+    h.agentProvider = "ask";
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    window.showQuickPick.mockResolvedValueOnce(undefined); // "Which tool?"
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "cancelled", batch: true, requested_count: 1, launched_count: 0, failed_count: 0, skipped_count: 0,
+    });
+  });
+
+  it("emits review_launched with outcome failed when opening the shared workspace throws", async () => {
+    shareThisWindow();
+    h.openSharedWorkspace.mockRejectedValueOnce(new Error("disk full"));
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
+    expect(toastText(p)).toMatch(/Couldn't open the review workspace/i);
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "failed", batch: true, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+    });
   });
 
   it("treats one PR into a new window as the ordinary single launch", async () => {
@@ -3732,6 +3979,18 @@ describe("DeckPanel review launch", () => {
     expect(posts(p).filter((m) => m.type === "toast")).toHaveLength(0);
   });
 
+  it("emits review_launched with outcome cancelled when the queue moved on before every id in the batch", async () => {
+    h.reviewCache = { fetchedAt: Date.now(), issueCount: 0, requests: [] };
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "cancelled", batch: true, requested_count: 0, launched_count: 0, failed_count: 0, skipped_count: 0,
+    });
+  });
+
   it("names an un-checked-out repo once, and reviews the rest", async () => {
     h.reviewCache = {
       fetchedAt: Date.now(),
@@ -3750,6 +4009,27 @@ describe("DeckPanel review launch", () => {
     expect(toastText(p).match(/ext-svc/g)).toHaveLength(1);
   });
 
+  it("emits ONE review_launched for a batch, with counts", async () => {
+    h.reviewCache = {
+      fetchedAt: Date.now(),
+      issueCount: 3,
+      requests: [
+        reviewFixture(),
+        { ...reviewFixture(), id: "x/ext-svc#1", repo: "x/ext-svc", repoName: "ext-svc", number: 1 },
+        { ...reviewFixture(), id: "x/ext-svc#2", repo: "x/ext-svc", repoName: "ext-svc", number: 2 },
+      ],
+    };
+    shareThisWindow();
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, "x/ext-svc#1", "x/ext-svc#2"] });
+    const evs = trackSpy.mock.calls.flat().filter((e: any) => e.name === "review_launched");
+    expect(evs).toHaveLength(1);
+    expect(evs[0]).toMatchObject({
+      batch: true, requested_count: 3, launched_count: 1, failed_count: 0, skipped_count: 1,
+    });
+  });
+
   it("reviews nothing, and says why once, when no selected repo is checked out", async () => {
     h.reviewCache = {
       fetchedAt: Date.now(),
@@ -3763,6 +4043,12 @@ describe("DeckPanel review launch", () => {
     expect(toastText(p)).toContain("ext-svc");
     // Asked the mode, then stopped: no destination question for a batch with nothing in it.
     expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    // Every request was skipped for want of a checkout — a real failure, not a
+    // no-op: nothing was ever going to launch out of this batch.
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "failed", batch: true, requested_count: 1, launched_count: 0, failed_count: 0, skipped_count: 1,
+    });
   });
 
   it("never edits an existing workspace file", async () => {
@@ -3811,6 +4097,16 @@ describe("DeckPanel review submit", () => {
     expect(posts(p)).toContainEqual({
       type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
     });
+  });
+
+  // An invalid verb must be withheld from `review_submitted` even on an exit that
+  // runs BEFORE the dedicated `Object.hasOwn` guard — verb validity is checked once,
+  // up front, rather than relying on this gate happening to run first.
+  it("emits no review_submitted for an out-of-union verb even when reviewWrites is off", async () => {
+    h.reviewWrites = false;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "merge" as unknown as ReviewVerb }));
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "review_submitted")).toBeUndefined();
   });
 
   it("asks for confirmation naming the verb, repo and number", async () => {
@@ -3935,6 +4231,16 @@ describe("DeckPanel review submit", () => {
     });
   });
 
+  it("emits review_submitted mirroring deck:reviewSubmitDone and never the body", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve", body: "SECRET-BODY", fromDraft: true }));
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "review_submitted")).toMatchObject({
+      verb: "approve", from_draft: true, outcome: "ok",
+    });
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("SECRET-BODY");
+  });
+
   it("appends the provenance line to an agent-drafted body", async () => {
     h.reviewWrites = true;
     h.stampLabelOnWrite = true;
@@ -4052,6 +4358,16 @@ describe("DeckPanel review submit", () => {
     expect(posts(p)).toContainEqual({
       type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
     });
+  });
+
+  // An invalid verb must never ride a `review_submitted` event at all — not even
+  // the value the gate itself is rejecting. The webview reply above still posts,
+  // unaffected; only the telemetry emit is withheld.
+  it("emits no review_submitted for an out-of-union verb", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "merge" as unknown as ReviewVerb }));
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "review_submitted")).toBeUndefined();
   });
 
   // --- Fix round 1: a double click (or any second deck:reviewSubmit for the same
@@ -4393,7 +4709,7 @@ describe("deck:mergePr", () => {
     expect(posts(p)).toContainEqual(CANCELLED({ key: "NOPE-9" }));
   });
 
-  it("releases the button for a local card", async () => {
+  it("releases the button for a local card, and emits pr_merged refused/local", async () => {
     h.mergeWrites = true;
     h.runs = [];
     h.openSessions = [sess({ cwd: "/r/svc", name: "svc-7e" })];
@@ -4402,8 +4718,12 @@ describe("deck:mergePr", () => {
     await settled();
     const localKey = builtLocal().run.key;
     const p = lastPanel();
+    trackSpy.mockClear();
     await p._fire({ type: "deck:mergePr", key: localKey, repo: "svc", number: 124 });
     expect(posts(p)).toContainEqual(CANCELLED({ key: localKey }));
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged")).toMatchObject({
+      outcome: "refused", refusal: "local",
+    });
   });
 
   // The wrong-number shape rather than the unmergeable-facts one, though both reach
@@ -4547,6 +4867,7 @@ describe("deck:mergePr", () => {
     let release!: () => void;
     h.prMerge.mockImplementation(() => new Promise((res) => { release = () => res({ ok: true }); }));
     const p = await openWith(greenFacts());
+    trackSpy.mockClear();
     const first = p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     release();
@@ -4562,6 +4883,12 @@ describe("deck:mergePr", () => {
     expect(dones).toEqual([
       { type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 124, outcome: "ok" },
     ]);
+    // The rejected duplicate still gets its own pr_merged{ refused, in-flight } —
+    // trackEvent isn't gated by the same "don't release the button" reasoning the
+    // webview post is, so both this and the real call's pr_merged{ ok } land.
+    const merged = trackSpy.mock.calls.flat().filter((e: any) => e.name === "pr_merged");
+    expect(merged).toContainEqual(expect.objectContaining({ outcome: "refused", refusal: "in-flight" }));
+    expect(merged).toContainEqual(expect.objectContaining({ outcome: "ok", merge_method: "squash" }));
   });
 
   it("carries mergeWrites on deck:runs so the card can render the row", async () => {
@@ -4577,6 +4904,102 @@ describe("deck:mergePr", () => {
     h.mergeWrites = false;
     await openWith(greenFacts());
     expect(lastRunsPost().mergeWrites).toBe(false);
+  });
+
+  it("emits pr_merged refused/writes-off when mergeWrites is off, with no repo or key in the serialized calls", async () => {
+    h.mergeWrites = false;
+    trackSpy.mockClear();
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged")).toMatchObject({
+      outcome: "refused", refusal: "writes-off",
+    });
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("svc");
+  });
+
+  it.each([
+    ["facts-off", () => { h.mergeWrites = true; h.prFacts = false; }],
+    ["no-run", () => { h.mergeWrites = true; }],
+    ["target-mismatch", () => { h.mergeWrites = true; }],
+    ["no-checkout", () => { h.mergeWrites = true; }],
+  ] as const)("emits pr_merged refused/%s for that gate", async (refusal, setup) => {
+    setup();
+    trackSpy.mockClear();
+    let p: ReturnType<typeof lastPanel>;
+    if (refusal === "no-run") {
+      p = await openWith(greenFacts());
+      await p._fire({ type: "deck:mergePr", key: "NOPE-9", repo: "svc", number: 124 });
+    } else if (refusal === "target-mismatch") {
+      p = await openWith(greenFacts());
+      await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 999 });
+    } else if (refusal === "no-checkout") {
+      h.runs = [mkRun({ repos: [{ name: "other", path: "/r/other", isGit: true, branch: "b" }] })];
+      h.prEntries = { svc: { facts: greenFacts(), fetchedAt: Date.now() } };
+      show();
+      await settled();
+      p = lastPanel();
+      await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    } else {
+      p = await openWith(greenFacts());
+      await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    }
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged")).toMatchObject({
+      outcome: "refused", refusal,
+    });
+  });
+
+  it("emits pr_merged ok with merge_method on a successful merge", async () => {
+    h.mergeWrites = true;
+    h.mergeMethod = "squash";
+    vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
+    trackSpy.mockClear();
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged")).toMatchObject({
+      outcome: "ok", merge_method: "squash",
+    });
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("124");
+  });
+
+  it("emits pr_merged failed with merge_method when the forge rejects the merge", async () => {
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
+    h.prMerge.mockResolvedValue({ ok: false, message: "Pull request is not mergeable" });
+    trackSpy.mockClear();
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged")).toMatchObject({
+      outcome: "failed", merge_method: "squash",
+    });
+  });
+
+  it("emits pr_merged cancelled, with no merge_method, when the confirmation is declined", async () => {
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockResolvedValue(undefined);
+    trackSpy.mockClear();
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged") as any;
+    expect(ev).toMatchObject({ outcome: "cancelled" });
+    expect(ev.merge_method).toBeUndefined();
+  });
+
+  // `merge_method` belongs on the failure event only once the forge was actually
+  // asked to merge (docs: "present only once a merge was actually attempted") — a
+  // throw from the confirm modal itself, before the forge is ever called, must not
+  // claim a merge method was in play.
+  it("emits pr_merged failed with no merge_method when the confirm dialog itself throws", async () => {
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockRejectedValueOnce(new Error("dialog crashed"));
+    trackSpy.mockClear();
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    expect(h.prMerge).not.toHaveBeenCalled();
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged") as any;
+    expect(ev).toMatchObject({ outcome: "failed" });
+    expect(ev.merge_method).toBeUndefined();
   });
 });
 
@@ -4677,15 +5100,19 @@ describe("DeckPanel — Address PR", () => {
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
   });
 
-  it("toasts an error when there is no run record for the key", async () => {
+  it("toasts an error when there is no run record for the key, and emits pr_work_seeded refused", async () => {
     h.runs = [];
     show();
     const p = lastPanel();
+    trackSpy.mockClear();
     await p._fire({ type: "deck:addressPr", key: "PROJ-9" });
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(
       expect.objectContaining({ type: "toast", level: "error", message: "No run record for PROJ-9." }),
     );
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "refused",
+    });
   });
 
   it("toasts an error when the run has nothing to open", async () => {
@@ -4752,10 +5179,14 @@ describe("DeckPanel — Address PR", () => {
     await settled();
     const localKey = builtLocal().run.key;
     const p = lastPanel();
+    trackSpy.mockClear();
     await p._fire({ type: "deck:addressPr", key: localKey });
     await settled();
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(h.openInEditor).not.toHaveBeenCalled();
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "refused",
+    });
   });
 
   it("tells the user nothing was seeded when agentFlow.seedAgent is off", async () => {
@@ -4768,6 +5199,50 @@ describe("DeckPanel — Address PR", () => {
     expect(posts(p)).toContainEqual(
       expect.objectContaining({ type: "toast", level: "info", message: expect.stringContaining("agentFlow.seedAgent") }),
     );
+  });
+
+  it("emits pr_work_seeded with reason review and source deck, and no ticket key in the serialized calls", async () => {
+    h.runs = [mkRun()];
+    show();
+    trackSpy.mockClear();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      reason: "review", source: "deck", outcome: "seeded",
+      window_count: 1, failed_repo_count: 0, agent_seeded: true,
+    });
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+  });
+
+  it("emits pr_work_seeded opened-not-seeded when agentFlow.seedAgent is off", async () => {
+    h.seedAgent = false;
+    h.runs = [mkRun()];
+    show();
+    trackSpy.mockClear();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "opened-not-seeded", agent_seeded: false,
+    });
+  });
+
+  it("emits pr_work_seeded open-failed, with the failed count, when the editor refuses to open", async () => {
+    h.runs = [mkRun()];
+    h.openInEditor.mockResolvedValueOnce(false);
+    show();
+    trackSpy.mockClear();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "open-failed", window_count: 1, failed_repo_count: 1,
+    });
+  });
+
+  it("emits pr_work_seeded refused for a run with nothing to open", async () => {
+    h.runs = [mkRun({ repos: [] })];
+    show();
+    trackSpy.mockClear();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "refused",
+    });
   });
 });
 
@@ -4883,14 +5358,18 @@ describe("DeckPanel — PR-work destination", () => {
     }));
   });
 
-  it("refuses this window when it has no identity between the pick and the seed", async () => {
+  it("refuses this window when it has no identity between the pick and the seed, and emits pr_work_seeded refused", async () => {
     h.currentWindow = undefined;
     window.showQuickPick.mockResolvedValueOnce({ target: { kind: "current" } });
+    trackSpy.mockClear();
     const p = await fire();
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(expect.objectContaining({
       type: "toast", level: "error", message: expect.stringContaining("no workspace file"),
     }));
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "refused",
+    });
   });
 
   // The plan file is the durable half of this click: written after the question, never
@@ -4901,6 +5380,25 @@ describe("DeckPanel — PR-work destination", () => {
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(h.openInEditor).not.toHaveBeenCalled();
     expect(posts(p).some((m) => m.type === "toast")).toBe(false);
+  });
+
+  it("emits pr_work_seeded cancelled when the destination picker is dismissed", async () => {
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    trackSpy.mockClear();
+    await fire();
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "cancelled",
+    });
+  });
+
+  it("emits pr_work_seeded seeded-in-place when re-seeding this window without opening anything", async () => {
+    h.currentWindow = HERE;
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "current" } });
+    trackSpy.mockClear();
+    await fire();
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "seeded-in-place", window_count: 0, agent_seeded: true,
+    });
   });
 
   it("asks nothing at all when the setting pins the run's own window", async () => {
@@ -5379,6 +5877,105 @@ describe("orchestrator flows", () => {
       expect(added.y).toBe(200);
       expect(saved.nodes.some((n) => n.id !== added.id && n.x === added.x && n.y === added.y)).toBe(false);
     });
+
+    // `addPlanned` returns `true` only once the node is actually written — every
+    // early return below is a refusal — and the `flow_action{add_planned}` emit
+    // in the switch case rides on that return, not on the message merely having
+    // arrived. One control (the node lands) plus one refusal per distinct early
+    // return proves the boolean is threaded correctly at every site, not just
+    // the first.
+    describe("flow_action{add_planned} fires only once the node actually lands", () => {
+      it("emits it once the node is appended", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "Ship it")];
+        h.discoverRepos.mockReturnValueOnce([REPO]);
+        pickAllFour();
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([
+          { name: "flow_action", action: "add_planned" },
+        ]);
+      });
+
+      it("stays silent when the connector is not authenticated", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        const { send } = await openPanel(); // the outer describe's unauthenticated default
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the connector has no tickets to offer", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        h.taskList.mockResolvedValueOnce([]);
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the ticket picker is cancelled", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        quickPick().mockResolvedValueOnce(undefined);
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when no repos are picked (an empty multi-select)", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        quickPick()
+          .mockResolvedValueOnce({ label: TASK.key, task: TASK })
+          .mockResolvedValueOnce([]);
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the prompt-mode picker is cancelled", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        quickPick()
+          .mockResolvedValueOnce({ label: TASK.key, task: TASK })
+          .mockResolvedValueOnce([{ label: REPO.name, repo: REPO }])
+          .mockResolvedValueOnce(undefined);
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the destination picker is cancelled, even with every other answer already given", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        quickPick()
+          .mockResolvedValueOnce({ label: TASK.key, task: TASK })
+          .mockResolvedValueOnce([{ label: REPO.name, repo: REPO }])
+          .mockResolvedValueOnce({ label: MODE.label, mode: MODE })
+          .mockResolvedValueOnce(undefined);
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the flow was deleted while the pickers were open", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [];
+        pickAllFour();
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+    });
   });
 
   describe("flow:saveCommand — keeping a free-text command in settings", () => {
@@ -5523,6 +6120,46 @@ describe("orchestrator flows", () => {
       const { send } = await openPanel();
       await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
       expect(commands()).toEqual([]);
+    });
+
+    // `saveCommand` returns `true` only once the config write actually lands —
+    // "invalid", "duplicate", and a failed `update()` are all refusals, each with
+    // its own toast already saying nothing happened — and the switch case's
+    // `flow_action{save_command}` emit rides on that return. The success side of
+    // this claim is already covered by "emits a flow_action for each flow
+    // gesture that did something" above (in the `orchestrator telemetry`
+    // describe further down this file), which includes `flow:saveCommand` in its
+    // sequence.
+    describe("flow_action{save_command} stays silent on every refusal", () => {
+      it("stays silent on a blank label", async () => {
+        setConfig({ orchestrator: true, commands: [] });
+        const { send } = await openPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:saveCommand", run: "deploy.sh", label: "  " });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent on a duplicate command", async () => {
+        setConfig({ orchestrator: true, commands: [{ id: "d", label: "Deploy to staging", run: "deploy.sh" }] });
+        const { send } = await openPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Ship it" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the settings write itself fails", async () => {
+        setConfig({ orchestrator: true });
+        const { send } = await openPanel();
+        const factory = workspace.getConfiguration.getMockImplementation()!;
+        workspace.getConfiguration.mockImplementation((section?: string) => {
+          const c = factory(section);
+          (c.update as any).mockRejectedValue(new Error("EROFS"));
+          return c;
+        });
+        trackSpy.mockClear();
+        await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
     });
   });
 });
@@ -10179,6 +10816,309 @@ describe("switching the forge account", () => {
     ghAccounts(TWO);
     const p = await showAndWarm();
     expect(lastRunsPost().ghAccount).toEqual({ cli: "gh", login: "oznasi1", canSwitch: true });
+  });
+});
+
+describe("orchestrator telemetry", () => {
+  /** Open a panel and return it plus a way to deliver an inbound message — the
+   * same `show()` + `settled()` + `_fire` idiom every other describe block in
+   * this file uses. */
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  const events = (name: string) => trackSpy.mock.calls.flat().filter((e: any) => e.name === name) as any[];
+
+  /** A place node wired to a notify terminal by one `pr-merged` rule — the
+   * smallest flow that can both be armed and fire. */
+  const wired = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    ...over,
+  });
+
+  /** A place whose PR is watched, wired to planned work — the launch fixture the
+   * "a met launch rule acts" block uses, with its first-spend question already
+   * answered. */
+  const launchFlow = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      {
+        id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+        ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+      },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    ...over,
+  });
+
+  /** Warm the resume gate with the condition UNMET, then leave the met status in
+   * place for the pass under test — the two-pass idiom every firing test in this
+   * file uses. Telemetry from the warm-up passes is cleared, so each assertion is
+   * about the pass the test itself asks for. */
+  const warmed = async (flows: Flow[]) => {
+    setConfig({ orchestrator: true });
+    h.flows = flows;
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    trackSpy.mockClear();
+    return opened;
+  };
+
+  it("emits flow_armed on the arm toggle, with the unfirable split by what each rule needs", async () => {
+    // PR facts off, so the one `pr-merged` rule is unfirable for want of them —
+    // h.prFacts, not setConfig, for the reason the arm block above documents.
+    setConfig({ orchestrator: true });
+    h.prFacts = false;
+    h.flows = [wired()];
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    expect(events("flow_armed")).toHaveLength(1);
+    expect(events("flow_armed")[0]).toEqual({
+      name: "flow_armed", armed: true, node_count: 2, edge_count: 1,
+      unfirable_live: 0, unfirable_pr_facts: 1, unfirable_forge: 0, source: "toggle",
+    });
+  });
+
+  it("never carries the flow's id, its name or a node's ticket key", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [wired({ nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      {
+        id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+        ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+      },
+    ] })];
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    await send({ type: "flow:save", flow: wired() });
+    const wire = JSON.stringify(trackSpy.mock.calls.flat());
+    // A minted flow id is not ours to send, not even fingerprinted; the name, the
+    // ticket key and the repo are user strings.
+    for (const secret of ["f1", "Ship the migration", "PROJ-12", "aws-ops"]) {
+      expect(wire).not.toContain(secret);
+    }
+  });
+
+  it("emits flow_armed with zeroed counts and the toggle source on a disarm", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...wired(), armed: true }];
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:arm", id: "f1", armed: false });
+    expect(events("flow_armed")[0]).toMatchObject({
+      armed: false, source: "toggle", unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+    });
+  });
+
+  it("emits a flow_action for each flow gesture that did something", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [wired()];
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:create" });
+    await send({ type: "flow:rename", id: "f1", name: "Ship it" });
+    await send({ type: "flow:save", flow: wired() });
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+    await send({ type: "flow:delete", id: "f1" });
+    expect(events("flow_action").map((e) => e.action)).toEqual([
+      "create", "rename", "save", "reset_edge", "save_command", "delete",
+    ]);
+    // Only `save` knows the shape of a graph.
+    expect(events("flow_action").find((e) => e.action === "save")).toMatchObject({ node_count: 2, edge_count: 1 });
+    expect(events("flow_action").find((e) => e.action === "create").node_count).toBeUndefined();
+  });
+
+  it("emits nothing for a flow gesture the host refuses", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [wired()];
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:rename", id: "intruder", name: "x" });
+    await send({ type: "flow:save", flow: mkFlow("intruder", "x") });
+    await send({ type: "flow:delete", id: "intruder" });
+    await send({ type: "flow:resumeApprove", id: "f1" }); // no gate is held
+    // `openPanel()` here defaults to an unauthenticated connector, so this
+    // refuses before ever opening a picker — `addPlanned` returns `false`, and
+    // that return is what the switch case's emit is gated on.
+    await send({ type: "flow:addPlanned", id: "f1" });
+    expect(events("flow_action")).toEqual([]);
+  });
+
+  it("emits resume_approve and resume_disarm from the resume banner, and the disarm's flow_armed", async () => {
+    // A real resume gate: the first pass to find a rule ready HOLDS it and
+    // reports, rather than firing, so the banner this test clicks is genuine.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...wired(), armed: true }];
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    const { p, send } = await openPanel();
+    await settle();
+    const gated = posts(p).filter((m) => m.type === "deck:flows").at(-1) as any;
+    expect(gated.pendingResume).toHaveLength(1);
+    trackSpy.mockClear();
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    expect(events("flow_action").map((e) => e.action)).toEqual(["resume_approve"]);
+    trackSpy.mockClear();
+    await send({ type: "flow:resumeDisarm", id: "f1" });
+    expect(events("flow_action").map((e) => e.action)).toEqual(["resume_disarm"]);
+    expect(events("flow_armed")[0]).toMatchObject({ armed: false, source: "resume-banner" });
+  });
+
+  it("emits flow_action dry_run from the webview's counts", async () => {
+    setConfig({ orchestrator: true });
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:dryRun", edges: 3, fired: 1, blocked: 0 });
+    expect(events("flow_action")).toEqual([
+      { name: "flow_action", action: "dry_run", edge_count: 3, fired_count: 1, blocked_count: 0 },
+    ]);
+  });
+
+  it("drops a dry-run payload whose counts are not finite, non-negative numbers", async () => {
+    setConfig({ orchestrator: true });
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    // A webview payload is untrusted whatever the wire type says.
+    await send({ type: "flow:dryRun", edges: "x", fired: 1, blocked: 0 });
+    await send({ type: "flow:dryRun", edges: 3, fired: -1, blocked: 0 });
+    await send({ type: "flow:dryRun", edges: 3, fired: 1, blocked: Number.NaN });
+    await send({ type: "flow:dryRun", edges: 3, fired: 1 });
+    expect(events("flow_action")).toEqual([]);
+  });
+
+  it("emits nothing at all for any flow message when the orchestrator is off", async () => {
+    setConfig({ orchestrator: false });
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:create" });
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    await send({ type: "flow:dryRun", edges: 3, fired: 1, blocked: 0 });
+    expect(trackSpy.mock.calls.flat().filter((e: any) => /^flow_/.test(e.name))).toEqual([]);
+  });
+
+  it("emits flow_edge_fired for a launch that acted, with the planned node's own launch shape", async () => {
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    expect(events("flow_edge_fired")).toEqual([{
+      name: "flow_edge_fired", edge_action: "launch", ok: true, deferred: false,
+      dest: "worktree", prompt_mode: "implementation", repo_count: 1,
+    }]);
+  });
+
+  it("reports a launch that tried and failed as ok:false, still not deferred", async () => {
+    h.launchPlanned.mockResolvedValue({ ok: false, message: "Couldn't create a git worktree in aws-ops" });
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(events("flow_edge_fired")[0]).toMatchObject({ ok: false, deferred: false });
+  });
+
+  it("emits no flow_edge_fired for a pass in which nothing was performed", async () => {
+    // A notify spends nothing and is not performed through this seam.
+    const { send } = await warmed([{ ...wired(), armed: true }]);
+    await send({ type: "deck:refresh" });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0].firedAt).toBeTypeOf("number");
+    expect(events("flow_edge_fired")).toEqual([]);
+  });
+
+  it("omits dest from flow_edge_fired when the planned node's dest is not one of the three known values", async () => {
+    // The flows file is hand-editable and only shape-checked on read (`validNode`
+    // in store.ts never looks at `dest`), so a stray or hand-typed value must not
+    // ride the event through unvalidated.
+    const flow = launchFlow();
+    (flow.nodes[1] as unknown as { dest: string }).dest = "not-a-real-dest";
+    const { send } = await warmed([flow]);
+    await send({ type: "deck:refresh" });
+    expect(events("flow_edge_fired")).toEqual([{
+      name: "flow_edge_fired", edge_action: "launch", ok: true, deferred: false,
+      prompt_mode: "implementation", repo_count: 1,
+    }]);
+  });
+
+  it("emits exactly one flow_settled when the last edge settles, and never again", async () => {
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(events("flow_settled")).toEqual([{ name: "flow_settled", node_count: 2, edge_count: 1 }]);
+    // The store now holds the stamped flow, as disk would. A settled flow left
+    // armed on the board is polled every six seconds and must not re-report.
+    h.flows = [h.writeFlow.mock.calls.at(-1)![2] as Flow];
+    trackSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    await send({ type: "deck:refresh" });
+    expect(events("flow_settled")).toEqual([]);
+  });
+
+  it("does not call a flow settled while one of its rules is still pending", async () => {
+    const twoRules = launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "shipped" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "ticket-status-is", status: "Shipped" }, action: "notify" },
+      ],
+    });
+    const { send } = await warmed([twoRules]);
+    await send({ type: "deck:refresh" });
+    const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(written.edges[0].firedAt).toBeTypeOf("number");
+    expect(written.edges[1].firedAt).toBeUndefined();
+    expect(events("flow_settled")).toEqual([]);
+  });
+
+  it("reports a mid-pass disarm once, as an auto-skip, however many rules it skipped", async () => {
+    // Three acting edges, so this pass has three `performEdge` calls to make —
+    // room for another window's Disarm to land between the first and the second,
+    // leaving TWO rules skipped by one disarm. The event must be about the
+    // disarm, not about the rules.
+    const many = (): Flow => ({
+      ...launchFlow(),
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        ...[1, 2, 3].map((i) => ({
+          id: `p${i}`, kind: "planned" as const, x: 0, y: 0, join: "any" as const,
+          ticketKey: `PROJ-2${i}`, repos: ["aws-ops"], mode: "implementation", dest: "worktree" as const,
+        })),
+      ],
+      edges: [1, 2, 3].map((i) => ({
+        id: `e${i}`, from: "n1", to: `p${i}`, cond: { kind: "pr-merged" as const }, action: "launch" as const,
+      })),
+    });
+    const { send } = await warmed([many()]);
+    h.launchPlanned.mockClear().mockImplementation(async (req: { node: { ticketKey: string; repos: string[] } }) => {
+      // The disarm itself, landing on disk while this pass sits inside the first
+      // launch's await — exactly as another window's write would.
+      h.flows = h.flows.map((f) => ({ ...f, armed: false }));
+      return { ok: true, runKey: req.node.ticketKey, repo: req.node.repos[0] };
+    });
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    // Two rules skipped, one event.
+    expect(events("flow_armed")).toEqual([{
+      name: "flow_armed", armed: false, node_count: 4, edge_count: 3,
+      unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0, source: "auto-skip",
+    }]);
   });
 });
 

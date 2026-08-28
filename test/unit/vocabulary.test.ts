@@ -92,6 +92,11 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
   // Task 7: host-side wire values and subagent references.
   { location: "src/config.ts", text: "agents",
     why: "the agentFlow.deckGrouping value normalized here — the stored setting, not copy" },
+  // Fix wave: deck_action.grouping validates a webview-fed value against this
+  // same persisted wire value before letting it ride the event — same class of
+  // hit as the src/config.ts entry above, just the membership check site.
+  { location: "src/deckView.ts", text: "agents",
+    why: "the agentFlow.deckGrouping wire value, validated here before deck_action.grouping sends it — not copy" },
   { location: "src/engine/workspace.ts", text: "cursor-agent",
     why: "the name of Cursor's CLI binary" },
   { location: "src/engine/workspace.ts", text: "agent",
@@ -110,8 +115,19 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "the repository URL" },
   { location: "src/tasksView.ts", text: "e.g. the deck-agents-view task",
     why: "an example branch name in a placeholder, not the noun" },
+  // Task 6: explore_completed's cancel_point wire value naming the step where
+  // openWorkspace's own agent picker was dismissed — a telemetry enum member
+  // passed as a value (not a type position), same class of hit as the
+  // orchestrator condition keys above.
+  { location: "src/tasksView.ts", text: "agent",
+    why: "the explore_completed cancel_point wire value for the agent-picker step, not copy" },
   { location: "src/webview/MarketplaceApp.tsx", text: "agent",
     why: "the AssetType wire value for a subagent" },
+  // Task 8: marketplace_opened's `agents` count groups view.assets by this same
+  // released AssetType wire value — same class of hit as the claudeAssets.ts and
+  // MarketplaceApp.tsx entries above, just read from the telemetry counter.
+  { location: "src/marketplaceView.ts", text: "agent",
+    why: "the AssetType wire value for a subagent, compared in countsOf's marketplace_opened counter" },
   { location: "src/webview/MarketplaceApp.tsx", text: "Agents",
     why: "the Marketplace tab listing subagents — the one correct use of the word" },
   { location: "src/webview/MarketplaceApp.tsx", text: "Search skills, commands, agents, hooks…",

@@ -7,7 +7,7 @@ vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
 import { App } from "../../src/webview/App";
 import { send } from "../../src/webview/vscodeApi";
-import type { OutboundMessage } from "../../src/types";
+import type { InboundMessage, OutboundMessage } from "../../src/types";
 import type { SerializedCaps } from "../../src/tasks/provider";
 import { mkTask } from "../_helpers/factories";
 
@@ -1301,6 +1301,65 @@ describe("caps arriving after state", () => {
     render(<App />);
     authed();
     expect(filterTabs()).toEqual(["My sprint", "Mine", "Sprint", "Backlog", "Unassigned"]);
+  });
+});
+
+describe("lens usage telemetry (debounced tasks:lensUsed)", () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  const apiPool = () =>
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "PROJ-1", summary: "one", services: ["api"] }),
+        mkTask({ key: "PROJ-2", summary: "two", services: ["billing"] }),
+      ],
+    });
+  const selectRepo = (name: string) => {
+    fireEvent.click(screen.getByText("Filter repos"));
+    const repoList = document.querySelector(".repo-list") as HTMLElement;
+    fireEvent.mouseDown(within(repoList).getByText(name).closest(".repo-opt")!);
+  };
+
+  it("posts tasks:lensUsed{search} once, 500ms after the search box stops changing", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "a" } });
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "al" } });
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "alp" } });
+    // Still inside the debounce window from the LAST keystroke — nothing sent yet.
+    act(() => vi.advanceTimersByTime(499));
+    expect(sent).not.toHaveBeenCalledWith({ type: "tasks:lensUsed", lens: "search" });
+    act(() => vi.advanceTimersByTime(1));
+    expect(sent).toHaveBeenCalledWith({ type: "tasks:lensUsed", lens: "search" });
+    expect(sent.mock.calls.filter((c) => (c[0] as InboundMessage).type === "tasks:lensUsed")).toHaveLength(1);
+  });
+
+  it("posts tasks:lensUsed{repo} once, 500ms after a repo-lens pick", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    selectRepo("api");
+    act(() => vi.advanceTimersByTime(500));
+    expect(sent).toHaveBeenCalledWith({ type: "tasks:lensUsed", lens: "repo" });
+    expect(sent.mock.calls.filter((c) => (c[0] as InboundMessage).type === "tasks:lensUsed")).toHaveLength(1);
+  });
+
+  it("debounces the search and repo lenses independently", () => {
+    render(<App />);
+    authed();
+    apiPool();
+    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "a" } });
+    act(() => vi.advanceTimersByTime(200));
+    selectRepo("api");
+    act(() => vi.advanceTimersByTime(300)); // search's 500ms elapses; repo's does not yet
+    expect(sent).toHaveBeenCalledWith({ type: "tasks:lensUsed", lens: "search" });
+    expect(sent).not.toHaveBeenCalledWith({ type: "tasks:lensUsed", lens: "repo" });
+    act(() => vi.advanceTimersByTime(200));
+    expect(sent).toHaveBeenCalledWith({ type: "tasks:lensUsed", lens: "repo" });
   });
 });
 

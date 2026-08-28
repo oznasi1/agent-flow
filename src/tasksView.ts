@@ -62,7 +62,7 @@ import {
   WorkspaceMode,
 } from "./types";
 import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
-import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
+import { toPromptModeProp, toExploreModeProp, classifyFailure, DestinationProp, ExploreModeProp, FailureClass, Op, Outcome, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 // globalState, not workspaceState: a notepad belongs to the user, not to whichever
@@ -185,6 +185,21 @@ function resolveOp(m: InboundMessage, e: unknown): Op | undefined {
  * timeouts, conflicts, and anything unclassified are presumed transient. */
 function isRetryable(failureClass: FailureClass): boolean {
   return failureClass !== "auth" && failureClass !== "not_found" && failureClass !== "permission" && failureClass !== "parse";
+}
+
+/** The `Filter`/`Size` unions, for validating a value before it rides a
+ * `tasks_fetched` property. `m.filter`/`m.size` are typed as `Filter`/`Size` at
+ * compile time only — a webview message is untyped at runtime, same as every
+ * other inbound value — and `effectiveFilter`'s own clamp assumes a member of
+ * this union going in, so a stale or hand-crafted message could otherwise ride
+ * through unclamped as well as unvalidated. */
+const FETCH_FILTERS: readonly Filter[] = ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"];
+const FETCH_SIZES: readonly Size[] = ["any", "s", "m", "l"];
+function isKnownFilter(v: string): v is Filter {
+  return (FETCH_FILTERS as readonly string[]).includes(v);
+}
+function isKnownSize(v: string): v is Size {
+  return (FETCH_SIZES as readonly string[]).includes(v);
 }
 
 /** Delay between opening successive batch windows — reduces focus-stealing and
@@ -692,6 +707,21 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         case "fetch": {
           if (!(await this.connector.isAuthenticated())) {
             this.postState(false, this.connector.isConfigured(), null);
+            // No provider to clamp against — `lens` is the requested `filter`
+            // verbatim, and every count is honestly zero: nothing was fetched.
+            // Neither `tasks_fetched.filter`/`.lens`/`.size` union has an "invalid"
+            // member (unlike SettingsSnapshot's enum-ish fields), so an
+            // unrecognised value has nowhere honest to collapse to — skip this
+            // emit entirely rather than report a wrong-but-typed value; the fetch
+            // path itself (the early return above) is unaffected either way.
+            if (isKnownFilter(m.filter) && isKnownSize(m.size)) {
+              track({
+                name: "tasks_fetched", filter: m.filter, lens: m.filter, size: m.size,
+                task_count: 0, repo_count: 0,
+                ...(cfg.trackOpenWindows ? { live_window_count: 0 } : {}),
+                authed: false,
+              });
+            }
             return;
           }
           this.post({ type: "loading", loading: true });
@@ -711,6 +741,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           this.lastFilter = lens;
           const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
           for (const t of tasks) t.services = this.guessServices(t, repos);
+          // Fires on every fetch, by design — this IS the lens-usage signal.
+          // `filter` is what the webview asked for; `lens` is what the clamp above
+          // actually answered, which differ exactly when a tab survived a
+          // `taskSource` switch to a source that cannot serve it.
+          // Same skip-the-emit choice as the unauthenticated branch above, and for
+          // the same reason: no "invalid" member exists in this event's unions to
+          // collapse an unrecognised value onto. The fetch itself (`provider.list`
+          // above) already ran unaffected.
+          if (isKnownFilter(m.filter) && isKnownFilter(lens) && isKnownSize(m.size)) {
+            track({
+              name: "tasks_fetched", filter: m.filter, lens, size: m.size,
+              task_count: tasks.length, repo_count: repos.length,
+              ...(cfg.trackOpenWindows ? { live_window_count: this.liveWindows().length } : {}),
+              authed: true,
+            });
+          }
           let outgoing = tasks;
           if (lens === "mysprint") {
             if (m.size === "any") {
@@ -725,6 +771,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "detail": {
+          track({ name: "card_action", action: "detail" });
           if (!(await this.connector.isAuthenticated())) return;
           const provider = this.provider();
           const info = this.connector.info();
@@ -785,18 +832,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "changeStatus": {
+          track({ name: "card_action", action: "change_status" });
           await this.changeStatus(m.key);
           break;
         }
         case "addToMySprint": {
+          track({ name: "card_action", action: "add_to_sprint" });
           await this.addToMySprint(m.key);
           break;
         }
         case "removeFromSprint": {
+          track({ name: "card_action", action: "remove_from_sprint" });
           await this.removeFromSprint(m.key, m.size);
           break;
         }
         case "setComponent": {
+          track({ name: "card_action", action: "set_component" });
           await this.setComponent(m.key, m.repo, m.on, m.movedChip);
           break;
         }
@@ -805,22 +856,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "notepad:add": {
+          track({ name: "notepad_action", action: "add" });
           await this.addNote(m.title, m.body, m.images);
           break;
         }
         case "notepad:update": {
+          track({ name: "notepad_action", action: "edit" });
           await this.updateNote(m.id, m.title, m.body);
           break;
         }
         case "notepad:addImage": {
+          track({ name: "notepad_action", action: "image_add" });
           await this.attachImage(m.id, Buffer.from(m.dataBase64, "base64"), m.mime, m.name);
           break;
         }
         case "notepad:pickImage": {
+          track({ name: "notepad_action", action: "image_add" });
           await this.pickImage(m.id);
           break;
         }
         case "notepad:removeImage": {
+          track({ name: "notepad_action", action: "image_remove" });
           await this.removeImage(m.id, m.imageId);
           break;
         }
@@ -833,6 +889,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "notepad:delete": {
+          track({ name: "notepad_action", action: "remove" });
           await this.deleteNote(m.id);
           break;
         }
@@ -841,6 +898,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "notepad:run": {
+          track({ name: "notepad_action", action: "run" });
           await this.runNotepadItem(m.id);
           break;
         }
@@ -856,6 +914,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           const base = saved.length > 0 ? saved : this.orderedNotes().map((n) => n.id);
           await this.saveNoteOrder(applyReorder(base, visible, new Set(visible)));
           this.postNotepad();
+          track({ name: "notepad_action", action: "reorder" });
           break;
         }
         case "notepad:resetOrder": {
@@ -889,11 +948,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           if (this.lastFilter !== "mysprint") break;
           const next = applyReorder(this.savedOrder(), m.order, new Set(m.order));
           await this.saveOrder(next);
+          track({ name: "card_action", action: "reorder" });
           break;
         }
         case "resetOrder": {
           await this.saveOrder([]);
           await this.onMessage({ type: "fetch", filter: "mysprint", size: m.size });
+          track({ name: "card_action", action: "reset_order" });
+          break;
+        }
+        case "tasks:lensUsed": {
+          if (m.lens === "repo" || m.lens === "search") track({ name: "lens_used", lens: m.lens });
           break;
         }
       }
@@ -1318,98 +1383,162 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * agent for investigation/knowledge — a Jira ticket can come out of it later. */
   public async explore(): Promise<void> {
     const cfg = getConfig();
-    if (this.remoteControlBlocksLaunch(cfg)) return;
-    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
-    if (repos.length === 0) {
-      this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
-      return;
-    }
+    const flow = startFlow();
+    // Reported at the two pre-mode early exits below, where no picked mode exists
+    // yet: the CONFIGURED mode is the honest answer there, not a guess at what the
+    // picker would have returned. "ask" collapses to "custom", same as an
+    // unrecognised id.
+    let mode: ExploreModeProp = toExploreModeProp(cfg.exploreMode);
+    let repoCount = 0;
+    let destination: DestinationProp | undefined;
+    let envPicked: "listed" | "custom" | undefined;
+    const done = (outcome: Outcome, cancelPoint?: "remote-control" | "repos" | "action" | "topic" | "env" | "kickoff" | "agent", extra?: { provider?: "claude-code" | "copilot" | "cursor" | "codex"; seededInPlace?: boolean; failureClass?: FailureClass }) =>
+      track({
+        name: "explore_completed",
+        flow_id: flow.id,
+        outcome,
+        mode,
+        ...(cancelPoint !== undefined ? { cancel_point: cancelPoint } : {}),
+        ...(destination !== undefined ? { destination } : {}),
+        ...(envPicked !== undefined ? { env_picked: envPicked } : {}),
+        ...(extra?.provider !== undefined ? { provider: extra.provider } : {}),
+        ...(extra?.seededInPlace !== undefined ? { seeded_in_place: extra.seededInPlace } : {}),
+        repo_count: repoCount,
+        duration_ms: flow.elapsedMs(),
+        ...(extra?.failureClass !== undefined ? { failure_class: extra.failureClass } : {}),
+      });
 
-    const action = await this.chooseExploreAction(cfg);
-    if (!action) return; // picker cancelled
+    // Everything after startFlow runs inside this try, so the funnel always gets its
+    // terminator even if something explore() itself calls throws — the dispatcher's
+    // own catch (tasksView.ts onMessage) still owns the user-facing handling and
+    // reports its own operation_failed, on purpose (same double-report discipline as
+    // take()'s funnel).
+    try {
+      if (this.remoteControlBlocksLaunch(cfg)) {
+        done("cancelled", "remote-control");
+        return;
+      }
+      const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+      if (repos.length === 0) {
+        this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
+        done("cancelled", "repos");
+        return;
+      }
 
-    const raw = await vscode.window.showInputBox(
-      action.needsEnv
-        ? {
-            title: "Verify — which feature or change?",
-            prompt: "The feature or change to verify on the environment.",
-            placeHolder: "e.g. the new retry banner on checkout",
-            ignoreFocusOut: true,
-            validateInput: (v) => (v.trim() ? undefined : "Name the feature or change to verify"),
-          }
-        : action.id === "supervise"
+      const action = await this.chooseExploreAction(cfg);
+      if (!action) {
+        done("cancelled", "action");
+        return;
+      }
+      // A mode now exists — this is the earliest point explore_started can honestly fire.
+      mode = toExploreModeProp(action.id);
+      track({ name: "explore_started", flow_id: flow.id, mode, source: "command" });
+
+      const raw = await vscode.window.showInputBox(
+        action.needsEnv
           ? {
-              title: "Supervise — anything specific to prioritize?",
-              prompt: "Optional — a priority among your other active tasks. Leave blank to check on all of them.",
-              placeHolder: "e.g. the deck-agents-view task",
+              title: "Verify — which feature or change?",
+              prompt: "The feature or change to verify on the environment.",
+              placeHolder: "e.g. the new retry banner on checkout",
               ignoreFocusOut: true,
+              validateInput: (v) => (v.trim() ? undefined : "Name the feature or change to verify"),
             }
-          : {
-              title: "Explore — what do you want to dig into?",
-              prompt: "A focus for the session (optional). A Jira ticket can come later.",
-              placeHolder: "e.g. how the aggregator retries failed scans",
-              ignoreFocusOut: true,
-            },
-    );
-    if (raw === undefined) return; // cancelled (empty is allowed → generic focus)
-    const topic = raw.trim() || (action.id === "supervise" ? "Check on active tasks" : "Codebase exploration");
+          : action.id === "supervise"
+            ? {
+                title: "Supervise — anything specific to prioritize?",
+                prompt: "Optional — a priority among your other active tasks. Leave blank to check on all of them.",
+                placeHolder: "e.g. the deck-agents-view task",
+                ignoreFocusOut: true,
+              }
+            : {
+                title: "Explore — what do you want to dig into?",
+                prompt: "A focus for the session (optional). A Jira ticket can come later.",
+                placeHolder: "e.g. how the aggregator retries failed scans",
+                ignoreFocusOut: true,
+              },
+      );
+      if (raw === undefined) {
+        done("cancelled", "topic");
+        return;
+      } // cancelled (empty is allowed → generic focus)
+      const topic = raw.trim() || (action.id === "supervise" ? "Check on active tasks" : "Codebase exploration");
 
-    // Verify needs to know where; the other actions never ask. Before the destination
-    // step, so cancelling here has created and opened nothing.
-    let env: string | undefined;
-    if (action.needsEnv) {
-      env = await this.chooseEnvironment(cfg);
-      if (!env) return; // environment pick cancelled
+      // Verify needs to know where; the other actions never ask. Before the destination
+      // step, so cancelling here has created and opened nothing.
+      let env: string | undefined;
+      if (action.needsEnv) {
+        env = await this.chooseEnvironment(cfg);
+        if (!env) {
+          done("cancelled", "env");
+          return;
+        } // environment pick cancelled
+        envPicked = cfg.environments.includes(env) ? "listed" : "custom";
+      }
+
+      // Destination first — an existing workspace / live folder already fixes its repos.
+      const kickoff = await this.resolveKickoffTarget(cfg, repos, "Explore", "Explore");
+      if (!kickoff) {
+        done("cancelled", "kickoff");
+        return;
+      }
+      const { services, args, wantRemoteControl } = kickoff;
+      destination = kickoff.target.kind;
+      repoCount = services.length;
+
+      const slug = slugify(topic) || "explore";
+      const serviceNames = services.map((s) => s.name).join(", ");
+      const key = env ? `verify-${slugify(env) || "env"}-${slug}` : `explore-${slug}`;
+      const summary = env ? `${topic} on ${env}` : topic;
+      const planMd = env
+        ? `## Verify: ${topic} on ${env}\n\n_Verification session — environment: ${env}. Services in scope: ${serviceNames}._`
+        : action.id === "supervise"
+          ? `## Supervise: ${topic}\n\n_No Jira ticket yet — a supervision session over your other active Agent Flow Deck tasks._\n\n` +
+            describeActiveTasks(readRuns(defaultRunsDir()), new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys()))
+          : `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
+      const result = await openWorkspace({
+        ticket: { key, summary, url: "" },
+        planMd,
+        descriptionText: "",
+        services,
+        mode: args.mode,
+        // Slack sentence first: it anchors on {files} in the *authored* template, so a
+        // typed environment containing "{files}" can never become that anchor.
+        promptTemplate: applyExploreVars(injectSlackDm(action.prompt, action.slackDm), { env, services: serviceNames }),
+        workspaceDir: cfg.workspaceDir,
+        seedAgent: cfg.seedAgent,
+        openIn: args.openIn,
+        existingWorkspaceFile: args.existingWorkspaceFile,
+        existingFolder: args.existingFolder,
+        currentWindow: args.currentWindow,
+        remoteControl: wantRemoteControl,
+        kind: "explore",
+      });
+      // The agent picker was dismissed, which dismisses the launch: nothing was opened,
+      // written or seeded, so there is nothing to report. Not an error toast either — a
+      // cancellation is the user's own decision, and every other picker on this path
+      // returns just as quietly.
+      if (result.cancelled) {
+        done("cancelled", "agent");
+        return;
+      }
+
+      const where = this.openedWhere(result, cfg.seedAgent);
+      const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
+      const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
+      const what = env
+        ? `to verify on ${env}`
+        : action.id === "supervise"
+          ? "to check on your other tasks"
+          : "to explore";
+      this.toast("success", `Opened ${where} ${what}. Brief seeded in each repo.${seeded}${rcNote}`);
+      // Last statement in the try, same discipline as take(): nothing after this can
+      // throw and reach the catch below, so a "launched" completion can never be
+      // followed by a second, contradictory "failed" one.
+      done("launched", undefined, { provider: result.provider, seededInPlace: result.seededInPlace });
+    } catch (e) {
+      done("failed", undefined, { failureClass: classifyFailure(e) });
+      throw e; // onMessage's existing catch (tasksView.ts:255) still owns the user-facing handling.
     }
-
-    // Destination first — an existing workspace / live folder already fixes its repos.
-    const kickoff = await this.resolveKickoffTarget(cfg, repos, "Explore", "Explore");
-    if (!kickoff) return;
-    const { services, args, wantRemoteControl } = kickoff;
-
-    const slug = slugify(topic) || "explore";
-    const serviceNames = services.map((s) => s.name).join(", ");
-    const key = env ? `verify-${slugify(env) || "env"}-${slug}` : `explore-${slug}`;
-    const summary = env ? `${topic} on ${env}` : topic;
-    const planMd = env
-      ? `## Verify: ${topic} on ${env}\n\n_Verification session — environment: ${env}. Services in scope: ${serviceNames}._`
-      : action.id === "supervise"
-        ? `## Supervise: ${topic}\n\n_No Jira ticket yet — a supervision session over your other active Agent Flow Deck tasks._\n\n` +
-          describeActiveTasks(readRuns(defaultRunsDir()), new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys()))
-        : `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
-    const result = await openWorkspace({
-      ticket: { key, summary, url: "" },
-      planMd,
-      descriptionText: "",
-      services,
-      mode: args.mode,
-      // Slack sentence first: it anchors on {files} in the *authored* template, so a
-      // typed environment containing "{files}" can never become that anchor.
-      promptTemplate: applyExploreVars(injectSlackDm(action.prompt, action.slackDm), { env, services: serviceNames }),
-      workspaceDir: cfg.workspaceDir,
-      seedAgent: cfg.seedAgent,
-      openIn: args.openIn,
-      existingWorkspaceFile: args.existingWorkspaceFile,
-      existingFolder: args.existingFolder,
-      currentWindow: args.currentWindow,
-      remoteControl: wantRemoteControl,
-      kind: "explore",
-    });
-    // The agent picker was dismissed, which dismisses the launch: nothing was opened,
-    // written or seeded, so there is nothing to report. Not an error toast either — a
-    // cancellation is the user's own decision, and every other picker on this path
-    // returns just as quietly.
-    if (result.cancelled) return;
-
-    const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
-    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
-    const what = env
-      ? `to verify on ${env}`
-      : action.id === "supervise"
-        ? "to check on your other tasks"
-        : "to explore";
-    this.toast("success", `Opened ${where} ${what}. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 
   /** Launch an agent for one notepad item. Same shape as explore(): pick repos and
@@ -1422,16 +1551,53 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!note) return;
 
     const cfg = getConfig();
-    if (this.remoteControlBlocksLaunch(cfg)) return;
+    const flow = startFlow();
+    // The notepad run has no action picker — it always borrows the "general" explore
+    // action (see the comment on `generic` below), so the mode is fixed and known
+    // from the start; unlike explore()'s configured-vs-picked split, there is no
+    // "before a mode exists" ambiguity to preserve here.
+    const mode: ExploreModeProp = "general";
+    let repoCount = 0;
+    let destination: DestinationProp | undefined;
+    const done = (
+      outcome: Outcome,
+      cancelPoint?: "remote-control" | "repos" | "kickoff" | "agent",
+      extra?: { provider?: "claude-code" | "copilot" | "cursor" | "codex"; seededInPlace?: boolean },
+    ) =>
+      track({
+        name: "explore_completed",
+        flow_id: flow.id,
+        outcome,
+        mode,
+        ...(cancelPoint !== undefined ? { cancel_point: cancelPoint } : {}),
+        ...(destination !== undefined ? { destination } : {}),
+        ...(extra?.provider !== undefined ? { provider: extra.provider } : {}),
+        ...(extra?.seededInPlace !== undefined ? { seeded_in_place: extra.seededInPlace } : {}),
+        repo_count: repoCount,
+        duration_ms: flow.elapsedMs(),
+      });
+
+    if (this.remoteControlBlocksLaunch(cfg)) {
+      done("cancelled", "remote-control");
+      return;
+    }
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
     if (repos.length === 0) {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
+      done("cancelled", "repos");
       return;
     }
 
+    track({ name: "explore_started", flow_id: flow.id, mode, source: "notepad" });
+
     const kickoff = await this.resolveKickoffTarget(cfg, repos, "Notepad", "Notepad");
-    if (!kickoff) return;
+    if (!kickoff) {
+      done("cancelled", "kickoff");
+      return;
+    }
     const { services, args, wantRemoteControl } = kickoff;
+    destination = kickoff.target.kind;
+    repoCount = services.length;
 
     // The generic explore action's prompt/slackDm — a notepad run has no action to
     // choose (there is no Explore-style picker for it), so it borrows the one action
@@ -1507,7 +1673,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     });
     // Dismissed at the agent picker: no window, no brief, no plan, no run. Returning
     // HERE — before saveNotes below — is what makes that comment true.
-    if (result.cancelled) return;
+    if (result.cancelled) {
+      done("cancelled", "agent");
+      return;
+    }
 
     // Point the note at its run so the badge has something to derive from. Written
     // after the launch, not before: a cancelled picker must leave no pointer to a
@@ -1518,6 +1687,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
     this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
+    done("launched", undefined, { provider: result.provider, seededInPlace: result.seededInPlace });
   }
 
   /** One repo → its own window; multiple → per the workspaceMode setting (asking if configured). */
@@ -2183,7 +2353,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             this.log(
               `fan-out ${key}: ${leafKeys.length} ${leafKeys.length === 1 ? "leaf" : "leaves"} into ${repos.length} repo(s) — ${repos.join(", ")}`,
             );
-            await this.takeBatch(leafKeys, repos, parent);
+            await this.takeBatch(leafKeys, repos, parent, mode);
           } else {
             // `preselected` rides along for the same reason the fan-out passes it to
             // fanOutRepos: it is the only repo intent the user has expressed on this
@@ -2200,14 +2370,18 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const taskFp = fingerprint(key);
     let destination: DestinationProp | undefined;
     let repoCount = 0;
-    let promptModeProp: PromptModeProp = "custom";
+    // Stays undefined for a Take that ends before the prompt-mode picker is
+    // answered, so take_completed omits the property rather than reporting a
+    // decision nobody made — "custom" here was Phase 1's fidelity bug (follow-ups
+    // doc, item 3).
+    let promptModeProp: PromptModeProp | undefined;
     // Set only once launch() has settled the worktree question; stays undefined for
     // a Take that ends before then, so take_completed omits the property rather
     // than reporting a decision nobody made.
     let usedWorktree: boolean | undefined;
     const worktreeProp = () => (usedWorktree === undefined ? {} : { used_worktree: usedWorktree });
 
-    track({ name: "take_started", flow_id: flow.id, source, task_fp: taskFp, inferred_count: 0 });
+    track({ name: "take_started", flow_id: flow.id, source, task_fp: taskFp });
 
     // Everything after take_started runs inside this try, so the funnel always gets
     // its terminator: a Jira read failing inside resolveKickoff is a *failure*, and
@@ -2217,7 +2391,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // How should the session start — pick a prompt mode (or use the configured default) FIRST.
       const promptMode = await this.choosePromptMode(cfg, `${key} — how should the session start?`);
       if (!promptMode) {
-        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", prompt_mode: promptModeProp, repo_count: 0, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", ...(promptModeProp !== undefined ? { prompt_mode: promptModeProp } : {}), repo_count: 0, duration_ms: flow.elapsedMs(), task_fp: taskFp });
         return;
       }
       promptModeProp = toPromptModeProp(promptMode.id);
@@ -2225,7 +2399,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
       const resolved = await this.resolveKickoff(key, preselected, flow);
       if (!resolved) {
-        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", destination, ...(promptModeProp !== undefined ? { prompt_mode: promptModeProp } : {}), repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
         return;
       }
       const { detail, services, target } = resolved;
@@ -2237,9 +2411,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       const launched = await this.launch(detail, services, promptMode.prompt, false, target, (used) => {
         usedWorktree = used;
       });
-      track({ name: "take_completed", flow_id: flow.id, outcome: launched ? "launched" : "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), task_fp: taskFp });
+      track({ name: "take_completed", flow_id: flow.id, outcome: launched ? "launched" : "cancelled", destination, ...(promptModeProp !== undefined ? { prompt_mode: promptModeProp } : {}), repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), task_fp: taskFp });
     } catch (e) {
-      track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), failure_class: classifyFailure(e), task_fp: taskFp });
+      track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, ...(promptModeProp !== undefined ? { prompt_mode: promptModeProp } : {}), repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), failure_class: classifyFailure(e), task_fp: taskFp });
       // A palette Take has no webview dispatcher above it — extension.ts registers
       // the command as a bare handler, so for source "command" the rethrow below
       // surfaces only VS Code's generic "command failed" notification: no toast,
@@ -2272,17 +2446,57 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     keys: string[],
     repos: string[],
     parent?: { key: string; branch: string },
+    treeMode?: "fanout" | "orchestrator" | "parent",
   ): Promise<void> {
     const cfg = getConfig();
     if (!keys.length) return;
 
+    const flow = startFlow();
+    // Known only once the corresponding picker/confirm has actually resolved;
+    // omitted (not defaulted) at every earlier exit, so a genuine choice never gets
+    // confused with "never asked" — the same discipline take_completed already uses
+    // for its own prompt_mode/destination.
+    let promptModeProp: PromptModeProp | undefined;
+    let destinationProp: DestinationProp | undefined;
+    let layoutAsked = false;
+    let layoutProp: "separate" | "shared" | undefined;
+    const failed: string[] = [];
+    let launched = 0;
+    const batchDone = (outcome: Outcome) =>
+      track({
+        name: "batch_completed",
+        flow_id: flow.id,
+        outcome,
+        attempted: keys.length,
+        launched,
+        failed: failed.length,
+        ...(promptModeProp !== undefined ? { prompt_mode: promptModeProp } : {}),
+        ...(destinationProp !== undefined ? { destination: destinationProp } : {}),
+        ...(layoutProp !== undefined ? { layout: layoutProp } : {}),
+        layout_asked: layoutAsked,
+        duration_ms: flow.elapsedMs(),
+      });
+    track({
+      name: "batch_started",
+      flow_id: flow.id,
+      keys_count: keys.length,
+      is_fanout: parent !== undefined,
+      ...(treeMode !== undefined ? { tree_mode: treeMode } : {}),
+    });
+
     if (!(await this.connector.isAuthenticated())) {
       const ok = await vscode.commands.executeCommand<boolean>("agentFlow.signIn");
-      if (!ok) return;
+      if (!ok) {
+        batchDone("cancelled");
+        return;
+      }
     }
 
     const filterSet = this.resolveBatchRepos(repos, cfg);
-    if (!filterSet.length) return;
+    if (!filterSet.length) {
+      batchDone("failed");
+      return;
+    }
 
     // A fan-out authorises WORKTREES, not keys: `reposForTask` widens to the whole filter
     // set for a child whose ticket infers nothing, so 3 leaves across 12 repos is 36
@@ -2308,7 +2522,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // destination is known (see the `shared` re-resolution below).
     const isBatch = keys.length > 1;
     let batchProvider = isBatch ? await resolveBatchProvider(cfg, true) : undefined;
-    if (isBatch && !batchProvider) return;
+    if (isBatch && !batchProvider) {
+      batchDone("cancelled");
+      return;
+    }
     // The agent for copy written BEFORE the launch: the resolved answer when there is
     // one, and otherwise the setting's own — a single launch resolves inside
     // `openWorkspace`, after this copy has already been written.
@@ -2323,19 +2540,31 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         { modal: true },
         "Launch",
       );
-      if (go !== "Launch") return;
+      if (go !== "Launch") {
+        batchDone("cancelled");
+        return;
+      }
     }
 
     const promptMode = await this.choosePromptMode(cfg, `Launch ${keys.length} selected task(s) — how should the sessions start?`);
-    if (!promptMode) return;
+    if (!promptMode) {
+      batchDone("cancelled");
+      return;
+    }
+    promptModeProp = toPromptModeProp(promptMode.id);
 
     const target = await this.chooseOpenTarget(cfg);
-    if (!target) return;
+    if (!target) {
+      batchDone("cancelled");
+      return;
+    }
+    destinationProp = target.kind;
 
     // Only a new window can go either way; the other destinations ARE a single window.
     // A one-key batch is an ordinary single-window launch, so it needs no layout pick.
     let shared = target.kind !== "new";
     if (target.kind === "new" && keys.length > 1) {
+      layoutAsked = true;
       const p = await vscode.window.showQuickPick(
         [
           { label: "$(multiple-windows) Separate windows", detail: "One window per task", shared: false },
@@ -2343,9 +2572,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ],
         { title: `Launch ${keys.length} tasks — how should I lay them out?`, ignoreFocusOut: true },
       );
-      if (!p) return;
+      if (!p) {
+        batchDone("cancelled");
+        return;
+      }
       shared = p.shared;
     }
+    layoutProp = layoutAsked ? (shared ? "shared" : "separate") : undefined;
 
     // One clipboard can't serve several sessions — but a one-key "batch" is a single
     // launch, so it resolves Remote Control exactly like Take does. A shared window
@@ -2360,7 +2593,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // would block Copilot launches that work fine today. Refusing here instead costs
     // nothing — the worktree loop below has not run yet, so there is still no side
     // effect to leave behind.
-    if (wantRemoteControl === null) return;
+    if (wantRemoteControl === null) {
+      batchDone("cancelled");
+      return;
+    }
 
     // The shared path seeds every session from a plan file and never calls
     // `openWorkspace` at all, so nothing downstream of here can ask: a one-key batch
@@ -2369,11 +2605,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // so a dismissal here costs nothing either.
     if (shared && !batchProvider) {
       batchProvider = await resolveBatchProvider(cfg, isBatch);
-      if (!batchProvider) return;
+      if (!batchProvider) {
+        batchDone("cancelled");
+        return;
+      }
     }
 
     const resolved: { task: BatchTask; key: string }[] = [];
-    const failed: string[] = [];
     for (const key of keys) {
       try {
         const detail = await this.provider().detail(key);
@@ -2427,10 +2665,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         const msg = e instanceof Error ? e.message : String(e);
         failed.push(`${key} (${msg})`);
         this.log(`takeBatch ${key}: failed — ${msg}`);
+        trackError({ name: "operation_failed", op: "workspace_write", failure_class: classifyFailure(e), retryable: false });
       }
     }
 
-    let launched = 0;
     let extra = "";
     let seededInPlace = false;
     // Set by the per-window loop below from the one place the truth lives — see the
@@ -2503,6 +2741,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         const msg = e instanceof Error ? e.message : String(e);
         for (const r of resolved) failed.push(`${r.key} (${msg})`);
         this.log(`takeBatch: shared window failed — ${msg}`);
+        trackError({ name: "operation_failed", op: "workspace_write", failure_class: classifyFailure(e), retryable: false });
       }
     } else {
       let appliedRemoteControl = false;
@@ -2558,6 +2797,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           const msg = e instanceof Error ? e.message : String(e);
           failed.push(`${key} (${msg})`);
           this.log(`takeBatch ${key}: failed — ${msg}`);
+          trackError({ name: "operation_failed", op: "workspace_write", failure_class: classifyFailure(e), retryable: false });
         }
         if (i < resolved.length - 1) await delay(BATCH_STAGGER_MS);
       }
@@ -2568,7 +2808,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // does — silently. `launched > 0` means earlier tasks really did open, and those
     // are still worth reporting, so the summary below runs and its "N of M" count tells
     // the truth about the ones that were abandoned.
-    if (dismissed && launched === 0) return;
+    if (dismissed && launched === 0) {
+      batchDone("cancelled");
+      return;
+    }
 
     // A batch seeded into this window opened nothing — "in one shared window" would
     // imply one appeared.
@@ -2611,6 +2854,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             : "A worktree + Claude session per task.";
       this.toast("success", `${summary} ${perTaskNote}${extra}${rcNote}`);
     }
+    batchDone(launched > 0 ? "launched" : "failed");
   }
 
 
@@ -3004,15 +3248,39 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * checks out its branch, assesses readiness, and (when prReviewAutoFix) implements the
    * requested changes. Surfaced on a card whose status matches cfg.prReviewStatus. */
   public async addressPr(key: string, preselected?: string[]): Promise<void> {
-    // Its own read rather than hoisting the `const cfg` below: that one is deliberately
-    // taken AFTER resolveKickoff's pickers, and moving it would change which settings
-    // snapshot the Claude Code path sees.
-    if (this.remoteControlBlocksLaunch(getConfig())) return;
+    // Its own read, not the `const cfg` taken below: THAT one is deliberately taken
+    // AFTER resolveKickoff's pickers, and moving it would change which settings
+    // snapshot the Claude Code path sees. `gateCfg` only ever informs this gate and
+    // the two telemetry emits that can fire before that later read exists.
+    const gateCfg = getConfig();
+    if (this.remoteControlBlocksLaunch(gateCfg)) {
+      track({
+        name: "pr_work_seeded", reason: "review", source: "tasks", outcome: "refused",
+        window_count: 0, failed_repo_count: 0, agent_seeded: gateCfg.seedAgent,
+      });
+      return;
+    }
     const resolved = await this.resolveKickoff(key, preselected);
-    if (!resolved) return;
+    if (!resolved) {
+      track({
+        name: "pr_work_seeded", reason: "review", source: "tasks", outcome: "cancelled",
+        window_count: 0, failed_repo_count: 0, agent_seeded: gateCfg.seedAgent,
+      });
+      return;
+    }
     const { detail, services, target } = resolved;
     const cfg = getConfig();
-    await this.launch(detail, services, prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix), true, target);
+    const launched = await this.launch(detail, services, prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix), true, target);
+    // No "failed" here: unlike take_completed, pr_work_seeded's outcome enum has no
+    // failure member — a throw out of launch() propagates to onMessage's own catch,
+    // which already reports it as operation_failed. window_count is the repo/worktree
+    // count launch() was asked to seed; launch() doesn't expose a per-repo failure
+    // count of its own, so failed_repo_count stays 0 on this path.
+    track({
+      name: "pr_work_seeded", reason: "review", source: "tasks",
+      outcome: launched ? (cfg.seedAgent ? "seeded" : "opened-not-seeded") : "cancelled",
+      window_count: services.length, failed_repo_count: 0, agent_seeded: cfg.seedAgent,
+    });
   }
 
   /** Where to open a taken task — new window, this window, a saved workspace, or a

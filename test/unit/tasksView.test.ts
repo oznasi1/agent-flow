@@ -134,7 +134,7 @@ import {
   markTaskNetworkFailure, SerializedCaps, TaskConnector, TaskProvider, TaskWriteError,
 } from "../../src/tasks/provider";
 import type { JiraAuth } from "../../src/tasks/jira/auth";
-import { makeFixtureConnector } from "../_helpers/fixtureConnector";
+import { FIXTURE_TASKS, makeFixtureConnector } from "../_helpers/fixtureConnector";
 import { TasksViewProvider } from "../../src/tasksView";
 import type { TakeSource } from "../../src/telemetry/events";
 import type { InboundMessage, OutboundMessage } from "../../src/types";
@@ -1738,6 +1738,185 @@ describe("explore", () => {
   });
 });
 
+describe("explore telemetry", () => {
+  const names = () => trackSpy.mock.calls.flat().map((e: any) => e.name);
+  const events = () => trackSpy.mock.calls.flat() as any[];
+  const find = (n: string) => events().find((e) => e.name === n);
+
+  it("emits explore_started then explore_completed, sharing one flow_id, with the seeded provider on success", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "jiraTicket" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+
+    expect(find("explore_started")).toMatchObject({ flow_id: "flow-1", mode: "jiraTicket", source: "command" });
+    expect(find("explore_completed")).toMatchObject({
+      flow_id: "flow-1", outcome: "launched", mode: "jiraTicket",
+      provider: "claude-code", repo_count: 1, duration_ms: 42,
+    });
+  });
+
+  it("emits only explore_completed with cancel_point 'remote-control' and the configured mode when the RC block refuses", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on", agentProvider: "copilot", exploreMode: "knowledge" });
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(names()).not.toContain("explore_started");
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "remote-control", mode: "knowledge", repo_count: 0 });
+  });
+
+  it("emits only explore_completed with cancel_point 'repos' and the configured mode when no repos are found", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "debug" });
+    vi.mocked(discoverRepos).mockReturnValue([]);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(names()).not.toContain("explore_started");
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "repos", mode: "debug", repo_count: 0 });
+  });
+
+  it("emits only explore_completed with cancel_point 'action' and mode 'custom' ('ask' collapsed) when the action picker is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel action pick
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(names()).not.toContain("explore_started");
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "action", mode: "custom", repo_count: 0 });
+  });
+
+  it("fires explore_started only once a mode exists, carrying the picked mode — not the configured one", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ action: CFG.exploreActions[2] } as never) // action picker → Debug
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { send } = setup();
+    await send({ type: "explore" });
+
+    const startedIdx = events().findIndex((e) => e.name === "explore_started");
+    expect(startedIdx).toBeGreaterThan(-1);
+    expect(events()[startedIdx].mode).toBe("debug");
+    // Nothing before explore_started is an explore_completed — the two pre-mode
+    // early exits are the only ones allowed to precede a start, and this run never
+    // hits either.
+    expect(events().slice(0, startedIdx).some((e) => e.name === "explore_completed")).toBe(false);
+  });
+
+  it("cancels with cancel_point 'topic' when the focus input box is dismissed", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "debug" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce(undefined);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_started")).toMatchObject({ mode: "debug" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "topic", mode: "debug", repo_count: 0 });
+  });
+
+  it("cancels with cancel_point 'env' when the environment picker is dismissed", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel env pick
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "env", mode: "verify", repo_count: 0 });
+  });
+
+  it("cancels with cancel_point 'kickoff' when the open-target picker is dismissed", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel open-target pick
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "kickoff", mode: "knowledge", repo_count: 0 });
+  });
+
+  it("cancels with cancel_point 'agent' and the resolved repo_count when the agent picker is dismissed", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "knowledge" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true,
+    });
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "agent", mode: "knowledge", repo_count: 1 });
+  });
+
+  it("carries env_picked 'listed' vs 'custom' on a successful verify launch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "staging", env: "staging" } as never) // env picker (listed)
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "launched", env_picked: "listed" });
+  });
+
+  it("marks a typed environment as env_picked 'custom'", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox)
+      .mockResolvedValueOnce("retry banner")
+      .mockResolvedValueOnce("staging-eu");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "$(edit) Custom…" } as never)
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "launched", env_picked: "custom" });
+  });
+
+  it("never sends the typed topic string", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "jiraTicket" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("SECRET-TOPIC");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(JSON.stringify(events())).not.toContain("SECRET-TOPIC");
+  });
+
+  // Mirrors takeWithFailingLaunch / "reports failed with a failure class when the
+  // launch throws" (tasksView.test.ts:2842-2906): proves explore()'s own try/catch —
+  // added specifically to give the funnel a terminator on a thrown failure, and to
+  // guard the reordering fix that made the success track() call the LAST statement
+  // in its branch — actually fires exactly once, with outcome "failed" and a
+  // failure_class, and that the error still propagates for onMessage's existing
+  // catch (tasksView.ts:255) to handle.
+  it("reports failed with a failure class when openWorkspace throws, emits explore_completed exactly once, and still propagates the error", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "jiraTicket" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    vi.mocked(openWorkspace).mockRejectedValueOnce(new Error("disk full"));
+    const { provider } = setup();
+
+    await expect((provider as unknown as { explore: () => Promise<void> }).explore()).rejects.toThrow("disk full");
+
+    const completedEvents = events().filter((e) => e.name === "explore_completed");
+    expect(completedEvents).toHaveLength(1);
+    expect(completedEvents[0]).toMatchObject({ flow_id: "flow-1", outcome: "failed", mode: "jiraTicket", repo_count: 1 });
+    expect(completedEvents[0].failure_class).toBeDefined();
+    // The action WAS picked before openWorkspace threw, so explore_started fired once
+    // (and only once) ahead of the single explore_completed above.
+    expect(names().filter((n: string) => n === "explore_started")).toHaveLength(1);
+  });
+});
+
 describe("passthrough messages", () => {
   it("opens external links via vscode.env", async () => {
     const { send } = setup();
@@ -2710,6 +2889,10 @@ describe("Take funnel", () => {
     expect(started.task_fp).toMatch(/^[0-9a-f]{16}$/);
     expect(done.outcome).toBe("launched");
     expect(done.duration_ms).toBeGreaterThanOrEqual(0);
+    // inferred_count on take_started was Phase 1's fidelity bug (follow-ups doc,
+    // item 2): inference hasn't run yet at that point, and hard-coding it to 0
+    // silently corrupted any chart grouping by that name across the funnel.
+    expect("inferred_count" in started).toBe(false);
   });
 
   it("never sends a ticket key or repo name", async () => {
@@ -2727,6 +2910,9 @@ describe("Take funnel", () => {
     const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
     expect(names).toEqual(["take_started", "take_completed"]);
     expect((trackSpy.mock.calls.flat().at(-1) as any).outcome).toBe("cancelled");
+    // prompt_mode must be ABSENT when the Take was cancelled before a mode was chosen —
+    // "custom" here was Phase 1's fidelity bug (follow-ups doc, item 3).
+    expect("prompt_mode" in (trackSpy.mock.calls.flat().at(-1) as any)).toBe(false);
   });
 
   it("reports cancelled with only the step events already fired when resolveKickoff aborts partway (repo QuickPick cancelled)", async () => {
@@ -3073,9 +3259,10 @@ describe("Take funnel", () => {
     await expect(provider.takeTask("BILL-1234", "command")).rejects.toThrow();
     const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
     expect(done.outcome).toBe("failed");
-    // JiraApiError carries `status`, not a `code` classifyFailure knows, so a 404
-    // lands in the catch-all class. The terminator firing at all is the point here.
-    expect(done.failure_class).toBe("unknown");
+    // JiraApiError carries a numeric `.status`, which classifyFailure now reads
+    // arms-length alongside `.code` (follow-ups doc, item 1) — a 404 classifies
+    // as not_found rather than falling into the catch-all class.
+    expect(done.failure_class).toBe("not_found");
   });
 
   it("reports take_repos_picked and take_completed with the real repo_count", async () => {
@@ -3089,11 +3276,16 @@ describe("Take funnel", () => {
     expect(done.repo_count).toBe(2);
   });
 
-  it("does not instrument addressPr's shared resolveKickoff call — no funnel events fire", async () => {
+  it("does not instrument addressPr's shared resolveKickoff call — no Take-funnel events fire", async () => {
+    // addressPr calls resolveKickoff with no `flow`, so neither
+    // take_destination_picked nor take_repos_picked fires from that shared call —
+    // pinned here since Task 4 gave addressPr its own separate telemetry
+    // (pr_work_seeded), which is expected to fire and is not a funnel event.
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
     const { provider } = setup();
     await provider.addressPr("BILL-1234", ["acme-billing"]);
-    expect(trackSpy).not.toHaveBeenCalled();
+    const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
+    expect(names).toEqual(["pr_work_seeded"]);
   });
 });
 
@@ -3346,6 +3538,10 @@ describe("takeBatch", () => {
     // bailed out somewhere earlier and never exercised the guard at all.
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(posted().filter((m) => m.type === "toast")).toEqual([]);
+    // The mid-loop cancel with zero launches reports itself as cancelled, not failed —
+    // the batch didn't break, the user walked away from a picker.
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "batch_completed") as any;
+    expect(done).toMatchObject({ outcome: "cancelled", attempted: 1, launched: 0, failed: 0 });
   });
 
   it("never raises its own agent picker for a one-key batch to a new window", async () => {
@@ -3426,6 +3622,49 @@ describe("takeBatch", () => {
     expect(toast.message).not.toContain("billing");
   });
 
+  it("emits the batch funnel with matching flow_ids and honest counts", async () => {
+    // 3 keys, PROJ-2's worktree falls back to the main checkout — the resolve-loop
+    // catch swallows it and the other two still launch.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      key === "PROJ-2" ? s : s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider } = setup();
+    await provider.takeBatch(["PROJ-1", "PROJ-2", "PROJ-3"], ["api"]);
+    const started = trackSpy.mock.calls.flat().find((e: any) => e.name === "batch_started") as any;
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "batch_completed") as any;
+    expect(started.flow_id).toBe(done.flow_id);
+    expect(done).toMatchObject({ attempted: 3, failed: 1 });
+    // A plain batch (no parent, no tree_mode arg) reports it as such.
+    expect(started).toMatchObject({ keys_count: 3, is_fanout: false });
+    expect("tree_mode" in started).toBe(false);
+    // No ticket key ever reaches the funnel's serialized properties.
+    expect(JSON.stringify([started, done])).not.toContain("PROJ-2");
+  });
+
+  it("carries chooseTreeMode's fan-out answer onto batch_started as tree_mode", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch(["PROJ-1"], ["api"], { key: "PROJ-9", branch: "PROJ-9-parent" }, "fanout");
+    const started = trackSpy.mock.calls.flat().find((e: any) => e.name === "batch_started") as any;
+    expect(started).toMatchObject({ tree_mode: "fanout", is_fanout: true });
+  });
+
+  it("emits operation_failed per swallowed per-key failure", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      key === "PROJ-2" ? s : s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider } = setup();
+    await provider.takeBatch(["PROJ-1", "PROJ-2", "PROJ-3"], ["api"]);
+    const errs = trackErrorSpy.mock.calls.flat().filter(
+      (e: any) => e.name === "operation_failed" && e.op === "workspace_write",
+    );
+    expect(errs.length).toBeGreaterThanOrEqual(1);
+    // The ticket key never leaks into the error event's properties.
+    expect(JSON.stringify(errs)).not.toContain("PROJ-2");
+  });
+
   it("launches one worktree'd new window per selected task in the filtered repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing"]));
     const { provider } = setup();
@@ -3463,6 +3702,18 @@ describe("takeBatch", () => {
     const { provider } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
     expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("a cancelled confirm emits batch_completed{outcome:cancelled} with no prompt_mode", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "batch_completed") as any;
+    expect(done.outcome).toBe("cancelled");
+    expect("prompt_mode" in done).toBe(false);
+    expect(done).toMatchObject({ attempted: 2, launched: 0, failed: 0 });
   });
 
   it("drops a non-git repo from the set and launches on the rest", async () => {
@@ -4420,6 +4671,35 @@ describe("addressPr", () => {
     await provider.addressPr("PROJ-1", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
   });
+
+  it("emits pr_work_seeded with source tasks and reason review on a successful launch, with no ticket key in the serialized calls", async () => {
+    const { provider } = setup();
+    await provider.addressPr("PROJ-1", ["account-service"]);
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      reason: "review", source: "tasks", outcome: "seeded", agent_seeded: true,
+    });
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+  });
+
+  it("emits pr_work_seeded cancelled when the open-target picker is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
+    const { provider } = setup();
+    await provider.addressPr("PROJ-1", ["account-service"]);
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "cancelled",
+    });
+  });
+
+  it("emits pr_work_seeded refused when Remote Control blocks the launch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on", agentProvider: "copilot", seedAgent: true });
+    const { provider } = setup();
+    await provider.addressPr("PROJ-1", ["account-service"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "refused",
+    });
+  });
 });
 
 describe("remote control", () => {
@@ -5212,6 +5492,156 @@ describe("a source with no optional capabilities", () => {
     // tab whose contents were never requested.
     expect(posted()).toContainEqual(expect.objectContaining({ type: "tasks", filter: "mine" }));
   });
+
+  it("reports the requested filter and the clamped lens as distinct properties on tasks_fetched", async () => {
+    const list = vi.fn(async () => [{ ...FIXTURE_TASKS[0] }]);
+    const { send } = setup({ connector: withProvider({ list }) });
+    await send({ type: "fetch", filter: "sprint", size: "any" });
+    expect(trackSpy).toHaveBeenCalledWith({
+      name: "tasks_fetched", filter: "sprint", lens: "mine", size: "any",
+      task_count: 1, repo_count: 2, live_window_count: 0, authed: true,
+    });
+  });
+});
+
+describe("tasks_fetched telemetry", () => {
+  it("emits authed:false with zero counts on the unauthenticated early return", async () => {
+    const { send } = setup({ authed: false });
+    await send({ type: "fetch", filter: "mysprint", size: "any" });
+    // No provider was ever asked to clamp anything, so `lens` reports the
+    // requested filter verbatim.
+    expect(trackSpy).toHaveBeenCalledWith({
+      name: "tasks_fetched", filter: "mysprint", lens: "mysprint", size: "any",
+      task_count: 0, repo_count: 0, live_window_count: 0, authed: false,
+    });
+  });
+
+  it("omits live_window_count when trackOpenWindows is off, on both the authed and unauthed paths", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, trackOpenWindows: false });
+    const { send } = setup({ authed: false });
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    const event = trackSpy.mock.calls.flat().find((e: any) => e.name === "tasks_fetched") as any;
+    expect("live_window_count" in event).toBe(false);
+  });
+
+  it("fires exactly once per fetch — no double emit when the same message is sent twice", async () => {
+    const { send } = setup();
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "tasks_fetched")).toHaveLength(2);
+  });
+
+  // `filter`/`size` are typed to their unions at compile time only — a webview
+  // message is untyped at runtime, and there is no "invalid" member in
+  // `tasks_fetched`'s unions to collapse an unrecognised value onto (unlike
+  // SettingsSnapshot's enum-ish fields). The fetch itself must still proceed
+  // unaffected; only the telemetry emit is withheld.
+  it("emits no tasks_fetched for an out-of-union filter, on the authenticated path", async () => {
+    const list = vi.fn(async () => []);
+    const { send } = setup({ connector: withProvider({ list }) });
+    await send({ type: "fetch", filter: "bogus" as never, size: "any" });
+    expect(list).toHaveBeenCalled(); // the fetch itself is unaffected
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "tasks_fetched")).toBe(false);
+  });
+
+  it("emits no tasks_fetched for an out-of-union size, on the authenticated path", async () => {
+    const list = vi.fn(async () => []);
+    const { send } = setup({ connector: withProvider({ list }) });
+    await send({ type: "fetch", filter: "mine", size: "bogus" as never });
+    expect(list).toHaveBeenCalled();
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "tasks_fetched")).toBe(false);
+  });
+
+  it("emits no tasks_fetched for an out-of-union filter, on the unauthenticated early return", async () => {
+    const { send } = setup({ authed: false });
+    await send({ type: "fetch", filter: "bogus" as never, size: "any" });
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "tasks_fetched")).toBe(false);
+  });
+});
+
+describe("card_action telemetry", () => {
+  it("emits card_action for a changeStatus message, from the dispatcher itself", async () => {
+    const { send } = setup();
+    await send({ type: "changeStatus", key: "PROJ-1" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "card_action", action: "change_status" });
+  });
+
+  it("emits card_action for a detail message", async () => {
+    const { send } = setup();
+    await send({ type: "detail", key: "PROJ-1" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "card_action", action: "detail" });
+  });
+
+  it("emits card_action for addToMySprint, removeFromSprint, and setComponent messages", async () => {
+    const { send } = setup();
+    await send({ type: "addToMySprint", key: "PROJ-1" });
+    await send({ type: "removeFromSprint", key: "PROJ-1", size: "any" });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: false });
+    const names = trackSpy.mock.calls.flat().filter((e: any) => e.name === "card_action").map((e: any) => e.action);
+    expect(names).toEqual(["add_to_sprint", "remove_from_sprint", "set_component"]);
+  });
+
+  it("emits card_action{reorder} only once the drag actually applies within My-sprint", async () => {
+    const { send } = setup();
+    await send({ type: "fetch", filter: "unassigned", size: "any" }); // lastFilter = unassigned
+    await send({ type: "reorder", order: ["C", "A", "B"] });
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "card_action")).toBe(false);
+    await send({ type: "fetch", filter: "mysprint", size: "any" }); // lastFilter = mysprint
+    await send({ type: "reorder", order: ["C", "A", "B"] });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "card_action", action: "reorder" });
+  });
+
+  it("emits card_action{reset_order}", async () => {
+    const { send } = setup();
+    await send({ type: "resetOrder", size: "any" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "card_action", action: "reset_order" });
+  });
+});
+
+describe("tasks:lensUsed", () => {
+  it("tracks lens_used for a recognised lens", async () => {
+    const { send } = setup();
+    await send({ type: "tasks:lensUsed", lens: "search" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "lens_used", lens: "search" });
+  });
+
+  it("tracks lens_used for the repo lens", async () => {
+    const { send } = setup();
+    await send({ type: "tasks:lensUsed", lens: "repo" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "lens_used", lens: "repo" });
+  });
+
+  it("silently drops an unrecognised lens value", async () => {
+    const { send } = setup();
+    await send({ type: "tasks:lensUsed", lens: "bogus" as never });
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "lens_used")).toBe(false);
+  });
+});
+
+describe("notepad_action telemetry", () => {
+  it("emits notepad_action for add, edit, and remove", async () => {
+    const { send } = setup();
+    await send({ type: "notepad:add", title: "First", body: "" });
+    await send({ type: "notepad:update", id: "irrelevant", title: "x", body: "y" });
+    await send({ type: "notepad:delete", id: "irrelevant" });
+    const names = trackSpy.mock.calls.flat().filter((e: any) => e.name === "notepad_action").map((e: any) => e.action);
+    expect(names).toEqual(["add", "edit", "remove"]);
+  });
+
+  it("emits notepad_action{image_add} for both notepad:addImage and notepad:pickImage", async () => {
+    const { send } = setup();
+    await send({ type: "notepad:add", title: "note", body: "" });
+    await send({ type: "notepad:addImage", id: "ghost", dataBase64: "", mime: "image/png", name: "a.png" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "notepad_action", action: "image_add" });
+  });
+
+  it("emits notepad_action{reorder} only once the drop actually changes the order", async () => {
+    const { send } = setup();
+    // No known notes at all — the reorder is a no-op and must not report a gesture
+    // that changed nothing.
+    await send({ type: "notepad:reorder", order: ["ghost"] });
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "notepad_action")).toBe(false);
+  });
 });
 
 describe("a refused write that names fields to retry", () => {
@@ -5877,6 +6307,21 @@ describe("notepad", () => {
       await sendMsg({ type: "notepad:delete", id: "ghost" });
       expect(orderIn(store)).toEqual([ids[0], ids[2], ids[1]]);
     });
+
+    it("emits notepad_action{reorder} once the drop actually applies", async () => {
+      const { sendMsg, ids } = await threeNotes();
+      trackSpy.mockClear();
+      const [a, b, c] = ids;
+      await sendMsg({ type: "notepad:reorder", order: [a, c, b] });
+      expect(trackSpy).toHaveBeenCalledWith({ name: "notepad_action", action: "reorder" });
+    });
+
+    it("does not emit notepad_action for a reorder that names no known note", async () => {
+      const { sendMsg } = await threeNotes();
+      trackSpy.mockClear();
+      await sendMsg({ type: "notepad:reorder", order: ["ghost"] });
+      expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "notepad_action")).toBe(false);
+    });
   });
 
   describe("sections", () => {
@@ -5975,6 +6420,89 @@ describe("notepad", () => {
       store.set("agentFlow.notepadSections", { corrupt: true });
       provider.postNotepad();
       expect(postedSections(posted)).toEqual([]);
+    });
+  });
+
+  describe("explore telemetry", () => {
+    const names = () => trackSpy.mock.calls.flat().map((e: any) => e.name);
+    const events = () => trackSpy.mock.calls.flat() as any[];
+    const find = (n: string) => events().find((e) => e.name === n);
+
+    it("emits explore_started with source 'notepad' and mode 'general', then explore_completed on success", async () => {
+      const repos = mkRepos(["account-service"]);
+      vi.mocked(discoverRepos).mockReturnValue(repos);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+
+      expect(find("explore_started")).toMatchObject({ flow_id: "flow-1", mode: "general", source: "notepad" });
+      expect(find("explore_completed")).toMatchObject({
+        flow_id: "flow-1", outcome: "launched", mode: "general", provider: "claude-code", repo_count: 1, duration_ms: 42,
+      });
+      // notepad:run also emits the Task 9 notepad_action{run} click signal —
+      // a separate event from the explore funnel above, fired at the dispatcher
+      // itself rather than from inside runNotepadItem. `find` above would return
+      // the EARLIER notepad_action{add} from the add call, so this reads the last
+      // notepad_action instead of the first.
+      const notepadActions = events().filter((e) => e.name === "notepad_action");
+      expect(notepadActions.at(-1)).toMatchObject({ action: "run" });
+    });
+
+    it("emits explore_completed with cancel_point 'remote-control' (no explore_started) when the RC block refuses, but still emits notepad_action{run}", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on", agentProvider: "copilot" });
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+      expect(names()).not.toContain("explore_started");
+      expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "remote-control", mode: "general", repo_count: 0 });
+      // notepad_action{run} is tracked at the dispatcher itself, before runNotepadItem
+      // is even called — it must survive a refusal deep inside that method untouched.
+      // `find` would return the earlier notepad_action{add} from the add call above,
+      // so read the LAST one instead of the first.
+      const notepadActions = events().filter((e) => e.name === "notepad_action");
+      expect(notepadActions.at(-1)).toMatchObject({ action: "run" });
+    });
+
+    it("emits only explore_completed with cancel_point 'repos' when no repos are found", async () => {
+      vi.mocked(discoverRepos).mockReturnValue([]);
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+      expect(names()).not.toContain("explore_started");
+      expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "repos", mode: "general", repo_count: 0 });
+    });
+
+    it("cancels with cancel_point 'kickoff' when the open-target picker is dismissed", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel open-target pick
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+      expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "kickoff", mode: "general", repo_count: 0 });
+    });
+
+    it("cancels with cancel_point 'agent' and the resolved repo_count when the agent picker is dismissed", async () => {
+      const repos = mkRepos(["account-service"]);
+      vi.mocked(discoverRepos).mockReturnValue(repos);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+      vi.mocked(openWorkspace).mockResolvedValue({
+        mode: "per-window", briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true,
+      });
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+      expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "agent", mode: "general", repo_count: 1 });
+    });
+
+    it("never sends the note title", async () => {
+      const repos = mkRepos(["account-service"]);
+      vi.mocked(discoverRepos).mockReturnValue(repos);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "SECRET-TOPIC", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+      expect(JSON.stringify(events())).not.toContain("SECRET-TOPIC");
     });
   });
 });
@@ -6247,7 +6775,7 @@ describe("takeTask: a ticket with children", () => {
     expect(takeBatch).toHaveBeenCalledWith(["PROJ-2"], ["account-service"], {
       key: "PROJ-1",
       branch: PARENT_BRANCH,
-    });
+    }, "fanout");
   });
 
   it("keeps a non-git folder out of the fan-out's repo set", async () => {
@@ -6265,7 +6793,7 @@ describe("takeTask: a ticket with children", () => {
     expect(takeBatch).toHaveBeenCalledWith(["PROJ-2"], ["account-service"], {
       key: "PROJ-1",
       branch: PARENT_BRANCH,
-    });
+    }, "fanout");
   });
 
   it("says there is no git repo at all without a blank where names belong", async () => {
@@ -6296,7 +6824,7 @@ describe("takeTask: a ticket with children", () => {
     expect(takeBatch).toHaveBeenCalledWith(["PROJ-2"], ["account-service", "webapp"], {
       key: "PROJ-1",
       branch: PARENT_BRANCH,
-    });
+    }, "fanout");
   });
 
   /** Four repos where the PARENT confirms two of them via components (plus a label

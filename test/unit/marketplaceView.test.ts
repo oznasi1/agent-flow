@@ -13,6 +13,16 @@ h.fsReader.mockImplementation(() => ({ readFile: h.readFile, readDir: () => [], 
 vi.mock("../../src/engine/claudeAssets", () => ({ scanClaudeAssets: h.scanClaudeAssets }));
 vi.mock("../../src/engine/claudeAssetsFs", () => ({ fsReader: h.fsReader, claudeConfigDir: h.claudeConfigDir }));
 
+// Telemetry: mocked wholesale, same pattern as tasksView/deckView's test files, so the
+// marketplace_opened/marketplace_action/operation_failed assertions below observe track()
+// calls without a real PostHog singleton.
+const trackSpy = vi.fn();
+const trackErrorSpy = vi.fn();
+vi.mock("../../src/telemetry/telemetry", () => ({
+  track: (...a: unknown[]) => trackSpy(...a),
+  trackError: (...a: unknown[]) => trackErrorSpy(...a),
+}));
+
 import { MarketplacePanel } from "../../src/marketplaceView";
 
 const view = (over: Partial<ClaudeAssetsView> = {}): ClaudeAssetsView => ({
@@ -34,6 +44,8 @@ const show = () => MarketplacePanel.show(fakeContext().context as any, () => {})
 beforeEach(() => {
   h.scanClaudeAssets.mockReset().mockReturnValue(view());
   h.readFile.mockReset().mockReturnValue(null);
+  trackSpy.mockClear();
+  trackErrorSpy.mockClear();
 });
 afterEach(() => {
   const r = window.createWebviewPanel.mock.results.at(-1);
@@ -235,6 +247,130 @@ describe("MarketplacePanel file preview", () => {
     await p._fire({ type: "mkt:ready" });
     await p._fire({ type: "mkt:read", file: FILE });
     expect(posts(p).at(-1).truncated).toBe(false);
+  });
+});
+
+describe("MarketplacePanel telemetry", () => {
+  const FILE = "/home/u/.claude/plugins/cache/acme/cicd/1/skills/build/SKILL.md";
+  const opened = () => trackSpy.mock.calls.flat().filter((e: any) => e.name === "marketplace_opened");
+  const actions = () => trackSpy.mock.calls.flat().filter((e: any) => e.name === "marketplace_action");
+
+  it("emits marketplace_opened{revealed:false} with real counts on a fresh open, and does not re-emit on a later re-render", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    expect(opened()).toEqual([
+      {
+        name: "marketplace_opened", revealed: false,
+        asset_count: 1, plugin_count: 0, marketplace_count: 1,
+        skills: 1, commands: 0, agents: 0, hooks: 0, not_set_up: false,
+      },
+    ]);
+    // A later refresh re-scans but must not emit a second marketplace_opened.
+    await p._fire({ type: "mkt:refresh" });
+    expect(opened()).toHaveLength(1);
+  });
+
+  it("emits marketplace_opened{revealed:true} with the last-known counts when an already-open panel is refocused", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    trackSpy.mockClear();
+    show(); // second show() while `current` is still set -> the reveal branch
+    expect(opened()).toEqual([
+      {
+        name: "marketplace_opened", revealed: true,
+        asset_count: 1, plugin_count: 0, marketplace_count: 1,
+        skills: 1, commands: 0, agents: 0, hooks: 0, not_set_up: false,
+      },
+    ]);
+    expect(p.reveal).toHaveBeenCalled();
+  });
+
+  it("reports zero counts on reveal if somehow refocused before any render completed", async () => {
+    show();
+    // No mkt:ready fired yet — counts must still be the zeroed default.
+    show();
+    expect(opened()).toEqual([
+      {
+        name: "marketplace_opened", revealed: true,
+        asset_count: 0, plugin_count: 0, marketplace_count: 0,
+        skills: 0, commands: 0, agents: 0, hooks: 0, not_set_up: false,
+      },
+    ]);
+  });
+
+  it("emits marketplace_action{action:'read', truncated:true} for an oversized file", async () => {
+    h.readFile.mockReturnValue("x".repeat(262_145));
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:read", file: FILE });
+    expect(actions()).toContainEqual({ name: "marketplace_action", action: "read", truncated: true });
+  });
+
+  it("emits marketplace_action{action:'open', allowed:true/false} for mkt:open", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:open", file: FILE });
+    await p._fire({ type: "mkt:open", file: "/etc/passwd" });
+    expect(actions()).toContainEqual({ name: "marketplace_action", action: "open", allowed: true });
+    expect(actions()).toContainEqual({ name: "marketplace_action", action: "open", allowed: false });
+  });
+
+  it("emits marketplace_action{action:'reveal', allowed:true/false} for mkt:reveal", async () => {
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:reveal", file: FILE });
+    await p._fire({ type: "mkt:reveal", file: "/etc/hosts" });
+    expect(actions()).toContainEqual({ name: "marketplace_action", action: "reveal", allowed: true });
+    expect(actions()).toContainEqual({ name: "marketplace_action", action: "reveal", allowed: false });
+  });
+
+  it("emits marketplace_action{action:'copy'} for mkt:copy", async () => {
+    show();
+    await lastPanel()._fire({ type: "mkt:copy", text: "/plugin install x@y" });
+    expect(actions()).toContainEqual({ name: "marketplace_action", action: "copy" });
+  });
+
+  it("reports operation_failed{op:'marketplace_read'} when the scan throws", async () => {
+    h.scanClaudeAssets.mockImplementation(() => { throw new Error("boom"); });
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    const ev = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(ev).toMatchObject({ name: "operation_failed", op: "marketplace_read", retryable: true });
+    expect(ev.failure_class).toBeTruthy();
+  });
+
+  it("does not open a file:// URL — the openExternal scheme guard allows only http(s)", async () => {
+    show();
+    await lastPanel()._fire({ type: "openExternal", url: "file:///etc/passwd" });
+    expect(env.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("still opens an https:// URL through the scheme guard", async () => {
+    show();
+    await lastPanel()._fire({ type: "openExternal", url: "https://example.com" });
+    expect(env.openExternal).toHaveBeenCalled();
+  });
+
+  it("never leaks a file path, asset name, or URL into a telemetry call", async () => {
+    h.readFile.mockReturnValue("secret contents");
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "mkt:ready" });
+    await p._fire({ type: "mkt:open", file: FILE });
+    await p._fire({ type: "mkt:reveal", file: FILE });
+    await p._fire({ type: "mkt:read", file: FILE });
+    await p._fire({ type: "mkt:copy", text: "/plugin install x@y" });
+    await p._fire({ type: "openExternal", url: "https://example.com/secret-path" });
+    const serialized = JSON.stringify([...trackSpy.mock.calls.flat(), ...trackErrorSpy.mock.calls.flat()]);
+    expect(serialized).not.toContain(FILE);
+    expect(serialized).not.toContain("example.com");
+    expect(serialized).not.toContain("build");
   });
 });
 

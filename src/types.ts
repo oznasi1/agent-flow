@@ -628,6 +628,11 @@ export type InboundMessage =
   // One chip on one ticket. `movedChip` says whether the chip's presence in the
   // list changed too — which is what makes a rejected write exactly undoable.
   | { type: "setComponent"; key: string; repo: string; on: boolean; movedChip: boolean }
+  /** The webview's own lens-usage signal — a search-box edit or a repo-lens
+   * pick, debounced 500ms per lens kind (one timer for "search", one for
+   * "repo") so a run of keystrokes or toggles reports once. The host validates
+   * the enum and drops an unrecognised value silently. */
+  | { type: "tasks:lensUsed"; lens: "repo" | "search" }
   // The Deck (separate webview panel)
   | { type: "deck:ready" }
   | { type: "deck:refresh" }
@@ -700,6 +705,13 @@ export type InboundMessage =
   // `saveCommand`. The node itself is deliberately left as free text — see that
   // method's own comment.
   | { type: "flow:saveCommand"; run: string; label: string }
+  // The dry run happened. Posted once per invocation of the drawer's "What would
+  // fire?" toggle, and the ONLY thing the host ever learns about a dry run: the
+  // verdicts themselves stay in the webview, which computes them itself and acts
+  // on nothing. Counts only — no flow id, no edge ids, no rule text — and the
+  // host still validates all three as finite, non-negative numbers before they
+  // reach an event, because a webview payload is untrusted whatever this type says.
+  | { type: "flow:dryRun"; edges: number; fired: number; blocked: number }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }

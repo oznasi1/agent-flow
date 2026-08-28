@@ -46,7 +46,7 @@ import { providerPin, resolveBatchProvider } from "./agentPick";
 // `import type` — erased at build time — for the reason forge/types.ts itself
 // documents: this module must add no runtime edge to the forge directory beyond
 // the registry call below.
-import { resolveForge } from "./engine/forge/registry";
+import { resolveForge, FORGE_IDS } from "./engine/forge/registry";
 import type { Forge, ForgeAccount, ForgeCaps, ForgeGap } from "./engine/forge/types";
 import { accountSlot } from "./engine/forge/accounts";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
@@ -63,6 +63,12 @@ import { AttentionCandidate, attentionLabel, ownsWorkToLose } from "./engine/att
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
 import { CardAgent, FlowPromptMode, InboundMessage, MergeMethod, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, PrWorkReason, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, ServiceRef, isTicketRun, runKind, ticketKeyFor } from "./types";
+// Aliased: DeckPanel already has a private `track(key)` method (promotes a local
+// card), unrelated to analytics — every later Deck telemetry emit goes through
+// `trackEvent`/`trackError` instead, never the bare names.
+import { track as trackEvent, trackError } from "./telemetry/telemetry";
+import { classifyFailure, DeckAction, Op, STOCK_REVIEW_MODES, toPromptModeProp, type TaskModeProp } from "./telemetry/events";
+import { modeProp } from "./telemetry/settingsSnapshot";
 
 export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
@@ -338,6 +344,44 @@ interface EdgeDone {
  * nothing was decided and the next pass should try again. */
 type EdgeResult = EdgeDone | { kind: "defer"; reason: string };
 
+/** `onMessage` cases that are a click-shaped user action, mapped to their `deck_action`
+ * enum member. `deck:inspect` and `deck:setGrouping` are handled separately (their event
+ * needs a payload field this table can't carry); everything else here emits with no
+ * further properties. Cases absent from this map — `deck:ready`, `deck:reviewExpand`,
+ * `deck:reviewLoadDraft`, `deck:setReviewSort`, `deck:reviewSubmit`, `deck:mergePr`,
+ * `deck:seedPrWork`, `deck:addressPr`, every `flow:*` case (its own `flow_action` event
+ * is a later task) — are read-plumbing or already funnel-instrumented elsewhere, not a
+ * bare action worth its own count. */
+const DECK_ACTIONS: Partial<Record<InboundMessage["type"], DeckAction>> = {
+  "deck:refresh": "refresh",
+  "deck:clearStale": "clear_stale",
+  "deck:switchAccount": "switch_account",
+  "deck:setGrouping": "set_grouping",
+  "deck:forget": "forget",
+  "deck:track": "track",
+  "deck:usageFor": "usage",
+  "openExternal": "open_external",
+};
+
+/** Last-resort `operation_failed` attribution for a message whose handler threw with
+ * no per-handler catch of its own to classify it more precisely — mirrors
+ * tasksView.ts's `MESSAGE_OPS`, but deliberately without its `resolveOp` escalation:
+ * nothing here reads a task source, so there is no jira_fetch/jira_write to prefer
+ * over the message's own op. A message absent from this map (e.g. `deck:ready`,
+ * `openExternal`) still falls back to `"workspace_write"` rather than reporting
+ * nothing — unlike tasksView, where an absent entry means "not itself a failure
+ * worth counting" and MESSAGE_OPS is consulted directly, not through a fallback. */
+const DECK_MESSAGE_OPS: Partial<Record<string, Op>> = {
+  "deck:reviewLaunch": "review_fetch",
+  "deck:reviewBatch": "review_fetch",
+  "deck:reviewSubmit": "review_fetch",
+  "deck:mergePr": "pr_lookup",
+  "deck:addressPr": "pr_lookup",
+  "deck:seedPrWork": "workspace_write",
+  "deck:track": "workspace_write",
+  "deck:refresh": "pr_lookup",
+};
+
 /** The Deck: a full-window board of every task launched via Agent Flow Deck, opened as a
  * singleton editor-area panel. Reuses the Jira client, runs store, and status engine. */
 export class DeckPanel {
@@ -510,6 +554,7 @@ export class DeckPanel {
   static show(context: vscode.ExtensionContext, connector: TaskConnector, log: (m: string) => void): void {
     if (DeckPanel.current) {
       DeckPanel.current.panel.reveal();
+      DeckPanel.current.trackOpened(true);
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -519,6 +564,30 @@ export class DeckPanel {
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] },
     );
     DeckPanel.current = new DeckPanel(panel, context, connector, log);
+    DeckPanel.current.trackOpened(false);
+  }
+
+  /** Emits `deck_opened`. `revealed` is the only thing the two call sites in `show()`
+   * differ on — everything else is the live state this panel (or the one about to
+   * exist) already holds: `prFacts`/`openAgents`/`reviewQueue` were seeded from config
+   * in the constructor and can have since been flipped by a setting, `orchestrator`
+   * and the flow counts are read fresh rather than cached, since either could have
+   * changed on disk since this panel last checked. `forge` validates the raw setting
+   * against the registry — never the resolved `Forge.id`, which a stale forge object
+   * cannot report as invalid — the same sentinel scheme settingsSnapshot.ts uses. */
+  private trackOpened(revealed: boolean): void {
+    const cfg = getConfig();
+    trackEvent({
+      name: "deck_opened",
+      revealed,
+      forge: (FORGE_IDS as readonly string[]).includes(cfg.forge) ? cfg.forge : "invalid",
+      pr_facts: this.prFacts,
+      open_agents: this.openAgents,
+      review_queue: this.reviewQueue,
+      orchestrator: cfg.orchestrator,
+      flow_count: readFlows(this.flowIo, this.flowsDir).length,
+      has_armed_flow: this.hasArmedFlow(),
+    });
   }
 
   private constructor(
@@ -924,6 +993,11 @@ export class DeckPanel {
         const receipts: { level: "success" | "error"; message: string }[] = [];
         // The junction targets of rules that could not even be DECIDED this pass.
         const deferredTargets = new Set<string>();
+        // A mid-pass disarm is ONE thing that happened to this flow, not one per
+        // rule it skipped: up to three rules can be left pending by a single
+        // Disarm click in another window, and three identical events would read
+        // as three disarms.
+        let skipReported = false;
         for (const f of firing) {
           // An earlier step in this pass lost the lock. EVERY remaining edge is left
           // exactly as it was — deferred, not stamped — and this check sits above the
@@ -952,10 +1026,59 @@ export class DeckPanel {
           const stillArmed = readFlows(this.flowIo, this.flowsDir).find((fl) => fl.id === flow.id)?.armed;
           if (!stillArmed) {
             this.log(`deck: flow ${flow.id} rule ${f.edge.id} skipped — disarmed mid-pass`);
+            if (!skipReported) {
+              skipReported = true;
+              // Not a gesture in this window: something else — the other window's
+              // toggle, or its resume banner — turned this flow off, and each of
+              // those emitted its own `flow_armed` where it happened. This one
+              // records that a pass in flight noticed and stopped spending, which
+              // is the only place that fact exists. Nothing here computes an
+              // armability split, so the three counts are zero.
+              trackEvent({
+                name: "flow_armed", armed: false,
+                node_count: fresh.nodes.length, edge_count: fresh.edges.length,
+                unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+                source: "auto-skip",
+              });
+            }
             deferredTargets.add(f.edge.to);
             continue;
           }
           const done = await this.performEdge(fresh, f.edge, runs, f.action);
+          // One per edge this pass actually PERFORMED — never per evaluation, and
+          // never for a rule merely stamped as a sibling, which is what keeps this
+          // to at most MAX_LAUNCHES_PER_PASS events per six seconds. Emitted here,
+          // where the act's own result is in hand: a `defer` never reaches
+          // `outcomes` at all, and reading it off the write below would lose it.
+          //
+          // The launch trio comes from the planned node as `fresh` holds it — the
+          // same copy `performEdge` just launched against, resolved through the
+          // same helper — so a node retargeted mid-pass reports nothing rather
+          // than reporting the shape of some other node. `node.mode` is a
+          // PromptMode id and `agentFlow.promptModes` is user-configurable, hence
+          // `toPromptModeProp`; `repos` is a count, never the repo names.
+          const launched = f.action === "launch" ? this.plannedTarget(fresh, f.edge) : undefined;
+          const edgeOk = done.kind === "done" && done.outcome.ok;
+          if (launched) {
+            // `launched.dest` came off a `PlannedNode` read back from the flows
+            // file, which is hand-editable and only shape-checked (`validNode` in
+            // store.ts), not value-checked — a stray or hand-typed `dest` is not
+            // one of the three the launcher itself understands. Validate before it
+            // ever reaches the event; an unrecognised value omits `dest` rather
+            // than sending it through.
+            const dest: LaunchDest | undefined =
+              launched.dest === "worktree" || launched.dest === "new-window" || launched.dest === "current-window"
+                ? launched.dest
+                : undefined;
+            trackEvent({
+              name: "flow_edge_fired", edge_action: "launch", ok: edgeOk, deferred: done.kind === "defer",
+              ...(dest ? { dest } : {}), prompt_mode: toPromptModeProp(launched.mode), repo_count: launched.repos.length,
+            });
+          } else {
+            trackEvent({
+              name: "flow_edge_fired", edge_action: f.action, ok: edgeOk, deferred: done.kind === "defer",
+            });
+          }
           // Renewed AFTER the act, against the real clock rather than this pass's
           // `nowMs` — a stamp dated when the poll started would be no renewal at
           // all. `false` means another window reaped this lock while the step above
@@ -1025,12 +1148,28 @@ export class DeckPanel {
         // Gone from the store between `fresh` and here (deleted mid-pass). Writing
         // would resurrect it, the same reasoning as the `!fresh` check above.
         if (!atWrite) continue;
+        // Read BEFORE the stamps land: `flow_settled` is about the transition, and
+        // the only way to know a flow just became settled is to know it was not
+        // already. A settled flow left armed on the board is still evaluated every
+        // six seconds, so without this a finished flow would report itself
+        // forever. (Nothing normally fires in such a pass — every edge is latched
+        // — but "nothing to fire" is `evaluate.ts`'s business, not a guarantee
+        // this event may rest on: one `flow:resetEdge` puts an edge back in play.)
+        const wasSettled = atWrite.edges.length > 0 && atWrite.edges.every(isSettled);
         let next = applyFired(atWrite, stamping, nowMs, outcomes);
         // `nowMs` — this pass's own clock, the same one `applyFired` stamped with a
         // line above: a promotion settles the rules that pointed at the node as
         // planned work, and those stamps belong to this pass, not to a later read.
         for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo, nowMs);
         writeFlow(this.flowIo, this.flowsDir, next);
+        // After the write, and computed from `next` AFTER the promotions: a
+        // promotion settles the rules that pointed at the node as planned work,
+        // so a flow can reach its end through one. The model has no terminal
+        // state — "settled" is every edge stamped or errored — so this is derived
+        // here rather than read off a field.
+        if (!wasSettled && next.edges.length > 0 && next.edges.every(isSettled)) {
+          trackEvent({ name: "flow_settled", node_count: next.nodes.length, edge_count: next.edges.length });
+        }
         // `next`, not `fresh`: the message should describe what was actually just
         // written — same reasoning as building `next` from `atWrite` above — and
         // `next` already carries the promotions too.
@@ -2340,13 +2479,29 @@ export class DeckPanel {
     // Resolve — or ask — before launchReview runs, because launchReview's first
     // act is createWorktrees. A picker raised any later would leave a worktree
     // and a branch behind every time someone pressed Escape.
+    //
+    // `pinnedMode`/`modeWasPinned` are pulled out so every `review_launched` emit below
+    // — including the ones before a PromptMode is ever chosen — can report the same
+    // "was this launch asked or pinned" answer.
+    const pinnedMode = resolveReviewMode(cfg.reviewRequestModes, cfg.reviewRequestMode);
+    const modeWasPinned = pinnedMode !== null;
     const mode =
-      resolveReviewMode(cfg.reviewRequestModes, cfg.reviewRequestMode) ??
+      pinnedMode ??
       (await vscode.window.showQuickPick(
         cfg.reviewRequestModes.map((m) => ({ label: m.label, detail: m.detail, mode: m })),
         { title: `Review ${req.repoName}#${req.number}`, ignoreFocusOut: true },
       ))?.mode;
-    if (!mode) return; // picker cancelled — no worktree, no window, no toast
+    if (!mode) {
+      // No PromptMode was ever resolved — `modeWasPinned` is trivially false here,
+      // since a pinned mode would never have raised this picker to dismiss. The raw
+      // setting is the only shape left to report.
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: false, requested_count: 1, launched_count: 0, failed_count: 0, skipped_count: 0,
+      });
+      return; // picker cancelled — no worktree, no window, no toast
+    }
     // Where it opens, settled before launchReview for exactly the reason above: this is
     // the second question that can be Escaped, and createWorktrees is still ahead of
     // both. The count is 1 — a review is one repo — so `targetToOpenArgs` never reaches
@@ -2362,12 +2517,29 @@ export class DeckPanel {
       },
       openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
     );
-    if (!target) return; // dismissed — same silence as the mode picker
+    if (!target) {
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: false, requested_count: 1, launched_count: 0, failed_count: 0, skipped_count: 0,
+      });
+      return; // dismissed — same silence as the mode picker
+    }
     const openTarget = await targetToOpenArgs(target, 1, {
       currentWindow,
       chooseWorkspaceMode: async () => "per-window",
     });
-    if (!openTarget) return; // this window lost its identity between the pick and here
+    if (!openTarget) {
+      // This window lost its identity between the pick and here — not a user
+      // gesture, so "failed" rather than "cancelled", same distinction the batch
+      // path below draws for the identical loss.
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: false, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+      });
+      return;
+    }
     const res = await launchReview(
       { req, template: mode.prompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent, openTarget },
       { createWorktrees, openWorkspace, log: this.log },
@@ -2376,10 +2548,28 @@ export class DeckPanel {
       // A dismissed agent picker is the user's own decision, not a failure — the same
       // silence the mode picker above returns with, for the same reason. Nothing was
       // opened, written or seeded, so there is nothing to report either way.
-      if ("cancelled" in res) return;
+      if ("cancelled" in res) {
+        trackEvent({
+          name: "review_launched", outcome: "cancelled",
+          mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+          destination: target.kind, batch: false, requested_count: 1, launched_count: 0, failed_count: 0, skipped_count: 0,
+        });
+        return;
+      }
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: false, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+      });
       this.toast("error", res.message);
       return;
     }
+    trackEvent({
+      name: "review_launched", outcome: "launched",
+      mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+      destination: target.kind, provider: res.provider, seeded_in_place: !!res.seededInPlace,
+      batch: false, requested_count: 1, launched_count: 1, failed_count: 0, skipped_count: 0,
+    });
     // `res.provider`, not the setting: under `ask` the setting names nobody, and the
     // launch is the only thing that knows which agent the user picked for it.
     //
@@ -2419,7 +2609,29 @@ export class DeckPanel {
   private async launchReviewBatchHeld(ids: string[]): Promise<void> {
     const cfg = getConfig();
     const requests = ids.map((id) => this.reviewById(id)).filter((r): r is ReviewRequest => !!r);
-    if (!requests.length) return; // the queue moved on before the click landed
+
+    // `modes`/`pinnedMode`/`modeWasPinned` are hoisted above the cost-confirm gate — same
+    // reason `launchReviewFor` hoists its own `pinnedMode` above its first gate: whether
+    // `resolveReviewMode` finds a pin is a pure function of config, entirely independent of
+    // whatever dialog is about to run. A user with a genuinely pinned mode can still decline
+    // the cost-confirm on a large batch, and `mode_was_pinned` on that event must say `true`
+    // — it was never "not reached yet", only "not yet needed to pick a mode". Hoisted above
+    // the `!requests.length` check too, now, so that terminal can report the same honest
+    // `mode_was_pinned` instead of skipping telemetry altogether.
+    const modes = batchReviewModes(cfg.reviewRequestModes, cfg.forge);
+    const pinnedMode = resolveReviewMode(modes, cfg.reviewRequestMode);
+    const modeWasPinned = pinnedMode !== null;
+    if (!requests.length) {
+      // The queue moved on before the click landed — nothing was ever requested, so
+      // "cancelled" (not "failed") is the honest outcome, same as every other
+      // dismissed-before-anything-happened terminal below.
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: true, requested_count: 0, launched_count: 0, failed_count: 0, skipped_count: 0,
+      });
+      return;
+    }
 
     // 1 — the cost. The mode is not known yet, so this names sessions (always true)
     //     rather than worktrees (mode-dependent).
@@ -2429,15 +2641,24 @@ export class DeckPanel {
         { modal: true },
         "Review",
       );
-      if (go !== "Review") return;
+      if (go !== "Review") {
+        // No PromptMode has been PICKED yet (the QuickPick below hasn't run), so the raw
+        // setting is the only shape left to report for `mode` — but `modeWasPinned` is the
+        // real, already-computed answer, not a constant.
+        trackEvent({
+          name: "review_launched", outcome: "cancelled",
+          mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+          batch: true, requested_count: requests.length, launched_count: 0, failed_count: 0, skipped_count: 0,
+        });
+        return;
+      }
     }
 
     // 2 — the mode, once, for the whole batch. This list always holds at least two
     //     modes (read-only plus the stock one), so an unpinned batch always asks:
     //     worktrees-or-not is its one consequential choice.
-    const modes = batchReviewModes(cfg.reviewRequestModes, cfg.forge);
     const mode =
-      resolveReviewMode(modes, cfg.reviewRequestMode) ??
+      pinnedMode ??
       (await vscode.window.showQuickPick(
         modes.map((m) => ({ label: m.label, detail: m.detail, mode: m })),
         {
@@ -2445,11 +2666,25 @@ export class DeckPanel {
           ignoreFocusOut: true,
         },
       ))?.mode;
-    if (!mode) return; // dismissed: nothing created, nothing said
+    if (!mode) {
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: true, requested_count: requests.length, launched_count: 0, failed_count: 0, skipped_count: 0,
+      });
+      return; // dismissed: nothing created, nothing said
+    }
 
     // 3 — plan. A row with no local checkout is named once per repo, not once per PR.
     const { items, skipped } = planReviewBatch(requests, mode);
     if (!items.length) {
+      // Every request was skipped for want of a local checkout — nothing was ever
+      // going to launch, so this is a genuine failure of the gesture, not a cancel.
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: true, requested_count: requests.length, launched_count: 0, failed_count: 0, skipped_count: skipped.length,
+      });
       this.toast(
         "error",
         `${skipped.join(", ")} isn't checked out under your repos root — open those PRs in your browser instead.`,
@@ -2471,12 +2706,20 @@ export class DeckPanel {
       },
       openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
     );
-    if (!target) return;
+    if (!target) {
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: true, requested_count: requests.length, launched_count: 0, failed_count: 0, skipped_count: skipped.length,
+      });
+      return;
+    }
 
     // 5 — layout. Only a new window can go either way; every other destination IS a
     //     single window. One PR is an ordinary single launch and needs no layout pick.
     let shared = target.kind !== "new";
-    if (target.kind === "new" && items.length > 1) {
+    const layoutAsked = target.kind === "new" && items.length > 1;
+    if (layoutAsked) {
       const p = await vscode.window.showQuickPick(
         [
           { label: "$(multiple-windows) Separate windows", detail: "One window per PR", shared: false },
@@ -2484,9 +2727,21 @@ export class DeckPanel {
         ],
         { title: `Review ${items.length} PRs — how should I lay them out?`, ignoreFocusOut: true },
       );
-      if (!p) return;
+      if (!p) {
+        trackEvent({
+          name: "review_launched", outcome: "cancelled",
+          mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+          destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+          failed_count: 0, skipped_count: skipped.length, layout_asked: layoutAsked,
+        });
+        return;
+      }
       shared = p.shared;
     }
+    const reviewLaunchedTelemetry = {
+      mode: modeProp(mode.id, STOCK_REVIEW_MODES), modeWasPinned,
+      requestedCount: requests.length, layout: shared ? ("shared" as const) : ("separate" as const), layoutAsked,
+    };
 
     // 6 — separate windows is the single-PR path, N times over. launchReview owns its
     //     own worktree and its own refusal to run without one, so nothing is
@@ -2504,6 +2759,14 @@ export class DeckPanel {
         chooseWorkspaceMode: async () => "per-window",
       });
       if (!openTarget) {
+        // This window lost its identity between the destination pick and here —
+        // every item in this batch fails at once, none of them a user gesture.
+        trackEvent({
+          name: "review_launched", outcome: "failed",
+          mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+          destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+          failed_count: items.length, skipped_count: skipped.length, layout: "separate", layout_asked: layoutAsked,
+        });
         this.toast("error", "This window can no longer hold a session — nothing was opened.");
         return;
       }
@@ -2518,7 +2781,7 @@ export class DeckPanel {
       // `true`, not `needsWorktrees(mode)`: launchReview ALWAYS cuts a worktree, whatever
       // the mode says, so read-only in separate windows still gets one per PR. The toast
       // has to say what happened rather than what the mode would have preferred.
-      this.reviewBatchToast(launched, true, skipped, failures);
+      this.reviewBatchToast(launched, true, skipped, failures, reviewLaunchedTelemetry);
       await this.refreshBusy();
       return;
     }
@@ -2544,6 +2807,15 @@ export class DeckPanel {
       ready.push({ item, services });
     }
     if (!ready.length) {
+      // Every item failed to get a worktree — `failures.length` accounts for all of
+      // them, since `needsWorktrees(mode)` false would have put every item in
+      // `ready` instead, never here.
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+        failed_count: failures.length, skipped_count: skipped.length, layout: "shared", layout_asked: layoutAsked,
+      });
       this.toast("error", "Couldn't create a git worktree for any of them — the Agent Flow Deck output channel has the reason.");
       return;
     }
@@ -2551,13 +2823,31 @@ export class DeckPanel {
     // 8 — the agent. A shared window seeds from plan files and can never ask later, so
     //     under `ask` this is the only chance to know which agent the user wants.
     const provider = await resolveBatchProvider(cfg, ready.length > 1);
-    if (!provider) return; // the picker was dismissed
+    if (!provider) {
+      // The picker was dismissed — a user gesture, so "cancelled". The worktree
+      // failures already counted above still failed; nothing further was attempted.
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+        failed_count: failures.length, skipped_count: skipped.length, layout: "shared", layout_asked: layoutAsked,
+      });
+      return;
+    }
 
     // "current" needs this window's identity, and it can be lost between the pick and
     // here. Without it openSharedWorkspace falls through to opening a new window —
     // spawning one nobody asked for — so fail instead, before anything is opened.
     const here = target.kind === "current" ? currentWindow() : undefined;
     if (target.kind === "current" && !here) {
+      // Not a user gesture: every item that made it to `ready` fails here, on top of
+      // whatever already failed to get a worktree.
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+        failed_count: failures.length + ready.length, skipped_count: skipped.length, layout: "shared", layout_asked: layoutAsked,
+      });
       this.toast("error", "This window can no longer hold a session — nothing was opened.");
       return;
     }
@@ -2580,18 +2870,37 @@ export class DeckPanel {
         ...providerPin(cfg, provider),
       });
     } catch (e) {
+      // Every ready item was headed for this one shared workspace and none of them
+      // opened, on top of whatever already failed to get a worktree.
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+        failed_count: failures.length + ready.length, skipped_count: skipped.length, layout: "shared", layout_asked: layoutAsked,
+      });
       this.toast("error", `Couldn't open the review workspace: ${e}`);
       return;
     }
-    this.reviewBatchToast(ready.length, needsWorktrees(mode), skipped, failures);
+    this.reviewBatchToast(ready.length, needsWorktrees(mode), skipped, failures, reviewLaunchedTelemetry);
     await this.refreshBusy(); // picks up the new runs so the rows show "reviewing"
   }
 
-  /** One toast for the whole batch, never one per PR. Says what launched, what could not
-   *  be, and whether worktrees were made — `worktrees` is passed rather than derived from
-   *  the mode because the two disagree: a separate-windows batch gets a worktree per PR
-   *  even under read-only, since that is what `launchReview` does. */
-  private reviewBatchToast(launched: number, worktrees: boolean, skipped: string[], failures: string[]): void {
+  /** One toast for the whole batch, never one per PR — and the one `review_launched`
+   *  emit for the whole gesture, from whichever of the two paths above (separate
+   *  windows or one shared window) actually ran. `worktrees` is passed rather than
+   *  derived from the mode because the two disagree: a separate-windows batch gets a
+   *  worktree per PR even under read-only, since that is what `launchReview` does. */
+  private reviewBatchToast(
+    launched: number, worktrees: boolean, skipped: string[], failures: string[],
+    telemetry: { mode: TaskModeProp; modeWasPinned: boolean; requestedCount: number; layout: "separate" | "shared"; layoutAsked: boolean },
+  ): void {
+    trackEvent({
+      name: "review_launched", outcome: launched > 0 ? "launched" : "failed",
+      mode: telemetry.mode, mode_was_pinned: telemetry.modeWasPinned,
+      batch: true, requested_count: telemetry.requestedCount, launched_count: launched,
+      failed_count: failures.length, skipped_count: skipped.length,
+      layout: telemetry.layout, layout_asked: telemetry.layoutAsked,
+    });
     if (!launched) {
       this.toast("error", `Nothing was reviewed. ${failures.join("; ")}`);
       return;
@@ -2623,6 +2932,18 @@ export class DeckPanel {
    * the row still being in the queue, and a modal the user has to accept. */
   private async submitReview(id: string, verb: ReviewVerb, body: string, fromDraft: boolean): Promise<void> {
     const cfg = getConfig();
+    // `verb` arrives from a webview message, untyped at runtime no matter what
+    // `ReviewVerb` claims at compile time. Validated ONCE, up front — every
+    // `review_submitted` emit below (all eight exits of this function) gates on
+    // this same answer, rather than each trusting the compile-time type or relying
+    // on control flow to keep an invalid value from ever reaching an emit that
+    // happens to run before the dedicated guard further down. An invalid verb
+    // therefore gets NO `review_submitted` event, from any exit — the webview
+    // reply (`deck:reviewSubmitDone`) still posts exactly as before either way.
+    const verbValid = Object.hasOwn(VERB_LABEL, verb);
+    const emitSubmitted = (outcome: "ok" | "cancelled" | "failed"): void => {
+      if (verbValid) trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome });
+    };
     // Every gate below that refuses *this* id's own attempt releases the
     // webview's disable the same way a completed submit does — nothing was
     // written, so "cancelled" (not "failed") is the honest outcome, and without
@@ -2632,6 +2953,7 @@ export class DeckPanel {
     // this call).
     if (!cfg.reviewWrites) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      emitSubmitted("cancelled");
       return;
     }
     // The strip itself can go dark (PR facts toggled off, reviewRequests
@@ -2642,21 +2964,21 @@ export class DeckPanel {
     // GitHub from a strip the user just switched off.
     if (!this.reviewsEnabled()) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      emitSubmitted("cancelled");
       return;
     }
-    // `verb` arrives from a webview message, untyped at runtime no matter what
-    // `ReviewVerb` claims at compile time. `Object.hasOwn` (not `!VERB_LABEL[verb]`,
-    // which a prototype key like "constructor" would sail through as truthy) fails
-    // closed before any dialog is shown — the same guard `provider.ts`'s `submit`
-    // already applies to the identical value, for the identical reason. Without
-    // this, an out-of-union verb reads `label` as `undefined`: the dialog shows
-    // "undefined on owner/repo#123?", and `undefined !== undefined` is *false*, so
-    // the decline branch below is skipped regardless of what the user answers —
-    // `provider.ts` still refuses the write, but the log would claim a submit the
-    // user never confirmed, and the user would be told "GitHub refused" about a
-    // call that never reached GitHub.
-    if (!Object.hasOwn(VERB_LABEL, verb)) {
+    // `Object.hasOwn` (not `!VERB_LABEL[verb]`, which a prototype key like
+    // "constructor" would sail through as truthy) fails closed before any dialog is
+    // shown — the same guard `provider.ts`'s `submit` already applies to the
+    // identical value, for the identical reason. Without this, an out-of-union verb
+    // reads `label` as `undefined`: the dialog shows "undefined on owner/repo#123?",
+    // and `undefined !== undefined` is *false*, so the decline branch below is
+    // skipped regardless of what the user answers — `provider.ts` still refuses the
+    // write, but the log would claim a submit the user never confirmed, and the
+    // user would be told "GitHub refused" about a call that never reached GitHub.
+    if (!verbValid) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      emitSubmitted("cancelled"); // no-op: verbValid is false here, by construction
       return;
     }
     // Deliberately silent: this gate is only reachable while a genuine call for
@@ -2669,6 +2991,7 @@ export class DeckPanel {
     const req = this.reviewById(id);
     if (!req) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      emitSubmitted("cancelled");
       return;
     }
     this.reviewSubmitsInFlight.add(id);
@@ -2691,6 +3014,7 @@ export class DeckPanel {
         // Distinct from a failure: nothing was attempted, so there is nothing to
         // warn about — just release the row's disable.
         this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+        emitSubmitted("cancelled");
         return;
       }
       const text = fromDraft && cfg.stampLabelOnWrite && body.trim()
@@ -2711,6 +3035,7 @@ export class DeckPanel {
           action: { label: "Open PR", url: req.url },
         });
         this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
+        emitSubmitted("failed");
         return;
       }
       this.toast("success", `${label} sent on ${req.repoName}#${req.number}.`);
@@ -2730,6 +3055,7 @@ export class DeckPanel {
       }
       this.postReviews();
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "ok" });
+      emitSubmitted("ok");
     } catch (e) {
       // Anything unexpected here (writeReviewCache, decorateReviews's fs calls,
       // `post` itself before its own guard was added — a disposed panel used to
@@ -2741,6 +3067,7 @@ export class DeckPanel {
       // have already gone through.
       this.log(`deck: review submit ${id} threw after starting: ${e}`);
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
+      emitSubmitted("failed");
     } finally {
       this.reviewSubmitsInFlight.delete(id);
     }
@@ -2776,8 +3103,15 @@ export class DeckPanel {
     const release = (): void => {
       this.post({ type: "deck:mergeDone", key, repo, number, outcome: "cancelled" });
     };
+    // Every refusal below emits its own `pr_merged` with the matching `refusal`
+    // member — never the key/repo/number the message carried, which stay
+    // webview-only in the `deck:mergeDone` post above.
+    const refuse = (refusal: "writes-off" | "facts-off" | "no-run" | "local" | "target-mismatch" | "no-checkout" | "in-flight"): void => {
+      trackEvent({ name: "pr_merged", outcome: "refused", refusal });
+    };
     if (!cfg.mergeWrites) {
       this.log(`deck: mergePr ignored — agentFlow.mergeWrites is off`);
+      refuse("writes-off");
       release();
       return;
     }
@@ -2790,12 +3124,14 @@ export class DeckPanel {
     // board was built from, and `onConfigChanged` re-seeds it.
     if (!this.prFacts) {
       this.log(`deck: mergePr ignored — agentFlow.prFacts is off`);
+      refuse("facts-off");
       release();
       return;
     }
     const run = this.run(key);
     if (!run) {
       this.toast("error", `No run record for ${key}.`);
+      refuse("no-run");
       release();
       return;
     }
@@ -2803,18 +3139,21 @@ export class DeckPanel {
     // from a branch name that may belong to somebody else's ticket.
     if (runKind(run) === "local") {
       this.log(`deck: mergePr ignored for local card ${key}`);
+      refuse("local");
       release();
       return;
     }
     const target = mergeTarget(readPrEntries(defaultPrFactsDir(), key));
     if (!target || target.repo !== repo || target.number !== number) {
       this.log(`deck: mergePr refused — ${key}/${repo}#${number} is not this run's merge target`);
+      refuse("target-mismatch");
       release();
       return;
     }
     const checkout = run.repos.find((r) => r.name === target.repo);
     if (!checkout) {
       this.log(`deck: mergePr refused — no checkout for ${target.repo} in ${key}`);
+      refuse("no-checkout");
       release();
       return;
     }
@@ -2825,8 +3164,17 @@ export class DeckPanel {
     // "cancelled" from this rejected duplicate would release the button mid-merge —
     // the opposite of what the guard exists for. Do not "fix" this to match the
     // gates above.
-    if (this.mergesInFlight.has(inflightKey)) return;
+    if (this.mergesInFlight.has(inflightKey)) {
+      refuse("in-flight");
+      return;
+    }
     this.mergesInFlight.add(inflightKey);
+    // Set right before the forge is actually asked to merge — the catch below reads
+    // it to decide whether `merge_method` belongs on the failure event at all. A
+    // throw from the confirm modal itself (or anything before it) must NOT claim a
+    // merge method was ever in play; only a throw once the forge call has started
+    // (or its own `!res.ok`/`ok` exits, both past that point already) may.
+    let mergeAttempted = false;
     try {
       const label = MERGE_LABEL[cfg.mergeMethod];
       const answer = await vscode.window.showWarningMessage(
@@ -2839,11 +3187,14 @@ export class DeckPanel {
       );
       if (answer !== label) {
         // Distinct from a failure: nothing was attempted, so there is nothing to
-        // warn about — just release the row's disable.
+        // warn about — just release the row's disable. No merge_method: the forge
+        // was never called.
         this.post({ type: "deck:mergeDone", key, repo: target.repo, number: target.number, outcome: "cancelled" });
+        trackEvent({ name: "pr_merged", outcome: "cancelled" });
         return;
       }
       this.log(`deck: merging ${target.repo}#${target.number} with ${cfg.mergeMethod}`);
+      mergeAttempted = true;
       const res = await this.forge.prs.merge(checkout.path, target.number, cfg.mergeMethod);
       if (!res.ok) {
         this.log(`deck: merge failed: ${res.message}`);
@@ -2857,6 +3208,7 @@ export class DeckPanel {
           action: { label: "Open PR", url: target.url },
         });
         this.post({ type: "deck:mergeDone", key, repo: target.repo, number: target.number, outcome: "failed" });
+        trackEvent({ name: "pr_merged", outcome: "failed", merge_method: cfg.mergeMethod });
         return;
       }
       this.toast("success", `${target.repo}#${target.number} merged.`);
@@ -2866,11 +3218,13 @@ export class DeckPanel {
       const stored = readPrEntries(defaultPrFactsDir(), key)[target.repo];
       if (stored) writePrEntry(defaultPrFactsDir(), key, target.repo, { ...stored, fetchedAt: 0 });
       this.post({ type: "deck:mergeDone", key, repo: target.repo, number: target.number, outcome: "ok" });
+      trackEvent({ name: "pr_merged", outcome: "ok", merge_method: cfg.mergeMethod });
     } catch (e) {
       // A throw anywhere above (a disposed panel's post, a rejected modal) must
       // still release the button — otherwise the row stays disabled forever.
       this.log(`deck: mergePr threw: ${e instanceof Error ? e.message : String(e)}`);
       this.post({ type: "deck:mergeDone", key, repo, number, outcome: "failed" });
+      trackEvent({ name: "pr_merged", outcome: "failed", ...(mergeAttempted ? { merge_method: cfg.mergeMethod } : {}) });
     } finally {
       this.mergesInFlight.delete(inflightKey);
     }
@@ -3501,9 +3855,29 @@ export class DeckPanel {
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
+    // `deck_action` fires before the switch runs its handler, not after: the
+    // gesture happened the moment the webview sent it, regardless of whether the
+    // handler below goes on to succeed, fail (caught below), or is still in
+    // flight. `deck:inspect` and `deck:setGrouping` carry a payload the flat
+    // DECK_ACTIONS table can't express, so they're keyed by message shape instead.
+    if (m.type === "deck:inspect") {
+      trackEvent({ name: "deck_action", action: m.action === "diff" ? "inspect_diff" : "inspect_open" });
+    } else if (m.type === "deck:setGrouping") {
+      // `m.grouping` is typed as "agents" | "workspaces" at compile time only — a
+      // webview message is untyped at runtime, same as every other inbound value.
+      // An unrecognised value still counts the gesture (`deck_action` fires either
+      // way) but omits `grouping` rather than sending it through unvalidated.
+      const grouping = m.grouping === "agents" || m.grouping === "workspaces" ? m.grouping : undefined;
+      trackEvent({ name: "deck_action", action: "set_grouping", ...(grouping ? { grouping } : {}) });
+    } else {
+      const action = DECK_ACTIONS[m.type];
+      if (action) trackEvent({ name: "deck_action", action });
+    }
     try {
       await this.dispatch(m);
     } catch (e) {
+      const op = DECK_MESSAGE_OPS[m.type] ?? "workspace_write";
+      trackError({ name: "operation_failed", op, failure_class: classifyFailure(e), retryable: false });
       // A throwing handler used to become a silent unhandled rejection — and
       // the webview has often already acted optimistically by then
       // (deck:forget drops the card before removeRun runs, so an EACCES there
@@ -3610,6 +3984,9 @@ export class DeckPanel {
         for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
         if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
         writeFlow(this.flowIo, this.flowsDir, emptyFlow(id, "New flow", now));
+        // After the write, not before: a create that lost nine id races created
+        // nothing, and the counts of an empty flow say nothing worth carrying.
+        trackEvent({ name: "flow_action", action: "create" });
         this.postFlows();
         return;
       }
@@ -3618,6 +3995,8 @@ export class DeckPanel {
         const existing = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
         if (!existing) return;
         writeFlow(this.flowIo, this.flowsDir, { ...existing, name: m.name });
+        // The name itself is the user's own text and never leaves the machine.
+        trackEvent({ name: "flow_action", action: "rename" });
         this.postFlows();
         return;
       }
@@ -3658,12 +4037,26 @@ export class DeckPanel {
             return { ...e, firedAt: host.firedAt, firedNote: host.firedNote, error: host.error };
           }),
         });
+        // The shape of the graph the user just drew — counts only. Node kinds,
+        // ticket keys, conditions and notes stay on disk.
+        trackEvent({
+          name: "flow_action", action: "save",
+          node_count: m.flow.nodes.length, edge_count: m.flow.edges.length,
+        });
         this.postFlows();
         return;
       }
       case "flow:addPlanned": {
         if (!getConfig().orchestrator) return;
-        await this.addPlanned(m.id);
+        // Only on the node actually landing: an unauthenticated connector, an
+        // empty ticket list, any of the four QuickPick cancellations, or the
+        // flow having vanished under the four modals are all refusals, and the
+        // docs promise "a message the host does not honor emits nothing" for
+        // exactly this reason — a `flow_action` for a picker the user backed out
+        // of would say a gesture happened when nothing was added.
+        if (await this.addPlanned(m.id)) {
+          trackEvent({ name: "flow_action", action: "add_planned" });
+        }
         return;
       }
       case "flow:delete": {
@@ -3675,6 +4068,7 @@ export class DeckPanel {
         const existing = readFlows(this.flowIo, this.flowsDir).some((f) => f.id === m.id);
         if (!existing) return;
         removeFlow(this.flowIo, this.flowsDir, m.id);
+        trackEvent({ name: "flow_action", action: "delete" });
         this.postFlows();
         return;
       }
@@ -3683,6 +4077,13 @@ export class DeckPanel {
         const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
         if (!flow) return;
         writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed });
+        // The armability split the toast below is built from, lifted so the event
+        // reports the same numbers the user was just shown rather than a second
+        // count of its own. Zero on a disarm, which computes no armability at all
+        // — there is nothing to warn a user about when they are switching a flow
+        // off — so a zero here means "not asked", exactly as on the other two
+        // `flow_armed` sources.
+        let unfirable = { live: 0, pr: 0, forge: 0 };
         if (m.armed) {
           // Warn and name, rather than refuse: a flow with one dead rule and three
           // live ones is still worth arming, and silence is how a user ends up
@@ -3699,10 +4100,11 @@ export class DeckPanel {
           // ever reads as unfirable here once the panel actually knows its forge
           // cannot report that.
           const dead = unfirableRules(flow, { liveSignal: true, prFacts: this.prFacts, forge: this.caps() });
+          const live = dead.filter((d) => d.needs === "live-signal").length;
+          const pr = dead.filter((d) => d.needs === "pr-facts").length;
+          const forge = dead.filter((d) => d.needs === "forge-unsupported").length;
+          unfirable = { live, pr, forge };
           if (dead.length > 0) {
-            const live = dead.filter((d) => d.needs === "live-signal").length;
-            const pr = dead.filter((d) => d.needs === "pr-facts").length;
-            const forge = dead.filter((d) => d.needs === "forge-unsupported").length;
             const blank = dead.filter((d) => d.needs === "unset-parameter").length;
             const offParts: string[] = [];
             if (pr > 0) offParts.push(`${pr} need${pr === 1 ? "s" : ""} PR facts`);
@@ -3738,6 +4140,12 @@ export class DeckPanel {
           this.pendingResume.delete(m.id);
           this.resumeCleared.delete(m.id);
         }
+        trackEvent({
+          name: "flow_armed", armed: m.armed,
+          node_count: flow.nodes.length, edge_count: flow.edges.length,
+          unfirable_live: unfirable.live, unfirable_pr_facts: unfirable.pr, unfirable_forge: unfirable.forge,
+          source: "toggle",
+        });
         this.postFlows();
         return;
       }
@@ -3800,6 +4208,7 @@ export class DeckPanel {
             return kept;
           }),
         });
+        trackEvent({ name: "flow_action", action: "reset_edge" });
         this.postFlows();
         return;
       }
@@ -3815,6 +4224,10 @@ export class DeckPanel {
         // Clearing the gate is all approval does — it does not fire anything
         // itself. The refresh that follows is what lets the next pass fire.
         this.resumeCleared.add(m.id);
+        // Emitted before the refresh, which is a whole pass and can throw: the
+        // approval is already recorded by then, and this event is about the
+        // click, not about what the next pass makes of it.
+        trackEvent({ name: "flow_action", action: "resume_approve" });
         await this.refreshBusy();
         return;
       }
@@ -3825,12 +4238,49 @@ export class DeckPanel {
         this.pendingResume.delete(m.id);
         this.resumeCleared.add(m.id);
         writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: false });
+        // Two events for one click, and deliberately: it is a gesture on the
+        // resume banner (`flow_action`) AND a disarm (`flow_armed`), and the arm
+        // question — how often does a held flow get switched off rather than
+        // approved — cannot be answered from either one alone. No armability
+        // split: nothing computes one on a disarm.
+        trackEvent({ name: "flow_action", action: "resume_disarm" });
+        trackEvent({
+          name: "flow_armed", armed: false,
+          node_count: flow.nodes.length, edge_count: flow.edges.length,
+          unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+          source: "resume-banner",
+        });
         this.postFlows();
         return;
       }
       case "flow:saveCommand": {
         if (!getConfig().orchestrator) return;
-        await this.saveCommand(m.run, m.label);
+        // Only on an actual write: "invalid" (unreachable from the drawer but
+        // not from a hand-authored message), "duplicate", and a failed config
+        // write are all refusals with a toast already telling the user nothing
+        // happened, and the docs promise this event fires only on a gesture
+        // that did something.
+        if (await this.saveCommand(m.run, m.label)) {
+          // The command string and its label are user-authored — free-text shell
+          // that can carry hostnames or tokens — so only the gesture is reported.
+          trackEvent({ name: "flow_action", action: "save_command" });
+        }
+        return;
+      }
+      case "flow:dryRun": {
+        if (!getConfig().orchestrator) return;
+        // The drawer's counts, validated before they reach an event. The wire
+        // type says three numbers; a webview payload is untrusted regardless, and
+        // a NaN, an Infinity, a negative or a string would be a nonsense property
+        // in the catalog rather than an error anyone would see. Dropped silently:
+        // a dry run is a read the user has already got their answer from, and
+        // there is nothing to tell them about our own bookkeeping.
+        const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+        if (!ok(m.edges) || !ok(m.fired) || !ok(m.blocked)) return;
+        trackEvent({
+          name: "flow_action", action: "dry_run",
+          edge_count: m.edges, fired_count: m.fired, blocked_count: m.blocked,
+        });
         return;
       }
       case "openExternal": {
@@ -3877,7 +4327,11 @@ export class DeckPanel {
    *    hostnames, paths and sometimes tokens; only `commands_count` is ever
    *    emitted, and `settingsSnapshot` already derives that on its own.
    */
-  private async saveCommand(run: string, label: string): Promise<void> {
+  /** `true` only once the command is actually written to config — "invalid",
+   * "duplicate" and a failed config write are refusals, and the caller's
+   * telemetry gesture rides on this return so a no-op save never reports as one
+   * that did something. */
+  private async saveCommand(run: string, label: string): Promise<boolean> {
     const c = vscode.workspace.getConfiguration("agentFlow");
     const explicit = pickExplicit<unknown>(c.inspect<unknown>("commands"));
     // A non-array value under the key (a hand-edited file can hold anything) is
@@ -3894,7 +4348,7 @@ export class DeckPanel {
       // could ever post one, and a blank id in settings is a command that can
       // never be picked.
       this.post({ type: "toast", level: "info", message: "A saved command needs a name and something to run." });
-      return;
+      return false;
     }
     if (outcome.kind === "duplicate") {
       this.post({
@@ -3902,7 +4356,7 @@ export class DeckPanel {
         level: "info",
         message: `Already saved as “${outcome.duplicateLabel}” — pick it from the command list.`,
       });
-      return;
+      return false;
     }
     try {
       await c.update("commands", outcome.entries, target);
@@ -3911,7 +4365,7 @@ export class DeckPanel {
       // Workspace target with no workspace open). Say so: the alternative is a
       // drawer that looks like it saved and a picker that never gains the entry.
       this.post({ type: "toast", level: "error", message: `Couldn't save the command: ${e}` });
-      return;
+      return false;
     }
     // The config-change listener re-posts flows on its own, but not synchronously
     // and not from every scope in every host build — posting here means the picker
@@ -3922,6 +4376,7 @@ export class DeckPanel {
       level: "info",
       message: `Saved “${outcome.command.label}” to agentFlow.commands.`,
     });
+    return true;
   }
 
   /**
@@ -3945,12 +4400,16 @@ export class DeckPanel {
    * owns "write a whole flow," and sending a half-built node across the wire to
    * be completed later would be a second source of truth for the same graph.
    */
-  private async addPlanned(flowId: string): Promise<void> {
+  /** `true` only once the node is actually written — every early return below
+   * is a refusal (unauthenticated, nothing to pick from, or a cancelled
+   * QuickPick), and the caller's telemetry gesture rides on this so a backed-out
+   * picker never reports as a gesture that did something. */
+  private async addPlanned(flowId: string): Promise<boolean> {
     // An unauthenticated source must not produce an empty picker with no
     // explanation — say so and stop before anything is asked.
     if (!(await this.connector.isAuthenticated())) {
       this.toast("error", `Sign in to ${this.connector.info().label} to add planned work.`);
-      return;
+      return false;
     }
     // "all" / "any": the fullest candidate list this connector can offer. Unlike
     // the task pool's own fetch, there is no lens the user picked for this — the
@@ -3959,13 +4418,13 @@ export class DeckPanel {
     const tasks = await this.connector.provider().list("all", "any");
     if (tasks.length === 0) {
       this.toast("error", `No tickets available from ${this.connector.info().label}.`);
-      return;
+      return false;
     }
     const ticketPick = await vscode.window.showQuickPick(
       tasks.map((t) => ({ label: t.key, description: t.summary, task: t })),
       { title: "Add planned work — which ticket?", placeHolder: "Pick a ticket", ignoreFocusOut: true },
     );
-    if (!ticketPick) return;
+    if (!ticketPick) return false;
 
     const cfg = getConfig();
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
@@ -3976,7 +4435,7 @@ export class DeckPanel {
     // recognises it here rather than parsing a second phrasing of the same fact.
     if (repos.length === 0) {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
-      return;
+      return false;
     }
     const repoPicks = await vscode.window.showQuickPick(
       repos.map((r) => ({ label: r.name, detail: r.isGit ? r.path : `${r.path}  (not a git repo)`, repo: r })),
@@ -3990,13 +4449,13 @@ export class DeckPanel {
     // Cancelled (undefined) or nothing toggled on (empty array) are the same
     // refusal here: a launch that fires on no repos is nothing to launch into
     // (see launchPlanned's own identical check on `node.repos.length`).
-    if (!repoPicks || repoPicks.length === 0) return;
+    if (!repoPicks || repoPicks.length === 0) return false;
 
     const modePick = await vscode.window.showQuickPick(
       cfg.promptModes.map((mode) => ({ label: mode.label, detail: mode.detail, mode })),
       { title: "Add planned work — which prompt mode?", placeHolder: "Pick a prompt mode", ignoreFocusOut: true },
     );
-    if (!modePick) return;
+    if (!modePick) return false;
 
     const DEST_OPTIONS: { label: string; dest: LaunchDest }[] = [
       { label: "Worktree", dest: "worktree" },
@@ -4008,14 +4467,14 @@ export class DeckPanel {
       placeHolder: "Pick a destination",
       ignoreFocusOut: true,
     });
-    if (!destPick) return;
+    if (!destPick) return false;
 
     // Re-read, not the caller's stale copy: four modals were just up, in which
     // time the flow could have been renamed, deleted, or edited from another
     // window — the same reasoning every other flow:* handler in this file
     // re-reads for before it writes.
     const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flowId);
-    if (!flow) return;
+    if (!flow) return false;
     const node: PlannedNode = {
       // Same minting scheme as the webview's own `nextNodeId` (OrchestratorDrawer.tsx):
       // the lowest unused "n<N>", scanning past whatever is already taken rather than
@@ -4035,6 +4494,7 @@ export class DeckPanel {
     };
     writeFlow(this.flowIo, this.flowsDir, { ...flow, nodes: [...flow.nodes, node] });
     this.postFlows();
+    return true;
   }
 
   /**
@@ -4161,7 +4621,14 @@ export class DeckPanel {
    * makes a live window seed itself when the plan lands, and openInEditor shells to
    * `open -a`, which focuses an existing window rather than opening a second one.
    */
-  private async seedPrWork(key: string, reason: PrWorkReason, detail?: string): Promise<void> {
+  private async seedPrWork(
+    key: string, reason: PrWorkReason, detail?: string,
+    // `"deck"` for both of this class's own dispatch sites (deck:addressPr,
+    // deck:seedPrWork) — tasksView's addressPr reaches `pr_work_seeded` through
+    // its own separate emit, not through this function, so no caller here ever
+    // passes anything else.
+    source: "deck" | "tasks" = "deck",
+  ): Promise<void> {
     // Deliberately silent, exactly as submitReview's own guard is: this gate is
     // only reachable while a genuine seed for this same key is still in flight
     // — parked on the destination picker, routinely — and that seed, not this
@@ -4169,7 +4636,7 @@ export class DeckPanel {
     if (this.prWorkSeedsInFlight.has(key)) return;
     this.prWorkSeedsInFlight.add(key);
     try {
-      await this.seedPrWorkHeld(key, reason, detail);
+      await this.seedPrWorkHeld(key, reason, detail, source);
     } finally {
       this.prWorkSeedsInFlight.delete(key);
     }
@@ -4177,10 +4644,15 @@ export class DeckPanel {
 
   /** The body of one card's PR-work seed, with its key held in
    * `prWorkSeedsInFlight` by the caller above. */
-  private async seedPrWorkHeld(key: string, reason: PrWorkReason, detail?: string): Promise<void> {
+  private async seedPrWorkHeld(key: string, reason: PrWorkReason, detail: string | undefined, source: "deck" | "tasks"): Promise<void> {
+    // cfg read up front (ahead of the two early guards below) so every
+    // refusal/cancellation emit below has `agent_seeded` to report, not just the
+    // terminals past the destination question.
+    const cfg = getConfig();
     const run = this.run(key);
     if (!run) {
       this.toast("error", `No run record for ${key}.`);
+      trackEvent({ name: "pr_work_seeded", reason, source, outcome: "refused", window_count: 0, failed_repo_count: 0, agent_seeded: cfg.seedAgent });
       return;
     }
     // The webview only ever sends this for a card gated on the review column's
@@ -4195,9 +4667,9 @@ export class DeckPanel {
     // against a future caller that isn't as careful.
     if (runKind(run) === "local") {
       this.log(`deck: seedPrWork ignored for local card ${key}`);
+      trackEvent({ name: "pr_work_seeded", reason, source, outcome: "refused", window_count: 0, failed_repo_count: 0, agent_seeded: cfg.seedAgent });
       return;
     }
-    const cfg = getConfig();
     const clause = prWorkClause(reason, detail);
     // The user's configured review prompt, preceded by what is actually wrong.
     // An empty clause (reason "review") leaves the template byte-identical to
@@ -4219,12 +4691,17 @@ export class DeckPanel {
     // this path has.
     if (!run.workspaceFile && run.repos.length === 0) {
       this.toast("error", `Nothing to open for ${key}.`);
+      trackEvent({ name: "pr_work_seeded", reason, source, outcome: "refused", window_count: 0, failed_repo_count: 0, agent_seeded: cfg.seedAgent });
       return;
     }
     // Where — asked BEFORE anything is written, so an Escape leaves no plan file behind
     // for some window to act on later. Same ordering, same reason, as launchReviewFor's.
     const target = await this.prWorkTarget(cfg, run, key, reason);
-    if (!target) return; // dismissed — nothing written, nothing opened, no toast
+    if (!target) {
+      // dismissed — nothing written, nothing opened, no toast
+      trackEvent({ name: "pr_work_seeded", reason, source, outcome: "cancelled", window_count: 0, failed_repo_count: 0, agent_seeded: cfg.seedAgent });
+      return;
+    }
     // Which windows that destination means, and which brief each renders against.
     // mentions is empty: file hints come from the ticket description, and re-fetching
     // Jira is exactly what this path exists to avoid.
@@ -4233,6 +4710,7 @@ export class DeckPanel {
       // `current` in a window that lost its identity between the pick and here — the one
       // case prWorkPlan refuses, and the same one targetToOpenArgs refuses.
       this.toast("error", `Couldn't seed ${key} here — this window has no workspace file and no single folder.`);
+      trackEvent({ name: "pr_work_seeded", reason, source, outcome: "refused", window_count: 0, failed_repo_count: 0, agent_seeded: cfg.seedAgent });
       return;
     }
     const matches = plan.seats.map((s) => ({ matchPath: s.matchPath, prompt: agentPrompt(ticket, [], template, s.briefPath) }));
@@ -4249,12 +4727,21 @@ export class DeckPanel {
       if (await openInEditor(p)) continue;
       failedRepos.push(run.repos.find((r) => r.path === p)?.name ?? p);
     }
+    // The four terminal shapes below map 1:1 onto pr_work_seeded's outcome enum:
+    // any repo failing to open is "open-failed" regardless of seedAgent (the plan
+    // file, if any, was already written above); with nothing to open the run
+    // seeded (or didn't) right where it already was, "seeded-in-place" /
+    // "opened-not-seeded"; and with every repo opened, "seeded" or, mirroring the
+    // in-place case, "opened-not-seeded" once more when seedAgent is off.
+    let outcome: "seeded" | "seeded-in-place" | "opened-not-seeded" | "open-failed";
     if (failedRepos.length === 1 && plan.toOpen.length === 1) {
       // The common case (one repo, or the single multiroot workspace file) keeps
       // the plain message — naming the sole repo would just repeat the key.
       this.toast("error", `Couldn't open ${key}.`);
+      outcome = "open-failed";
     } else if (failedRepos.length > 0) {
       this.toast("error", `Couldn't open ${key} (${failedRepos.join(", ")}).`);
+      outcome = "open-failed";
     } else if (plan.toOpen.length === 0) {
       // This window: nothing opened, nothing focused, so silence here would be
       // indistinguishable from a click that did nothing at all.
@@ -4264,13 +4751,23 @@ export class DeckPanel {
           ? `${prWorkLabel(reason)} for ${key} — seeded in this window.`
           : `Nothing seeded for ${key} — agentFlow.seedAgent is off.`,
       );
+      outcome = cfg.seedAgent ? "seeded-in-place" : "opened-not-seeded";
     } else if (!cfg.seedAgent) {
       // Address PR with seedAgent off is otherwise silently indistinguishable
       // from plain Open — nothing seeded, no toast, no way to tell the two
       // apart from what actually happened. Only reached when every window did
       // open: a failure already got its own explanation above.
       this.toast("info", `Opened ${key}'s window — nothing seeded, agentFlow.seedAgent is off.`);
+      outcome = "opened-not-seeded";
+    } else {
+      // Every window opened and the agent was seeded — the windows themselves are
+      // the notification, so there is no toast for this, the plain success case.
+      outcome = "seeded";
     }
+    trackEvent({
+      name: "pr_work_seeded", reason, source, outcome,
+      window_count: plan.toOpen.length, failed_repo_count: failedRepos.length, agent_seeded: cfg.seedAgent,
+    });
   }
 
   /**

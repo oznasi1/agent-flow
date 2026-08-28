@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  AnalyticsEvent, EventName, OPEN_STRING_PROPS, STOCK_PROMPT_MODES, classifyFailure, toPromptModeProp,
+  AnalyticsEvent, EventName, OPEN_STRING_PROPS, STOCK_EXPLORE_MODES, STOCK_PROMPT_MODES, classifyFailure,
+  toExploreModeProp, toPromptModeProp,
 } from "../../../src/telemetry/events";
 // The REAL class, not a local stand-in — classifyFailure relies on its constructor
 // setting `this.name` explicitly (src/tasks/jira/client.ts), and a hand-rolled stand-in
@@ -35,13 +36,36 @@ const SAMPLES = [
     review_modes_overridden: 0, review_modes_custom: 0, review_modes_hidden: 0,
   },
   { name: "command_invoked", command: "openDeck" },
-  { name: "take_started", flow_id: "f1", source: "card", task_fp: "0123456789abcdef", inferred_count: 2 },
+  { name: "take_started", flow_id: "f1", source: "card", task_fp: "0123456789abcdef" },
   { name: "take_prompt_mode_picked", flow_id: "f1", prompt_mode: "tdd", is_custom_mode: false },
   { name: "take_destination_picked", flow_id: "f1", destination: "new", workspace_mode: "multiroot" },
   { name: "take_repos_picked", flow_id: "f1", repo_count: 3, repo_source: "quickpick", accepted_inference: true, inferred_count: 2 },
   { name: "take_completed", flow_id: "f1", outcome: "launched", destination: "new", prompt_mode: "tdd", repo_count: 3, duration_ms: 4200, used_worktree: true, task_fp: "0123456789abcdef" },
+  { name: "batch_started", flow_id: "f1", keys_count: 4, is_fanout: false, tree_mode: "fanout" },
+  { name: "batch_completed", flow_id: "f1", outcome: "launched", attempted: 4, launched: 3, failed: 1, prompt_mode: "plan", destination: "new", layout: "separate", layout_asked: true, duration_ms: 900 },
   { name: "operation_failed", op: "git_worktree", failure_class: "conflict", retryable: false },
   { name: "unhandled_error", error_class: "TypeError", stack_digest: "at f (dist/extension.js:1:2)" },
+  { name: "deck_opened", revealed: false, forge: "github", pr_facts: true, open_agents: true, review_queue: true, orchestrator: false, flow_count: 0, has_armed_flow: false },
+  { name: "deck_action", action: "set_grouping", grouping: "workspaces" },
+  { name: "review_launched", outcome: "launched", mode: "stock", mode_was_pinned: true, destination: "new", provider: "claude-code", seeded_in_place: false, batch: false, requested_count: 1, launched_count: 1, failed_count: 0, skipped_count: 0 },
+  { name: "review_submitted", verb: "approve", from_draft: true, outcome: "ok" },
+  { name: "pr_merged", outcome: "refused", refusal: "writes-off" },
+  { name: "pr_work_seeded", reason: "review", source: "deck", outcome: "seeded", window_count: 1, failed_repo_count: 0, agent_seeded: true },
+  { name: "explore_started", flow_id: "f1", mode: "debug", source: "command" },
+  { name: "explore_completed", flow_id: "f1", outcome: "cancelled", mode: "debug", cancel_point: "topic", repo_count: 2, duration_ms: 30 },
+  { name: "flow_action", action: "dry_run", edge_count: 3, fired_count: 1, blocked_count: 0 },
+  { name: "flow_armed", armed: true, node_count: 4, edge_count: 3, unfirable_live: 0, unfirable_pr_facts: 1, unfirable_forge: 0, source: "toggle" },
+  { name: "flow_edge_fired", edge_action: "launch", ok: true, deferred: false, dest: "worktree", prompt_mode: "implementation", repo_count: 1 },
+  { name: "flow_settled", node_count: 4, edge_count: 3 },
+  { name: "marketplace_opened", revealed: false, asset_count: 7, plugin_count: 2, marketplace_count: 1, skills: 3, commands: 2, agents: 1, hooks: 1, not_set_up: false },
+  { name: "marketplace_action", action: "read", truncated: true },
+  { name: "tasks_fetched", filter: "sprint", lens: "mysprint", size: "any", task_count: 12, repo_count: 3, live_window_count: 2, authed: true },
+  { name: "lens_used", lens: "search" },
+  { name: "card_action", action: "change_status" },
+  { name: "notepad_action", action: "run" },
+  { name: "setup_started", source: "offer", connector_steps: 2 },
+  { name: "setup_completed", outcome: "signin-skipped", signed_in: false },
+  { name: "doctor_run", fails: 1, warns: 2, outcome: "action", action_kind: "command" },
 ] satisfies AnalyticsEvent[];
 
 /** `Unsampled` is every EventName with no entry in SAMPLES above. `AssertNever`
@@ -61,7 +85,7 @@ describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
     const names = SAMPLES.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(10);
+    expect(names).toHaveLength(33);
   });
 
   it("carries no free-form strings outside the allow-list", () => {
@@ -99,6 +123,17 @@ describe("toPromptModeProp", () => {
   });
 });
 
+describe("toExploreModeProp", () => {
+  it("passes the six shipped ids through", () => {
+    for (const id of STOCK_EXPLORE_MODES) expect(toExploreModeProp(id)).toBe(id);
+  });
+
+  it("collapses 'ask' and any other unrecognised id to 'custom'", () => {
+    expect(toExploreModeProp("ask")).toBe("custom");
+    expect(toExploreModeProp("acme-billing-hotfix")).toBe("custom");
+  });
+});
+
 describe("classifyFailure", () => {
   it("classifies the real JiraAuthError as auth", () => {
     const e = new JiraAuthError("token expired");
@@ -127,9 +162,17 @@ describe("classifyFailure", () => {
     expect(classifyFailure(jiraAuth)).toBe("auth");
   });
 
-  it("classifies auth by well-known 401/403 codes", () => {
-    expect(classifyFailure({ code: "401" })).toBe("auth");
-    expect(classifyFailure({ code: "403" })).toBe("auth");
+  it("classifies auth by numeric 401/403 status (JiraApiError shape)", () => {
+    expect(classifyFailure({ status: 401 })).toBe("auth");
+    expect(classifyFailure({ status: 403 })).toBe("auth");
+  });
+
+  it("classifies not_found by numeric 404 status", () => {
+    expect(classifyFailure({ status: 404 })).toBe("not_found");
+  });
+
+  it("ignores other statuses", () => {
+    expect(classifyFailure({ status: 500 })).toBe("unknown");
   });
 
   it("classifies timeout by AbortError name or ETIMEDOUT code", () => {

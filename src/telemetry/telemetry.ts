@@ -27,8 +27,10 @@ export interface Flow {
  * random — derived from nothing about the user — and is what makes funnel analysis
  * work when two Takes overlap. */
 export function startFlow(): Flow {
-  const started = Date.now();
-  return { id: randomUUID(), elapsedMs: () => Date.now() - started };
+  // performance.now() is monotonic; Date.now() is not — a clock adjustment
+  // mid-flow yielded wrong or negative durations (follow-ups doc, item 4).
+  const started = performance.now();
+  return { id: randomUUID(), elapsedMs: () => Math.round(performance.now() - started) };
 }
 
 function settingEnabled(): boolean {

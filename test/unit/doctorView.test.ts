@@ -1,7 +1,21 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { commands, env, extensions, window, Uri } from "../_mocks/vscode";
-import { collectInputs, showDoctor, probeClaudeExtension, probeChatCommand, type DoctorDeps } from "../../src/doctorView";
 import { formatReport, runChecks } from "../../src/engine/doctor";
+
+// Telemetry: mocked wholesale, same pattern as tasksView/deckView/marketplaceView's
+// test files, so the doctor_run assertions below observe track() calls without a
+// real PostHog singleton (which is uninitialised in tests, making the real track()
+// a silent no-op).
+const trackSpy = vi.fn();
+vi.mock("../../src/telemetry/telemetry", () => ({
+  track: (...a: unknown[]) => trackSpy(...a),
+}));
+
+import { collectInputs, showDoctor, probeClaudeExtension, probeChatCommand, type DoctorDeps } from "../../src/doctorView";
+
+beforeEach(() => {
+  trackSpy.mockClear();
+});
 
 /** Every seam healthy. Each test spoils exactly one. */
 const deps = (over: Partial<DoctorDeps> = {}): DoctorDeps => ({
@@ -210,12 +224,20 @@ describe("showDoctor — the QuickPick", () => {
     const inputs = await collectInputs(d);
     const expected = formatReport(runChecks(inputs), inputs.sourceLabel);
     expect(env.clipboard.writeText).toHaveBeenCalledWith(expected);
+    // A healthy machine (this suite's default deps()): 0 fails, 0 warns.
+    expect(trackSpy).toHaveBeenCalledWith({ name: "doctor_run", fails: 0, warns: 0, outcome: "copied" });
   });
 
   it("runs a check's command action when its row is chosen", async () => {
     window.showQuickPick.mockImplementation(async (items: any) => items[0]);
     await showDoctor(deps({ hasCredentials: async () => false }));
     expect(commands.executeCommand).toHaveBeenCalledWith("agentFlow.signIn");
+    // One failing check (Credentials stored) whose action is a command.
+    expect(trackSpy).toHaveBeenCalledWith({ name: "doctor_run", fails: 1, warns: 0, outcome: "action", action_kind: "command" });
+    // No check label, detail, path, or URL ever rides along.
+    const serialized = JSON.stringify(trackSpy.mock.calls.flat());
+    expect(serialized).not.toContain("Credentials stored");
+    expect(serialized).not.toContain("jira.test");
   });
 
   it("opens Settings filtered to the key for a setting action", async () => {
@@ -242,6 +264,8 @@ describe("showDoctor — the QuickPick", () => {
     await showDoctor(deps({ which: () => null }));
     expect(commands.executeCommand).not.toHaveBeenCalled();
     expect(env.clipboard.writeText).not.toHaveBeenCalled();
+    // Dismissal still emits once, with the counts this run actually found.
+    expect(trackSpy).toHaveBeenCalledWith({ name: "doctor_run", fails: 1, warns: 0, outcome: "dismissed" });
   });
 
   it("does nothing when a passing row with no action is chosen", async () => {
@@ -249,6 +273,14 @@ describe("showDoctor — the QuickPick", () => {
     await showDoctor(deps());
     expect(commands.executeCommand).not.toHaveBeenCalled();
     expect(env.clipboard.writeText).not.toHaveBeenCalled();
+    // Picked, but nothing was applied — telemetry reads this the same as a dismissal.
+    expect(trackSpy).toHaveBeenCalledWith({ name: "doctor_run", fails: 0, warns: 0, outcome: "dismissed" });
+  });
+
+  it("emits doctor_run exactly once per run", async () => {
+    window.showQuickPick.mockResolvedValue(undefined as never);
+    await showDoctor(deps());
+    expect(trackSpy).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -20,6 +20,15 @@ export default defineConfig({
     // Node by default; webview test files opt into jsdom via a
     // `// @vitest-environment jsdom` docblock at the top of the file.
     environment: "node",
+    // test/unit/deckView.test.ts (~680 tests) outgrew Node's default worker
+    // heap: on GitHub's 7GB runners its fork dies mid-file with
+    // "[vitest-worker]: Timeout calling onTaskUpdate" and vitest reports
+    // 158/159 files with zero test failures. Give every worker explicit
+    // headroom instead of relying on callers to remember NODE_OPTIONS.
+    poolOptions: {
+      forks: { execArgv: ["--max-old-space-size=8192"] },
+      threads: { execArgv: ["--max-old-space-size=8192"] },
+    },
     setupFiles: ["test/_setup.ts"],
     include: ["test/**/*.test.{ts,tsx}"],
     coverage: {
