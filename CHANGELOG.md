@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Usage analytics phase 2: the Deck, review queue, PR merge/address, batch launches,
+  Explore, orchestrator flows, Marketplace, task lenses, setup and Doctor now report
+  anonymous usage events, under the same `agentFlow.telemetry.enabled` opt-out and the
+  same no-user-strings guarantee documented in docs/TELEMETRY.md.
+
+### Fixed
+- Telemetry durations are monotonic, Jira HTTP failures classify by status, and
+  cancelled Takes no longer inflate the custom-prompt-mode bucket.
+
 ## [0.54.0] — 2026-08-28
 
 ### Added

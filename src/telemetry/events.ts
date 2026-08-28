@@ -107,8 +107,9 @@ export type DestinationProp = "new" | "current" | "existing" | "live-folder";
  * `onMessage`'s "take" case for a Deck card, `agentFlow.takeTask` for the command
  * palette — never inferred from the shape of the arguments: a one-click Take from a
  * collapsed card carries no repo selection and is still a card Take.
- * `"batch"` is reserved: takeBatch is not instrumented in Phase 1, so nothing
- * emits it yet. */
+ * `"batch"` is reserved: takeBatch reports through its own batch_started/
+ * batch_completed funnel instead, never through take_started, so nothing
+ * emits this member. */
 export type TakeSource = "card" | "command" | "batch";
 /** The Deck's `onMessage` click-shaped actions, one enum member per case that
  * counts as a user gesture rather than read-plumbing (`deck:reviewExpand`,
@@ -141,7 +142,7 @@ export type CommandId =
  * `*_fp` properties are matched by suffix and must be 16-char hex. */
 export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as const;
 
-/** The 41 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
+/** The 43 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
  *
  * `"invalid"` on the eleven enum-ish fields below (workspace_mode, open_in,
  * review_open_in, agent_provider, agent_surface, explore_mode, worktree, remote_control,

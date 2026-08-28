@@ -88,7 +88,7 @@ truncated to at most 20 frames and 2,048 bytes (`MAX_STACK_FRAMES` /
 
 ## The event catalog
 
-Ten event types ship today. Every property not listed under "always attached
+33 event types ship today. Every property not listed under "always attached
 automatically" below is specific to the event named.
 
 Attached automatically to **every** event, usage and error alike: `session_id`,
@@ -108,7 +108,7 @@ Suppressed entirely when `telemetry.telemetryLevel` is `"error"` (or lower).
 | `extension_installed` | *(none)* | Once per machine, on the first activation ever. |
 | `extension_activated` | `is_first_ever: boolean`, `has_jira_auth: boolean`, `is_configured: boolean`, plus the full settings snapshot (see [Settings snapshot](#settings-snapshot) below) | Every activation, after the sign-in check resolves. |
 | `command_invoked` | `command`: one of `"refresh"`, `"setup"`, `"doctor"`, `"signIn"`, `"signOut"`, `"takeTask"`, `"openDeck"`, `"openMarketplace"` | Whenever one of Agent Flow Deck's commands runs. |
-| `take_started` | `flow_id: string` (random UUID), `source`: `"card"` (a Deck card's Take button, expanded or not) \| `"command"` (the `agentFlow.takeTask` palette command) \| `"batch"`, `task_fp: string` | A Take begins. `source` is passed in by whichever entry point started the Take, not inferred. `"batch"` is reserved and unused today: `takeBatch` is not instrumented in Phase 1, so no event carries it. Not every Take emits this: a card **or command** Take that becomes a fan-out or an orchestrator take — possible whenever `agentFlow.childWorktrees` is on, which it is by default — routes away before the funnel opens and emits no funnel events at all, so `take_started` volume falls as that setting is adopted rather than because Takes stopped; the settings snapshot's `child_worktrees` field is how to correlate the two. |
+| `take_started` | `flow_id: string` (random UUID), `source`: `"card"` (a Deck card's Take button, expanded or not) \| `"command"` (the `agentFlow.takeTask` palette command) \| `"batch"`, `task_fp: string` | A Take begins. `source` is passed in by whichever entry point started the Take, not inferred. `"batch"` is reserved and unused: `takeBatch` reports through its own `batch_started`/`batch_completed` funnel instead, never through `take_started`, so no event carries this member. Not every Take emits this: a card **or command** Take that becomes a fan-out or an orchestrator take — possible whenever `agentFlow.childWorktrees` is on, which it is by default — routes away before the funnel opens and emits no funnel events at all, so `take_started` volume falls as that setting is adopted rather than because Takes stopped; the settings snapshot's `child_worktrees` field is how to correlate the two. |
 | `take_prompt_mode_picked` | `flow_id`, `prompt_mode`: a stock mode id (`"plan"`, `"implementation"`, `"tdd"`, `"investigate"`, `"orchestrator"`, `"refine"`) or `"custom"`, `is_custom_mode: boolean` | The prompt mode for this Take is resolved. |
 | `take_destination_picked` | `flow_id`, `destination`: `"new"` \| `"current"` \| `"existing"` \| `"live-folder"`, `workspace_mode`: `"multiroot"` \| `"per-window"` | The open target for this Take is resolved. |
 | `take_repos_picked` | `flow_id`, `repo_count: number`, `repo_source`: `"preselected"` \| `"destination"` \| `"quickpick"`, `accepted_inference?: boolean`, `inferred_count: number` | The repo set for this Take is resolved. `"destination"` covers every destination that already has folders — an existing workspace, another open window, or this window. `accepted_inference` is present only for the `"quickpick"` source, where it's meaningful; omitted (not `false`) otherwise, so "inference never ran" stays distinguishable from a genuine rejection. |
@@ -184,7 +184,7 @@ entry point:
 
 - **Started from the Deck** (a card's Take button): the failure is
   thrown back through `TasksViewProvider.onMessage`'s webview dispatcher,
-  whose catch block (`tasksView.ts:879-889`) is what emits `operation_failed`,
+  whose catch block (`tasksView.ts:916-921`) is what emits `operation_failed`,
   attributing the failure to a subsystem (`op`) so failures can be aggregated
   across every code path that can fail that way, not just Takes. **Both**
   events fire for the same failure here — reading them as two separate
@@ -201,7 +201,7 @@ entry point:
 `takeBatch` never lets one task's failure abort the rest — its three internal
 `catch` blocks (resolving a task, the shared-window path, and the per-window
 launch loop) each push the key onto a `failed` list and keep going, so they
-never reach `TasksViewProvider.onMessage`'s own catch (`tasksView.ts:879-889`)
+never reach `TasksViewProvider.onMessage`'s own catch (`tasksView.ts:916-921`)
 — `MESSAGE_OPS.takeBatch`'s mapping to `"workspace_write"` is unreachable for
 this per-key path in practice. Each swallowed catch instead emits its own
 `operation_failed{ op: "workspace_write", failure_class, retryable: false }`

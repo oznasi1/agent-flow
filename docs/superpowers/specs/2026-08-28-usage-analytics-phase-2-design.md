@@ -143,7 +143,7 @@ file: `openExternal` gains the same https/http scheme guard deckView already has
 |---|---|---|
 | `tasks_fetched` | `filter: Filter`-vocabulary (requested); `lens:` same vocabulary (after `effectiveFilter` clamp — requested ≠ lens is the "asked for an unsupported lens" signal); `size: "any" \| "s" \| "m" \| "l"`; `task_count`, `repo_count: number`; `live_window_count?: number`; `authed: boolean` | `fetch` case `tasksView.ts:677`, clamp `:688` |
 | `lens_used` | `lens: "repo" \| "search"` | new `tasks:lensUsed` message, webview-debounced 500 ms |
-| `card_action` | `action: "detail" \| "change_status" \| "add_to_sprint" \| "remove_from_sprint" \| "set_component" \| "reorder" \| "reset_order"`; `size?: Size` where the message carries it | cases `tasksView.ts:706–873` |
+| `card_action` | `action: "detail" \| "change_status" \| "add_to_sprint" \| "remove_from_sprint" \| "set_component" \| "reorder" \| "reset_order"` (shipped shape — the implementation deliberately dropped the `size?: Size` this spec originally proposed, since none of the seven actions need it to be distinguishable) | cases `tasksView.ts:706–873` |
 | `notepad_action` | `action: "add" \| "run" \| "edit" \| "remove" \| "reorder" \| "image_add" \| "image_remove"` | notepad cases `tasksView.ts:786–864` |
 
 `tasks_fetched` fires on every lens/tab change by design — that is the lens-usage signal.
