@@ -84,37 +84,45 @@
       {
         "command": "agentFlow.refresh",
         "title": "Refresh Tasks",
-        "icon": "$(refresh)"
+        "icon": "$(refresh)",
+        "category": "Agent Flow"
       },
       {
         "command": "agentFlow.setup",
-        "title": "Run Setup…"
+        "title": "Run Setup…",
+        "category": "Agent Flow"
       },
       {
         "command": "agentFlow.doctor",
-        "title": "Doctor"
+        "title": "Doctor",
+        "category": "Agent Flow"
       },
       {
         "command": "agentFlow.signIn",
-        "title": "Sign in to Jira"
+        "title": "Sign in to Jira",
+        "category": "Agent Flow"
       },
       {
         "command": "agentFlow.signOut",
-        "title": "Sign out of Jira"
+        "title": "Sign out of Jira",
+        "category": "Agent Flow"
       },
       {
         "command": "agentFlow.takeTask",
-        "title": "Take Task…"
+        "title": "Take Task…",
+        "category": "Agent Flow"
       },
       {
         "command": "agentFlow.openDeck",
         "title": "Open the Deck (in-flight)",
-        "icon": "$(dashboard)"
+        "icon": "$(dashboard)",
+        "category": "Agent Flow"
       },
       {
         "command": "agentFlow.openMarketplace",
         "title": "Open the Marketplace",
-        "icon": "$(library)"
+        "icon": "$(library)",
+        "category": "Agent Flow"
       }
     ],
     "menus": {
@@ -136,697 +144,742 @@
         }
       ]
     },
-    "configuration": {
-      "title": "Agent Flow Deck",
-      "properties": {
-        "agentFlow.taskSource": {
-          "type": "string",
-          "enum": [
-            "jira",
-            "agileAccelerator"
-          ],
-          "enumDescriptions": [
-            "Atlassian Jira Cloud",
-            "Salesforce Agile Accelerator (and GUS, which is the same code line)"
-          ],
-          "default": "jira",
-          "description": "Where Agent Flow Deck reads tasks from. Each source has its own settings under agentFlow.<source>.*. Requires a window reload."
-        },
-        "agentFlow.forge": {
-          "type": "string",
-          "enum": [
-            "github",
-            "gitlab",
-            "bitbucket"
-          ],
-          "enumDescriptions": [
-            "GitHub, through the `gh` CLI.",
-            "GitLab, through the `glab` CLI.",
-            "Bitbucket Cloud, through the `atlassian-cli` CLI. Full support needs a build with `bb api`; without it, cards show branch CI only. Bitbucket has no review-requests queue in either case. Run Doctor to see which mode you are in."
-          ],
-          "default": "github",
-          "description": "Which forge Agent Flow Deck reads pull/merge requests, CI, and review requests from. Each forge needs its own CLI installed and signed in — run Doctor to check. Requires a window reload."
-        },
-        "agentFlow.jira.baseUrl": {
-          "type": "string",
-          "default": "",
-          "description": "Base URL of your Atlassian Jira Cloud site (e.g. https://your-org.atlassian.net). Set during first-run setup."
-        },
-        "agentFlow.jira.project": {
-          "type": "string",
-          "default": "",
-          "description": "Jira project key to pull tasks from (e.g. ABC). Set during first-run setup."
-        },
-        "agentFlow.agileAccelerator.instanceUrl": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Your Salesforce Lightning URL — GUS, or any org with the Agile Accelerator package installed. Example: `https://your-org.lightning.force.com`. Requires a window reload — the connector caches its resolved schema and identity for the session."
-        },
-        "agentFlow.agileAccelerator.team": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Your scrum team's name, exactly as it appears in Agile Accelerator. Bounds every query. Requires a window reload — the connector caches its resolved schema and identity for the session."
-        },
-        "agentFlow.agileAccelerator.targetOrg": {
-          "type": "string",
-          "default": "",
-          "markdownDescription": "Salesforce CLI org alias or username. Leave blank to use the `sf` default org. Requires a window reload — the connector caches its key→Id map for the session, and changing orgs mid-session could pair a new instance with an Id memoised from the old one."
-        },
-        "agentFlow.reposRoot": {
-          "type": "string",
-          "default": "~/projects",
-          "description": "Directory where your service repo checkouts live."
-        },
-        "agentFlow.workspaceDir": {
-          "type": "string",
-          "default": "~/projects",
-          "description": "Where generated .code-workspace files are written."
-        },
-        "agentFlow.githubOrg": {
-          "type": "string",
-          "default": "",
-          "description": "GitHub org used to clone repos that aren't checked out yet (reserved — not yet used)."
-        },
-        "agentFlow.repoBlocklist": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "default": [],
-          "description": "Directory names under reposRoot to exclude from task-target discovery (infra, tooling, generated repos). Hidden dirs are always skipped."
-        },
-        "agentFlow.defaultFilter": {
-          "type": "string",
-          "enum": [
-            "unassigned",
-            "mysprint",
-            "mine",
-            "sprint",
-            "backlog"
-          ],
-          "enumDescriptions": [
-            "Unassigned tasks in the active sprint",
-            "Your tasks in the active sprint",
-            "All tasks assigned to you",
-            "All tasks in the active sprint",
-            "Tasks not in the active sprint"
-          ],
-          "default": "mysprint",
-          "description": "Default task filter lens shown when Agent Flow Deck opens."
-        },
-        "agentFlow.filters.size": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the Size lens (Any/S/M/L) in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
-        },
-        "agentFlow.filters.status": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the Status chip row in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
-        },
-        "agentFlow.filters.repo": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the repo multiselect filter in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
-        },
-        "agentFlow.filters.search": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the fuzzy title search box in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
-        },
-        "agentFlow.seedAgent": {
-          "type": "boolean",
-          "default": true,
-          "description": "After opening a workspace, pre-fill the session's panel (or terminal) with the task plan (you press Enter to start). Which tool is agentFlow.agentProvider."
-        },
-        "agentFlow.agentProvider": {
-          "type": "string",
-          "enum": [
-            "claude-code",
-            "copilot",
-            "cursor",
-            "codex",
-            "ask"
-          ],
-          "enumDescriptions": [
-            "Claude Code",
-            "GitHub Copilot — VS Code only",
-            "Cursor's composer — Cursor only",
-            "OpenAI Codex CLI — runs in a terminal in any editor",
-            "Ask every launch — pick from the tools this editor can run"
-          ],
-          "default": "claude-code",
-          "markdownDescription": "Which tool Agent Flow Deck starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. `codex` runs the Codex CLI in a terminal in any editor, whatever agentFlow.agentSurface says. Note that only Claude Code sessions appear as live cards on the Deck, which reads Claude Code's session files.\n\nSet to `ask` to choose per launch. Batch launches ask once for the whole batch, and Orchestrator rules — which run unattended — always use Claude Code, because there is nobody there to answer a picker."
-        },
-        "agentFlow.agentSurface": {
-          "type": "string",
-          "enum": [
-            "extension",
-            "terminal"
-          ],
-          "enumDescriptions": [
-            "The tool's chat panel",
-            "The tool's CLI in an integrated terminal"
-          ],
-          "default": "extension",
-          "description": "Where Agent Flow Deck starts a session: the tool's chat panel, or its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter to start."
-        },
-        "agentFlow.workspaceMode": {
-          "type": "string",
-          "enum": [
-            "auto",
-            "multiroot",
-            "per-window",
-            "ask"
-          ],
-          "enumDescriptions": [
-            "1 repo → open that repo; multiple → one multi-root workspace",
-            "Always one multi-root workspace",
-            "Always one window per repo",
-            "Ask each time (when more than one repo)"
-          ],
-          "default": "auto",
-          "description": "How to open the repos a task touches."
-        },
-        "agentFlow.openIn": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "new-window",
-            "this-window",
-            "pick-existing"
-          ],
-          "enumDescriptions": [
-            "Ask each time you take a task",
-            "Always open a task in a new window",
-            "Always start the task here, keeping this window's folders as they are",
-            "Always pick an existing .code-workspace to open the task into"
-          ],
-          "default": "ask",
-          "description": "Where to open a task you take: a new window, this window, or an existing .code-workspace."
-        },
-        "agentFlow.taskMode": {
-          "type": "string",
-          "default": "ask",
-          "markdownDescription": "Which prompt mode to seed when taking a task: `ask` to choose each time, or the `id` of one of `#agentFlow.promptModes#`."
-        },
-        "agentFlow.promptModes": {
-          "type": "array",
-          "markdownDescription": "Prompt modes offered when taking a task. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`, `{note}`. Add your own (e.g. a `spike` mode). Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"tdd\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you.",
-          "items": {
-            "type": "object",
-            "required": [
-              "id"
+    "configuration": [
+      {
+        "title": "Task source",
+        "order": 1,
+        "properties": {
+          "agentFlow.taskSource": {
+            "type": "string",
+            "enum": [
+              "jira",
+              "agileAccelerator"
             ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "description": "Stable id (used by taskMode)."
-              },
-              "label": {
-                "type": "string",
-                "description": "Shown in the picker. Omit to keep a built-in mode's label; required when adding a mode of your own."
-              },
-              "detail": {
-                "type": "string",
-                "description": "Optional line shown under the label in the picker. Omit it and the mode shows its label only."
-              },
-              "prompt": {
-                "type": "string",
-                "description": "Template with {key} {summary} {url} {brief} {files} {note}. Omit to keep a built-in mode's prompt; required when adding a mode of your own."
-              },
-              "hidden": {
-                "type": "boolean",
-                "description": "Set to true to drop this built-in mode from the picker."
+            "enumDescriptions": [
+              "Atlassian Jira Cloud",
+              "Salesforce Agile Accelerator (and GUS, which is the same code line)"
+            ],
+            "default": "jira",
+            "markdownDescription": "Where Agent Flow Deck reads tasks from. Each source has its own settings under agentFlow.<source>.*. Requires a window reload."
+          },
+          "agentFlow.jira.baseUrl": {
+            "type": "string",
+            "default": "",
+            "description": "Base URL of your Atlassian Jira Cloud site (e.g. https://your-org.atlassian.net). Set during first-run setup."
+          },
+          "agentFlow.jira.project": {
+            "type": "string",
+            "default": "",
+            "description": "Jira project key to pull tasks from (e.g. ABC). Set during first-run setup."
+          },
+          "agentFlow.agileAccelerator.instanceUrl": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Your Salesforce Lightning URL — GUS, or any org with the Agile Accelerator package installed. Example: `https://your-org.lightning.force.com`. Requires a window reload — the connector caches its resolved schema and identity for the session."
+          },
+          "agentFlow.agileAccelerator.team": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Your scrum team's name, exactly as it appears in Agile Accelerator. Bounds every query. Requires a window reload — the connector caches its resolved schema and identity for the session."
+          },
+          "agentFlow.agileAccelerator.targetOrg": {
+            "type": "string",
+            "default": "",
+            "markdownDescription": "Salesforce CLI org alias or username. Leave blank to use the `sf` default org. Requires a window reload — the connector caches its key→Id map for the session, and changing orgs mid-session could pair a new instance with an Id memoised from the old one."
+          },
+          "agentFlow.stampLabelOnWrite": {
+            "type": "boolean",
+            "default": true,
+            "description": "Add the provenance label (see agentFlow.provenanceLabel) whenever this extension updates a Jira item (e.g. a status change), to mark automated changes. Also controls whether a review body drafted by the session is marked as such when you submit it to GitHub from the Deck — turning this off hides that a session, not you, wrote the words. That GitHub marker is a fixed line, not agentFlow.provenanceLabel."
+          },
+          "agentFlow.provenanceLabel": {
+            "type": "string",
+            "default": "claude-code",
+            "description": "Label stamped on Jira items this extension updates when agentFlow.stampLabelOnWrite is enabled."
+          }
+        }
+      },
+      {
+        "title": "Repos & workspaces",
+        "order": 2,
+        "properties": {
+          "agentFlow.reposRoot": {
+            "type": "string",
+            "default": "~/projects",
+            "description": "Directory where your service repo checkouts live."
+          },
+          "agentFlow.workspaceDir": {
+            "type": "string",
+            "default": "~/projects",
+            "description": "Where generated .code-workspace files are written."
+          },
+          "agentFlow.githubOrg": {
+            "type": "string",
+            "default": "",
+            "description": "GitHub org used to clone repos that aren't checked out yet (reserved — not yet used)."
+          },
+          "agentFlow.repoBlocklist": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "default": [],
+            "description": "Directory names under reposRoot to exclude from task-target discovery (infra, tooling, generated repos). Hidden dirs are always skipped."
+          },
+          "agentFlow.workspaceMode": {
+            "type": "string",
+            "enum": [
+              "auto",
+              "multiroot",
+              "per-window",
+              "ask"
+            ],
+            "enumDescriptions": [
+              "1 repo → open that repo; multiple → one multi-root workspace",
+              "Always one multi-root workspace",
+              "Always one window per repo",
+              "Ask each time (when more than one repo)"
+            ],
+            "default": "auto",
+            "description": "How to open the repos a task touches."
+          },
+          "agentFlow.openIn": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "new-window",
+              "this-window",
+              "pick-existing"
+            ],
+            "enumDescriptions": [
+              "Ask each time you take a task",
+              "Always open a task in a new window",
+              "Always start the task here, keeping this window's folders as they are",
+              "Always pick an existing .code-workspace to open the task into"
+            ],
+            "default": "ask",
+            "description": "Where to open a task you take: a new window, this window, or an existing .code-workspace."
+          },
+          "agentFlow.worktree": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "always",
+              "never"
+            ],
+            "enumDescriptions": [
+              "Ask each time",
+              "Always create a per-task git worktree/branch",
+              "Always work in the repo directly"
+            ],
+            "default": "ask",
+            "description": "Whether to isolate the task in a git worktree. Worktrees are created inside each repo at .claude/worktrees/<KEY> (git-excluded automatically)."
+          },
+          "agentFlow.childWorktrees": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "When you take a ticket that has children, offer to work them as a worktree per child (a session each) or as one orchestrator session dispatching a subagent per child. Turn it off to take such a ticket on its own, with no question asked."
+          },
+          "agentFlow.trackOpenWindows": {
+            "type": "boolean",
+            "default": true,
+            "description": "Track your open Agent Flow Deck windows so a task can be opened into a window you already have open (shown as extra choices in the \"Open the task where?\" picker)."
+          }
+        }
+      },
+      {
+        "title": "Task pool & filters",
+        "order": 3,
+        "properties": {
+          "agentFlow.defaultFilter": {
+            "type": "string",
+            "enum": [
+              "unassigned",
+              "mysprint",
+              "mine",
+              "sprint",
+              "backlog"
+            ],
+            "enumDescriptions": [
+              "Unassigned tasks in the active sprint",
+              "Your tasks in the active sprint",
+              "All tasks assigned to you",
+              "All tasks in the active sprint",
+              "Tasks not in the active sprint"
+            ],
+            "default": "mysprint",
+            "description": "Default task filter lens shown when Agent Flow Deck opens."
+          },
+          "agentFlow.filters.size": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show the Size lens (Any/S/M/L) in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+          },
+          "agentFlow.filters.status": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show the Status chip row in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+          },
+          "agentFlow.filters.repo": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show the repo multiselect filter in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+          },
+          "agentFlow.filters.search": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show the fuzzy title search box in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+          }
+        }
+      },
+      {
+        "title": "Sessions & launch",
+        "order": 4,
+        "properties": {
+          "agentFlow.seedAgent": {
+            "type": "boolean",
+            "default": true,
+            "description": "After opening a workspace, pre-fill the session's panel (or terminal) with the task plan (you press Enter to start). Which tool is agentFlow.agentProvider."
+          },
+          "agentFlow.agentProvider": {
+            "type": "string",
+            "enum": [
+              "claude-code",
+              "copilot",
+              "cursor",
+              "codex",
+              "ask"
+            ],
+            "enumDescriptions": [
+              "Claude Code",
+              "GitHub Copilot — VS Code only",
+              "Cursor's composer — Cursor only",
+              "OpenAI Codex CLI — runs in a terminal in any editor",
+              "Ask every launch — pick from the tools this editor can run"
+            ],
+            "default": "claude-code",
+            "markdownDescription": "Which tool Agent Flow Deck starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. `codex` runs the Codex CLI in a terminal in any editor, whatever agentFlow.agentSurface says. Note that only Claude Code sessions appear as live cards on the Deck, which reads Claude Code's session files.\n\nSet to `ask` to choose per launch. Batch launches ask once for the whole batch, and Orchestrator rules — which run unattended — always use Claude Code, because there is nobody there to answer a picker."
+          },
+          "agentFlow.agentSurface": {
+            "type": "string",
+            "enum": [
+              "extension",
+              "terminal"
+            ],
+            "enumDescriptions": [
+              "The tool's chat panel",
+              "The tool's CLI in an integrated terminal"
+            ],
+            "default": "extension",
+            "description": "Where Agent Flow Deck starts a session: the tool's chat panel, or its CLI in an integrated terminal. Either way the prompt is pre-filled and you press Enter to start."
+          },
+          "agentFlow.taskMode": {
+            "type": "string",
+            "default": "ask",
+            "markdownDescription": "Which prompt mode to seed when taking a task: `ask` to choose each time, or the `id` of one of `#agentFlow.promptModes#`."
+          },
+          "agentFlow.promptModes": {
+            "type": "array",
+            "markdownDescription": "Prompt modes offered when taking a task. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`, `{note}`. Add your own (e.g. a `spike` mode). Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"tdd\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable id (used by taskMode)."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Shown in the picker. Omit to keep a built-in mode's label; required when adding a mode of your own."
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "Optional line shown under the label in the picker. Omit it and the mode shows its label only."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Template with {key} {summary} {url} {brief} {files} {note}. Omit to keep a built-in mode's prompt; required when adding a mode of your own."
+                },
+                "hidden": {
+                  "type": "boolean",
+                  "description": "Set to true to drop this built-in mode from the picker."
+                }
               }
+            },
+            "default": [
+              {
+                "id": "plan",
+                "label": "Plan first",
+                "detail": "Propose a step-by-step plan and wait for approval — no code edits",
+                "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Propose a step-by-step PLAN for this task and wait for my approval — do not edit any code yet. Ticket: {url}{files}"
+              },
+              {
+                "id": "implementation",
+                "label": "Implementation",
+                "detail": "Start building; check in only when something's ambiguous",
+                "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Begin implementing. Confirm your approach with me only if something is ambiguous. Ticket: {url}{files}"
+              },
+              {
+                "id": "tdd",
+                "label": "Test-driven",
+                "detail": "Write the failing test first, then implement until it's green",
+                "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Work test-first: write the failing test that captures this ticket's acceptance criteria, confirm it fails for the right reason, then implement until it passes. Ticket: {url}{files}"
+              },
+              {
+                "id": "investigate",
+                "label": "Investigate & root-cause",
+                "detail": "Reproduce, trace to a root cause, propose a fix — no code edits",
+                "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Reproduce the problem, trace it to a root cause, and explain what's going wrong with evidence from the code. Propose a fix, but don't change code unless I ask. Ticket: {url}{files}"
+              },
+              {
+                "id": "orchestrator",
+                "label": "Orchestrator",
+                "detail": "Split into parallel subtasks, then integrate and verify",
+                "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Break this into independent subtasks and tell me the breakdown before you start. Then dispatch a subagent per subtask so they run in parallel, integrate the results yourself, and verify the whole thing works. Ticket: {url}{files}"
+              },
+              {
+                "id": "refine",
+                "label": "Refine the ticket",
+                "detail": "Sharpen the description and acceptance criteria — no code",
+                "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. This ticket needs sharpening before anyone builds it: dig into the code, then rewrite the description and acceptance criteria so they're unambiguous and testable, and list what's still unclear. Update the ticket and add the `claude-code` label. Don't implement it. Ticket: {url}{files}"
+              }
+            ]
+          },
+          "agentFlow.remoteControl": {
+            "type": "string",
+            "enum": [
+              "off",
+              "on",
+              "ask"
+            ],
+            "enumDescriptions": [
+              "Never offer Remote Control",
+              "Offer Remote Control for every session Agent Flow Deck launches",
+              "Ask once each time you launch"
+            ],
+            "default": "off",
+            "markdownDescription": "Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens, so you can drive it from claude.ai or the Claude mobile app. The panel is pre-filled with `/remote-control <KEY>` and your task prompt goes to the clipboard: press Enter to connect, then paste to start the task. Skipped for launches that open more than one window, because a single clipboard can't serve them. Claude Code only: under `agentFlow.agentProvider: copilot`, `on` refuses the launch and `ask` simply doesn't offer it."
+          },
+          "agentFlow.batchLaunchConfirmThreshold": {
+            "type": "number",
+            "default": 6,
+            "minimum": 1,
+            "markdownDescription": "When you launch several things at once — multi-selected tasks (with the repo filter narrowed to a single repo), or several PRs selected in the Deck's review queue — batches **larger than** this number prompt a confirmation first, naming the cost. A guard against accidentally opening a swarm of windows and sessions, one per task or PR."
+          }
+        }
+      },
+      {
+        "title": "Explore",
+        "order": 5,
+        "properties": {
+          "agentFlow.explorePrompt": {
+            "type": "string",
+            "editPresentation": "multilineText",
+            "markdownDeprecationMessage": "Deprecated — use the per-action prompts under `agentFlow.explorePrompts`. If you customized this, its value is migrated into the **Enhance knowledge / flow** action automatically.",
+            "markdownDescription": "Prompt seeded when you start an **Explore** session (no ticket). Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
+            "default": "Exploration session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising or worth a follow-up ticket. Don't change code unless I ask.{files}"
+          },
+          "agentFlow.exploreMode": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "jiraTicket",
+              "knowledge",
+              "debug",
+              "general",
+              "supervise",
+              "verify"
+            ],
+            "enumDescriptions": [
+              "Choose an action each time you click Explore",
+              "Open a Jira ticket — explore, then create a ticket capturing the findings",
+              "Enhance knowledge / flow — map the code paths and explain how it works",
+              "Debug — reproduce and root-cause a problem",
+              "General — open-ended working session",
+              "Supervise running tasks — check on your other active tasks and help unblock or integrate them",
+              "Verify on an environment — check a feature against a live env for the picked services"
+            ],
+            "default": "ask",
+            "markdownDescription": "Which Explore action to start. `ask` shows a picker each time; otherwise that action's prompt is seeded directly. Prompts are editable under `agentFlow.explorePrompts`."
+          },
+          "agentFlow.explorePrompts.jiraTicket": {
+            "type": "string",
+            "editPresentation": "multilineText",
+            "markdownDescription": "Prompt seeded for the **Open a Jira ticket** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
+            "default": "Exploration session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Dig into this, then draft and create a Jira ticket that captures what you found — a clear problem statement, the affected code paths, and a proposed approach. Add the `claude-code` label to the ticket, and share the ticket key and URL.{files}"
+          },
+          "agentFlow.explorePrompts.knowledge": {
+            "type": "string",
+            "editPresentation": "multilineText",
+            "markdownDescription": "Prompt seeded for the **Enhance knowledge / flow** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
+            "default": "Exploration session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising or worth a follow-up ticket. Don't change code unless I ask.{files}"
+          },
+          "agentFlow.explorePrompts.debug": {
+            "type": "string",
+            "editPresentation": "multilineText",
+            "markdownDescription": "Prompt seeded for the **Debug** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
+            "default": "Debugging session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Reproduce the problem, trace it to a root cause, and explain what's going wrong with evidence from the code. Propose a fix, but don't change code unless I ask.{files}"
+          },
+          "agentFlow.explorePrompts.general": {
+            "type": "string",
+            "editPresentation": "multilineText",
+            "markdownDescription": "Prompt seeded for the **General** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
+            "default": "Working session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me make progress on this — ask what I need if it's unclear before diving in. Don't change code unless I ask.{files}"
+          },
+          "agentFlow.explorePrompts.supervise": {
+            "type": "string",
+            "editPresentation": "multilineText",
+            "markdownDescription": "Prompt seeded for the **Supervise running tasks** Explore action. Placeholders: `{summary}` (optional priority), `{brief}` (includes a list of your other active tasks), `{files}`.",
+            "default": "Supervision session — checking on your other active Agent Flow Deck tasks. A brief listing them, and whether each still has a session attached, is at {brief}. Read it, judge which ones are stalled, blocked, or waiting on you, and tell me what needs attention. Where it's safe and unambiguous, help unblock or integrate one yourself; flag anything you're unsure about rather than guessing.{files}"
+          },
+          "agentFlow.explorePrompts.verify": {
+            "type": "string",
+            "editPresentation": "multilineText",
+            "markdownDescription": "Prompt seeded for the **Verify on an environment** Explore action. Placeholders: `{summary}` (the feature), `{env}` (only this action collects one), `{services}` (the repos you picked), `{brief}`, `{files}`.",
+            "default": "Verification session — checking a feature in a live environment, not the code in this checkout. Feature: \"{summary}\". Environment: {env}. Services in scope: {services}. A brief listing the repos in scope is at {brief}. Using the observability tools available to you, check these services in {env}: recent logs and error rates, the relevant metrics and traces, and which version is actually deployed. Then give a verdict — working, broken, or inconclusive — with the evidence behind it and where to look next. Read-only: don't change code, and don't mutate the environment.{files}"
+          },
+          "agentFlow.exploreSlackDm": {
+            "type": "object",
+            "markdownDescription": "Per-action: when checked, the seeded prompt asks the session to send you a Slack DM summarizing the session when it ends. Off by default. (The session does this via its own Slack connector.)",
+            "properties": {
+              "jiraTicket": {
+                "type": "boolean",
+                "description": "Open a Jira ticket"
+              },
+              "knowledge": {
+                "type": "boolean",
+                "description": "Enhance knowledge / flow"
+              },
+              "debug": {
+                "type": "boolean",
+                "description": "Debug"
+              },
+              "general": {
+                "type": "boolean",
+                "description": "General"
+              },
+              "supervise": {
+                "type": "boolean",
+                "description": "Supervise running tasks"
+              },
+              "verify": {
+                "type": "boolean",
+                "description": "Verify on an environment"
+              }
+            },
+            "additionalProperties": {
+              "type": "boolean"
+            },
+            "default": {
+              "jiraTicket": false,
+              "knowledge": false,
+              "debug": false,
+              "general": false,
+              "supervise": false,
+              "verify": false
             }
           },
-          "default": [
-            {
-              "id": "plan",
-              "label": "Plan first",
-              "detail": "Propose a step-by-step plan and wait for approval — no code edits",
-              "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Propose a step-by-step PLAN for this task and wait for my approval — do not edit any code yet. Ticket: {url}{files}"
+          "agentFlow.environments": {
+            "type": "array",
+            "items": {
+              "type": "string"
             },
-            {
-              "id": "implementation",
-              "label": "Implementation",
-              "detail": "Start building; check in only when something's ambiguous",
-              "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Begin implementing. Confirm your approach with me only if something is ambiguous. Ticket: {url}{files}"
-            },
-            {
-              "id": "tdd",
-              "label": "Test-driven",
-              "detail": "Write the failing test first, then implement until it's green",
-              "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Work test-first: write the failing test that captures this ticket's acceptance criteria, confirm it fails for the right reason, then implement until it passes. Ticket: {url}{files}"
-            },
-            {
-              "id": "investigate",
-              "label": "Investigate & root-cause",
-              "detail": "Reproduce, trace to a root cause, propose a fix — no code edits",
-              "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Reproduce the problem, trace it to a root cause, and explain what's going wrong with evidence from the code. Propose a fix, but don't change code unless I ask. Ticket: {url}{files}"
-            },
-            {
-              "id": "orchestrator",
-              "label": "Orchestrator",
-              "detail": "Split into parallel subtasks, then integrate and verify",
-              "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. Break this into independent subtasks and tell me the breakdown before you start. Then dispatch a subagent per subtask so they run in parallel, integrate the results yourself, and verify the whole thing works. Ticket: {url}{files}"
-            },
-            {
-              "id": "refine",
-              "label": "Refine the ticket",
-              "detail": "Sharpen the description and acceptance criteria — no code",
-              "prompt": "Jira {key}: \"{summary}\". Read the task brief at {brief} for context and the repos involved. This ticket needs sharpening before anyone builds it: dig into the code, then rewrite the description and acceptance criteria so they're unambiguous and testable, and list what's still unclear. Update the ticket and add the `claude-code` label. Don't implement it. Ticket: {url}{files}"
-            }
-          ]
-        },
-        "agentFlow.commands": {
-          "type": "array",
-          "default": [
-            {
-              "id": "verify-on-dev",
-              "label": "Verify on dev",
-              "detail": "Example — replace the command with your own check",
-              "run": "echo verify the feature on {note}"
-            }
-          ],
-          "markdownDescription": "Commands an Orchestrator rule can run when its condition is met — a deploy, a webhook call, a smoke test. Each has an `id`, a `label` shown in the picker, the `run` command itself, and an optional `detail` line. The Orchestrator drawer can append to this list for you: type a one-off command on a node, then name it under **Save to settings**. `run` may contain `{note}`, replaced with the rule's own free text — **spliced in unquoted**, exactly as typed, so the note can extend the command (`--env={note}` plus a note of `prod; rm -rf ~` runs both); quoting it yourself (`--env=\"{note}\"`) does not fully neutralise it either, since a `\"` inside the note still breaks out. Only use `{note}` where you trust whoever fills in a rule's note. **These run unattended on your machine**, so a flow asks before its FIRST command and then runs commands on its own. That question is separate from the one a launch asks: approving a flow's launches never approves its commands, so a flow you already armed and confirmed still asks before it runs anything in a shell. The one default here is an inert example (`echo`, cannot fail or mutate anything) so the picker has something to show; replace or remove it, or clear the list entirely, to run your own.",
-          "items": {
-            "type": "object",
-            "required": [
-              "id",
-              "run"
+            "uniqueItems": true,
+            "default": [
+              "dev",
+              "staging",
+              "production"
             ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "description": "Stable id, referenced by a flow's command node."
-              },
-              "label": {
-                "type": "string",
-                "description": "Shown in the rule picker. Defaults to the id."
-              },
-              "detail": {
-                "type": "string",
-                "description": "Optional line shown under the label."
-              },
-              "run": {
-                "type": "string",
-                "description": "The command to run. May contain {note}, spliced in unquoted and verbatim — quoting it in the template does not fully sanitise it."
+            "markdownDescription": "Environments offered when an Explore action asks which environment to verify against. The picker always also offers **Custom…**, so a one-off environment doesn't need to be added here first."
+          }
+        }
+      },
+      {
+        "title": "Deck & in-flight",
+        "order": 6,
+        "properties": {
+          "agentFlow.deck.showTokenTotal": {
+            "type": "boolean",
+            "default": false,
+            "description": "Show a \"Tokens on board\" total in the Deck header. Off by default: the total needs a transcript sweep across every run on the board, while each task's own token breakdown is read on demand when you open its detail drawer. The figure is effort-weighted (input×1, cache-write×1.25, cache-read×0.1, output×5) and labelled \"eq\" — cache reads are the overwhelming majority of raw tokens at a tenth the rate, so a raw sum would rank tasks by conversation length rather than by cost."
+          },
+          "agentFlow.openAgents": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Show every Claude Code session open on this machine on the Deck — as sessions on the card that owns their directory, and as a card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. Off = only the tasks Agent Flow Deck launched."
+          },
+          "agentFlow.deckGrouping": {
+            "type": "string",
+            "enum": [
+              "agents",
+              "workspaces"
+            ],
+            "enumDescriptions": [
+              "One card per session, with the repo, ticket and PR it belongs to on the card",
+              "One card per launched task, with every session open in its directories nested underneath"
+            ],
+            "default": "agents",
+            "markdownDescription": "Which lens the Deck's In-flight board opens in. The board's own **Sessions / Workspaces** control writes this setting, so whichever you pick sticks."
+          },
+          "agentFlow.retireFinishedAfterHours": {
+            "type": "number",
+            "default": 24,
+            "minimum": 0,
+            "markdownDescription": "How long landed work stays on the Deck after its last session closes — every pull request merged, or the Jira issue done with no PR still open. When the window elapses the run record is deleted (never the worktree, branch, or commits). `0` retires it as soon as it lands."
+          },
+          "agentFlow.retireAbandonedAfterDays": {
+            "type": "number",
+            "default": 7,
+            "minimum": 0,
+            "markdownDescription": "How long a run with no Jira ticket, no pull request and nothing uncommitted may sit untouched before its record is deleted (never the worktree, branch, or commits). `0` disables this cleanup."
+          },
+          "agentFlow.retireClosedAfterHours": {
+            "type": "number",
+            "default": 24,
+            "minimum": 0,
+            "markdownDescription": "How long a closed run stays in the In-flight board's **Recently closed** strip — no session of its own open, no pull request, no active ticket, and nothing uncommitted or unpushed. When the window elapses the run record is deleted (never the worktree, branch, or commits). `0` retires it as soon as it closes."
+          },
+          "agentFlow.retireInPlaceAfterHours": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "markdownDescription": "How long a finished **Explore** or **Notepad** session stays on the In-flight board once you close it. These run in your checkout rather than in a worktree, so there is no branch or worktree to come back to and nothing to lose — `0` (the default) removes the card as soon as the session closes. Raise it to keep such a card around for that many hours instead. The run record is deleted when the window elapses; briefs on disk are left untouched."
+          },
+          "agentFlow.inflightShowAll": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Show **every** run record on the In-flight board, the way Agent Flow Deck did before the Recently closed strip existed — nothing is moved off the board and nothing is retired for being closed. Leave this off unless you used stale cards as a to-do list."
+          },
+          "agentFlow.notifyOnActionRequired": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Show a notification when a run enters **Action required** — a session has stopped and is waiting on you. Announced once when a run parks, in whichever window is focused at the time, and not repeated until that run is answered and parks again. The activity-bar badge tracks the count whether this is on or off."
+          },
+          "agentFlow.orchestrator": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Show the **Orchestrator** on the Deck: a drawer where you wire the sessions already on your board into a flow and put a condition on each connection. Off by default — an armed flow eventually starts sessions on a timer, so nothing about it appears until you turn it on."
+          },
+          "agentFlow.commands": {
+            "type": "array",
+            "default": [
+              {
+                "id": "verify-on-dev",
+                "label": "Verify on dev",
+                "detail": "Example — replace the command with your own check",
+                "run": "echo verify the feature on {note}"
+              }
+            ],
+            "markdownDescription": "Commands an Orchestrator rule can run when its condition is met — a deploy, a webhook call, a smoke test. Each has an `id`, a `label` shown in the picker, the `run` command itself, and an optional `detail` line. The Orchestrator drawer can append to this list for you: type a one-off command on a node, then name it under **Save to settings**. `run` may contain `{note}`, replaced with the rule's own free text — **spliced in unquoted**, exactly as typed, so the note can extend the command (`--env={note}` plus a note of `prod; rm -rf ~` runs both); quoting it yourself (`--env=\"{note}\"`) does not fully neutralise it either, since a `\"` inside the note still breaks out. Only use `{note}` where you trust whoever fills in a rule's note. **These run unattended on your machine**, so a flow asks before its FIRST command and then runs commands on its own. That question is separate from the one a launch asks: approving a flow's launches never approves its commands, so a flow you already armed and confirmed still asks before it runs anything in a shell. The one default here is an inert example (`echo`, cannot fail or mutate anything) so the picker has something to show; replace or remove it, or clear the list entirely, to run your own.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id",
+                "run"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable id, referenced by a flow's command node."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Shown in the rule picker. Defaults to the id."
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "Optional line shown under the label."
+                },
+                "run": {
+                  "type": "string",
+                  "description": "The command to run. May contain {note}, spliced in unquoted and verbatim — quoting it in the template does not fully sanitise it."
+                }
               }
             }
           }
-        },
-        "agentFlow.explorePrompt": {
-          "type": "string",
-          "editPresentation": "multilineText",
-          "markdownDeprecationMessage": "Deprecated — use the per-action prompts under `agentFlow.explorePrompts`. If you customized this, its value is migrated into the **Enhance knowledge / flow** action automatically.",
-          "markdownDescription": "Prompt seeded when you start an **Explore** session (no ticket). Placeholders: `{summary}` (your focus), `{brief}`, `{files}`.",
-          "default": "Exploration session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising or worth a follow-up ticket. Don't change code unless I ask.{files}"
-        },
-        "agentFlow.exploreMode": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "jiraTicket",
-            "knowledge",
-            "debug",
-            "general",
-            "supervise",
-            "verify"
-          ],
-          "enumDescriptions": [
-            "Choose an action each time you click Explore",
-            "Open a Jira ticket — explore, then create a ticket capturing the findings",
-            "Enhance knowledge / flow — map the code paths and explain how it works",
-            "Debug — reproduce and root-cause a problem",
-            "General — open-ended working session",
-            "Supervise running tasks — check on your other active tasks and help unblock or integrate them",
-            "Verify on an environment — check a feature against a live env for the picked services"
-          ],
-          "default": "ask",
-          "markdownDescription": "Which Explore action to start. `ask` shows a picker each time; otherwise that action's prompt is seeded directly. Prompts are editable under `agentFlow.explorePrompts`."
-        },
-        "agentFlow.explorePrompts.jiraTicket": {
-          "type": "string",
-          "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Open a Jira ticket** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
-          "default": "Exploration session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Dig into this, then draft and create a Jira ticket that captures what you found — a clear problem statement, the affected code paths, and a proposed approach. Add the `claude-code` label to the ticket, and share the ticket key and URL.{files}"
-        },
-        "agentFlow.explorePrompts.knowledge": {
-          "type": "string",
-          "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Enhance knowledge / flow** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
-          "default": "Exploration session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me understand how this works: map the relevant code paths, explain the flow, and flag anything surprising or worth a follow-up ticket. Don't change code unless I ask.{files}"
-        },
-        "agentFlow.explorePrompts.debug": {
-          "type": "string",
-          "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Debug** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
-          "default": "Debugging session — no Jira ticket yet. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Reproduce the problem, trace it to a root cause, and explain what's going wrong with evidence from the code. Propose a fix, but don't change code unless I ask.{files}"
-        },
-        "agentFlow.explorePrompts.general": {
-          "type": "string",
-          "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **General** Explore action. Placeholders: `{summary}` (your focus), `{services}` (the repos you picked), `{brief}`, `{files}`.",
-          "default": "Working session. Focus: \"{summary}\". A brief listing the repos in scope is at {brief}. Help me make progress on this — ask what I need if it's unclear before diving in. Don't change code unless I ask.{files}"
-        },
-        "agentFlow.explorePrompts.supervise": {
-          "type": "string",
-          "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Supervise running tasks** Explore action. Placeholders: `{summary}` (optional priority), `{brief}` (includes a list of your other active tasks), `{files}`.",
-          "default": "Supervision session — checking on your other active Agent Flow Deck tasks. A brief listing them, and whether each still has a session attached, is at {brief}. Read it, judge which ones are stalled, blocked, or waiting on you, and tell me what needs attention. Where it's safe and unambiguous, help unblock or integrate one yourself; flag anything you're unsure about rather than guessing.{files}"
-        },
-        "agentFlow.explorePrompts.verify": {
-          "type": "string",
-          "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Verify on an environment** Explore action. Placeholders: `{summary}` (the feature), `{env}` (only this action collects one), `{services}` (the repos you picked), `{brief}`, `{files}`.",
-          "default": "Verification session — checking a feature in a live environment, not the code in this checkout. Feature: \"{summary}\". Environment: {env}. Services in scope: {services}. A brief listing the repos in scope is at {brief}. Using the observability tools available to you, check these services in {env}: recent logs and error rates, the relevant metrics and traces, and which version is actually deployed. Then give a verdict — working, broken, or inconclusive — with the evidence behind it and where to look next. Read-only: don't change code, and don't mutate the environment.{files}"
-        },
-        "agentFlow.exploreSlackDm": {
-          "type": "object",
-          "markdownDescription": "Per-action: when checked, the seeded prompt asks the session to send you a Slack DM summarizing the session when it ends. Off by default. (The session does this via its own Slack connector.)",
-          "properties": {
-            "jiraTicket": {
-              "type": "boolean",
-              "description": "Open a Jira ticket"
-            },
-            "knowledge": {
-              "type": "boolean",
-              "description": "Enhance knowledge / flow"
-            },
-            "debug": {
-              "type": "boolean",
-              "description": "Debug"
-            },
-            "general": {
-              "type": "boolean",
-              "description": "General"
-            },
-            "supervise": {
-              "type": "boolean",
-              "description": "Supervise running tasks"
-            },
-            "verify": {
-              "type": "boolean",
-              "description": "Verify on an environment"
-            }
-          },
-          "additionalProperties": {
-            "type": "boolean"
-          },
-          "default": {
-            "jiraTicket": false,
-            "knowledge": false,
-            "debug": false,
-            "general": false,
-            "supervise": false,
-            "verify": false
-          }
-        },
-        "agentFlow.environments": {
-          "type": "array",
-          "items": {
-            "type": "string"
-          },
-          "uniqueItems": true,
-          "default": [
-            "dev",
-            "staging",
-            "production"
-          ],
-          "markdownDescription": "Environments offered when an Explore action asks which environment to verify against. The picker always also offers **Custom…**, so a one-off environment doesn't need to be added here first."
-        },
-        "agentFlow.prReviewStatus": {
-          "type": "string",
-          "default": "PR initiated",
-          "description": "Task status that reveals the \"Address PR\" button on the sidebar's Tasks card (matched case-insensitively against the Jira status name). The Deck's own Address PR button is unaffected — it goes by the card's review/waiting lane instead. Either way, clicking the button kicks off a session that finds the task's GitHub PR and assesses whether it's ready for our fixes — in a fresh worktree from the sidebar's task card, or in the run's own already-open workspace from a Deck card."
-        },
-        "agentFlow.prReviewAutoFix": {
-          "type": "boolean",
-          "default": true,
-          "description": "After the PR-review session assesses the PR, let it proceed to implement the requested changes on the PR's branch. Turn off to have it only assess and report back."
-        },
-        "agentFlow.deck.showTokenTotal": {
-          "type": "boolean",
-          "default": false,
-          "description": "Show a \"Tokens on board\" total in the Deck header. Off by default: the total needs a transcript sweep across every run on the board, while each task's own token breakdown is read on demand when you open its detail drawer. The figure is effort-weighted (input×1, cache-write×1.25, cache-read×0.1, output×5) and labelled \"eq\" — cache reads are the overwhelming majority of raw tokens at a tenth the rate, so a raw sum would rank tasks by conversation length rather than by cost."
-        },
-        "agentFlow.prReviewPrompt": {
-          "type": "string",
-          "editPresentation": "multilineText",
-          "markdownDescription": "Prompt seeded for the **Address PR** kick-off. The session locates the task's GitHub PR by its Jira key and assesses readiness; when `#agentFlow.prReviewAutoFix#` is on, a fixing instruction is appended automatically. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`. Under `#agentFlow.forge#: gitlab` an equivalent GitLab-flavoured default is used instead, unless you have customized this setting.",
-          "default": "Jira {key} ({url}): \"{summary}\". This task has an open GitHub PR — all our PRs carry the Jira key in their title and branch. Using `gh` (or the GitHub tools available to you): find the PR for {key}, run `gh pr checkout` to bring its branch into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}"
-        },
-        "agentFlow.worktree": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "always",
-            "never"
-          ],
-          "enumDescriptions": [
-            "Ask each time",
-            "Always create a per-task git worktree/branch",
-            "Always work in the repo directly"
-          ],
-          "default": "ask",
-          "description": "Whether to isolate the task in a git worktree. Worktrees are created inside each repo at .claude/worktrees/<KEY> (git-excluded automatically)."
-        },
-        "agentFlow.childWorktrees": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "When you take a ticket that has children, offer to work them as a worktree per child (a session each) or as one orchestrator session dispatching a subagent per child. Turn it off to take such a ticket on its own, with no question asked."
-        },
-        "agentFlow.remoteControl": {
-          "type": "string",
-          "enum": [
-            "off",
-            "on",
-            "ask"
-          ],
-          "enumDescriptions": [
-            "Never offer Remote Control",
-            "Offer Remote Control for every session Agent Flow Deck launches",
-            "Ask once each time you launch"
-          ],
-          "default": "off",
-          "markdownDescription": "Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens, so you can drive it from claude.ai or the Claude mobile app. The panel is pre-filled with `/remote-control <KEY>` and your task prompt goes to the clipboard: press Enter to connect, then paste to start the task. Skipped for launches that open more than one window, because a single clipboard can't serve them. Claude Code only: under `agentFlow.agentProvider: copilot`, `on` refuses the launch and `ask` simply doesn't offer it."
-        },
-        "agentFlow.batchLaunchConfirmThreshold": {
-          "type": "number",
-          "default": 6,
-          "minimum": 1,
-          "markdownDescription": "When you launch several things at once — multi-selected tasks (with the repo filter narrowed to a single repo), or several PRs selected in the Deck's review queue — batches **larger than** this number prompt a confirmation first, naming the cost. A guard against accidentally opening a swarm of windows and sessions, one per task or PR."
-        },
-        "agentFlow.trackOpenWindows": {
-          "type": "boolean",
-          "default": true,
-          "description": "Track your open Agent Flow Deck windows so a task can be opened into a window you already have open (shown as extra choices in the \"Open the task where?\" picker)."
-        },
-        "agentFlow.prFacts": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Read each in-flight task's pull-request state from GitHub with the `gh` CLI, and show it on the Deck's cards — CI, review and mergeability. Requires `gh` on your PATH and logged in (`gh auth login`); Agent Flow Deck stores no GitHub credentials of its own. Off = the Deck's git + Jira backbone only."
-        },
-        "agentFlow.openAgents": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Show every Claude Code session open on this machine on the Deck — as sessions on the card that owns their directory, and as a card of its own for a place Agent Flow Deck never launched. Read from `~/.claude/sessions`. Off = only the tasks Agent Flow Deck launched."
-        },
-        "agentFlow.deckGrouping": {
-          "type": "string",
-          "enum": [
-            "agents",
-            "workspaces"
-          ],
-          "enumDescriptions": [
-            "One card per session, with the repo, ticket and PR it belongs to on the card",
-            "One card per launched task, with every session open in its directories nested underneath"
-          ],
-          "default": "agents",
-          "markdownDescription": "Which lens the Deck's In-flight board opens in. The board's own **Sessions / Workspaces** control writes this setting, so whichever you pick sticks."
-        },
-        "agentFlow.retireFinishedAfterHours": {
-          "type": "number",
-          "default": 24,
-          "minimum": 0,
-          "markdownDescription": "How long landed work stays on the Deck after its last session closes — every pull request merged, or the Jira issue done with no PR still open. When the window elapses the run record is deleted (never the worktree, branch, or commits). `0` retires it as soon as it lands."
-        },
-        "agentFlow.retireAbandonedAfterDays": {
-          "type": "number",
-          "default": 7,
-          "minimum": 0,
-          "markdownDescription": "How long a run with no Jira ticket, no pull request and nothing uncommitted may sit untouched before its record is deleted (never the worktree, branch, or commits). `0` disables this cleanup."
-        },
-        "agentFlow.retireClosedAfterHours": {
-          "type": "number",
-          "default": 24,
-          "minimum": 0,
-          "markdownDescription": "How long a closed run stays in the In-flight board's **Recently closed** strip — no session of its own open, no pull request, no active ticket, and nothing uncommitted or unpushed. When the window elapses the run record is deleted (never the worktree, branch, or commits). `0` retires it as soon as it closes."
-        },
-        "agentFlow.retireInPlaceAfterHours": {
-          "type": "number",
-          "default": 0,
-          "minimum": 0,
-          "markdownDescription": "How long a finished **Explore** or **Notepad** session stays on the In-flight board once you close it. These run in your checkout rather than in a worktree, so there is no branch or worktree to come back to and nothing to lose — `0` (the default) removes the card as soon as the session closes. Raise it to keep such a card around for that many hours instead. The run record is deleted when the window elapses; briefs on disk are left untouched."
-        },
-        "agentFlow.inflightShowAll": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Show **every** run record on the In-flight board, the way Agent Flow Deck did before the Recently closed strip existed — nothing is moved off the board and nothing is retired for being closed. Leave this off unless you used stale cards as a to-do list."
-        },
-        "agentFlow.notifyOnActionRequired": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Show a notification when a run enters **Action required** — a session has stopped and is waiting on you. Announced once when a run parks, in whichever window is focused at the time, and not repeated until that run is answered and parks again. The activity-bar badge tracks the count whether this is on or off."
-        },
-        "agentFlow.prFactsTtlSeconds": {
-          "type": "number",
-          "default": 120,
-          "minimum": 30,
-          "markdownDescription": "How stale a cached pull-request fact may be before the Deck re-reads it from GitHub. Only ever fetched while the Deck is open. Lower values cost more GitHub API calls; the floor is 30 seconds."
-        },
-        "agentFlow.reviewRequests": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show the Deck's review-requests strip: open GitHub PRs that ask for your review, read with the gh CLI."
-        },
-        "agentFlow.reviewRequestsAlwaysVisible": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Keep the review-requests strip visible when no PRs are waiting on your review. Set to false to hide the strip while it is empty. Only applies while the strip itself is on (`#agentFlow.reviewRequests#`)."
-        },
-        "agentFlow.reviewRequestsTtlSeconds": {
-          "type": "number",
-          "default": 300,
-          "minimum": 60,
-          "description": "How stale the cached review queue may be before the Deck re-fetches it (minimum 60). Only fetched while the Deck is open."
-        },
-        "agentFlow.reviewWrites": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Allow submitting **approve / comment / request changes** to GitHub from the Deck's review strip. Off by default — this is one of two settings that let Agent Flow Deck write to GitHub, alongside `#agentFlow.mergeWrites#`. Every submit still asks for confirmation."
-        },
-        "agentFlow.mergeWrites": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Show a **Merge** button on a Deck card when its pull request is provably ready — approved, every check green, no unresolved review threads, and mergeable cleanly. Off by default: this is the only setting that lets Agent Flow Deck merge. Every merge still asks for confirmation, and names the strategy from `#agentFlow.mergeMethod#`. A card needs exactly one pull request left to merge, with every other repo's already merged: two ready pull requests show no button, and neither does a card whose sibling repo still has one open — merging one of a coupled pair on a single click is not something this decides for you."
-        },
-        "agentFlow.mergeMethod": {
-          "type": "string",
-          "enum": [
-            "squash",
-            "merge",
-            "rebase"
-          ],
-          "default": "squash",
-          "markdownDescription": "Which strategy a card's **Merge** button uses. Named in the confirmation dialog every time, so you always see it before the merge. Under `#agentFlow.forge#: gitlab` only `squash` and `merge` can be expressed per request — GitLab's own project **Merge method** setting decides whether a merge is rebased — so `rebase` is refused with a message rather than quietly merging another way. See docs/FORGES.md."
-        },
-        "agentFlow.orchestrator": {
-          "type": "boolean",
-          "default": false,
-          "markdownDescription": "Show the **Orchestrator** on the Deck: a drawer where you wire the sessions already on your board into a flow and put a condition on each connection. Off by default — an armed flow eventually starts sessions on a timer, so nothing about it appears until you turn it on."
-        },
-        "agentFlow.reviewRequestModes": {
-          "type": "array",
-          "markdownDescription": "Seed modes offered by **Review with …** on the Deck's review strip — the button names your configured tool, so it reads `Review with Claude Code`, `Review with Cursor`, or `Review with Copilot`. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and clicking **Review with …** asks which to use, since your entry joins the built-in **Full review** rather than replacing it. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you. Under `#agentFlow.forge#: gitlab` the built-in **Full review** mode carries an equivalent GitLab-flavoured prompt, unless you have overridden that mode's `prompt` yourself.",
-          "items": {
-            "type": "object",
-            "required": [
-              "id"
+        }
+      },
+      {
+        "title": "Pull requests & reviews",
+        "order": 7,
+        "properties": {
+          "agentFlow.forge": {
+            "type": "string",
+            "enum": [
+              "github",
+              "gitlab",
+              "bitbucket"
             ],
-            "properties": {
-              "id": {
-                "type": "string",
-                "description": "Stable id (used by reviewRequestMode)."
-              },
-              "label": {
-                "type": "string",
-                "description": "Shown in the picker. Omit to keep a built-in mode's label; required when adding a mode of your own."
-              },
-              "detail": {
-                "type": "string",
-                "description": "Optional line shown under the label in the picker. Omit it and the mode shows its label only."
-              },
-              "prompt": {
-                "type": "string",
-                "description": "Template with {repo} {number} {author} {key} {summary} {url} {brief} {files}. Omit to keep a built-in mode's prompt; required when adding a mode of your own."
-              },
-              "hidden": {
-                "type": "boolean",
-                "description": "Set to true to drop this built-in mode from the picker."
-              }
-            }
+            "enumDescriptions": [
+              "GitHub, through the `gh` CLI.",
+              "GitLab, through the `glab` CLI.",
+              "Bitbucket Cloud, through the `atlassian-cli` CLI. Full support needs a build with `bb api`; without it, cards show branch CI only. Bitbucket has no review-requests queue in either case. Run Doctor to see which mode you are in."
+            ],
+            "default": "github",
+            "description": "Which forge Agent Flow Deck reads pull/merge requests, CI, and review requests from. Each forge needs its own CLI installed and signed in — run Doctor to check. Requires a window reload."
           },
-          "default": [
-            {
-              "id": "full",
-              "label": "Full review",
-              "detail": "Correctness, edge cases, tests — findings to .pick-task/REVIEW-<n>.md",
-              "prompt": "Review pull request {url} — {repo}#{number}, \"{summary}\", by {author}. Check it out with `gh pr checkout {number} --repo {repo}`, then read the full diff against its base branch. Assess correctness, edge cases, tests, and anything that would break in production. Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, each with the file and line it refers to. Do not post anything to GitHub; the human submits the review.{files}"
-            }
-          ]
-        },
-        "agentFlow.reviewRequestMode": {
-          "type": "string",
-          "default": "ask",
-          "markdownDescription": "Which review mode to seed when you click **Review with …**: `ask` to choose each time, or the `id` of one of `#agentFlow.reviewRequestModes#`. A stock install has one mode and shows no picker; add or hide modes so only one is left and the picker stays away."
-        },
-        "agentFlow.reviewOpenIn": {
-          "type": "string",
-          "enum": [
-            "new-window",
-            "ask",
-            "this-window",
-            "pick-existing"
-          ],
-          "enumDescriptions": [
-            "Always open the review in a new window on its worktree",
-            "Ask each time you click Review with …",
-            "Always start the review here, keeping this window's folders as they are",
-            "Always pick an existing .code-workspace to focus and seed"
-          ],
-          "default": "new-window",
-          "markdownDescription": "Where **Review with …** opens: a new window on the review worktree (the default, and what every release so far did), this window, a `.code-workspace` you already have, or `ask` to choose each time — the same question `#agentFlow.openIn#` asks for a task you take, kept separate because a review is a shorter errand. The review always runs in its own git worktree whichever you pick; a destination other than a new window seeds a session that is told to work in that worktree by absolute path."
-        },
-        "agentFlow.prWorkOpenIn": {
-          "type": "string",
-          "enum": [
-            "ask",
-            "its-window"
-          ],
-          "enumDescriptions": [
-            "Ask each time you click Fix CI, Resolve conflict or Address review",
-            "Always re-seed the run's own window, with no question"
-          ],
-          "default": "ask",
-          "markdownDescription": "Where a Deck card's PR work opens when you click **Fix CI**, **Resolve conflict** or **Address review**: `ask` to choose each time between the run's own window, this window, a `.code-workspace` you have, or an Agent Flow window that is already open — or `its-window` for what every release before this did, re-seeding where the run already lives without asking. A destination other than the run's own window seeds one session for the whole run and points it at the brief by absolute path.\n\nOpen windows are only offered when `#agentFlow.trackOpenWindows#` is on."
-        },
-        "agentFlow.reviewRequestPrompt": {
-          "type": "string",
-          "editPresentation": "multilineText",
-          "default": "",
-          "markdownDeprecationMessage": "Deprecated — use `agentFlow.reviewRequestModes`. If you customized this, its value is migrated into the **Full review** mode automatically.",
-          "markdownDescription": "Prompt seeded when you launch **Review with …** on a review request. Empty uses the built-in default. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`."
-        },
-        "agentFlow.stampLabelOnWrite": {
-          "type": "boolean",
-          "default": true,
-          "description": "Add the provenance label (see agentFlow.provenanceLabel) whenever this extension updates a Jira item (e.g. a status change), to mark automated changes. Also controls whether a review body drafted by the session is marked as such when you submit it to GitHub from the Deck — turning this off hides that a session, not you, wrote the words. That GitHub marker is a fixed line, not agentFlow.provenanceLabel."
-        },
-        "agentFlow.provenanceLabel": {
-          "type": "string",
-          "default": "claude-code",
-          "description": "Label stamped on Jira items this extension updates when agentFlow.stampLabelOnWrite is enabled."
-        },
-        "agentFlow.telemetry.enabled": {
-          "type": "boolean",
-          "default": true,
-          "markdownDescription": "Send anonymous usage and error events (which features are used, where flows are abandoned, what fails) to help decide what to build next. Never includes repo names, ticket keys, file paths, prompt text or error messages — see [TELEMETRY.md](https://github.com/oznasi1/agent-flow/blob/main/docs/TELEMETRY.md). VS Code's own `#telemetry.telemetryLevel#` setting is honoured regardless of this one."
+          "agentFlow.prFacts": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Read each in-flight task's pull-request state from GitHub with the `gh` CLI, and show it on the Deck's cards — CI, review and mergeability. Requires `gh` on your PATH and logged in (`gh auth login`); Agent Flow Deck stores no GitHub credentials of its own. Off = the Deck's git + Jira backbone only."
+          },
+          "agentFlow.prFactsTtlSeconds": {
+            "type": "number",
+            "default": 120,
+            "minimum": 30,
+            "markdownDescription": "How stale a cached pull-request fact may be before the Deck re-reads it from GitHub. Only ever fetched while the Deck is open. Lower values cost more GitHub API calls; the floor is 30 seconds."
+          },
+          "agentFlow.prReviewStatus": {
+            "type": "string",
+            "default": "PR initiated",
+            "description": "Task status that reveals the \"Address PR\" button on the sidebar's Tasks card (matched case-insensitively against the Jira status name). The Deck's own Address PR button is unaffected — it goes by the card's review/waiting lane instead. Either way, clicking the button kicks off a session that finds the task's GitHub PR and assesses whether it's ready for our fixes — in a fresh worktree from the sidebar's task card, or in the run's own already-open workspace from a Deck card."
+          },
+          "agentFlow.prReviewAutoFix": {
+            "type": "boolean",
+            "default": true,
+            "description": "After the PR-review session assesses the PR, let it proceed to implement the requested changes on the PR's branch. Turn off to have it only assess and report back."
+          },
+          "agentFlow.prReviewPrompt": {
+            "type": "string",
+            "editPresentation": "multilineText",
+            "markdownDescription": "Prompt seeded for the **Address PR** kick-off. The session locates the task's GitHub PR by its Jira key and assesses readiness; when `#agentFlow.prReviewAutoFix#` is on, a fixing instruction is appended automatically. Placeholders: `{key}`, `{summary}`, `{url}`, `{brief}`, `{files}`. Under `#agentFlow.forge#: gitlab` an equivalent GitLab-flavoured default is used instead, unless you have customized this setting.",
+            "default": "Jira {key} ({url}): \"{summary}\". This task has an open GitHub PR — all our PRs carry the Jira key in their title and branch. Using `gh` (or the GitHub tools available to you): find the PR for {key}, run `gh pr checkout` to bring its branch into this worktree, then assess whether it's ready for us to work on — unresolved review comments and requested changes, CI status, merge conflicts, and approval state. Summarize what you find.{files}"
+          },
+          "agentFlow.reviewRequests": {
+            "type": "boolean",
+            "default": true,
+            "description": "Show the Deck's review-requests strip: open GitHub PRs that ask for your review, read with the gh CLI."
+          },
+          "agentFlow.reviewRequestsAlwaysVisible": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Keep the review-requests strip visible when no PRs are waiting on your review. Set to false to hide the strip while it is empty. Only applies while the strip itself is on (`#agentFlow.reviewRequests#`)."
+          },
+          "agentFlow.reviewRequestsTtlSeconds": {
+            "type": "number",
+            "default": 300,
+            "minimum": 60,
+            "description": "How stale the cached review queue may be before the Deck re-fetches it (minimum 60). Only fetched while the Deck is open."
+          },
+          "agentFlow.reviewWrites": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Allow submitting **approve / comment / request changes** to GitHub from the Deck's review strip. Off by default — this is one of two settings that let Agent Flow Deck write to GitHub, alongside `#agentFlow.mergeWrites#`. Every submit still asks for confirmation."
+          },
+          "agentFlow.mergeWrites": {
+            "type": "boolean",
+            "default": false,
+            "markdownDescription": "Show a **Merge** button on a Deck card when its pull request is provably ready — approved, every check green, no unresolved review threads, and mergeable cleanly. Off by default: this is the only setting that lets Agent Flow Deck merge. Every merge still asks for confirmation, and names the strategy from `#agentFlow.mergeMethod#`. A card needs exactly one pull request left to merge, with every other repo's already merged: two ready pull requests show no button, and neither does a card whose sibling repo still has one open — merging one of a coupled pair on a single click is not something this decides for you."
+          },
+          "agentFlow.mergeMethod": {
+            "type": "string",
+            "enum": [
+              "squash",
+              "merge",
+              "rebase"
+            ],
+            "default": "squash",
+            "markdownDescription": "Which strategy a card's **Merge** button uses. Named in the confirmation dialog every time, so you always see it before the merge. Under `#agentFlow.forge#: gitlab` only `squash` and `merge` can be expressed per request — GitLab's own project **Merge method** setting decides whether a merge is rebased — so `rebase` is refused with a message rather than quietly merging another way. See docs/FORGES.md."
+          },
+          "agentFlow.reviewRequestModes": {
+            "type": "array",
+            "markdownDescription": "Seed modes offered by **Review with …** on the Deck's review strip — the button names your configured tool, so it reads `Review with Claude Code`, `Review with Cursor`, or `Review with Copilot`. Each has an `id`, `label`, `prompt` template, and an optional `detail` line shown under the label in the picker. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`. Add your own — e.g. separate backend and frontend review modes — and clicking **Review with …** asks which to use, since your entry joins the built-in **Full review** rather than replacing it. Pin one with `#agentFlow.reviewRequestMode#` to skip the question. Your entries **layer over** the built-in modes rather than replacing them: reuse a built-in `id` to override just the fields you set, use a new `id` to add a mode, and `{\"id\": \"full\", \"hidden\": true}` to drop a built-in. Modes you don't list are appended, so built-ins added in a later release still reach you. Under `#agentFlow.forge#: gitlab` the built-in **Full review** mode carries an equivalent GitLab-flavoured prompt, unless you have overridden that mode's `prompt` yourself.",
+            "items": {
+              "type": "object",
+              "required": [
+                "id"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "Stable id (used by reviewRequestMode)."
+                },
+                "label": {
+                  "type": "string",
+                  "description": "Shown in the picker. Omit to keep a built-in mode's label; required when adding a mode of your own."
+                },
+                "detail": {
+                  "type": "string",
+                  "description": "Optional line shown under the label in the picker. Omit it and the mode shows its label only."
+                },
+                "prompt": {
+                  "type": "string",
+                  "description": "Template with {repo} {number} {author} {key} {summary} {url} {brief} {files}. Omit to keep a built-in mode's prompt; required when adding a mode of your own."
+                },
+                "hidden": {
+                  "type": "boolean",
+                  "description": "Set to true to drop this built-in mode from the picker."
+                }
+              }
+            },
+            "default": [
+              {
+                "id": "full",
+                "label": "Full review",
+                "detail": "Correctness, edge cases, tests — findings to .pick-task/REVIEW-<n>.md",
+                "prompt": "Review pull request {url} — {repo}#{number}, \"{summary}\", by {author}. Check it out with `gh pr checkout {number} --repo {repo}`, then read the full diff against its base branch. Assess correctness, edge cases, tests, and anything that would break in production. Write your findings to `.pick-task/REVIEW-{number}.md` as a short prioritised list — most serious first, each with the file and line it refers to. Do not post anything to GitHub; the human submits the review.{files}"
+              }
+            ]
+          },
+          "agentFlow.reviewRequestMode": {
+            "type": "string",
+            "default": "ask",
+            "markdownDescription": "Which review mode to seed when you click **Review with …**: `ask` to choose each time, or the `id` of one of `#agentFlow.reviewRequestModes#`. A stock install has one mode and shows no picker; add or hide modes so only one is left and the picker stays away."
+          },
+          "agentFlow.reviewOpenIn": {
+            "type": "string",
+            "enum": [
+              "new-window",
+              "ask",
+              "this-window",
+              "pick-existing"
+            ],
+            "enumDescriptions": [
+              "Always open the review in a new window on its worktree",
+              "Ask each time you click Review with …",
+              "Always start the review here, keeping this window's folders as they are",
+              "Always pick an existing .code-workspace to focus and seed"
+            ],
+            "default": "new-window",
+            "markdownDescription": "Where **Review with …** opens: a new window on the review worktree (the default, and what every release so far did), this window, a `.code-workspace` you already have, or `ask` to choose each time — the same question `#agentFlow.openIn#` asks for a task you take, kept separate because a review is a shorter errand. The review always runs in its own git worktree whichever you pick; a destination other than a new window seeds a session that is told to work in that worktree by absolute path."
+          },
+          "agentFlow.prWorkOpenIn": {
+            "type": "string",
+            "enum": [
+              "ask",
+              "its-window"
+            ],
+            "enumDescriptions": [
+              "Ask each time you click Fix CI, Resolve conflict or Address review",
+              "Always re-seed the run's own window, with no question"
+            ],
+            "default": "ask",
+            "markdownDescription": "Where a Deck card's PR work opens when you click **Fix CI**, **Resolve conflict** or **Address review**: `ask` to choose each time between the run's own window, this window, a `.code-workspace` you have, or an Agent Flow window that is already open — or `its-window` for what every release before this did, re-seeding where the run already lives without asking. A destination other than the run's own window seeds one session for the whole run and points it at the brief by absolute path.\n\nOpen windows are only offered when `#agentFlow.trackOpenWindows#` is on."
+          },
+          "agentFlow.reviewRequestPrompt": {
+            "type": "string",
+            "editPresentation": "multilineText",
+            "default": "",
+            "markdownDeprecationMessage": "Deprecated — use `agentFlow.reviewRequestModes`. If you customized this, its value is migrated into the **Full review** mode automatically.",
+            "markdownDescription": "Prompt seeded when you launch **Review with …** on a review request. Empty uses the built-in default. Placeholders: `{repo}` `{number}` `{author}` `{key}` `{summary}` `{url}` `{brief}` `{files}`."
+          }
+        }
+      },
+      {
+        "title": "Telemetry",
+        "order": 8,
+        "properties": {
+          "agentFlow.telemetry.enabled": {
+            "type": "boolean",
+            "default": true,
+            "markdownDescription": "Send anonymous usage and error events (which features are used, where flows are abandoned, what fails) to help decide what to build next. Never includes repo names, ticket keys, file paths, prompt text or error messages — see [TELEMETRY.md](https://github.com/oznasi1/agent-flow/blob/main/docs/TELEMETRY.md). VS Code's own `#telemetry.telemetryLevel#` setting is honoured regardless of this one."
+          }
         }
       }
-    }
+    ]
   },
   "scripts": {
     "build": "node esbuild.js",

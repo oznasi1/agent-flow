@@ -10,6 +10,7 @@ import { STOCK_REVIEW_MODES } from "../../../src/telemetry/events";
 import { CONNECTOR_IDS } from "../../../src/tasks/registry";
 import { FORGE_IDS } from "../../../src/engine/forge/registry";
 import { setConfig } from "../../_mocks/vscode";
+import { manifestSettings } from "../../_helpers/manifest";
 import pkg from "../../../package.json";
 
 describe("settingsSnapshot", () => {
@@ -306,10 +307,7 @@ describe("package.json ⇄ settingsSnapshot enum whitelists", () => {
   // manifest option added and forgotten here would silently collapse to
   // "invalid" forever. Same pattern as config.test.ts's DEFAULT_PROMPT_MODES /
   // DEFAULT_PR_REVIEW_PROMPT parity tests.
-  const props = pkg.contributes.configuration.properties as Record<
-    string,
-    { enum?: string[]; enumDescriptions?: string[] }
-  >;
+  const props = manifestSettings<{ enum?: string[]; enumDescriptions?: string[] }>(pkg);
 
   it("keeps WORKSPACE_MODES equal to agentFlow.workspaceMode's manifest enum", () => {
     expect([...WORKSPACE_MODES]).toEqual(props["agentFlow.workspaceMode"].enum);

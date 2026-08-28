@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { CONNECTOR_IDS, resolveConnector } from "../../../src/tasks/registry";
+import { manifestSettings } from "../../_helpers/manifest";
 
 vi.mock("../../../src/config", () => ({ getConfig: () => ({ taskSource: mockSource }) }));
 let mockSource = "jira";
@@ -37,7 +38,8 @@ describe("resolveConnector", () => {
 describe("the manifest and the registry agree", () => {
   const taskSourceProp = () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, "../../../package.json"), "utf8"));
-    return pkg.contributes.configuration.properties["agentFlow.taskSource"];
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return manifestSettings<any>(pkg)["agentFlow.taskSource"];
   };
 
   it("offers exactly the registered connectors in the taskSource enum", () => {
@@ -51,7 +53,9 @@ describe("the manifest and the registry agree", () => {
     // Nothing listens for a change to this one: the connector is resolved once, at
     // activation (`resolveConnector`), so editing the setting does nothing visible
     // until the window reloads. The description is the only place a user can learn
-    // that, and without it the setting reads as broken.
-    expect(taskSourceProp().description).toMatch(/reload/i);
+    // that, and without it the setting reads as broken. Either description field
+    // counts — the Settings UI renders whichever one the manifest carries.
+    const prop = taskSourceProp();
+    expect(prop.description ?? prop.markdownDescription).toMatch(/reload/i);
   });
 });

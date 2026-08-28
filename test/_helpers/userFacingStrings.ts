@@ -116,7 +116,16 @@ export function scanManifest(root: string): Hit[] {
       hits.push({ location: `package.json#${jsonPath}`, text: text.replace(/\s+/g, " ") });
     }
   };
-  for (const [key, v] of Object.entries<any>(c.configuration?.properties ?? {})) {
+  // `configuration` may be a single section or an array of titled sections;
+  // the settings prose must be scanned in either shape.
+  const sections: any[] = Array.isArray(c.configuration)
+    ? c.configuration
+    : c.configuration
+      ? [c.configuration]
+      : [];
+  sections.forEach((s, i) => add(`configuration[${i}].title`, s.title));
+  const properties = Object.assign({}, ...sections.map((s) => s.properties ?? {}));
+  for (const [key, v] of Object.entries<any>(properties)) {
     for (const f of ["description", "markdownDescription", "deprecationMessage"]) add(`${key}.${f}`, v[f]);
     (v.enumDescriptions ?? []).forEach((d: unknown, i: number) => add(`${key}.enumDescriptions[${i}]`, d));
     (v.markdownEnumDescriptions ?? []).forEach((d: unknown, i: number) =>
