@@ -1370,6 +1370,8 @@ describe("deck telemetry", () => {
     await send({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
     const actions = trackSpy.mock.calls.flat().filter((e: any) => e.name === "deck_action").map((e: any) => e.action);
     expect(actions).toEqual(["inspect_open", "inspect_diff"]);
+    // The event carries only the action enum, never the key the message was sent with.
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
   });
 
   it("emits deck_action for refresh, clear stale, forget, and open external", async () => {
@@ -1400,8 +1402,28 @@ describe("deck telemetry", () => {
     expect(err).toBeDefined();
     expect(err.op).toBe("pr_lookup");
     expect(err.retryable).toBe(false);
-    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-");
-    expect(JSON.stringify(trackErrorSpy.mock.calls.flat())).not.toContain("PROJ-");
+  });
+
+  // Unlike the case above, `deck:refresh` carries no key — so a leak check against it
+  // is true no matter what the emit does, and would not catch a real regression. Force
+  // the failure on a message that DOES carry a real key (`deck:forget`, key "PROJ-1"),
+  // by making the engine call that case makes first (`removeRun`) throw, and check the
+  // key never reaches either spy's serialized calls.
+  it("never leaks the message's key into operation_failed or any deck_action, even when the failing handler was given one", async () => {
+    const { send } = await openPanel();
+    h.removeRun.mockImplementationOnce(() => {
+      throw new Error("boom");
+    });
+    trackSpy.mockClear();
+    trackErrorSpy.mockClear();
+    await send({ type: "deck:forget", key: "PROJ-1" });
+    const err = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(err).toBeDefined();
+    // "deck:forget" is absent from DECK_MESSAGE_OPS, so it falls back to the default op.
+    expect(err.op).toBe("workspace_write");
+    expect(err.retryable).toBe(false);
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+    expect(JSON.stringify(trackErrorSpy.mock.calls.flat())).not.toContain("PROJ-1");
   });
 
   it("does not report operation_failed for a message absent from the op map, falling back to workspace_write", async () => {
