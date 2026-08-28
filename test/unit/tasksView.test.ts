@@ -2710,6 +2710,10 @@ describe("Take funnel", () => {
     expect(started.task_fp).toMatch(/^[0-9a-f]{16}$/);
     expect(done.outcome).toBe("launched");
     expect(done.duration_ms).toBeGreaterThanOrEqual(0);
+    // inferred_count on take_started was Phase 1's fidelity bug (follow-ups doc,
+    // item 2): inference hasn't run yet at that point, and hard-coding it to 0
+    // silently corrupted any chart grouping by that name across the funnel.
+    expect("inferred_count" in started).toBe(false);
   });
 
   it("never sends a ticket key or repo name", async () => {
@@ -2727,6 +2731,9 @@ describe("Take funnel", () => {
     const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
     expect(names).toEqual(["take_started", "take_completed"]);
     expect((trackSpy.mock.calls.flat().at(-1) as any).outcome).toBe("cancelled");
+    // prompt_mode must be ABSENT when the Take was cancelled before a mode was chosen —
+    // "custom" here was Phase 1's fidelity bug (follow-ups doc, item 3).
+    expect("prompt_mode" in (trackSpy.mock.calls.flat().at(-1) as any)).toBe(false);
   });
 
   it("reports cancelled with only the step events already fired when resolveKickoff aborts partway (repo QuickPick cancelled)", async () => {
@@ -3073,9 +3080,10 @@ describe("Take funnel", () => {
     await expect(provider.takeTask("BILL-1234", "command")).rejects.toThrow();
     const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
     expect(done.outcome).toBe("failed");
-    // JiraApiError carries `status`, not a `code` classifyFailure knows, so a 404
-    // lands in the catch-all class. The terminator firing at all is the point here.
-    expect(done.failure_class).toBe("unknown");
+    // JiraApiError carries a numeric `.status`, which classifyFailure now reads
+    // arms-length alongside `.code` (follow-ups doc, item 1) — a 404 classifies
+    // as not_found rather than falling into the catch-all class.
+    expect(done.failure_class).toBe("not_found");
   });
 
   it("reports take_repos_picked and take_completed with the real repo_count", async () => {

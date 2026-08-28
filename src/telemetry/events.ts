@@ -53,10 +53,13 @@ export type FailureClass =
 export function classifyFailure(e: unknown): FailureClass {
   const name = e instanceof Error ? e.name : "";
   const code = (e as { code?: string } | null)?.code ?? "";
-  if (name === "TaskAuthError" || name === "JiraAuthError" || code === "401" || code === "403") return "auth";
+  // JiraApiError carries a numeric `.status` (src/tasks/jira/errors.ts) — read it the
+  // same arms-length way as `.code`, never the message.
+  const status = (e as { status?: number } | null)?.status;
+  if (name === "TaskAuthError" || name === "JiraAuthError" || status === 401 || status === 403) return "auth";
   if (name === "AbortError" || code === "ETIMEDOUT") return "timeout";
   if (code === "ENOTFOUND" || code === "ECONNREFUSED" || code === "ENETUNREACH") return "network";
-  if (code === "ENOENT") return "not_found";
+  if (code === "ENOENT" || status === 404) return "not_found";
   if (code === "EACCES" || code === "EPERM") return "permission";
   if (name === "SyntaxError") return "parse";
   return "unknown";
@@ -187,7 +190,7 @@ export type UsageEvent =
   | { name: "extension_installed" }
   | ({ name: "extension_activated"; is_first_ever: boolean; has_jira_auth: boolean; is_configured: boolean } & SettingsSnapshot)
   | { name: "command_invoked"; command: CommandId }
-  | { name: "take_started"; flow_id: string; source: TakeSource; task_fp: string; inferred_count: number }
+  | { name: "take_started"; flow_id: string; source: TakeSource; task_fp: string }
   | { name: "take_prompt_mode_picked"; flow_id: string; prompt_mode: PromptModeProp; is_custom_mode: boolean }
   | { name: "take_destination_picked"; flow_id: string; destination: DestinationProp; workspace_mode: WorkspaceModeProp }
   // `accepted_inference` is optional: it's only meaningful in the "quickpick"
@@ -202,7 +205,11 @@ export type UsageEvent =
   // answered (cancelled at the prompt-mode or destination step, or a Jira failure
   // in between), and omitting it there keeps "no decision was made" distinct from
   // a genuine "no worktree".
-  | { name: "take_completed"; flow_id: string; outcome: Outcome; destination?: DestinationProp; prompt_mode: PromptModeProp; repo_count: number; duration_ms: number; used_worktree?: boolean; failure_class?: FailureClass; task_fp: string };
+  // `prompt_mode` is optional: it's only known once the prompt-mode picker has been
+  // answered, and omitting it for a Take cancelled before then keeps a genuine
+  // "custom" distinguishable from "no mode was ever chosen" — the latter is not a
+  // vote for "custom" (Phase 1's fidelity bug, follow-ups doc, item 3).
+  | { name: "take_completed"; flow_id: string; outcome: Outcome; destination?: DestinationProp; prompt_mode?: PromptModeProp; repo_count: number; duration_ms: number; used_worktree?: boolean; failure_class?: FailureClass; task_fp: string };
 
 /** Sent via logError — still delivered at telemetry level "error". */
 export type ErrorEvent =

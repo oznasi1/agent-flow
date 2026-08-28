@@ -2153,14 +2153,18 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const taskFp = fingerprint(key);
     let destination: DestinationProp | undefined;
     let repoCount = 0;
-    let promptModeProp: PromptModeProp = "custom";
+    // Stays undefined for a Take that ends before the prompt-mode picker is
+    // answered, so take_completed omits the property rather than reporting a
+    // decision nobody made — "custom" here was Phase 1's fidelity bug (follow-ups
+    // doc, item 3).
+    let promptModeProp: PromptModeProp | undefined;
     // Set only once launch() has settled the worktree question; stays undefined for
     // a Take that ends before then, so take_completed omits the property rather
     // than reporting a decision nobody made.
     let usedWorktree: boolean | undefined;
     const worktreeProp = () => (usedWorktree === undefined ? {} : { used_worktree: usedWorktree });
 
-    track({ name: "take_started", flow_id: flow.id, source, task_fp: taskFp, inferred_count: 0 });
+    track({ name: "take_started", flow_id: flow.id, source, task_fp: taskFp });
 
     // Everything after take_started runs inside this try, so the funnel always gets
     // its terminator: a Jira read failing inside resolveKickoff is a *failure*, and
@@ -2170,7 +2174,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       // How should the session start — pick a prompt mode (or use the configured default) FIRST.
       const promptMode = await this.choosePromptMode(cfg, `${key} — how should the session start?`);
       if (!promptMode) {
-        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", prompt_mode: promptModeProp, repo_count: 0, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", ...(promptModeProp !== undefined ? { prompt_mode: promptModeProp } : {}), repo_count: 0, duration_ms: flow.elapsedMs(), task_fp: taskFp });
         return;
       }
       promptModeProp = toPromptModeProp(promptMode.id);
@@ -2178,7 +2182,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
 
       const resolved = await this.resolveKickoff(key, preselected, flow);
       if (!resolved) {
-        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
+        track({ name: "take_completed", flow_id: flow.id, outcome: "cancelled", destination, ...(promptModeProp !== undefined ? { prompt_mode: promptModeProp } : {}), repo_count: repoCount, duration_ms: flow.elapsedMs(), task_fp: taskFp });
         return;
       }
       const { detail, services, target } = resolved;
@@ -2190,9 +2194,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
       const launched = await this.launch(detail, services, promptMode.prompt, false, target, (used) => {
         usedWorktree = used;
       });
-      track({ name: "take_completed", flow_id: flow.id, outcome: launched ? "launched" : "cancelled", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), task_fp: taskFp });
+      track({ name: "take_completed", flow_id: flow.id, outcome: launched ? "launched" : "cancelled", destination, ...(promptModeProp !== undefined ? { prompt_mode: promptModeProp } : {}), repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), task_fp: taskFp });
     } catch (e) {
-      track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, prompt_mode: promptModeProp, repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), failure_class: classifyFailure(e), task_fp: taskFp });
+      track({ name: "take_completed", flow_id: flow.id, outcome: "failed", destination, ...(promptModeProp !== undefined ? { prompt_mode: promptModeProp } : {}), repo_count: repoCount, duration_ms: flow.elapsedMs(), ...worktreeProp(), failure_class: classifyFailure(e), task_fp: taskFp });
       throw e; // onMessage's existing catch (tasksView.ts:255) still owns the user-facing handling.
     }
   }

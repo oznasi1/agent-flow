@@ -35,7 +35,7 @@ const SAMPLES = [
     review_modes_overridden: 0, review_modes_custom: 0, review_modes_hidden: 0,
   },
   { name: "command_invoked", command: "openDeck" },
-  { name: "take_started", flow_id: "f1", source: "card", task_fp: "0123456789abcdef", inferred_count: 2 },
+  { name: "take_started", flow_id: "f1", source: "card", task_fp: "0123456789abcdef" },
   { name: "take_prompt_mode_picked", flow_id: "f1", prompt_mode: "tdd", is_custom_mode: false },
   { name: "take_destination_picked", flow_id: "f1", destination: "new", workspace_mode: "multiroot" },
   { name: "take_repos_picked", flow_id: "f1", repo_count: 3, repo_source: "quickpick", accepted_inference: true, inferred_count: 2 },
@@ -127,9 +127,17 @@ describe("classifyFailure", () => {
     expect(classifyFailure(jiraAuth)).toBe("auth");
   });
 
-  it("classifies auth by well-known 401/403 codes", () => {
-    expect(classifyFailure({ code: "401" })).toBe("auth");
-    expect(classifyFailure({ code: "403" })).toBe("auth");
+  it("classifies auth by numeric 401/403 status (JiraApiError shape)", () => {
+    expect(classifyFailure({ status: 401 })).toBe("auth");
+    expect(classifyFailure({ status: 403 })).toBe("auth");
+  });
+
+  it("classifies not_found by numeric 404 status", () => {
+    expect(classifyFailure({ status: 404 })).toBe("not_found");
+  });
+
+  it("ignores other statuses", () => {
+    expect(classifyFailure({ status: 500 })).toBe("unknown");
   });
 
   it("classifies timeout by AbortError name or ETIMEDOUT code", () => {

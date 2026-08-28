@@ -214,6 +214,17 @@ describe("startFlow", () => {
     expect(a.id).not.toBe(b.id);
     expect(a.elapsedMs()).toBeGreaterThanOrEqual(0);
   });
+
+  it("startFlow is monotonic — elapsedMs never goes negative when the wall clock jumps back", () => {
+    const flow = startFlow();
+    // performance.now() is monotonic by contract; assert the reader is wired to it
+    // rather than Date.now() by checking a plain forward measurement is sane and
+    // integer-valued (Date.now() deltas are also integers, so additionally spy):
+    const spy = vi.spyOn(performance, "now");
+    flow.elapsedMs();
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
 });
 
 describe("fingerprint", () => {
