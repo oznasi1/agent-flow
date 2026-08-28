@@ -394,7 +394,7 @@ export const CSS = `
      two can never drift apart the way a second hardcoded literal would. */
   .np-item { position: relative; display: grid; grid-template-columns: 1fr max-content;
     grid-template-rows: max-content max-content 1fr; column-gap: 10px;
-    padding: 8px 2px 9px 11px; border-bottom: 1px solid var(--hair); --grip-w: 14px; }
+    padding: 8px 2px 9px 11px; border-bottom: 1px solid var(--hair); --grip-w: 14px; --np-body-lines: 4; }
   .np-item::before { content: ""; position: absolute; left: 0; top: 8px; bottom: 9px; width: 2px;
     border-radius: 1px; background: var(--rail, transparent); }
   .np-item.r-running { --rail: var(--c-progress); }
@@ -414,8 +414,19 @@ export const CSS = `
      before the grip existed. The grip now sits ahead of the checkbox, pushing
      the title right by its own width plus another gap; the body must move with
      it by that same amount, read from --grip-w rather than re-measured by hand. */
+  /* Clamped to --np-body-lines by default: a long note must not push every other
+     note off the panel. The line box is what gets counted, so a wrapped paragraph
+     and four hard newlines clamp identically. -webkit-box is the only display that
+     honours line-clamp; the expanded state has to put display back to block or the
+     box layout outlives the clamp it was there for. */
   .np-body { grid-column: 1; margin: 3px 0 0 calc(var(--grip-w) + 7px + 20px); font-size: var(--t-body); color: var(--dim);
-    white-space: pre-wrap; overflow-wrap: anywhere; }
+    white-space: pre-wrap; overflow-wrap: anywhere;
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--np-body-lines); overflow: hidden; }
+  .np-body.expanded { display: block; overflow: visible; }
+  /* Sits on the body's own left offset, and only renders when the clamp is really
+     hiding something — see the comment at its call site. */
+  .np-body-more { grid-column: 1; justify-self: start; margin-left: calc(var(--grip-w) + 7px + 20px);
+    padding: 1px 0; font-size: var(--t-micro); }
   /* Attachments sit under the title on the body's own left offset, not under the
      grip — same calc, for the same reason. A fixed height with cover cropping keeps
      the row even: screenshots are usually wide, and honouring each one's aspect

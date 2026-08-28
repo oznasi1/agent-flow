@@ -534,13 +534,29 @@ describe("notepad note text", () => {
     expect(body!.body).toMatch(/overflow-wrap:\s*anywhere/);
   });
 
-  // The note is the user's own text: it wraps to as many lines as it needs, and
-  // nothing is ever cut. Truncating would hide what they wrote with no way to read
-  // it in place.
-  it("never truncates or clamps the text it wraps", () => {
-    const noteRules = ruleBlocks(CSS).filter((r) => /\.np-(title|body)\b/.test(r.selector));
-    expect(noteRules.length).toBeGreaterThan(0);
-    expect(noteRules.filter((r) => /text-overflow|line-clamp/.test(r.body))).toEqual([]);
+  // The title is the note's identity in a scanned list — it wraps to as many lines
+  // as it needs and is never cut, because a clamped title cannot be recovered
+  // without a control on the title itself, which this row has no room for.
+  it("never truncates or clamps the title", () => {
+    const titleRules = ruleBlocks(CSS).filter((r) => /\.np-title\b/.test(r.selector));
+    expect(titleRules.length).toBeGreaterThan(0);
+    expect(titleRules.filter((r) => /text-overflow|line-clamp/.test(r.body))).toEqual([]);
+  });
+
+  // The body may be clamped — a long note must not push every other note off the
+  // panel — but the original rule this replaces was there to stop the user's own
+  // text being hidden with no way to read it in place. That is still the invariant:
+  // whatever the clamp cuts, an expanded state has to put back. Losing the .expanded
+  // rule while keeping the clamp is the regression being guarded against.
+  it("pairs any clamp on the body with a state that undoes it", () => {
+    const body = ruleBlocks(CSS).find((r) => r.selector === ".np-body");
+    expect(body).toBeDefined();
+    if (!/line-clamp|text-overflow/.test(body!.body)) return;
+    const expanded = ruleBlocks(CSS).find((r) => r.selector === ".np-body.expanded");
+    expect(expanded, "a clamped .np-body needs an .np-body.expanded rule to undo it").toBeDefined();
+    // -webkit-box is the display the clamp rides on; only putting the display back
+    // actually lifts it, so asserting the rule merely exists would not be enough.
+    expect(expanded!.body).toMatch(/display:\s*block/);
   });
 });
 
