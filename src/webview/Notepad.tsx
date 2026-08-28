@@ -718,7 +718,7 @@ function NoteRow({ note, sections, editing, onEdit, onDone, dnd }: {
               does not do. */}
           {clipped && (
             <button
-              className="quiet dim np-body-more"
+              className="np-body-more"
               aria-expanded={expanded}
               onClick={() => setExpanded((e) => !e)}
             >

@@ -424,9 +424,14 @@ export const CSS = `
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: var(--np-body-lines); overflow: hidden; }
   .np-body.expanded { display: block; overflow: visible; }
   /* Sits on the body's own left offset, and only renders when the clamp is really
-     hiding something — see the comment at its call site. */
-  .np-body-more { grid-column: 1; justify-self: start; margin-left: calc(var(--grip-w) + 7px + 20px);
-    padding: 1px 0; font-size: var(--t-micro); }
+     hiding something — see the comment at its call site. Deliberately NOT .quiet:
+     that is a 24px bordered control for a row of actions, and a bordered chip
+     under a paragraph reads as a third button competing with Start. This is the
+     continuation of the text above it, so it is text. */
+  .np-body-more { grid-column: 1; justify-self: start; margin: 1px 0 0 calc(var(--grip-w) + 7px + 20px);
+    padding: 0; border: none; background: none; cursor: pointer;
+    font-family: var(--vscode-font-family); font-size: var(--t-micro); color: var(--dim); }
+  .np-body-more:hover { color: var(--vscode-foreground); text-decoration: underline; }
   /* Attachments sit under the title on the body's own left offset, not under the
      grip — same calc, for the same reason. A fixed height with cover cropping keeps
      the row even: screenshots are usually wide, and honouring each one's aspect
