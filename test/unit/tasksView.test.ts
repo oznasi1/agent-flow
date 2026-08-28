@@ -7349,6 +7349,54 @@ describe("takeTask — palette (command) failure surfacing", () => {
   });
 });
 
+describe("no repos found — first-run path", () => {
+  // discoverRepos → [] is the first-run state (agentFlow.reposRoot unset or
+  // pointing nowhere). Every launch entry point must stop with the actionable
+  // toast and open nothing.
+  const NO_REPOS_TOAST = "No repos found under /repos. Check agentFlow.reposRoot.";
+
+  it("explore stops with the reposRoot toast and opens nothing", async () => {
+    vi.mocked(discoverRepos).mockReturnValue([]);
+    const { send, messages } = setup();
+    await send({ type: "explore" });
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: NO_REPOS_TOAST }),
+    );
+    expect(vi.mocked(openWorkspace)).not.toHaveBeenCalled();
+    // It stops before any picker — the action QuickPick never shows.
+    expect(vi.mocked(window.showQuickPick)).not.toHaveBeenCalled();
+  });
+
+  it("notepad:run stops with the reposRoot toast and opens nothing", async () => {
+    vi.mocked(discoverRepos).mockReturnValue([]);
+    const { send, messages, globalState } = setup();
+    globalState.store.set("agentFlow.notepad", [{ id: "n1", title: "t", body: "", done: false, createdAt: 1 }]);
+    await send({ type: "notepad:run", id: "n1" });
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: NO_REPOS_TOAST }),
+    );
+    expect(vi.mocked(openWorkspace)).not.toHaveBeenCalled();
+    // The note keeps no pointer to a run that was never created.
+    const notes = globalState.store.get("agentFlow.notepad") as { lastRunKey?: string }[];
+    expect(notes[0].lastRunKey).toBeUndefined();
+  });
+
+  it("take stops with the reposRoot toast, opens nothing, and reports the funnel outcome as cancelled", async () => {
+    vi.mocked(discoverRepos).mockReturnValue([]);
+    const { send, messages } = setup();
+    await send({ type: "take", key: "BILL-1234", services: ["acme-billing"] });
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "toast", level: "error", message: NO_REPOS_TOAST }),
+    );
+    expect(vi.mocked(openWorkspace)).not.toHaveBeenCalled();
+    // resolveKickoff answering undefined reports as a cancellation, not a failure —
+    // pinning what the code actually tracks today.
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "take_completed") as any;
+    expect(done).toBeDefined();
+    expect(done.outcome).toBe("cancelled");
+  });
+});
+
 describe("removeFromSprint — failed Undo", () => {
   it("says the undo failed and refetches when the sprint re-add write rejects", async () => {
     // The remove itself succeeded — the ticket really is out of the sprint. A
