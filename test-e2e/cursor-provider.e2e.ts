@@ -10,11 +10,11 @@ let app: ElectronApplication | undefined;
 // NOT coverage of the real Cursor path. `isCursorHost()` (src/config.ts:169-171)
 // gates `agentProvider: "cursor"` behind `vscode.env.uriScheme === "cursor"`, and
 // this lane's Task 1 CDP spike already proved a real Cursor host is unautomatable
-// here (workbench unreachable through the CDP target it hands back). There is no
-// host anywhere in this lane that can make `isCursorHost()` true, so the actual
-// `cursor-agent` launch has never run under test and remains UNVERIFIED IN ANY
-// EDITOR since it shipped in 0.33.0. A future reader must not assume this file
-// closes that gap.
+// here (workbench unreachable through the CDP target it hands back). The
+// `cursor-agent` launch itself is covered by cursor-host.e2e.ts, which impersonates
+// the scheme by patching a stock install's product.json rather than automating the
+// real app; what has run under test is still that impersonation, so the real
+// editor's own behavior stays hand-verification territory.
 //
 // What this file DOES pin: `readAgentProviderSetting` (src/config.ts:198-206)
 // documents that a `cursor`/`copilot` value read on the wrong host "degrades ...

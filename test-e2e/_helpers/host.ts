@@ -1,5 +1,7 @@
 import { _electron, type ElectronApplication, type FrameLocator, type Page } from "@playwright/test";
 import { downloadAndUnzipVSCode } from "@vscode/test-electron";
+import { execFileSync } from "child_process";
+import * as fs from "fs";
 import * as path from "path";
 import type { Sandbox } from "./sandbox";
 
@@ -7,8 +9,48 @@ import type { Sandbox } from "./sandbox";
  *  .vscode-test/ after the first download. Bump deliberately, never float. */
 export const VSCODE_VERSION = "1.96.2";
 
-export async function launchHost(sb: Sandbox): Promise<{ app: ElectronApplication; page: Page }> {
-  const executablePath = await downloadAndUnzipVSCode(VSCODE_VERSION);
+/** A copy of the pinned install whose product.json says `urlProtocol: "cursor"` —
+ *  which is exactly what `vscode.env.uriScheme` reports, and all `isCursorHost()`
+ *  (src/config.ts) reads. The REAL Cursor app is unautomatable here (its CDP target
+ *  never reaches the workbench — see cursor-provider.e2e.ts), but the host gate
+ *  doesn't need Cursor, only Cursor's uri scheme, and stock VS Code takes the patch:
+ *  ad-hoc re-signed on macOS (a modified bundle won't launch under arm64's signature
+ *  requirement otherwise; linux has no such check). Prepared once beside the stock
+ *  install and reused — a marker file says the copy is complete, because a killed
+ *  first run would otherwise leave a half-copied app that boots flakily. */
+export async function cursorHostExecutable(): Promise<string> {
+  const stockExe = await downloadAndUnzipVSCode(VSCODE_VERSION);
+  const testDir = path.dirname(stockExe).split(`${path.sep}.vscode-test${path.sep}`)[0] + `${path.sep}.vscode-test`;
+  const stockRoot = path.join(testDir, `vscode-${process.platform === "darwin" ? `darwin-${process.arch}` : `linux-${process.arch === "arm64" ? "arm64" : "x64"}`}-${VSCODE_VERSION}`);
+  const patchedRoot = path.join(testDir, `cursor-host-${VSCODE_VERSION}`);
+  const marker = path.join(patchedRoot, "is-cursor-patched");
+  const patchedExe = stockExe.replace(stockRoot, patchedRoot);
+
+  if (!fs.existsSync(marker)) {
+    fs.rmSync(patchedRoot, { recursive: true, force: true });
+    // `cp -Rc` on macOS APFS-clones the 400MB bundle (instant, no extra space) and
+    // preserves the framework symlinks a plain file walk can mangle; -R alone does
+    // the same preserving on linux.
+    execFileSync("cp", [process.platform === "darwin" ? "-Rc" : "-R", stockRoot, patchedRoot]);
+    const productJson =
+      process.platform === "darwin"
+        ? path.join(path.dirname(patchedExe), "..", "Resources", "app", "product.json")
+        : path.join(path.dirname(patchedExe), "resources", "app", "product.json");
+    const product = JSON.parse(fs.readFileSync(productJson, "utf8"));
+    if (product.urlProtocol !== "vscode") throw new Error(`expected stock urlProtocol "vscode", got ${product.urlProtocol}`);
+    product.urlProtocol = "cursor";
+    fs.writeFileSync(productJson, JSON.stringify(product, null, "\t"));
+    if (process.platform === "darwin") {
+      const appBundle = patchedExe.split(`${path.sep}Contents${path.sep}`)[0];
+      execFileSync("codesign", ["--force", "--deep", "-s", "-", appBundle], { stdio: "ignore" });
+    }
+    fs.writeFileSync(marker, "");
+  }
+  return patchedExe;
+}
+
+export async function launchHost(sb: Sandbox, opts: { host?: "vscode" | "cursor" } = {}): Promise<{ app: ElectronApplication; page: Page }> {
+  const executablePath = opts.host === "cursor" ? await cursorHostExecutable() : await downloadAndUnzipVSCode(VSCODE_VERSION);
   const app = await _electron.launch({
     executablePath,
     args: [
