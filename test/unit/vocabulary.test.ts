@@ -118,6 +118,11 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "the explore_completed cancel_point wire value for the agent-picker step, not copy" },
   { location: "src/webview/MarketplaceApp.tsx", text: "agent",
     why: "the AssetType wire value for a subagent" },
+  // Task 8: marketplace_opened's `agents` count groups view.assets by this same
+  // released AssetType wire value — same class of hit as the claudeAssets.ts and
+  // MarketplaceApp.tsx entries above, just read from the telemetry counter.
+  { location: "src/marketplaceView.ts", text: "agent",
+    why: "the AssetType wire value for a subagent, compared in countsOf's marketplace_opened counter" },
   { location: "src/webview/MarketplaceApp.tsx", text: "Agents",
     why: "the Marketplace tab listing subagents — the one correct use of the word" },
   { location: "src/webview/MarketplaceApp.tsx", text: "Search skills, commands, agents, hooks…",
