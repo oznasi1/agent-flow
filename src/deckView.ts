@@ -3470,6 +3470,22 @@ export class DeckPanel {
     if (e.affectsConfiguration("agentFlow.deckGrouping")) {
       this.post({ type: "deck:grouping", grouping: cfg.deckGrouping });
     }
+    // The usage sweep's timer was only ever armed in startPolling, so flipping
+    // the total on mid-session showed a confident $0 until the next reload —
+    // and flipping it off left a 60s transcript-parsing timer running for a
+    // figure nothing on screen shows any more. Armed only while the board's own
+    // poll is running (`this.timer`), exactly as startPolling would: a hidden
+    // panel picks the setting up on its next visibility change instead.
+    if (e.affectsConfiguration("agentFlow.deck.showTokenTotal")) {
+      if (cfg.showTokenTotal && this.timer && !this.usageTimer) {
+        // The same eager-sweep-then-cadence shape startPolling arms.
+        void Promise.resolve().then(() => this.sweepUsage(this.sweepTargets()));
+        this.usageTimer = setInterval(() => this.sweepUsage(this.sweepTargets()), USAGE_POLL_MS);
+      } else if (!cfg.showTokenTotal && this.usageTimer) {
+        clearInterval(this.usageTimer);
+        this.usageTimer = undefined;
+      }
+    }
     if (touched) await this.refreshBusy();
   }
 

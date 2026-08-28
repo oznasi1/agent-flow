@@ -10331,3 +10331,46 @@ describe("hardening — Clear stale re-entrancy and failure", () => {
     }));
   });
 });
+
+describe("hardening — flipping the token total mid-session", () => {
+  // Fake timers for the same reason "the poll and the close confirmation"
+  // above uses them: the usage cadence never fires under real timers within a
+  // test's lifetime. Same settle shape, too.
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const settle = async (ms = 0) => {
+    await vi.advanceTimersByTimeAsync(ms);
+  };
+
+  it("arms the usage sweep when the setting turns on, without a reload", async () => {
+    // The sweep timer was only ever armed in startPolling, so flipping the
+    // setting on mid-session showed a confident $0 forever.
+    h.showTokenTotal = false;
+    show();
+    await settle();
+    h.usageReadRun.mockClear();
+    h.showTokenTotal = true;
+    fireConfigurationChanged("agentFlow.deck.showTokenTotal");
+    await settle();
+    expect(h.usageReadRun).toHaveBeenCalled(); // the eager sweep, exactly as startPolling's
+    h.usageReadRun.mockClear();
+    await settle(USAGE_POLL_MS + 1);
+    expect(h.usageReadRun).toHaveBeenCalled(); // and the cadence behind it
+  });
+
+  it("clears the sweep timer when the setting turns off, instead of leaking it", async () => {
+    h.showTokenTotal = true;
+    show();
+    await settle();
+    h.showTokenTotal = false;
+    fireConfigurationChanged("agentFlow.deck.showTokenTotal");
+    await settle();
+    h.usageReadRun.mockClear();
+    await settle(USAGE_POLL_MS * 2 + 1);
+    expect(h.usageReadRun).not.toHaveBeenCalled();
+  });
+});
