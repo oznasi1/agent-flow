@@ -420,6 +420,12 @@ export class DeckPanel {
    * would start two paid review sessions — and `reviewRunKey` is deterministic,
    * so the second `writeRun` silently orphans the first launch's worktree. */
   private readonly reviewLaunchesInFlight = new Set<string>();
+  /** Run keys with a `seedPrWork` in flight — same shape, same reason, as
+   * `reviewSubmitsInFlight` above: `onMessage` dispatches fire-and-forget, and
+   * the destination picker can sit open for as long as the user thinks. A
+   * second click would queue a second picker behind it and, once both are
+   * answered, write the plan file twice and seed the same window twice. */
+  private readonly prWorkSeedsInFlight = new Set<string>();
   private forgeProbe: Promise<ForgeGap | null> | null = null;
   /** undefined until the probe resolves; null means the forge is usable, and a
    * gap disables PR facts with a footer note. */
@@ -4066,6 +4072,22 @@ export class DeckPanel {
    * `open -a`, which focuses an existing window rather than opening a second one.
    */
   private async seedPrWork(key: string, reason: PrWorkReason, detail?: string): Promise<void> {
+    // Deliberately silent, exactly as submitReview's own guard is: this gate is
+    // only reachable while a genuine seed for this same key is still in flight
+    // — parked on the destination picker, routinely — and that seed, not this
+    // rejected duplicate, owns whatever toast the click ends in.
+    if (this.prWorkSeedsInFlight.has(key)) return;
+    this.prWorkSeedsInFlight.add(key);
+    try {
+      await this.seedPrWorkHeld(key, reason, detail);
+    } finally {
+      this.prWorkSeedsInFlight.delete(key);
+    }
+  }
+
+  /** The body of one card's PR-work seed, with its key held in
+   * `prWorkSeedsInFlight` by the caller above. */
+  private async seedPrWorkHeld(key: string, reason: PrWorkReason, detail?: string): Promise<void> {
     const run = this.run(key);
     if (!run) {
       this.toast("error", `No run record for ${key}.`);

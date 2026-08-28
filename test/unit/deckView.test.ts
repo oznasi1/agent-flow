@@ -10176,3 +10176,37 @@ describe("hardening — review launch double-click", () => {
     expect(h.launchReview).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("hardening — PR-work double-seed", () => {
+  it("seeds once for a double click across the destination picker", async () => {
+    // The shipped default (prWorkOpenIn: "ask") parks seedPrWork on a picker,
+    // which is exactly where a second click lands: without a guard it queues a
+    // second picker and, once both are answered, writes the plan file twice and
+    // seeds the same window twice.
+    h.runs = [mkRun()];
+    const picks: ((v: unknown) => void)[] = [];
+    window.showQuickPick.mockImplementation(() => new Promise((res) => picks.push(res)));
+    show();
+    const p = lastPanel();
+    const first = p._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
+    const second = p._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
+    await settled();
+    // One destination question on screen, not a queued duplicate behind it.
+    expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    picks.forEach((r) => r({ target: { kind: "stay" } }));
+    await Promise.all([first, second]);
+    expect(h.writePlanFile).toHaveBeenCalledTimes(1);
+  });
+
+  it("still seeds a second time once the first is done", async () => {
+    // The guard is about overlap, not about once-per-session: a deliberate
+    // second Address PR after the first finished must keep working.
+    h.runs = [mkRun()];
+    window.showQuickPick.mockResolvedValue({ target: { kind: "stay" } });
+    show();
+    const p = lastPanel();
+    await p._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
+    await p._fire({ type: "deck:seedPrWork", key: "PROJ-1", reason: "conflict" });
+    expect(h.writePlanFile).toHaveBeenCalledTimes(2);
+  });
+});
