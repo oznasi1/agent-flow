@@ -3737,6 +3737,20 @@ describe("DeckPanel review launch", () => {
     expect(h.openSharedWorkspace).not.toHaveBeenCalled();
   });
 
+  it("reports mode_was_pinned:true when the cost confirm is declined for a genuinely pinned mode", async () => {
+    // resolveReviewMode(modes, cfg.reviewRequestMode) is a pure function of config —
+    // whether it finds a pin has nothing to do with whether the cost-confirm dialog
+    // even ran. A pinned mode declined here must still report true, not the "nothing
+    // was resolved yet" false the mode/destination pickers' own dismissals report.
+    setConfig({ batchLaunchConfirmThreshold: 1, reviewRequestMode: "full" });
+    twoQueued();
+    const p = await showAndWarm();
+    window.showWarningMessage.mockResolvedValueOnce(undefined); // refused
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({ outcome: "cancelled", mode_was_pinned: true, batch: true, requested_count: 2 });
+  });
+
   it("does not confirm a batch at or below the threshold", async () => {
     twoQueued();
     shareThisWindow();

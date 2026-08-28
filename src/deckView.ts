@@ -2465,6 +2465,16 @@ export class DeckPanel {
     const requests = ids.map((id) => this.reviewById(id)).filter((r): r is ReviewRequest => !!r);
     if (!requests.length) return; // the queue moved on before the click landed
 
+    // `modes`/`pinnedMode`/`modeWasPinned` are hoisted above the cost-confirm gate — same
+    // reason `launchReviewFor` hoists its own `pinnedMode` above its first gate: whether
+    // `resolveReviewMode` finds a pin is a pure function of config, entirely independent of
+    // whatever dialog is about to run. A user with a genuinely pinned mode can still decline
+    // the cost-confirm on a large batch, and `mode_was_pinned` on that event must say `true`
+    // — it was never "not reached yet", only "not yet needed to pick a mode".
+    const modes = batchReviewModes(cfg.reviewRequestModes, cfg.forge);
+    const pinnedMode = resolveReviewMode(modes, cfg.reviewRequestMode);
+    const modeWasPinned = pinnedMode !== null;
+
     // 1 — the cost. The mode is not known yet, so this names sessions (always true)
     //     rather than worktrees (mode-dependent).
     if (requests.length > cfg.batchLaunchConfirmThreshold) {
@@ -2474,12 +2484,12 @@ export class DeckPanel {
         "Review",
       );
       if (go !== "Review") {
-        // No PromptMode is resolved yet at this point, so — same as launchReviewFor's
-        // own mode-picker dismissal — the raw setting is the only shape left to report,
-        // and `mode_was_pinned` is trivially false (a pinned mode never reaches here).
+        // No PromptMode has been PICKED yet (the QuickPick below hasn't run), so the raw
+        // setting is the only shape left to report for `mode` — but `modeWasPinned` is the
+        // real, already-computed answer, not a constant.
         trackEvent({
           name: "review_launched", outcome: "cancelled",
-          mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES), mode_was_pinned: false,
+          mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
           batch: true, requested_count: requests.length, launched_count: 0, failed_count: 0, skipped_count: 0,
         });
         return;
@@ -2489,9 +2499,6 @@ export class DeckPanel {
     // 2 — the mode, once, for the whole batch. This list always holds at least two
     //     modes (read-only plus the stock one), so an unpinned batch always asks:
     //     worktrees-or-not is its one consequential choice.
-    const modes = batchReviewModes(cfg.reviewRequestModes, cfg.forge);
-    const pinnedMode = resolveReviewMode(modes, cfg.reviewRequestMode);
-    const modeWasPinned = pinnedMode !== null;
     const mode =
       pinnedMode ??
       (await vscode.window.showQuickPick(
