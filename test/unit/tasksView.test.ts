@@ -4047,6 +4047,15 @@ describe("takeBatch", () => {
     expect(toast.message).toBe("Launched 2 of 2 in one shared window. A worktree + Cursor session per task.");
   });
 
+  it("names Codex in the per-task note across separate windows", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "codex", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Codex session per task.");
+  });
+
   it("names the agent the batch's ask picker chose, not Claude", async () => {
     vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask", openIn: "new-window" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));

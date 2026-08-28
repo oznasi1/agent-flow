@@ -37,6 +37,9 @@ const CLI: Record<AgentProvider, { cmd: string; label: string; bootMs: number }>
   // it is a separate install, so the `command not found` fallback is reached more
   // often here than for the other two.
   cursor: { cmd: "cursor-agent", label: "Cursor", bootMs: 2000 },
+  // UNVERIFIED — like cursor-agent, `codex` is its own install (npm i -g
+  // @openai/codex), so `command not found` is this entry's common failure too.
+  codex: { cmd: "codex", label: "Codex", bootMs: 2000 },
 };
 
 /** Wrap text so the terminal delivers it as a *paste*. renderPrompt appends the
@@ -1161,7 +1164,11 @@ async function seedAgentSession(opts: {
   // the plan file. Flipping it therefore also affects plans already on disk, which is
   // what a preference should do. The provider is resolved the same way, one level up
   // in seedProvider, which also gets to honor a plan's own recorded choice.
-  if (readAgentSurface() === "terminal") {
+  //
+  // Codex has no extension surface: workbench.action.chat.open belongs to Copilot
+  // and Cursor, and Codex's IDE extension publishes no open-with-prompt command —
+  // so under either surface setting a Codex seed lands in a terminal.
+  if (readAgentSurface() === "terminal" || provider === "codex") {
     if (await seedViaTerminal(provider, seedText, key, matchPath, log)) {
       announceRemoteControl();
       return;

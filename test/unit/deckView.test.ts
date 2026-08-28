@@ -5965,6 +5965,14 @@ describe("a met launch rule acts", () => {
     expect(toast.message).toContain("Cursor pre-seeded — press Enter to start.");
   });
 
+  it("names Codex in the launch receipt when Codex is configured", async () => {
+    h.agentProvider = "codex";
+    const { p, send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const toast = posts(p).find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toContain("Codex pre-seeded — press Enter to start.");
+  });
+
   it.each([["claude-code"], ["ask"], ["copilot"]])(
     "keeps the launch receipt saying Claude Code under %s",
     async (agentProvider) => {

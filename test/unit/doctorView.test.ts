@@ -136,6 +136,29 @@ describe("collectInputs — the agent provider", () => {
     expect(i.agentProvider).toBe("ask");
   });
 
+  it("probes the codex CLI under codex and reports where it was found", async () => {
+    const which = vi.fn((bin: string) => (bin === "codex" ? "/usr/local/bin/codex" : `/usr/bin/${bin}`));
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "codex" }), which }));
+    expect(which).toHaveBeenCalledWith("codex");
+    expect(i.codexCli).toEqual({ foundAt: "/usr/local/bin/codex" });
+  });
+
+  it("probes the codex CLI under ask too — codex is on every host's picker", async () => {
+    const which = vi.fn((bin: string) => (bin === "codex" ? null : `/usr/bin/${bin}`));
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "ask" }), which }));
+    expect(i.codexCli).toEqual({ foundAt: null });
+  });
+
+  it("does not probe the codex CLI under a provider that cannot be codex", async () => {
+    const which = vi.fn((bin: string) => `/usr/bin/${bin}`);
+    const cfg = deps().config;
+    const i = await collectInputs(deps({ config: () => ({ ...cfg(), agentProvider: "claude-code" }), which }));
+    expect(which).not.toHaveBeenCalledWith("codex");
+    expect(i.codexCli).toBeUndefined();
+  });
+
   it("also probes the chat command under ask — any host agent could be the one that runs", async () => {
     const chatCommand = vi.fn(async () => ({ available: true }));
     const cfg = deps().config;
@@ -146,13 +169,13 @@ describe("collectInputs — the agent provider", () => {
 
   it("supplies the host's agent providers so runChecks can show ask's full set", async () => {
     env.uriScheme = "vscode";
-    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "copilot"]);
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "copilot", "codex"]);
 
     env.uriScheme = "cursor";
-    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "cursor"]);
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "cursor", "codex"]);
 
     env.uriScheme = "windsurf";
-    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code"]);
+    expect((await collectInputs(deps())).hostProviders).toEqual(["claude-code", "codex"]);
   });
 });
 

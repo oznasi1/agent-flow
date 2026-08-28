@@ -1094,6 +1094,48 @@ describe("seedClaudeCode fallback chain (via maybeSeedAgent)", () => {
     });
   });
 
+  describe("seedAgentSession — codex", () => {
+    beforeEach(() => {
+      setConfig({ agentProvider: "codex", agentSurface: "terminal" });
+      window.createTerminal.mockClear();
+      commands.executeCommand.mockClear();
+    });
+
+    afterEach(() => {
+      setConfig({ agentProvider: undefined, agentSurface: undefined });
+    });
+
+    it("names the terminal for Codex and runs the codex CLI", async () => {
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal).toHaveBeenCalledTimes(1);
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Codex · PROJ-1" });
+      expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "codex", true);
+      // The prompt is pasted, not submitted.
+      expect(terminalAt(0).sendText.mock.calls[1][1]).toBe(false);
+      expect(terminalAt(0).sendText.mock.calls[1][0]).toContain("do it");
+    });
+
+    // Codex has no extension panel to seed — workbench.action.chat.open belongs to
+    // Copilot and Cursor — so the extension surface still lands in a terminal
+    // rather than pre-filling a panel Codex does not serve.
+    it("seeds via terminal even under the extension surface", async () => {
+      setConfig({ agentSurface: undefined });
+      setupMatchingPlan();
+      const { context } = fakeContext();
+
+      await seedWithTimers(context);
+
+      expect(window.createTerminal).toHaveBeenCalledTimes(1);
+      expect(window.createTerminal.mock.calls[0][0]).toMatchObject({ name: "Codex · PROJ-1" });
+      expect(terminalAt(0).sendText).toHaveBeenNthCalledWith(1, "codex", true);
+      expect(commands.executeCommand).not.toHaveBeenCalledWith("workbench.action.chat.open", expect.anything());
+    });
+  });
+
   it("uses the extension panel and no terminal when agentSurface is unset", async () => {
     setConfig({ agentSurface: undefined });
     window.createTerminal.mockClear();
@@ -2162,8 +2204,8 @@ describe("openWorkspace — ask", () => {
     window.showQuickPick.mockResolvedValueOnce({ label: "Cursor", provider: "cursor" });
     await openWorkspace(baseReq({ seedAgent: true }));
     const items = window.showQuickPick.mock.calls[0][0] as { label: string; provider: string }[];
-    expect(items.map((i) => i.provider)).toEqual(["claude-code", "cursor"]);
-    expect(items.map((i) => i.label)).toEqual(["Claude Code", "Cursor"]);
+    expect(items.map((i) => i.provider)).toEqual(["claude-code", "cursor", "codex"]);
+    expect(items.map((i) => i.label)).toEqual(["Claude Code", "Cursor", "Codex"]);
   });
 
   it("titles the picker exactly, and holds it open until it is answered", async () => {
@@ -2188,7 +2230,7 @@ describe("openWorkspace — ask", () => {
     window.showQuickPick.mockResolvedValueOnce({ label: "Copilot", provider: "copilot" });
     const result = await openWorkspace(baseReq({ seedAgent: true }));
     const items = window.showQuickPick.mock.calls[0][0] as { provider: string }[];
-    expect(items.map((i) => i.provider)).toEqual(["claude-code", "copilot"]);
+    expect(items.map((i) => i.provider)).toEqual(["claude-code", "copilot", "codex"]);
     expect(result.provider).toBe("copilot");
     expect(planOf().provider).toBe("copilot");
   });
@@ -2218,14 +2260,17 @@ describe("openWorkspace — ask", () => {
   });
 
   // A picker with one item is not a question — it is a modal, held open by
-  // `ignoreFocusOut`, that can only be answered one way. On a host that is neither VS
-  // Code nor Cursor, `hostProviders()` is exactly `["claude-code"]`, so `ask` there
-  // used to raise that dialog on every single launch.
-  it("does not prompt on a host with only one possible agent", async () => {
+  // `ignoreFocusOut`, that can only be answered one way, so a one-agent host skips
+  // it. Since codex joined every host's picker no real host has fewer than two
+  // agents, so the short-circuit is pinned here through the picker's contents: even
+  // a host that is neither VS Code nor Cursor asks, offering Claude Code and Codex.
+  it("still prompts on a host with no editor-specific agent — Codex makes it two", async () => {
     setConfig({ agentProvider: "ask" });
     env.uriScheme = "windsurf";
+    window.showQuickPick.mockResolvedValueOnce({ label: "Claude Code", provider: "claude-code" });
     const result = await openWorkspace(baseReq({ seedAgent: true }));
-    expect(window.showQuickPick).not.toHaveBeenCalled();
+    const items = window.showQuickPick.mock.calls[0][0] as { provider: string }[];
+    expect(items.map((i) => i.provider)).toEqual(["claude-code", "codex"]);
     expect(result.provider).toBe("claude-code");
     // Still a resolved `ask`, so the answer is pinned into the plan exactly as a
     // picked or caller-pinned one is.

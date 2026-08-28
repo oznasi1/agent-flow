@@ -131,7 +131,7 @@ export interface SettingsSnapshot {
    *  separately: the interesting question is whether people answer it differently for a
    *  five-minute review than for a day's work. */
   review_open_in: "ask" | "new-window" | "this-window" | "pick-existing" | "invalid";
-  agent_provider: "claude-code" | "copilot" | "cursor" | "ask" | "invalid";
+  agent_provider: "claude-code" | "copilot" | "cursor" | "codex" | "ask" | "invalid";
   agent_surface: "extension" | "terminal" | "invalid";
   explore_mode: "ask" | "jiraTicket" | "knowledge" | "debug" | "general" | "supervise" | "verify" | "invalid";
   /** A registered connector id, or "invalid". Validated against the registry, so

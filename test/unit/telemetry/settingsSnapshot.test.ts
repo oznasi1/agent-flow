@@ -289,11 +289,12 @@ describe("settingsSnapshot", () => {
 
   it("reports agent_provider", () => {
     expect(settingsSnapshot({ ...getConfig(), agentProvider: "copilot" }).agent_provider).toBe("copilot");
+    expect(settingsSnapshot({ ...getConfig(), agentProvider: "codex" }).agent_provider).toBe("codex");
   });
 
   it("collapses an unrecognized agentProvider to invalid", () => {
     expect(
-      settingsSnapshot({ ...getConfig(), agentProvider: "codex" as never }).agent_provider,
+      settingsSnapshot({ ...getConfig(), agentProvider: "zed" as never }).agent_provider,
     ).toBe("invalid");
   });
 });

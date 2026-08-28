@@ -30,10 +30,15 @@ describe("resolveBatchProvider", () => {
     expect(window.showQuickPick).not.toHaveBeenCalled();
   });
 
-  it("does not ask on a host with only one possible agent", async () => {
+  // Codex joined every host's picker, so even a host that is neither VS Code nor
+  // Cursor now has two agents to choose between — the one-agent short-circuit has
+  // no reachable host left, and the batch picker asks everywhere.
+  it("asks even on a host with no editor-specific agent — Codex makes it two", async () => {
     env.uriScheme = "windsurf"; // neither VS Code nor Cursor
+    window.showQuickPick.mockImplementationOnce(async (items: any) => items[0]);
     expect(await resolveBatchProvider(cfg(), true)).toBe("claude-code");
-    expect(window.showQuickPick).not.toHaveBeenCalled();
+    const items = window.showQuickPick.mock.calls[0][0] as { provider: string }[];
+    expect(items.map((i) => i.provider)).toEqual(["claude-code", "codex"]);
   });
 
   it("returns undefined when the picker is dismissed, so the caller can abandon", async () => {

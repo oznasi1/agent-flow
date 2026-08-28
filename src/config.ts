@@ -183,6 +183,9 @@ export function hostProviders(): AgentProvider[] {
     "claude-code",
     ...(isVSCodeHost() ? (["copilot"] as const) : []),
     ...(isCursorHost() ? (["cursor"] as const) : []),
+    // The Codex CLI is editor-independent — it runs in any host's integrated
+    // terminal — so, like Claude Code, it is on every host's picker.
+    "codex",
   ];
 }
 
@@ -191,10 +194,12 @@ export function hostProviders(): AgentProvider[] {
  * means Claude Code, so a typo in settings.json degrades rather than breaking
  * seeding. `copilot` and `cursor` each additionally require their own host: settings
  * sync carries values between editors, so each value degrades in the wrong editor
- * instead of failing at seed time. This runtime guard — not the manifest — is what
- * makes the behavior correct, and it is the reason the manifest needs no `when`
- * clause at all. Called with no argument from the seeding path, which reads at seed
- * time rather than capturing at activation. */
+ * instead of failing at seed time. `codex` is host-independent like Claude Code —
+ * its CLI runs in any host's terminal — so it passes through everywhere. This
+ * runtime guard — not the manifest — is what makes the behavior correct, and it is
+ * the reason the manifest needs no `when` clause at all. Called with no argument
+ * from the seeding path, which reads at seed time rather than capturing at
+ * activation. */
 export function readAgentProviderSetting(
   c: vscode.WorkspaceConfiguration = vscode.workspace.getConfiguration("agentFlow"),
 ): AgentProviderSetting {
@@ -202,12 +207,13 @@ export function readAgentProviderSetting(
   if (raw === "ask") return "ask";
   if (raw === "copilot" && isVSCodeHost()) return "copilot";
   if (raw === "cursor" && isCursorHost()) return "cursor";
+  if (raw === "codex") return "codex";
   return "claude-code";
 }
 
 /** The agent's name, for copy that tells the user what was just seeded. */
 export function providerLabel(p: AgentProvider): string {
-  return p === "copilot" ? "Copilot" : p === "cursor" ? "Cursor" : "Claude Code";
+  return p === "copilot" ? "Copilot" : p === "cursor" ? "Cursor" : p === "codex" ? "Codex" : "Claude Code";
 }
 
 /** The agent a launch actually starts when nothing has resolved `ask` into a concrete
