@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **A navigable settings page.** The extension's 68 settings are grouped into
+  eight titled sections (Task source, Repos & workspaces, Task pool & filters,
+  Sessions & launch, Explore, Deck & in-flight, Pull requests & reviews,
+  Telemetry) in the Settings UI and the extension page's Features tab, instead
+  of one flat list. Every setting id, type, default, and enum is unchanged —
+  existing `settings.json` values keep working as-is.
+- Commands are prefixed with an **Agent Flow** category in the Command Palette
+  and the Features tab ("Agent Flow: Doctor" instead of a bare "Doctor").
+- `agentFlow.taskSource`'s description now renders its markdown (backticks,
+  links) in the Settings UI instead of showing it literally.
+
 ## [0.56.0] — 2026-08-28
 
 ### Added

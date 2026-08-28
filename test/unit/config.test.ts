@@ -28,6 +28,7 @@ import {
   shippedReviewRequestModes,
 } from "../../src/config";
 import { env, setConfig, setDefaultConfig } from "../_mocks/vscode";
+import { manifestSettings } from "../_helpers/manifest";
 import pkg from "../../package.json";
 
 describe("expandHome", () => {
@@ -1025,7 +1026,7 @@ describe("deck grouping and retirement settings", () => {
 });
 
 describe("package.json ⇄ config constants", () => {
-  const props = (pkg.contributes.configuration.properties as Record<string, { default?: unknown }>);
+  const props = manifestSettings<{ default?: unknown }>(pkg);
 
   it("keeps each explore prompt schema default byte-identical to its config constant", () => {
     expect(props["agentFlow.explorePrompts.jiraTicket"].default).toBe(DEFAULT_EXPLORE_JIRA_TICKET_PROMPT);
@@ -1228,7 +1229,7 @@ describe("forge", () => {
   // something pins it. An existing install with no explicit `agentFlow.forge`
   // gets whatever VS Code's settings UI serves from this manifest default.
   it("ships a manifest default of github, so an existing install is unaffected", () => {
-    const props = pkg.contributes.configuration.properties as Record<string, { default?: unknown }>;
+    const props = manifestSettings<{ default?: unknown }>(pkg);
     expect(props["agentFlow.forge"].default).toBe("github");
   });
 });
