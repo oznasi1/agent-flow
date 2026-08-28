@@ -1363,6 +1363,18 @@ describe("deck telemetry", () => {
     expect(act).toMatchObject({ action: "set_grouping", grouping: "workspaces" });
   });
 
+  // `grouping` is typed "agents" | "workspaces" at compile time only — a webview
+  // message is untyped at runtime. The gesture still counts (deck_action fires
+  // either way); only the unrecognised value is withheld.
+  it("still counts the gesture but omits grouping when the value is out of union", async () => {
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "deck:setGrouping", grouping: "not-a-real-grouping" as never });
+    const act = trackSpy.mock.calls.flat().find((e: any) => e.name === "deck_action");
+    expect(act).toMatchObject({ action: "set_grouping" });
+    expect(act).not.toHaveProperty("grouping");
+  });
+
   it("emits deck_action inspect_open / inspect_diff from the same deck:inspect message, keyed by payload", async () => {
     const { send } = await openPanel();
     trackSpy.mockClear();
@@ -3507,6 +3519,28 @@ describe("DeckPanel review launch", () => {
     expect(ev.requested_count).toBe(1);
   });
 
+  it("emits review_launched with outcome failed when this window loses identity between the destination pick and the launch", async () => {
+    // Same loss `targetToOpenArgs` documents for "current": the window vanishes
+    // between the destination QuickPick answering "This window" and the second,
+    // fresh `currentWindow()` read just before `launchReview`. Simulated inside the
+    // picker's own resolution, the one async gap between the two reads.
+    setConfig({ reviewOpenIn: "ask" });
+    const HERE = { identity: "/repos/aws-ops", kind: "folder" as const, roots: [{ path: "/repos/aws-ops" }] };
+    h.currentWindow = HERE;
+    window.showQuickPick.mockImplementationOnce(async (items: unknown) => {
+      const row = (items as { label: string }[]).find((i) => i.label.includes("This window"));
+      h.currentWindow = undefined;
+      return row;
+    });
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    expect(h.launchReview).not.toHaveBeenCalled();
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "failed", batch: false, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+    });
+  });
+
   it("still names Claude Code pre-seeded in the launch toast by default", async () => {
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
@@ -3822,6 +3856,12 @@ describe("DeckPanel review launch", () => {
     // Not merely "a toast mentioning worktrees" — the refusal, and nothing launched.
     expect(h.launchReview).not.toHaveBeenCalled();
     expect(toastText(p)).toMatch(/Couldn't create a git worktree/i);
+    // Every worktree in the batch failed, so this terminal must count as a real
+    // failure — not a silent no-op the way a dismissed picker is.
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "failed", batch: true, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+    });
   });
 
   it("asks how to lay out a multi-PR new window, and separate windows goes one at a time", async () => {
@@ -3833,6 +3873,20 @@ describe("DeckPanel review launch", () => {
     // Separate windows IS the single-PR path, N times — worktree included.
     expect(h.launchReview).toHaveBeenCalledTimes(2);
     expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("emits review_launched with outcome cancelled when the layout picker is dismissed", async () => {
+    twoQueued();
+    const p = await showAndWarm(); // stock reviewOpenIn: a new window, asked nothing
+    pickMode(readOnlyReviewMode("github"));
+    window.showQuickPick.mockResolvedValueOnce(undefined); // the layout picker
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    expect(h.launchReview).not.toHaveBeenCalled();
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "cancelled", batch: true, requested_count: 2, launched_count: 0, failed_count: 0, skipped_count: 0,
+    });
   });
 
   it("asks no layout question when the destination is already one window", async () => {
@@ -3862,6 +3916,41 @@ describe("DeckPanel review launch", () => {
     await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
     expect(h.openSharedWorkspace).not.toHaveBeenCalled();
     expect(toastText(p)).toMatch(/no longer hold a session/i);
+    // Not a user gesture — the window vanished out from under the launch — so
+    // "failed", not "cancelled", and the one ready item counts as failed too.
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "failed", batch: true, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+    });
+  });
+
+  it("emits review_launched with outcome cancelled when the agent picker is dismissed", async () => {
+    // Read-only needs no worktree, so `ready` fills without touching createWorktrees
+    // (reset to a bare `vi.fn()` between tests) — isolating this from the picker.
+    shareThisWindow();
+    h.agentProvider = "ask";
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    window.showQuickPick.mockResolvedValueOnce(undefined); // "Which tool?"
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "cancelled", batch: true, requested_count: 1, launched_count: 0, failed_count: 0, skipped_count: 0,
+    });
+  });
+
+  it("emits review_launched with outcome failed when opening the shared workspace throws", async () => {
+    shareThisWindow();
+    h.openSharedWorkspace.mockRejectedValueOnce(new Error("disk full"));
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A] });
+    expect(toastText(p)).toMatch(/Couldn't open the review workspace/i);
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "failed", batch: true, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+    });
   });
 
   it("treats one PR into a new window as the ordinary single launch", async () => {
@@ -3888,6 +3977,18 @@ describe("DeckPanel review launch", () => {
     expect(createWorktrees).not.toHaveBeenCalled();
     expect(h.openSharedWorkspace).not.toHaveBeenCalled();
     expect(posts(p).filter((m) => m.type === "toast")).toHaveLength(0);
+  });
+
+  it("emits review_launched with outcome cancelled when the queue moved on before every id in the batch", async () => {
+    h.reviewCache = { fetchedAt: Date.now(), issueCount: 0, requests: [] };
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, ID_B] });
+    expect(window.showQuickPick).not.toHaveBeenCalled();
+    expect(h.openSharedWorkspace).not.toHaveBeenCalled();
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "cancelled", batch: true, requested_count: 0, launched_count: 0, failed_count: 0, skipped_count: 0,
+    });
   });
 
   it("names an un-checked-out repo once, and reviews the rest", async () => {
@@ -3942,6 +4043,12 @@ describe("DeckPanel review launch", () => {
     expect(toastText(p)).toContain("ext-svc");
     // Asked the mode, then stopped: no destination question for a batch with nothing in it.
     expect(window.showQuickPick).toHaveBeenCalledTimes(1);
+    // Every request was skipped for want of a checkout — a real failure, not a
+    // no-op: nothing was ever going to launch out of this batch.
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "failed", batch: true, requested_count: 1, launched_count: 0, failed_count: 0, skipped_count: 1,
+    });
   });
 
   it("never edits an existing workspace file", async () => {
@@ -3990,6 +4097,16 @@ describe("DeckPanel review submit", () => {
     expect(posts(p)).toContainEqual({
       type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
     });
+  });
+
+  // An invalid verb must be withheld from `review_submitted` even on an exit that
+  // runs BEFORE the dedicated `Object.hasOwn` guard — verb validity is checked once,
+  // up front, rather than relying on this gate happening to run first.
+  it("emits no review_submitted for an out-of-union verb even when reviewWrites is off", async () => {
+    h.reviewWrites = false;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "merge" as unknown as ReviewVerb }));
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "review_submitted")).toBeUndefined();
   });
 
   it("asks for confirmation naming the verb, repo and number", async () => {
@@ -4241,6 +4358,16 @@ describe("DeckPanel review submit", () => {
     expect(posts(p)).toContainEqual({
       type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "cancelled",
     });
+  });
+
+  // An invalid verb must never ride a `review_submitted` event at all — not even
+  // the value the gate itself is rejecting. The webview reply above still posts,
+  // unaffected; only the telemetry emit is withheld.
+  it("emits no review_submitted for an out-of-union verb", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "merge" as unknown as ReviewVerb }));
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "review_submitted")).toBeUndefined();
   });
 
   // --- Fix round 1: a double click (or any second deck:reviewSubmit for the same
@@ -4856,6 +4983,22 @@ describe("deck:mergePr", () => {
     await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged") as any;
     expect(ev).toMatchObject({ outcome: "cancelled" });
+    expect(ev.merge_method).toBeUndefined();
+  });
+
+  // `merge_method` belongs on the failure event only once the forge was actually
+  // asked to merge (docs: "present only once a merge was actually attempted") — a
+  // throw from the confirm modal itself, before the forge is ever called, must not
+  // claim a merge method was in play.
+  it("emits pr_merged failed with no merge_method when the confirm dialog itself throws", async () => {
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockRejectedValueOnce(new Error("dialog crashed"));
+    trackSpy.mockClear();
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    expect(h.prMerge).not.toHaveBeenCalled();
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged") as any;
+    expect(ev).toMatchObject({ outcome: "failed" });
     expect(ev.merge_method).toBeUndefined();
   });
 });
@@ -10884,6 +11027,20 @@ describe("orchestrator telemetry", () => {
     await send({ type: "deck:refresh" });
     expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0].firedAt).toBeTypeOf("number");
     expect(events("flow_edge_fired")).toEqual([]);
+  });
+
+  it("omits dest from flow_edge_fired when the planned node's dest is not one of the three known values", async () => {
+    // The flows file is hand-editable and only shape-checked on read (`validNode`
+    // in store.ts never looks at `dest`), so a stray or hand-typed value must not
+    // ride the event through unvalidated.
+    const flow = launchFlow();
+    (flow.nodes[1] as unknown as { dest: string }).dest = "not-a-real-dest";
+    const { send } = await warmed([flow]);
+    await send({ type: "deck:refresh" });
+    expect(events("flow_edge_fired")).toEqual([{
+      name: "flow_edge_fired", edge_action: "launch", ok: true, deferred: false,
+      prompt_mode: "implementation", repo_count: 1,
+    }]);
   });
 
   it("emits exactly one flow_settled when the last edge settles, and never again", async () => {

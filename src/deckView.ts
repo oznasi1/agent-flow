@@ -1034,9 +1034,19 @@ export class DeckPanel {
           const launched = f.action === "launch" ? this.plannedTarget(fresh, f.edge) : undefined;
           const edgeOk = done.kind === "done" && done.outcome.ok;
           if (launched) {
+            // `launched.dest` came off a `PlannedNode` read back from the flows
+            // file, which is hand-editable and only shape-checked (`validNode` in
+            // store.ts), not value-checked — a stray or hand-typed `dest` is not
+            // one of the three the launcher itself understands. Validate before it
+            // ever reaches the event; an unrecognised value omits `dest` rather
+            // than sending it through.
+            const dest: LaunchDest | undefined =
+              launched.dest === "worktree" || launched.dest === "new-window" || launched.dest === "current-window"
+                ? launched.dest
+                : undefined;
             trackEvent({
               name: "flow_edge_fired", edge_action: "launch", ok: edgeOk, deferred: done.kind === "defer",
-              dest: launched.dest, prompt_mode: toPromptModeProp(launched.mode), repo_count: launched.repos.length,
+              ...(dest ? { dest } : {}), prompt_mode: toPromptModeProp(launched.mode), repo_count: launched.repos.length,
             });
           } else {
             trackEvent({
@@ -2470,7 +2480,17 @@ export class DeckPanel {
       currentWindow,
       chooseWorkspaceMode: async () => "per-window",
     });
-    if (!openTarget) return; // this window lost its identity between the pick and here
+    if (!openTarget) {
+      // This window lost its identity between the pick and here — not a user
+      // gesture, so "failed" rather than "cancelled", same distinction the batch
+      // path below draws for the identical loss.
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: false, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+      });
+      return;
+    }
     const res = await launchReview(
       { req, template: mode.prompt, workspaceDir: cfg.workspaceDir, seedAgent: cfg.seedAgent, openTarget },
       { createWorktrees, openWorkspace, log: this.log },
@@ -2523,17 +2543,29 @@ export class DeckPanel {
   private async launchReviewBatch(ids: string[]): Promise<void> {
     const cfg = getConfig();
     const requests = ids.map((id) => this.reviewById(id)).filter((r): r is ReviewRequest => !!r);
-    if (!requests.length) return; // the queue moved on before the click landed
 
     // `modes`/`pinnedMode`/`modeWasPinned` are hoisted above the cost-confirm gate — same
     // reason `launchReviewFor` hoists its own `pinnedMode` above its first gate: whether
     // `resolveReviewMode` finds a pin is a pure function of config, entirely independent of
     // whatever dialog is about to run. A user with a genuinely pinned mode can still decline
     // the cost-confirm on a large batch, and `mode_was_pinned` on that event must say `true`
-    // — it was never "not reached yet", only "not yet needed to pick a mode".
+    // — it was never "not reached yet", only "not yet needed to pick a mode". Hoisted above
+    // the `!requests.length` check too, now, so that terminal can report the same honest
+    // `mode_was_pinned` instead of skipping telemetry altogether.
     const modes = batchReviewModes(cfg.reviewRequestModes, cfg.forge);
     const pinnedMode = resolveReviewMode(modes, cfg.reviewRequestMode);
     const modeWasPinned = pinnedMode !== null;
+    if (!requests.length) {
+      // The queue moved on before the click landed — nothing was ever requested, so
+      // "cancelled" (not "failed") is the honest outcome, same as every other
+      // dismissed-before-anything-happened terminal below.
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: true, requested_count: 0, launched_count: 0, failed_count: 0, skipped_count: 0,
+      });
+      return;
+    }
 
     // 1 — the cost. The mode is not known yet, so this names sessions (always true)
     //     rather than worktrees (mode-dependent).
@@ -2580,6 +2612,13 @@ export class DeckPanel {
     // 3 — plan. A row with no local checkout is named once per repo, not once per PR.
     const { items, skipped } = planReviewBatch(requests, mode);
     if (!items.length) {
+      // Every request was skipped for want of a local checkout — nothing was ever
+      // going to launch, so this is a genuine failure of the gesture, not a cancel.
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: true, requested_count: requests.length, launched_count: 0, failed_count: 0, skipped_count: skipped.length,
+      });
       this.toast(
         "error",
         `${skipped.join(", ")} isn't checked out under your repos root — open those PRs in your browser instead.`,
@@ -2622,7 +2661,15 @@ export class DeckPanel {
         ],
         { title: `Review ${items.length} PRs — how should I lay them out?`, ignoreFocusOut: true },
       );
-      if (!p) return;
+      if (!p) {
+        trackEvent({
+          name: "review_launched", outcome: "cancelled",
+          mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+          destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+          failed_count: 0, skipped_count: skipped.length, layout_asked: layoutAsked,
+        });
+        return;
+      }
       shared = p.shared;
     }
     const reviewLaunchedTelemetry = {
@@ -2646,6 +2693,14 @@ export class DeckPanel {
         chooseWorkspaceMode: async () => "per-window",
       });
       if (!openTarget) {
+        // This window lost its identity between the destination pick and here —
+        // every item in this batch fails at once, none of them a user gesture.
+        trackEvent({
+          name: "review_launched", outcome: "failed",
+          mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+          destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+          failed_count: items.length, skipped_count: skipped.length, layout: "separate", layout_asked: layoutAsked,
+        });
         this.toast("error", "This window can no longer hold a session — nothing was opened.");
         return;
       }
@@ -2686,6 +2741,15 @@ export class DeckPanel {
       ready.push({ item, services });
     }
     if (!ready.length) {
+      // Every item failed to get a worktree — `failures.length` accounts for all of
+      // them, since `needsWorktrees(mode)` false would have put every item in
+      // `ready` instead, never here.
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+        failed_count: failures.length, skipped_count: skipped.length, layout: "shared", layout_asked: layoutAsked,
+      });
       this.toast("error", "Couldn't create a git worktree for any of them — the Agent Flow Deck output channel has the reason.");
       return;
     }
@@ -2693,13 +2757,31 @@ export class DeckPanel {
     // 8 — the agent. A shared window seeds from plan files and can never ask later, so
     //     under `ask` this is the only chance to know which agent the user wants.
     const provider = await resolveBatchProvider(cfg, ready.length > 1);
-    if (!provider) return; // the picker was dismissed
+    if (!provider) {
+      // The picker was dismissed — a user gesture, so "cancelled". The worktree
+      // failures already counted above still failed; nothing further was attempted.
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+        failed_count: failures.length, skipped_count: skipped.length, layout: "shared", layout_asked: layoutAsked,
+      });
+      return;
+    }
 
     // "current" needs this window's identity, and it can be lost between the pick and
     // here. Without it openSharedWorkspace falls through to opening a new window —
     // spawning one nobody asked for — so fail instead, before anything is opened.
     const here = target.kind === "current" ? currentWindow() : undefined;
     if (target.kind === "current" && !here) {
+      // Not a user gesture: every item that made it to `ready` fails here, on top of
+      // whatever already failed to get a worktree.
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+        failed_count: failures.length + ready.length, skipped_count: skipped.length, layout: "shared", layout_asked: layoutAsked,
+      });
       this.toast("error", "This window can no longer hold a session — nothing was opened.");
       return;
     }
@@ -2722,6 +2804,14 @@ export class DeckPanel {
         ...providerPin(cfg, provider),
       });
     } catch (e) {
+      // Every ready item was headed for this one shared workspace and none of them
+      // opened, on top of whatever already failed to get a worktree.
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: true, requested_count: requests.length, launched_count: 0,
+        failed_count: failures.length + ready.length, skipped_count: skipped.length, layout: "shared", layout_asked: layoutAsked,
+      });
       this.toast("error", `Couldn't open the review workspace: ${e}`);
       return;
     }
@@ -2776,6 +2866,18 @@ export class DeckPanel {
    * the row still being in the queue, and a modal the user has to accept. */
   private async submitReview(id: string, verb: ReviewVerb, body: string, fromDraft: boolean): Promise<void> {
     const cfg = getConfig();
+    // `verb` arrives from a webview message, untyped at runtime no matter what
+    // `ReviewVerb` claims at compile time. Validated ONCE, up front — every
+    // `review_submitted` emit below (all eight exits of this function) gates on
+    // this same answer, rather than each trusting the compile-time type or relying
+    // on control flow to keep an invalid value from ever reaching an emit that
+    // happens to run before the dedicated guard further down. An invalid verb
+    // therefore gets NO `review_submitted` event, from any exit — the webview
+    // reply (`deck:reviewSubmitDone`) still posts exactly as before either way.
+    const verbValid = Object.hasOwn(VERB_LABEL, verb);
+    const emitSubmitted = (outcome: "ok" | "cancelled" | "failed"): void => {
+      if (verbValid) trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome });
+    };
     // Every gate below that refuses *this* id's own attempt releases the
     // webview's disable the same way a completed submit does — nothing was
     // written, so "cancelled" (not "failed") is the honest outcome, and without
@@ -2785,7 +2887,7 @@ export class DeckPanel {
     // this call).
     if (!cfg.reviewWrites) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
-      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "cancelled" });
+      emitSubmitted("cancelled");
       return;
     }
     // The strip itself can go dark (PR facts toggled off, reviewRequests
@@ -2796,23 +2898,21 @@ export class DeckPanel {
     // GitHub from a strip the user just switched off.
     if (!this.reviewsEnabled()) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
-      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "cancelled" });
+      emitSubmitted("cancelled");
       return;
     }
-    // `verb` arrives from a webview message, untyped at runtime no matter what
-    // `ReviewVerb` claims at compile time. `Object.hasOwn` (not `!VERB_LABEL[verb]`,
-    // which a prototype key like "constructor" would sail through as truthy) fails
-    // closed before any dialog is shown — the same guard `provider.ts`'s `submit`
-    // already applies to the identical value, for the identical reason. Without
-    // this, an out-of-union verb reads `label` as `undefined`: the dialog shows
-    // "undefined on owner/repo#123?", and `undefined !== undefined` is *false*, so
-    // the decline branch below is skipped regardless of what the user answers —
-    // `provider.ts` still refuses the write, but the log would claim a submit the
-    // user never confirmed, and the user would be told "GitHub refused" about a
-    // call that never reached GitHub.
-    if (!Object.hasOwn(VERB_LABEL, verb)) {
+    // `Object.hasOwn` (not `!VERB_LABEL[verb]`, which a prototype key like
+    // "constructor" would sail through as truthy) fails closed before any dialog is
+    // shown — the same guard `provider.ts`'s `submit` already applies to the
+    // identical value, for the identical reason. Without this, an out-of-union verb
+    // reads `label` as `undefined`: the dialog shows "undefined on owner/repo#123?",
+    // and `undefined !== undefined` is *false*, so the decline branch below is
+    // skipped regardless of what the user answers — `provider.ts` still refuses the
+    // write, but the log would claim a submit the user never confirmed, and the
+    // user would be told "GitHub refused" about a call that never reached GitHub.
+    if (!verbValid) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
-      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "cancelled" });
+      emitSubmitted("cancelled"); // no-op: verbValid is false here, by construction
       return;
     }
     // Deliberately silent: this gate is only reachable while a genuine call for
@@ -2825,7 +2925,7 @@ export class DeckPanel {
     const req = this.reviewById(id);
     if (!req) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
-      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "cancelled" });
+      emitSubmitted("cancelled");
       return;
     }
     this.reviewSubmitsInFlight.add(id);
@@ -2848,7 +2948,7 @@ export class DeckPanel {
         // Distinct from a failure: nothing was attempted, so there is nothing to
         // warn about — just release the row's disable.
         this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
-        trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "cancelled" });
+        emitSubmitted("cancelled");
         return;
       }
       const text = fromDraft && cfg.stampLabelOnWrite && body.trim()
@@ -2869,7 +2969,7 @@ export class DeckPanel {
           action: { label: "Open PR", url: req.url },
         });
         this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
-        trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "failed" });
+        emitSubmitted("failed");
         return;
       }
       this.toast("success", `${label} sent on ${req.repoName}#${req.number}.`);
@@ -2889,7 +2989,7 @@ export class DeckPanel {
       }
       this.postReviews();
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "ok" });
-      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "ok" });
+      emitSubmitted("ok");
     } catch (e) {
       // Anything unexpected here (writeReviewCache, decorateReviews's fs calls,
       // `post` itself before its own guard was added — a disposed panel used to
@@ -2901,7 +3001,7 @@ export class DeckPanel {
       // have already gone through.
       this.log(`deck: review submit ${id} threw after starting: ${e}`);
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
-      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "failed" });
+      emitSubmitted("failed");
     } finally {
       this.reviewSubmitsInFlight.delete(id);
     }
@@ -3003,6 +3103,12 @@ export class DeckPanel {
       return;
     }
     this.mergesInFlight.add(inflightKey);
+    // Set right before the forge is actually asked to merge — the catch below reads
+    // it to decide whether `merge_method` belongs on the failure event at all. A
+    // throw from the confirm modal itself (or anything before it) must NOT claim a
+    // merge method was ever in play; only a throw once the forge call has started
+    // (or its own `!res.ok`/`ok` exits, both past that point already) may.
+    let mergeAttempted = false;
     try {
       const label = MERGE_LABEL[cfg.mergeMethod];
       const answer = await vscode.window.showWarningMessage(
@@ -3022,6 +3128,7 @@ export class DeckPanel {
         return;
       }
       this.log(`deck: merging ${target.repo}#${target.number} with ${cfg.mergeMethod}`);
+      mergeAttempted = true;
       const res = await this.forge.prs.merge(checkout.path, target.number, cfg.mergeMethod);
       if (!res.ok) {
         this.log(`deck: merge failed: ${res.message}`);
@@ -3051,7 +3158,7 @@ export class DeckPanel {
       // still release the button — otherwise the row stays disabled forever.
       this.log(`deck: mergePr threw: ${e instanceof Error ? e.message : String(e)}`);
       this.post({ type: "deck:mergeDone", key, repo, number, outcome: "failed" });
-      trackEvent({ name: "pr_merged", outcome: "failed", merge_method: cfg.mergeMethod });
+      trackEvent({ name: "pr_merged", outcome: "failed", ...(mergeAttempted ? { merge_method: cfg.mergeMethod } : {}) });
     } finally {
       this.mergesInFlight.delete(inflightKey);
     }
@@ -3650,7 +3757,12 @@ export class DeckPanel {
     if (m.type === "deck:inspect") {
       trackEvent({ name: "deck_action", action: m.action === "diff" ? "inspect_diff" : "inspect_open" });
     } else if (m.type === "deck:setGrouping") {
-      trackEvent({ name: "deck_action", action: "set_grouping", grouping: m.grouping });
+      // `m.grouping` is typed as "agents" | "workspaces" at compile time only — a
+      // webview message is untyped at runtime, same as every other inbound value.
+      // An unrecognised value still counts the gesture (`deck_action` fires either
+      // way) but omits `grouping` rather than sending it through unvalidated.
+      const grouping = m.grouping === "agents" || m.grouping === "workspaces" ? m.grouping : undefined;
+      trackEvent({ name: "deck_action", action: "set_grouping", ...(grouping ? { grouping } : {}) });
     } else {
       const action = DECK_ACTIONS[m.type];
       if (action) trackEvent({ name: "deck_action", action });

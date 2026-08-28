@@ -134,7 +134,7 @@ Suppressed entirely when `telemetry.telemetryLevel` is `"error"` (or lower).
 | `card_action` | `action`: one of `"detail"`, `"change_status"`, `"add_to_sprint"`, `"remove_from_sprint"`, `"set_component"`, `"reorder"`, `"reset_order"` | One per card affordance click in the tasksView switch. `"reorder"`/`"reset_order"` fire only once the gesture actually applies (a `reorder` outside the My-sprint lens is ignored and emits nothing). Never carries the ticket key, repo name, or component name. |
 | `notepad_action` | `action`: one of `"add"`, `"run"`, `"edit"`, `"remove"`, `"reorder"`, `"image_add"`, `"image_remove"` | One per notepad gesture that maps onto this enum: `notepad:add` → `add`; `notepad:update` → `edit`; `notepad:delete` → `remove`; `notepad:reorder` → `reorder` (only once the drop actually changes the saved order); `notepad:run` → `run` (the notepad's own `explore_started{source:"notepad"}` still fires separately, from inside `runNotepadItem`); `notepad:addImage` and `notepad:pickImage` → `image_add` (paste and file-picker are two paths to the same gesture); `notepad:removeImage` → `image_remove`. `notepad:toggleDone`, `notepad:clearCompleted`, `notepad:resetOrder`, the section messages, and `notepad:openImage` have no corresponding member and emit nothing here. Note text, section names and image names never appear. |
 | `setup_started` | `source`: `"offer"` (the first-activation welcome prompt's "Set up" answer) \| `"command"` (the `agentFlow.setup` palette command); `connector_steps: number` (`connector.setupSteps`, not the wizard's total — which also counts the repos-root step this module owns) | Right after `runSetup` computes its step total, before the connector's own first step is shown. |
-| `setup_completed` | `outcome`: `"complete"` \| `"cancelled-source"` (Esc during the connector's own steps) \| `"cancelled-root"` (Esc at the repos-root box) \| `"signin-skipped"` (settings saved, sign-in declined) \| `"deferred"` (the welcome offer's "Later" answer — never reaches `runSetup` at all); `signed_in: boolean` (true only for `"complete"`) | The setup funnel's terminator — exactly one per `runSetup`/`maybeRunSetup` call, from whichever exit it reaches. Instrumentation is `track()` calls only: cancelling the wizard still performs zero `getConfiguration().update` calls and leaves `agentFlow.setupComplete` unset (`test/unit/compat.test.ts`). |
+| `setup_completed` | `outcome`: `"complete"` \| `"cancelled-source"` (Esc during the connector's own steps) \| `"cancelled-root"` (Esc at the repos-root box) \| `"signin-skipped"` (settings saved, sign-in declined) \| `"deferred"` (the welcome offer's "Later" answer, or dismissing that same toast — Escape or clicking away — without choosing either button; neither reaches `runSetup` at all); `signed_in: boolean` (true only for `"complete"`) | The setup funnel's terminator — exactly one per `runSetup`/`maybeRunSetup` call, from whichever exit it reaches. Instrumentation is `track()` calls only: cancelling the wizard still performs zero `getConfiguration().update` calls and leaves `agentFlow.setupComplete` unset (`test/unit/compat.test.ts`). |
 | `doctor_run` | `fails`, `warns: number` (the same counts `summarize(checks)` bases its title on); `outcome`: `"dismissed"` (Escape, or a passing row with nothing to fix) \| `"copied"` \| `"action"`; `action_kind?`: `"command"` \| `"setting"` \| `"extension"` \| `"external"` (present only for `"action"`, the picked check's own `DoctorAction.kind`) | Once per `showDoctor` call, right after the QuickPick resolves. No check label, detail, path, or URL is ever a property. |
 
 ### Error events
@@ -156,11 +156,17 @@ never from its message.
 independent judgement call about the specific failure, just a query
 convenience so "was this worth retrying" doesn't need a `failure_class` lookup
 table re-derived in every dashboard. It adds no information beyond
-`failure_class` itself. The one exception: `takeBatch`'s three internal per-key
-catches (resolving a task, the shared-window path, and the per-window launch
-loop) always report `retryable: false` — these failures are swallowed
-per-task, with no "retry" affordance the button that logged them could offer,
-unlike the `onMessage`-level catch the derived value describes.
+`failure_class` itself. Two sites hardcode it instead of deriving it:
+`takeBatch`'s three internal per-key catches (resolving a task, the
+shared-window path, and the per-window launch loop) always report `retryable:
+false` — these failures are swallowed per-task, with no "retry" affordance the
+button that logged them could offer, unlike the `onMessage`-level catch the
+derived value describes. The Deck's own last-resort seam — `DeckPanel.onMessage`'s
+catch, the Deck's equivalent of `TasksViewProvider.onMessage`'s (`tasksView.ts:944-949`)
+— hardcodes `retryable: false` the same way, for the same reason: it is a
+catch-all around the whole per-message `handle()` dispatch, with no single
+failure class to derive retryability from and no retry affordance of its own
+to offer either.
 
 `unhandled_error` is not something Agent Flow Deck's own code calls explicitly —
 it's VS Code's built-in behavior: `vscode.TelemetryLogger` automatically routes
@@ -184,7 +190,7 @@ entry point:
 
 - **Started from the Deck** (a card's Take button): the failure is
   thrown back through `TasksViewProvider.onMessage`'s webview dispatcher,
-  whose catch block (`tasksView.ts:916-921`) is what emits `operation_failed`,
+  whose catch block (`tasksView.ts:944-949`) is what emits `operation_failed`,
   attributing the failure to a subsystem (`op`) so failures can be aggregated
   across every code path that can fail that way, not just Takes. **Both**
   events fire for the same failure here — reading them as two separate
@@ -201,7 +207,7 @@ entry point:
 `takeBatch` never lets one task's failure abort the rest — its three internal
 `catch` blocks (resolving a task, the shared-window path, and the per-window
 launch loop) each push the key onto a `failed` list and keep going, so they
-never reach `TasksViewProvider.onMessage`'s own catch (`tasksView.ts:916-921`)
+never reach `TasksViewProvider.onMessage`'s own catch (`tasksView.ts:944-949`)
 — `MESSAGE_OPS.takeBatch`'s mapping to `"workspace_write"` is unreachable for
 this per-key path in practice. Each swallowed catch instead emits its own
 `operation_failed{ op: "workspace_write", failure_class, retryable: false }`

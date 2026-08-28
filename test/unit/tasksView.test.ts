@@ -5511,6 +5511,33 @@ describe("tasks_fetched telemetry", () => {
     await send({ type: "fetch", filter: "mine", size: "any" });
     expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "tasks_fetched")).toHaveLength(2);
   });
+
+  // `filter`/`size` are typed to their unions at compile time only — a webview
+  // message is untyped at runtime, and there is no "invalid" member in
+  // `tasks_fetched`'s unions to collapse an unrecognised value onto (unlike
+  // SettingsSnapshot's enum-ish fields). The fetch itself must still proceed
+  // unaffected; only the telemetry emit is withheld.
+  it("emits no tasks_fetched for an out-of-union filter, on the authenticated path", async () => {
+    const list = vi.fn(async () => []);
+    const { send } = setup({ connector: withProvider({ list }) });
+    await send({ type: "fetch", filter: "bogus" as never, size: "any" });
+    expect(list).toHaveBeenCalled(); // the fetch itself is unaffected
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "tasks_fetched")).toBe(false);
+  });
+
+  it("emits no tasks_fetched for an out-of-union size, on the authenticated path", async () => {
+    const list = vi.fn(async () => []);
+    const { send } = setup({ connector: withProvider({ list }) });
+    await send({ type: "fetch", filter: "mine", size: "bogus" as never });
+    expect(list).toHaveBeenCalled();
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "tasks_fetched")).toBe(false);
+  });
+
+  it("emits no tasks_fetched for an out-of-union filter, on the unauthenticated early return", async () => {
+    const { send } = setup({ authed: false });
+    await send({ type: "fetch", filter: "bogus" as never, size: "any" });
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "tasks_fetched")).toBe(false);
+  });
 });
 
 describe("card_action telemetry", () => {

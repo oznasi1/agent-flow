@@ -187,6 +187,21 @@ function isRetryable(failureClass: FailureClass): boolean {
   return failureClass !== "auth" && failureClass !== "not_found" && failureClass !== "permission" && failureClass !== "parse";
 }
 
+/** The `Filter`/`Size` unions, for validating a value before it rides a
+ * `tasks_fetched` property. `m.filter`/`m.size` are typed as `Filter`/`Size` at
+ * compile time only — a webview message is untyped at runtime, same as every
+ * other inbound value — and `effectiveFilter`'s own clamp assumes a member of
+ * this union going in, so a stale or hand-crafted message could otherwise ride
+ * through unclamped as well as unvalidated. */
+const FETCH_FILTERS: readonly Filter[] = ["unassigned", "mine", "mysprint", "sprint", "backlog", "all"];
+const FETCH_SIZES: readonly Size[] = ["any", "s", "m", "l"];
+function isKnownFilter(v: string): v is Filter {
+  return (FETCH_FILTERS as readonly string[]).includes(v);
+}
+function isKnownSize(v: string): v is Size {
+  return (FETCH_SIZES as readonly string[]).includes(v);
+}
+
 /** Delay between opening successive batch windows — reduces focus-stealing and
  *  `open -a` thrash when several windows launch back-to-back. */
 const BATCH_STAGGER_MS = 250;
@@ -679,12 +694,19 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             this.postState(false, this.connector.isConfigured(), null);
             // No provider to clamp against — `lens` is the requested `filter`
             // verbatim, and every count is honestly zero: nothing was fetched.
-            track({
-              name: "tasks_fetched", filter: m.filter, lens: m.filter, size: m.size,
-              task_count: 0, repo_count: 0,
-              ...(cfg.trackOpenWindows ? { live_window_count: 0 } : {}),
-              authed: false,
-            });
+            // Neither `tasks_fetched.filter`/`.lens`/`.size` union has an "invalid"
+            // member (unlike SettingsSnapshot's enum-ish fields), so an
+            // unrecognised value has nowhere honest to collapse to — skip this
+            // emit entirely rather than report a wrong-but-typed value; the fetch
+            // path itself (the early return above) is unaffected either way.
+            if (isKnownFilter(m.filter) && isKnownSize(m.size)) {
+              track({
+                name: "tasks_fetched", filter: m.filter, lens: m.filter, size: m.size,
+                task_count: 0, repo_count: 0,
+                ...(cfg.trackOpenWindows ? { live_window_count: 0 } : {}),
+                authed: false,
+              });
+            }
             return;
           }
           this.post({ type: "loading", loading: true });
@@ -702,12 +724,18 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           // `filter` is what the webview asked for; `lens` is what the clamp above
           // actually answered, which differ exactly when a tab survived a
           // `taskSource` switch to a source that cannot serve it.
-          track({
-            name: "tasks_fetched", filter: m.filter, lens, size: m.size,
-            task_count: tasks.length, repo_count: repos.length,
-            ...(cfg.trackOpenWindows ? { live_window_count: this.liveWindows().length } : {}),
-            authed: true,
-          });
+          // Same skip-the-emit choice as the unauthenticated branch above, and for
+          // the same reason: no "invalid" member exists in this event's unions to
+          // collapse an unrecognised value onto. The fetch itself (`provider.list`
+          // above) already ran unaffected.
+          if (isKnownFilter(m.filter) && isKnownFilter(lens) && isKnownSize(m.size)) {
+            track({
+              name: "tasks_fetched", filter: m.filter, lens, size: m.size,
+              task_count: tasks.length, repo_count: repos.length,
+              ...(cfg.trackOpenWindows ? { live_window_count: this.liveWindows().length } : {}),
+              authed: true,
+            });
+          }
           let outgoing = tasks;
           if (lens === "mysprint") {
             if (m.size === "any") {

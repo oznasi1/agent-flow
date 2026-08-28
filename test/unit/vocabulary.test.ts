@@ -92,6 +92,11 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
   // Task 7: host-side wire values and subagent references.
   { location: "src/config.ts", text: "agents",
     why: "the agentFlow.deckGrouping value normalized here — the stored setting, not copy" },
+  // Fix wave: deck_action.grouping validates a webview-fed value against this
+  // same persisted wire value before letting it ride the event — same class of
+  // hit as the src/config.ts entry above, just the membership check site.
+  { location: "src/deckView.ts", text: "agents",
+    why: "the agentFlow.deckGrouping wire value, validated here before deck_action.grouping sends it — not copy" },
   { location: "src/engine/workspace.ts", text: "cursor-agent",
     why: "the name of Cursor's CLI binary" },
   { location: "src/engine/workspace.ts", text: "agent",

@@ -366,9 +366,12 @@ export type UsageEvent =
   | { name: "flow_settled"; node_count: number; edge_count: number }
   // Fires on every open of the Marketplace panel. `revealed: true` is an
   // already-open panel refocused — its counts are the last scan's, kept on the
-  // panel instance (zero before that instance has ever rendered, which cannot
-  // happen here since a panel only exists after its first render). `revealed:
-  // false` fires once, at the first `render()` this panel instance completes —
+  // panel instance. A reveal that lands in the async window between the panel's
+  // construction and its first completed `render()` (the webview boots and posts
+  // `mkt:ready` before that render ever runs) genuinely reports the zeroed counts
+  // the instance started with — that is not a bug, just an honest snapshot of a
+  // scan that has not happened yet. `revealed: false` fires once, at the first
+  // `render()` this panel instance completes —
   // never on a later re-render (re-focus after the stale window, `mkt:refresh`) —
   // with the real counts of that scan: `asset_count`/`plugin_count`/
   // `marketplace_count` are `view.assets/plugins/marketplaces.length`; `skills`/
