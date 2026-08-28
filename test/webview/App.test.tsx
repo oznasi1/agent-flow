@@ -1303,3 +1303,59 @@ describe("caps arriving after state", () => {
     expect(filterTabs()).toEqual(["My sprint", "Mine", "Sprint", "Backlog", "Unassigned"]);
   });
 });
+
+describe("repo filter — pool refresh pruning", () => {
+  const selectRepo = (name: string) => {
+    fireEvent.click(screen.getByText("Filter repos"));
+    const repoList = document.querySelector(".repo-list") as HTMLElement;
+    fireEvent.mouseDown(within(repoList).getByText(name).closest(".repo-opt")!);
+  };
+
+  it("prunes a selected repo that vanished from the pool instead of dead-ending the list", () => {
+    render(<App />);
+    authed();
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [mkTask({ key: "PROJ-1", summary: "alpha", services: ["billing"] })],
+    });
+    selectRepo("billing");
+    expect(screen.getByText("PROJ-1")).toBeInTheDocument();
+    // A refresh whose tasks carry no services empties the repo pool. The
+    // multiselect unmounts (it renders null on an empty pool), so a selection
+    // that survived would leave "No tasks touch the selected repos." on screen
+    // with no control left to clear it.
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [mkTask({ key: "PROJ-9", summary: "zulu" })],
+    });
+    expect(screen.queryByText("No tasks touch the selected repos.")).not.toBeInTheDocument();
+    expect(screen.getByText("PROJ-9")).toBeInTheDocument();
+  });
+
+  it("keeps a selection whose repo is still in the refreshed pool", () => {
+    render(<App />);
+    authed();
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "PROJ-1", summary: "alpha", services: ["billing"] }),
+        mkTask({ key: "PROJ-2", summary: "bravo", services: ["web"] }),
+      ],
+    });
+    selectRepo("billing");
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "PROJ-3", summary: "charlie", services: ["billing"] }),
+        mkTask({ key: "PROJ-4", summary: "delta", services: ["web"] }),
+      ],
+    });
+    // The billing selection survives the refresh and keeps filtering.
+    expect(screen.getByText("PROJ-3")).toBeInTheDocument();
+    expect(screen.queryByText("PROJ-4")).not.toBeInTheDocument();
+  });
+});

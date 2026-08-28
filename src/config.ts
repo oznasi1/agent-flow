@@ -714,6 +714,16 @@ export function getConfig(): AgentFlowConfig {
   // Hoisted so the membership check below and the resolved `mergeMethod` value
   // read the same call instead of asking `c.get` for it twice.
   const mergeMethodRaw = c.get<string>("mergeMethod");
+  // `c.get<number>` is a cast, not a check: a hand-edited settings.json can hold
+  // any JSON type, and `Math.max(1, "six")` is NaN — which then poisons every
+  // downstream comparison (`>` against NaN is always false, so e.g. the
+  // batch-launch confirmation would silently never fire). Fall back to the
+  // documented default unless the value is a finite number; the clamps below
+  // still apply to finite out-of-range values.
+  const finiteNumber = (key: string, def: number): number => {
+    const v = c.get<number>(key);
+    return typeof v === "number" && Number.isFinite(v) ? v : def;
+  };
   return {
     taskSource: c.get<string>("taskSource") || "jira",
     forge,
@@ -769,25 +779,25 @@ export function getConfig(): AgentFlowConfig {
       const v = c.get<string>("remoteControl");
       return v === "on" || v === "ask" ? v : "off";
     })(),
-    batchLaunchConfirmThreshold: Math.max(1, c.get<number>("batchLaunchConfirmThreshold") ?? 6),
+    batchLaunchConfirmThreshold: Math.max(1, finiteNumber("batchLaunchConfirmThreshold", 6)),
     trackOpenWindows: c.get<boolean>("trackOpenWindows") ?? true,
     telemetryEnabled: c.get<boolean>("telemetry.enabled") ?? true,
     prFacts: c.get<boolean>("prFacts") ?? true,
-    prFactsTtlSeconds: Math.max(30, c.get<number>("prFactsTtlSeconds") ?? 120),
+    prFactsTtlSeconds: Math.max(30, finiteNumber("prFactsTtlSeconds", 120)),
     openAgents: c.get<boolean>("openAgents") ?? true,
     deckGrouping: c.get<string>("deckGrouping") === "workspaces" ? "workspaces" : "agents",
     // Floored, not defaulted: 0 is meaningful (disable the window) and must
     // survive, while a negative value is a typo that would retire on a clock
     // running backwards.
-    retireFinishedAfterHours: Math.max(0, c.get<number>("retireFinishedAfterHours") ?? 24),
-    retireAbandonedAfterDays: Math.max(0, c.get<number>("retireAbandonedAfterDays") ?? 7),
-    retireClosedAfterHours: Math.max(0, c.get<number>("retireClosedAfterHours") ?? 24),
-    retireInPlaceAfterHours: Math.max(0, c.get<number>("retireInPlaceAfterHours") ?? 0),
+    retireFinishedAfterHours: Math.max(0, finiteNumber("retireFinishedAfterHours", 24)),
+    retireAbandonedAfterDays: Math.max(0, finiteNumber("retireAbandonedAfterDays", 7)),
+    retireClosedAfterHours: Math.max(0, finiteNumber("retireClosedAfterHours", 24)),
+    retireInPlaceAfterHours: Math.max(0, finiteNumber("retireInPlaceAfterHours", 0)),
     inflightShowAll: c.get<boolean>("inflightShowAll") ?? false,
     notifyOnActionRequired: c.get<boolean>("notifyOnActionRequired") ?? false,
     reviewRequests: c.get<boolean>("reviewRequests") ?? true,
     reviewRequestsAlwaysVisible: c.get<boolean>("reviewRequestsAlwaysVisible") ?? true,
-    reviewRequestsTtlSeconds: Math.max(60, c.get<number>("reviewRequestsTtlSeconds") ?? 300),
+    reviewRequestsTtlSeconds: Math.max(60, finiteNumber("reviewRequestsTtlSeconds", 300)),
     reviewWrites: c.get<boolean>("reviewWrites") ?? false,
     mergeWrites: c.get<boolean>("mergeWrites") ?? false,
     // Unlike `worktree` above — whose `|| "ask"` fallback lets any hand-edited

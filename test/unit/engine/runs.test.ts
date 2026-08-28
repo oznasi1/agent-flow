@@ -64,6 +64,78 @@ describe("runs store", () => {
   });
 });
 
+describe("writeRun / removeRun — path-escaping keys", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-runs-esc-"));
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it("no-ops a write whose key holds a path separator, instead of throwing ENOENT", () => {
+    expect(() => writeRun(dir, mkRun("PROJ/1", 100))).not.toThrow();
+    expect(fs.readdirSync(dir)).toEqual([]);
+    expect(fs.existsSync(path.join(dir, "PROJ"))).toBe(false);
+  });
+
+  it("no-ops a write whose key climbs out of the runs dir", () => {
+    const outside = path.join(path.dirname(dir), `escape-w-${process.pid}.json`);
+    fs.rmSync(outside, { force: true });
+    expect(() => writeRun(dir, mkRun(`../escape-w-${process.pid}`, 100))).not.toThrow();
+    expect(fs.existsSync(outside)).toBe(false);
+    expect(fs.readdirSync(dir)).toEqual([]);
+  });
+
+  it("no-ops a remove through a climbing key — the file outside the dir survives", () => {
+    const outside = path.join(path.dirname(dir), `escape-r-${process.pid}.json`);
+    fs.writeFileSync(outside, "{}");
+    removeRun(dir, `../escape-r-${process.pid}`);
+    expect(fs.existsSync(outside)).toBe(true);
+    fs.rmSync(outside, { force: true });
+  });
+
+  it("still round-trips and removes an ordinary key", () => {
+    writeRun(dir, mkRun("PROJ-1", 100));
+    expect(readRuns(dir).map((r) => r.key)).toEqual(["PROJ-1"]);
+    removeRun(dir, "PROJ-1");
+    expect(readRuns(dir)).toEqual([]);
+  });
+});
+
+describe("readRuns — malformed record files", () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "agent-flow-runs-bad-"));
+  });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it.each([
+    ["null", "null"],
+    ["a bare number", "5"],
+    ["a bare string", '"text"'],
+    ["an empty array", "[]"],
+  ])("skips a file whose JSON is %s (valid JSON, wrong type) without throwing", (_label, content) => {
+    fs.writeFileSync(path.join(dir, "bad.json"), content);
+    writeRun(dir, mkRun("PROJ-1", 100));
+    expect(readRuns(dir).map((r) => r.key)).toEqual(["PROJ-1"]);
+  });
+
+  it("sorts a record with no createdAt oldest, deterministically", () => {
+    // A missing createdAt used to feed NaN into the sort comparator, making
+    // the whole ordering implementation-defined.
+    fs.writeFileSync(path.join(dir, "A-1.json"), JSON.stringify({ key: "A-1" }));
+    writeRun(dir, mkRun("B-1", 100));
+    writeRun(dir, mkRun("C-1", 300));
+    expect(readRuns(dir).map((r) => r.key)).toEqual(["C-1", "B-1", "A-1"]);
+  });
+
+  it("sorts a record whose createdAt is not a number oldest too", () => {
+    fs.writeFileSync(path.join(dir, "A-1.json"), JSON.stringify({ key: "A-1", createdAt: "soon" }));
+    writeRun(dir, mkRun("B-1", 100));
+    writeRun(dir, mkRun("C-1", 300));
+    expect(readRuns(dir).map((r) => r.key)).toEqual(["C-1", "B-1", "A-1"]);
+  });
+});
+
 describe("runTarget", () => {
   const base = { key: "K-1", summary: "s", url: "u", createdAt: 1, mode: "per-window" as const, briefPaths: [] };
 
@@ -78,6 +150,14 @@ describe("runTarget", () => {
 
   it("is undefined when there is nothing to open", () => {
     expect(runTarget({ ...base, repos: [] })).toBeUndefined();
+  });
+
+  it("is undefined (no throw) for a record with neither workspaceFile nor repos", () => {
+    // The key-only readRuns guard admits this shape; the optional chain used
+    // to sit on the element, not on `repos` itself.
+    const bare = base as unknown as Run;
+    expect(() => runTarget(bare)).not.toThrow();
+    expect(runTarget(bare)).toBeUndefined();
   });
 });
 
@@ -141,6 +221,17 @@ describe("describeActiveTasks", () => {
       "## Active tasks",
       "- **PROJ-1** (task) — Fix the retry bug and the flaky test — `/repos/svc` (branch: proj-1) — idle, no session attached",
     ]);
+  });
+
+  it("doesn't throw on a record admitted by the key guard but missing summary", () => {
+    // readRuns only validates `.key`, so {"key":"X","createdAt":1} in
+    // ~/.agentflow/runs/ reaches here with no summary to .replace() on.
+    const { summary, ...rest } = mkRun("PROJ-1", 100);
+    const noSummary = rest as unknown as Run;
+    expect(() => describeActiveTasks([noSummary], new Set())).not.toThrow();
+    const md = describeActiveTasks([noSummary], new Set());
+    expect(md).toContain("**PROJ-1** (task)");
+    expect(md).toContain("idle, no session attached");
   });
 
   it("lists multiple active runs as separate bullets, newest first if readRuns already sorted them", () => {

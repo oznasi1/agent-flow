@@ -10,14 +10,20 @@ export function defaultRunsDir(): string {
   return path.join(os.homedir(), ".agentflow", "runs");
 }
 
-function fileFor(dir: string, key: string): string {
-  return path.join(dir, `${key}.json`);
+/** Null for a key that names a path: a separator would land the write — or the
+ * delete — outside the runs dir (`PROJ/1` threw ENOENT and was swallowed
+ * upstream; `../x` deleted a sibling). Escaping the dir requires a separator,
+ * so refusing one keeps every released single-segment key working unchanged. */
+function fileFor(dir: string, key: string): string | null {
+  return /[/\\]/.test(key) ? null : path.join(dir, `${key}.json`);
 }
 
 /** Persist a run, keyed by ticket — re-taking a task overwrites its record. */
 export function writeRun(dir: string, run: Run): void {
+  const file = fileFor(dir, run.key);
+  if (!file) return;
   fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(fileFor(dir, run.key), JSON.stringify(run, null, 2) + "\n");
+  fs.writeFileSync(file, JSON.stringify(run, null, 2) + "\n");
 }
 
 /** All runs in the store, newest first. Malformed files are skipped, not fatal. */
@@ -37,18 +43,21 @@ export function readRuns(dir: string): Run[] {
       /* skip a corrupt/half-written record rather than blow up the whole deck */
     }
   }
-  return runs.sort((a, b) => b.createdAt - a.createdAt);
+  // Coerced: a record missing createdAt (admitted by the key-only guard above)
+  // would feed NaN into the comparator and make the whole ordering undefined.
+  return runs.sort((a, b) => (Number(b.createdAt) || 0) - (Number(a.createdAt) || 0));
 }
 
 /** Forget a run (e.g. after it's merged/archived). */
 export function removeRun(dir: string, key: string): void {
-  fs.rmSync(fileFor(dir, key), { force: true });
+  const file = fileFor(dir, key);
+  if (file) fs.rmSync(file, { force: true });
 }
 
 /** The path the Deck's "Open" acts on for a run: the multi-root workspace file,
  * else the first repo. Undefined when a run somehow has neither. */
 export function runTarget(run: Run): string | undefined {
-  return run.workspaceFile ?? run.repos[0]?.path;
+  return run.workspaceFile ?? run.repos?.[0]?.path;
 }
 
 /** One bullet per still-active run, for folding into a supervising session's
@@ -71,7 +80,9 @@ export function describeActiveTasks(runs: Run[], livePlaces: ReadonlySet<string>
     const where = first ? `\`${first.path}\`${first.branch ? ` (branch: ${first.branch})` : ""}` : "unknown location";
     // Collapse any embedded newline so one run's summary can't split a single
     // bullet across multiple lines of the `## Active tasks` markdown list.
-    const summary = r.summary.replace(/\s*\n\s*/g, " ");
+    // Guarded like `repos` above: the key-only readRuns guard admits a record
+    // with no summary at all.
+    const summary = (r.summary ?? "").replace(/\s*\n\s*/g, " ");
     return `- **${r.key}** (${runKind(r)}) — ${summary} — ${where} — ${live ? "session open" : "idle, no session attached"}`;
   });
   return `## Active tasks\n${lines.join("\n")}`;
