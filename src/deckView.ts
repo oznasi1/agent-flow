@@ -1715,7 +1715,14 @@ export class DeckPanel {
    */
   private usageFor(key: string): void {
     const run = this.run(key);
-    if (!run) return;
+    if (!run) {
+      // No record any more — forgotten or retired between the click and here.
+      // Answer anyway: the webview asks once per drawer opening and treats
+      // no-reply as loading forever, while null already renders as "couldn't
+      // read this task's transcripts".
+      this.post({ type: "deck:usage", key, usage: null });
+      return;
+    }
     let usage: UsageTotals | null;
     try {
       usage = this.usage.readRun(claudeProjectsRoot(), run.repos.map((r) => r.path));

@@ -10235,3 +10235,17 @@ describe("hardening — a refresh outliving the panel", () => {
     expect(posts(p).some((m) => m.type === "deck:runs")).toBe(false);
   });
 });
+
+describe("hardening — usageFor answers for a missing run", () => {
+  it("posts a null usage for a key with no run, instead of leaving the drawer loading forever", async () => {
+    // The webview asks once per drawer opening and treats no-reply as loading:
+    // a silent return leaves "Reading transcripts…" on screen until the panel
+    // reloads. null is the shape it already renders as "couldn't read".
+    show();
+    const p = lastPanel();
+    await settled();
+    await p._fire({ type: "deck:usageFor", key: "PROJ-GONE" });
+    const post = posts(p).filter((m) => m.type === "deck:usage").at(-1);
+    expect(post).toEqual({ type: "deck:usage", key: "PROJ-GONE", usage: null });
+  });
+});
