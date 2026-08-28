@@ -170,6 +170,11 @@ export function makeSandbox(settingsOverride: Record<string, unknown> = {}): San
   // files, so no user PATH entry can outrank this shim.
   fs.writeFileSync(path.join(bin, "claude"), "#!/bin/sh\necho CLAUDE-SHIM-READY\nexec cat\n", { mode: 0o755 });
 
+  // And `codex`, for the same reason: it is the one non-Claude provider whose real
+  // path this lane can exercise (no host gate), and a developer's actual Codex CLI
+  // must never start a session from a test.
+  fs.writeFileSync(path.join(bin, "codex"), "#!/bin/sh\necho CODEX-SHIM-READY\nexec cat\n", { mode: 0o755 });
+
   return {
     root, home, userDataDir, extensionsDir, fixtureDir, reposRoot, repoPath,
     dispose: () => fs.rmSync(root, { recursive: true, force: true }),
