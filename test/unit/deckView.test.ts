@@ -4582,7 +4582,7 @@ describe("deck:mergePr", () => {
     expect(posts(p)).toContainEqual(CANCELLED({ key: "NOPE-9" }));
   });
 
-  it("releases the button for a local card", async () => {
+  it("releases the button for a local card, and emits pr_merged refused/local", async () => {
     h.mergeWrites = true;
     h.runs = [];
     h.openSessions = [sess({ cwd: "/r/svc", name: "svc-7e" })];
@@ -4591,8 +4591,12 @@ describe("deck:mergePr", () => {
     await settled();
     const localKey = builtLocal().run.key;
     const p = lastPanel();
+    trackSpy.mockClear();
     await p._fire({ type: "deck:mergePr", key: localKey, repo: "svc", number: 124 });
     expect(posts(p)).toContainEqual(CANCELLED({ key: localKey }));
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged")).toMatchObject({
+      outcome: "refused", refusal: "local",
+    });
   });
 
   // The wrong-number shape rather than the unmergeable-facts one, though both reach
@@ -4736,6 +4740,7 @@ describe("deck:mergePr", () => {
     let release!: () => void;
     h.prMerge.mockImplementation(() => new Promise((res) => { release = () => res({ ok: true }); }));
     const p = await openWith(greenFacts());
+    trackSpy.mockClear();
     const first = p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
     release();
@@ -4751,6 +4756,12 @@ describe("deck:mergePr", () => {
     expect(dones).toEqual([
       { type: "deck:mergeDone", key: "PROJ-1", repo: "svc", number: 124, outcome: "ok" },
     ]);
+    // The rejected duplicate still gets its own pr_merged{ refused, in-flight } —
+    // trackEvent isn't gated by the same "don't release the button" reasoning the
+    // webview post is, so both this and the real call's pr_merged{ ok } land.
+    const merged = trackSpy.mock.calls.flat().filter((e: any) => e.name === "pr_merged");
+    expect(merged).toContainEqual(expect.objectContaining({ outcome: "refused", refusal: "in-flight" }));
+    expect(merged).toContainEqual(expect.objectContaining({ outcome: "ok", merge_method: "squash" }));
   });
 
   it("carries mergeWrites on deck:runs so the card can render the row", async () => {
@@ -4946,15 +4957,19 @@ describe("DeckPanel — Address PR", () => {
     expect(h.openInEditor).toHaveBeenCalledWith("/r/svc");
   });
 
-  it("toasts an error when there is no run record for the key", async () => {
+  it("toasts an error when there is no run record for the key, and emits pr_work_seeded refused", async () => {
     h.runs = [];
     show();
     const p = lastPanel();
+    trackSpy.mockClear();
     await p._fire({ type: "deck:addressPr", key: "PROJ-9" });
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(
       expect.objectContaining({ type: "toast", level: "error", message: "No run record for PROJ-9." }),
     );
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "refused",
+    });
   });
 
   it("toasts an error when the run has nothing to open", async () => {
@@ -5021,10 +5036,14 @@ describe("DeckPanel — Address PR", () => {
     await settled();
     const localKey = builtLocal().run.key;
     const p = lastPanel();
+    trackSpy.mockClear();
     await p._fire({ type: "deck:addressPr", key: localKey });
     await settled();
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(h.openInEditor).not.toHaveBeenCalled();
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "refused",
+    });
   });
 
   it("tells the user nothing was seeded when agentFlow.seedAgent is off", async () => {
@@ -5196,14 +5215,18 @@ describe("DeckPanel — PR-work destination", () => {
     }));
   });
 
-  it("refuses this window when it has no identity between the pick and the seed", async () => {
+  it("refuses this window when it has no identity between the pick and the seed, and emits pr_work_seeded refused", async () => {
     h.currentWindow = undefined;
     window.showQuickPick.mockResolvedValueOnce({ target: { kind: "current" } });
+    trackSpy.mockClear();
     const p = await fire();
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(posts(p)).toContainEqual(expect.objectContaining({
       type: "toast", level: "error", message: expect.stringContaining("no workspace file"),
     }));
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "refused",
+    });
   });
 
   // The plan file is the durable half of this click: written after the question, never
