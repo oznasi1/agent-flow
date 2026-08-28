@@ -113,6 +113,8 @@ Suppressed entirely when `telemetry.telemetryLevel` is `"error"` (or lower).
 | `take_destination_picked` | `flow_id`, `destination`: `"new"` \| `"current"` \| `"existing"` \| `"live-folder"`, `workspace_mode`: `"multiroot"` \| `"per-window"` | The open target for this Take is resolved. |
 | `take_repos_picked` | `flow_id`, `repo_count: number`, `repo_source`: `"preselected"` \| `"destination"` \| `"quickpick"`, `accepted_inference?: boolean`, `inferred_count: number` | The repo set for this Take is resolved. `"destination"` covers every destination that already has folders — an existing workspace, another open window, or this window. `accepted_inference` is present only for the `"quickpick"` source, where it's meaningful; omitted (not `false`) otherwise, so "inference never ran" stays distinguishable from a genuine rejection. |
 | `take_completed` | `flow_id`, `outcome`: `"launched"` \| `"cancelled"` \| `"failed"`, `destination?`, `prompt_mode?`, `repo_count`, `duration_ms: number`, `used_worktree?: boolean`, `failure_class?` (see [Errors](#errors--operation_failed-and-unhandled_error)), `task_fp` | The Take funnel ends, one way or another — this is the funnel terminator. `used_worktree` is the decision actually applied, which on the shipped `agentFlow.worktree: "ask"` default is the user's answer to a QuickPick; it is omitted (not `false`) when the Take ended before that question was answered, so "never asked" stays distinguishable from "asked, declined". `prompt_mode` is omitted when the Take is cancelled before a mode was chosen, so a genuine `"custom"` pick stays distinguishable from no decision at all. |
+| `batch_started` | `flow_id`, `keys_count: number`, `is_fanout: boolean` (a `parent` argument is present — this batch is a fan-out under one ticket), `tree_mode?`: `"fanout"` \| `"orchestrator"` \| `"parent"` (present only when this batch was reached through `chooseTreeMode`'s fan-out picker) | `takeBatch` begins, right after the `keys.length === 0` no-op guard. A plain multi-select batch and a one-key "batch" (really a single launch) omit `tree_mode`, since no tree-mode picker ran for either. |
+| `batch_completed` | `flow_id`, `outcome`: `"launched"` \| `"cancelled"` \| `"failed"`, `attempted`, `launched`, `failed: number`, `prompt_mode?`, `destination?`, `layout?`: `"separate"` \| `"shared"`, `layout_asked: boolean`, `duration_ms: number` | The batch funnel's terminator — exactly one fires per `takeBatch` call, from whichever exit it reaches: a declined sign-in, an over-threshold confirmation declined, the prompt-mode/destination/layout/Remote-Control/agent pickers dismissed, and a mid-loop dismissal that abandons the rest of the batch all report `"cancelled"`; no usable repos among the filtered set reports `"failed"`; the ordinary end of the loop reports `"launched"` when at least one task launched, else `"failed"`. `prompt_mode`/`destination`/`layout` are omitted until the corresponding picker has actually resolved — same discipline as `take_completed`. `layout_asked` is `true` only when `target.kind === "new" && keys.length > 1` raised the layout QuickPick; `layout` itself is present only then. Never carries a ticket key or repo name. |
 | `deck_opened` | `revealed: boolean` (an already-open Deck refocused vs a freshly built panel), `forge: string` (a registry-validated forge id, or `"invalid"` — same sentinel as the settings snapshot's `forge`), `pr_facts`, `open_agents`, `review_queue`, `orchestrator: boolean`, `flow_count: number`, `has_armed_flow: boolean` | Every time the Deck command opens the panel, whether that reveals the existing one or constructs a new one. |
 | `deck_action` | `action`: one of `"refresh"`, `"clear_stale"`, `"switch_account"`, `"set_grouping"`, `"inspect_open"`, `"inspect_diff"`, `"forget"`, `"track"`, `"usage"`, `"open_external"`; `grouping?`: `"agents"` \| `"workspaces"` (present only for `set_grouping`) | Whenever the Deck webview sends a click-shaped message — read-plumbing messages like `deck:reviewExpand` are not actions and emit nothing here. |
 | `review_launched` | `outcome`: `"launched"` \| `"cancelled"` \| `"failed"`; `mode`: `"ask"` \| `"stock"` \| `"custom"` (the PromptMode actually picked or pinned for this launch, not merely the raw `reviewRequestMode` setting); `mode_was_pinned: boolean` (`resolveReviewMode` resolved it without asking); `destination?`: `"new"` \| `"current"` \| `"existing"` \| `"live-folder"` (single launches only); `provider?`: `"claude-code"` \| `"copilot"` \| `"cursor"` (single launches only, the agent actually seeded); `seeded_in_place?: boolean` (single, successful launches only); `batch: boolean`; `requested_count`, `launched_count`, `failed_count`, `skipped_count: number`; `layout?`: `"separate"` \| `"shared"` (batch only); `layout_asked?: boolean` (batch only — whether the layout QuickPick was actually raised) | A single review launch ends (one of `LaunchReviewResult`'s three arms, or the mode/destination picker dismissed first) or a batch review launch ends. Exactly one event per user gesture — a batch never emits one per PR. |
@@ -139,7 +141,11 @@ never from its message.
 independent judgement call about the specific failure, just a query
 convenience so "was this worth retrying" doesn't need a `failure_class` lookup
 table re-derived in every dashboard. It adds no information beyond
-`failure_class` itself.
+`failure_class` itself. The one exception: `takeBatch`'s three internal per-key
+catches (resolving a task, the shared-window path, and the per-window launch
+loop) always report `retryable: false` — these failures are swallowed
+per-task, with no "retry" affordance the button that logged them could offer,
+unlike the `onMessage`-level catch the derived value describes.
 
 `unhandled_error` is not something Agent Flow Deck's own code calls explicitly —
 it's VS Code's built-in behavior: `vscode.TelemetryLogger` automatically routes
@@ -174,6 +180,20 @@ entry point:
   directly, with no equivalent try/catch around it. A failure here is
   reported only as `take_completed{ outcome: "failed" }` — `operation_failed`
   does not fire, because nothing on this path calls `trackError`.
+
+### A batch's per-key failures are swallowed, on purpose
+
+`takeBatch` never lets one task's failure abort the rest — its three internal
+`catch` blocks (resolving a task, the shared-window path, and the per-window
+launch loop) each push the key onto a `failed` list and keep going, so they
+never reach `TasksViewProvider.onMessage`'s own catch (`tasksView.ts:879-889`)
+— `MESSAGE_OPS.takeBatch`'s mapping to `"workspace_write"` is unreachable for
+this per-key path in practice. Each swallowed catch instead emits its own
+`operation_failed{ op: "workspace_write", failure_class, retryable: false }`
+directly, so a per-task failure is still visible without waiting for
+`batch_completed`'s aggregate `failed` count — the same "both fire" doubling
+the Take funnel accepts above, not a second classification of a different
+failure.
 
 ### Settings snapshot
 

@@ -62,7 +62,7 @@ import {
   WorkspaceMode,
 } from "./types";
 import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
-import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
+import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, Outcome, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 // globalState, not workspaceState: a notepad belongs to the user, not to whichever
@@ -2136,7 +2136,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             this.log(
               `fan-out ${key}: ${leafKeys.length} ${leafKeys.length === 1 ? "leaf" : "leaves"} into ${repos.length} repo(s) — ${repos.join(", ")}`,
             );
-            await this.takeBatch(leafKeys, repos, parent);
+            await this.takeBatch(leafKeys, repos, parent, mode);
           } else {
             // `preselected` rides along for the same reason the fan-out passes it to
             // fanOutRepos: it is the only repo intent the user has expressed on this
@@ -2214,17 +2214,57 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     keys: string[],
     repos: string[],
     parent?: { key: string; branch: string },
+    treeMode?: "fanout" | "orchestrator" | "parent",
   ): Promise<void> {
     const cfg = getConfig();
     if (!keys.length) return;
 
+    const flow = startFlow();
+    // Known only once the corresponding picker/confirm has actually resolved;
+    // omitted (not defaulted) at every earlier exit, so a genuine choice never gets
+    // confused with "never asked" — the same discipline take_completed already uses
+    // for its own prompt_mode/destination.
+    let promptModeProp: PromptModeProp | undefined;
+    let destinationProp: DestinationProp | undefined;
+    let layoutAsked = false;
+    let layoutProp: "separate" | "shared" | undefined;
+    const failed: string[] = [];
+    let launched = 0;
+    const batchDone = (outcome: Outcome) =>
+      track({
+        name: "batch_completed",
+        flow_id: flow.id,
+        outcome,
+        attempted: keys.length,
+        launched,
+        failed: failed.length,
+        ...(promptModeProp !== undefined ? { prompt_mode: promptModeProp } : {}),
+        ...(destinationProp !== undefined ? { destination: destinationProp } : {}),
+        ...(layoutProp !== undefined ? { layout: layoutProp } : {}),
+        layout_asked: layoutAsked,
+        duration_ms: flow.elapsedMs(),
+      });
+    track({
+      name: "batch_started",
+      flow_id: flow.id,
+      keys_count: keys.length,
+      is_fanout: parent !== undefined,
+      ...(treeMode !== undefined ? { tree_mode: treeMode } : {}),
+    });
+
     if (!(await this.connector.isAuthenticated())) {
       const ok = await vscode.commands.executeCommand<boolean>("agentFlow.signIn");
-      if (!ok) return;
+      if (!ok) {
+        batchDone("cancelled");
+        return;
+      }
     }
 
     const filterSet = this.resolveBatchRepos(repos, cfg);
-    if (!filterSet.length) return;
+    if (!filterSet.length) {
+      batchDone("failed");
+      return;
+    }
 
     // A fan-out authorises WORKTREES, not keys: `reposForTask` widens to the whole filter
     // set for a child whose ticket infers nothing, so 3 leaves across 12 repos is 36
@@ -2250,7 +2290,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // destination is known (see the `shared` re-resolution below).
     const isBatch = keys.length > 1;
     let batchProvider = isBatch ? await resolveBatchProvider(cfg, true) : undefined;
-    if (isBatch && !batchProvider) return;
+    if (isBatch && !batchProvider) {
+      batchDone("cancelled");
+      return;
+    }
     // The agent for copy written BEFORE the launch: the resolved answer when there is
     // one, and otherwise the setting's own — a single launch resolves inside
     // `openWorkspace`, after this copy has already been written.
@@ -2265,19 +2308,31 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         { modal: true },
         "Launch",
       );
-      if (go !== "Launch") return;
+      if (go !== "Launch") {
+        batchDone("cancelled");
+        return;
+      }
     }
 
     const promptMode = await this.choosePromptMode(cfg, `Launch ${keys.length} selected task(s) — how should the sessions start?`);
-    if (!promptMode) return;
+    if (!promptMode) {
+      batchDone("cancelled");
+      return;
+    }
+    promptModeProp = toPromptModeProp(promptMode.id);
 
     const target = await this.chooseOpenTarget(cfg);
-    if (!target) return;
+    if (!target) {
+      batchDone("cancelled");
+      return;
+    }
+    destinationProp = target.kind;
 
     // Only a new window can go either way; the other destinations ARE a single window.
     // A one-key batch is an ordinary single-window launch, so it needs no layout pick.
     let shared = target.kind !== "new";
     if (target.kind === "new" && keys.length > 1) {
+      layoutAsked = true;
       const p = await vscode.window.showQuickPick(
         [
           { label: "$(multiple-windows) Separate windows", detail: "One window per task", shared: false },
@@ -2285,9 +2340,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         ],
         { title: `Launch ${keys.length} tasks — how should I lay them out?`, ignoreFocusOut: true },
       );
-      if (!p) return;
+      if (!p) {
+        batchDone("cancelled");
+        return;
+      }
       shared = p.shared;
     }
+    layoutProp = layoutAsked ? (shared ? "shared" : "separate") : undefined;
 
     // One clipboard can't serve several sessions — but a one-key "batch" is a single
     // launch, so it resolves Remote Control exactly like Take does. A shared window
@@ -2302,7 +2361,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // would block Copilot launches that work fine today. Refusing here instead costs
     // nothing — the worktree loop below has not run yet, so there is still no side
     // effect to leave behind.
-    if (wantRemoteControl === null) return;
+    if (wantRemoteControl === null) {
+      batchDone("cancelled");
+      return;
+    }
 
     // The shared path seeds every session from a plan file and never calls
     // `openWorkspace` at all, so nothing downstream of here can ask: a one-key batch
@@ -2311,11 +2373,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // so a dismissal here costs nothing either.
     if (shared && !batchProvider) {
       batchProvider = await resolveBatchProvider(cfg, isBatch);
-      if (!batchProvider) return;
+      if (!batchProvider) {
+        batchDone("cancelled");
+        return;
+      }
     }
 
     const resolved: { task: BatchTask; key: string }[] = [];
-    const failed: string[] = [];
     for (const key of keys) {
       try {
         const detail = await this.provider().detail(key);
@@ -2369,10 +2433,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         const msg = e instanceof Error ? e.message : String(e);
         failed.push(`${key} (${msg})`);
         this.log(`takeBatch ${key}: failed — ${msg}`);
+        trackError({ name: "operation_failed", op: "workspace_write", failure_class: classifyFailure(e), retryable: false });
       }
     }
 
-    let launched = 0;
     let extra = "";
     let seededInPlace = false;
     // Set by the per-window loop below from the one place the truth lives — see the
@@ -2445,6 +2509,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         const msg = e instanceof Error ? e.message : String(e);
         for (const r of resolved) failed.push(`${r.key} (${msg})`);
         this.log(`takeBatch: shared window failed — ${msg}`);
+        trackError({ name: "operation_failed", op: "workspace_write", failure_class: classifyFailure(e), retryable: false });
       }
     } else {
       let appliedRemoteControl = false;
@@ -2500,6 +2565,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           const msg = e instanceof Error ? e.message : String(e);
           failed.push(`${key} (${msg})`);
           this.log(`takeBatch ${key}: failed — ${msg}`);
+          trackError({ name: "operation_failed", op: "workspace_write", failure_class: classifyFailure(e), retryable: false });
         }
         if (i < resolved.length - 1) await delay(BATCH_STAGGER_MS);
       }
@@ -2510,7 +2576,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // does — silently. `launched > 0` means earlier tasks really did open, and those
     // are still worth reporting, so the summary below runs and its "N of M" count tells
     // the truth about the ones that were abandoned.
-    if (dismissed && launched === 0) return;
+    if (dismissed && launched === 0) {
+      batchDone("cancelled");
+      return;
+    }
 
     // A batch seeded into this window opened nothing — "in one shared window" would
     // imply one appeared.
@@ -2553,6 +2622,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             : "A worktree + Claude session per task.";
       this.toast("success", `${summary} ${perTaskNote}${extra}${rcNote}`);
     }
+    batchDone(launched > 0 ? "launched" : "failed");
   }
 
 

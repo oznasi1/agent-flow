@@ -40,6 +40,8 @@ const SAMPLES = [
   { name: "take_destination_picked", flow_id: "f1", destination: "new", workspace_mode: "multiroot" },
   { name: "take_repos_picked", flow_id: "f1", repo_count: 3, repo_source: "quickpick", accepted_inference: true, inferred_count: 2 },
   { name: "take_completed", flow_id: "f1", outcome: "launched", destination: "new", prompt_mode: "tdd", repo_count: 3, duration_ms: 4200, used_worktree: true, task_fp: "0123456789abcdef" },
+  { name: "batch_started", flow_id: "f1", keys_count: 4, is_fanout: false, tree_mode: "fanout" },
+  { name: "batch_completed", flow_id: "f1", outcome: "launched", attempted: 4, launched: 3, failed: 1, prompt_mode: "plan", destination: "new", layout: "separate", layout_asked: true, duration_ms: 900 },
   { name: "operation_failed", op: "git_worktree", failure_class: "conflict", retryable: false },
   { name: "unhandled_error", error_class: "TypeError", stack_digest: "at f (dist/extension.js:1:2)" },
   { name: "deck_opened", revealed: false, forge: "github", pr_facts: true, open_agents: true, review_queue: true, orchestrator: false, flow_count: 0, has_armed_flow: false },
@@ -67,7 +69,7 @@ describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
     const names = SAMPLES.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(16);
+    expect(names).toHaveLength(18);
   });
 
   it("carries no free-form strings outside the allow-list", () => {

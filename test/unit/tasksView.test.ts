@@ -3349,6 +3349,10 @@ describe("takeBatch", () => {
     // bailed out somewhere earlier and never exercised the guard at all.
     expect(openWorkspace).toHaveBeenCalledTimes(1);
     expect(posted().filter((m) => m.type === "toast")).toEqual([]);
+    // The mid-loop cancel with zero launches reports itself as cancelled, not failed —
+    // the batch didn't break, the user walked away from a picker.
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "batch_completed") as any;
+    expect(done).toMatchObject({ outcome: "cancelled", attempted: 1, launched: 0, failed: 0 });
   });
 
   it("never raises its own agent picker for a one-key batch to a new window", async () => {
@@ -3429,6 +3433,49 @@ describe("takeBatch", () => {
     expect(toast.message).not.toContain("billing");
   });
 
+  it("emits the batch funnel with matching flow_ids and honest counts", async () => {
+    // 3 keys, PROJ-2's worktree falls back to the main checkout — the resolve-loop
+    // catch swallows it and the other two still launch.
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      key === "PROJ-2" ? s : s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider } = setup();
+    await provider.takeBatch(["PROJ-1", "PROJ-2", "PROJ-3"], ["api"]);
+    const started = trackSpy.mock.calls.flat().find((e: any) => e.name === "batch_started") as any;
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "batch_completed") as any;
+    expect(started.flow_id).toBe(done.flow_id);
+    expect(done).toMatchObject({ attempted: 3, failed: 1 });
+    // A plain batch (no parent, no tree_mode arg) reports it as such.
+    expect(started).toMatchObject({ keys_count: 3, is_fanout: false });
+    expect("tree_mode" in started).toBe(false);
+    // No ticket key ever reaches the funnel's serialized properties.
+    expect(JSON.stringify([started, done])).not.toContain("PROJ-2");
+  });
+
+  it("carries chooseTreeMode's fan-out answer onto batch_started as tree_mode", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider } = setup();
+    await provider.takeBatch(["PROJ-1"], ["api"], { key: "PROJ-9", branch: "PROJ-9-parent" }, "fanout");
+    const started = trackSpy.mock.calls.flat().find((e: any) => e.name === "batch_started") as any;
+    expect(started).toMatchObject({ tree_mode: "fanout", is_fanout: true });
+  });
+
+  it("emits operation_failed per swallowed per-key failure", async () => {
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(createWorktrees).mockImplementation((s, key) =>
+      key === "PROJ-2" ? s : s.map((r) => ({ ...r, path: `${r.path}/.claude/worktrees/${key}` })),
+    );
+    const { provider } = setup();
+    await provider.takeBatch(["PROJ-1", "PROJ-2", "PROJ-3"], ["api"]);
+    const errs = trackErrorSpy.mock.calls.flat().filter(
+      (e: any) => e.name === "operation_failed" && e.op === "workspace_write",
+    );
+    expect(errs.length).toBeGreaterThanOrEqual(1);
+    // The ticket key never leaks into the error event's properties.
+    expect(JSON.stringify(errs)).not.toContain("PROJ-2");
+  });
+
   it("launches one worktree'd new window per selected task in the filtered repo", async () => {
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api", "billing"]));
     const { provider } = setup();
@@ -3466,6 +3513,18 @@ describe("takeBatch", () => {
     const { provider } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
     expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("a cancelled confirm emits batch_completed{outcome:cancelled} with no prompt_mode", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, taskMode: "ask" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined);
+    const { provider } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const done = trackSpy.mock.calls.flat().find((e: any) => e.name === "batch_completed") as any;
+    expect(done.outcome).toBe("cancelled");
+    expect("prompt_mode" in done).toBe(false);
+    expect(done).toMatchObject({ attempted: 2, launched: 0, failed: 0 });
   });
 
   it("drops a non-git repo from the set and launches on the rest", async () => {
@@ -6270,7 +6329,7 @@ describe("takeTask: a ticket with children", () => {
     expect(takeBatch).toHaveBeenCalledWith(["PROJ-2"], ["account-service"], {
       key: "PROJ-1",
       branch: PARENT_BRANCH,
-    });
+    }, "fanout");
   });
 
   it("keeps a non-git folder out of the fan-out's repo set", async () => {
@@ -6288,7 +6347,7 @@ describe("takeTask: a ticket with children", () => {
     expect(takeBatch).toHaveBeenCalledWith(["PROJ-2"], ["account-service"], {
       key: "PROJ-1",
       branch: PARENT_BRANCH,
-    });
+    }, "fanout");
   });
 
   it("says there is no git repo at all without a blank where names belong", async () => {
@@ -6319,7 +6378,7 @@ describe("takeTask: a ticket with children", () => {
     expect(takeBatch).toHaveBeenCalledWith(["PROJ-2"], ["account-service", "webapp"], {
       key: "PROJ-1",
       branch: PARENT_BRANCH,
-    });
+    }, "fanout");
   });
 
   /** Four repos where the PARENT confirms two of them via components (plus a label

@@ -217,6 +217,26 @@ export type UsageEvent =
   // "custom" distinguishable from "no mode was ever chosen" — the latter is not a
   // vote for "custom" (Phase 1's fidelity bug, follow-ups doc, item 3).
   | { name: "take_completed"; flow_id: string; outcome: Outcome; destination?: DestinationProp; prompt_mode?: PromptModeProp; repo_count: number; duration_ms: number; used_worktree?: boolean; failure_class?: FailureClass; task_fp: string }
+  // `takeBatch`'s own funnel — separate from the Take funnel above, since a card or
+  // command Take that becomes a fan-out routes away before take_started ever fires
+  // (see TakeSource's "batch" note) and takeBatch asks its own questions from here.
+  // `tree_mode` is present only when this batch was reached through the fan-out
+  // picker (`chooseTreeMode`'s "fanout" answer) — a plain multi-select batch, and the
+  // one-key "batch" that is really a single launch, omit it rather than reporting a
+  // picker that never ran.
+  | { name: "batch_started"; flow_id: string; keys_count: number; is_fanout: boolean; tree_mode?: "fanout" | "orchestrator" | "parent" }
+  // `attempted`/`launched`/`failed` are honest at every exit, including the ones
+  // before the loop ever runs (0/0/0). `prompt_mode`/`destination`/`layout` are
+  // omitted (not defaulted) until the corresponding picker actually resolves, same
+  // discipline as `take_completed`. `layout_asked` is unconditional: it is only ever
+  // true when `target.kind === "new" && keys.length > 1` put the layout QuickPick up,
+  // and `layout` itself is present only then — a batch that never asked has nothing
+  // honest to report there.
+  | {
+      name: "batch_completed"; flow_id: string; outcome: Outcome; attempted: number; launched: number;
+      failed: number; prompt_mode?: PromptModeProp; destination?: DestinationProp;
+      layout?: "separate" | "shared"; layout_asked: boolean; duration_ms: number;
+    }
   // `forge` is a registry-validated id or "invalid" — same sentinel scheme as
   // SettingsSnapshot.forge; never the raw setting string. `revealed` distinguishes
   // an already-open panel refocused from one freshly constructed.
