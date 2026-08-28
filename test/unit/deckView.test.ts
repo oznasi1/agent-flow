@@ -10249,3 +10249,38 @@ describe("hardening — usageFor answers for a missing run", () => {
     expect(post).toEqual({ type: "deck:usage", key: "PROJ-GONE", usage: null });
   });
 });
+
+describe("hardening — onMessage failures surface", () => {
+  /** Like `show()`, but with a log this describe can read. */
+  const showWithLog = () => {
+    const log = vi.fn();
+    DeckPanel.show(fakeContext().context as any, fakeConnector(), log);
+    return log;
+  };
+
+  it("logs and toasts when a handler throws, instead of a silent unhandled rejection", async () => {
+    // deck:forget is the sharpest case: the webview drops the card
+    // optimistically before removeRun runs, so a throw here (EACCES on the
+    // runs directory, say) used to resurrect the card on the next poll with no
+    // explanation at all.
+    const log = showWithLog();
+    const p = lastPanel();
+    await settled();
+    h.removeRun.mockImplementationOnce(() => { throw new Error("EACCES: /runs"); });
+    await p._fire({ type: "deck:forget", key: "PROJ-1" }); // resolves — the throw is owned
+    expect(log.mock.calls.some((c) => String(c[0]).includes("deck:forget") && String(c[0]).includes("EACCES"))).toBe(true);
+    expect(posts(p)).toContainEqual(expect.objectContaining({
+      type: "toast", level: "error", message: expect.stringContaining("deck:forget"),
+    }));
+  });
+
+  it("logs a message type it does not know instead of dropping it silently", async () => {
+    // Most plausibly a webview newer than the host — the panel survives an
+    // extension update until its window reloads.
+    const log = showWithLog();
+    const p = lastPanel();
+    await settled();
+    await p._fire({ type: "deck:not-a-thing" });
+    expect(log.mock.calls.some((c) => String(c[0]).includes("deck:not-a-thing"))).toBe(true);
+  });
+});

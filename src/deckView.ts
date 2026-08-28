@@ -3460,6 +3460,20 @@ export class DeckPanel {
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
+    try {
+      await this.dispatch(m);
+    } catch (e) {
+      // A throwing handler used to become a silent unhandled rejection — and
+      // the webview has often already acted optimistically by then
+      // (deck:forget drops the card before removeRun runs, so an EACCES there
+      // resurrected it on the next poll with no explanation). Log the cause
+      // and tell the user which click failed.
+      this.log(`deck: handling ${m.type} failed: ${e}`);
+      this.toast("error", `Something went wrong handling ${m.type} — the Agent Flow Deck output channel has the reason.`);
+    }
+  }
+
+  private async dispatch(m: InboundMessage): Promise<void> {
     switch (m.type) {
       case "deck:ready":
         // Before the board build, not after it. `refresh()` only reaches
@@ -3779,6 +3793,12 @@ export class DeckPanel {
         await vscode.env.openExternal(u);
         break;
       }
+      default:
+        // A type this build does not know — most plausibly a webview newer
+        // than the host, since the panel survives an extension update until
+        // its window reloads. Logged rather than silently dropped so the
+        // mismatch is diagnosable.
+        this.log(`deck: unhandled message type ${(m as { type?: string }).type}`);
     }
   }
 
