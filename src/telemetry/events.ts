@@ -101,6 +101,13 @@ export type DestinationProp = "new" | "current" | "existing" | "live-folder";
  * `"batch"` is reserved: takeBatch is not instrumented in Phase 1, so nothing
  * emits it yet. */
 export type TakeSource = "card" | "command" | "batch";
+/** The Deck's `onMessage` click-shaped actions, one enum member per case that
+ * counts as a user gesture rather than read-plumbing (`deck:reviewExpand`,
+ * `deck:reviewLoadDraft`, and similar are not actions — see docs/TELEMETRY.md). */
+export type DeckAction =
+  | "refresh" | "clear_stale" | "switch_account" | "set_grouping"
+  | "inspect_open" | "inspect_diff" | "forget" | "track" | "usage" | "open_external";
+
 export type WorkspaceModeProp = "multiroot" | "per-window";
 export type RepoSource = "preselected" | "destination" | "quickpick";
 export type Outcome = "launched" | "cancelled" | "failed";
@@ -209,7 +216,12 @@ export type UsageEvent =
   // answered, and omitting it for a Take cancelled before then keeps a genuine
   // "custom" distinguishable from "no mode was ever chosen" — the latter is not a
   // vote for "custom" (Phase 1's fidelity bug, follow-ups doc, item 3).
-  | { name: "take_completed"; flow_id: string; outcome: Outcome; destination?: DestinationProp; prompt_mode?: PromptModeProp; repo_count: number; duration_ms: number; used_worktree?: boolean; failure_class?: FailureClass; task_fp: string };
+  | { name: "take_completed"; flow_id: string; outcome: Outcome; destination?: DestinationProp; prompt_mode?: PromptModeProp; repo_count: number; duration_ms: number; used_worktree?: boolean; failure_class?: FailureClass; task_fp: string }
+  // `forge` is a registry-validated id or "invalid" — same sentinel scheme as
+  // SettingsSnapshot.forge; never the raw setting string. `revealed` distinguishes
+  // an already-open panel refocused from one freshly constructed.
+  | { name: "deck_opened"; revealed: boolean; forge: string; pr_facts: boolean; open_agents: boolean; review_queue: boolean; orchestrator: boolean; flow_count: number; has_armed_flow: boolean }
+  | { name: "deck_action"; action: DeckAction; grouping?: "agents" | "workspaces" };
 
 /** Sent via logError — still delivered at telemetry level "error". */
 export type ErrorEvent =

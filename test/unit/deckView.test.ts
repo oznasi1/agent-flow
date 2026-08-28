@@ -16,6 +16,18 @@ import type { FlowCommand } from "../../src/types";
 import { attentionKeys } from "../../src/engine/attention";
 import { forgeNote } from "../../src/deckView";
 
+// Telemetry: mocked wholesale so the deck_opened/deck_action/operation_failed
+// assertions below observe track()/trackError() calls without a real singleton —
+// same pattern as tasksView.test.ts's Take-funnel mock.
+const trackSpy = vi.fn();
+const trackErrorSpy = vi.fn();
+vi.mock("../../src/telemetry/telemetry", () => ({
+  track: (...a: unknown[]) => trackSpy(...a),
+  trackError: (...a: unknown[]) => trackErrorSpy(...a),
+  startFlow: () => ({ id: "flow-1", elapsedMs: () => 42 }),
+  fingerprint: () => "0123456789abcdef",
+}));
+
 /** The shape `child_process.exec`'s callback is invoked with, narrowed to the four
  * fields `shellCommandRunner` actually branches on. A real `ExecException` carries
  * more, but a test that built one would be asserting against Node's own class
@@ -678,6 +690,8 @@ const sess = (over: Partial<OpenSession> = {}): OpenSession => ({
 });
 
 beforeEach(() => {
+  trackSpy.mockClear();
+  trackErrorSpy.mockClear();
   h.runs = [mkRun()];
   h.openInEditor.mockClear().mockResolvedValue(true);
   h.openWorkspace.mockClear().mockResolvedValue({ mode: "per-window", briefs: [], opened: [], remoteControl: false });
@@ -1313,6 +1327,92 @@ describe("DeckPanel", () => {
     await Promise.all([first, second]);
     const loads = posts(p).filter((m) => m.type === "deck:loading").map((m) => m.loading);
     expect(loads).toEqual([true, false]);
+  });
+});
+
+describe("deck telemetry", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  it("emits deck_opened once on a fresh open, with revealed:false", async () => {
+    await openPanel();
+    const opened = trackSpy.mock.calls.flat().filter((e: any) => e.name === "deck_opened");
+    expect(opened).toHaveLength(1);
+    expect(opened[0].revealed).toBe(false);
+    expect(typeof opened[0].flow_count).toBe("number");
+  });
+
+  it("emits deck_opened with revealed:true when an already-open panel is revealed instead of recreated", async () => {
+    await openPanel();
+    trackSpy.mockClear();
+    show(); // second show() on an existing panel takes the reveal branch
+    const opened = trackSpy.mock.calls.flat().filter((e: any) => e.name === "deck_opened");
+    expect(opened).toHaveLength(1);
+    expect(opened[0].revealed).toBe(true);
+  });
+
+  it("emits deck_action for a grouping change, carrying the grouping enum", async () => {
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "deck:setGrouping", grouping: "workspaces" });
+    const act = trackSpy.mock.calls.flat().find((e: any) => e.name === "deck_action");
+    expect(act).toMatchObject({ action: "set_grouping", grouping: "workspaces" });
+  });
+
+  it("emits deck_action inspect_open / inspect_diff from the same deck:inspect message, keyed by payload", async () => {
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "deck:inspect", key: "PROJ-1", action: "open" });
+    await send({ type: "deck:inspect", key: "PROJ-1", action: "diff" });
+    const actions = trackSpy.mock.calls.flat().filter((e: any) => e.name === "deck_action").map((e: any) => e.action);
+    expect(actions).toEqual(["inspect_open", "inspect_diff"]);
+  });
+
+  it("emits deck_action for refresh, clear stale, forget, and open external", async () => {
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    await send({ type: "deck:clearStale" });
+    await send({ type: "deck:forget", key: "PROJ-1" });
+    await send({ type: "openExternal", url: "https://example.com" });
+    const actions = trackSpy.mock.calls.flat().filter((e: any) => e.name === "deck_action").map((e: any) => e.action);
+    expect(actions).toEqual(["refresh", "clear_stale", "forget", "open_external"]);
+  });
+
+  it("emits no deck_action for read-plumbing messages like deck:reviewExpand", async () => {
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "deck:reviewExpand", id: "PROJ-1" });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "deck_action")).toBeUndefined();
+  });
+
+  it("emits operation_failed from the new onMessage catch and never a user string", async () => {
+    const { send } = await openPanel();
+    const panel = (DeckPanel as any).current;
+    vi.spyOn(panel, "refreshBusy").mockRejectedValueOnce(new Error("boom"));
+    trackErrorSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    const err = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(err).toBeDefined();
+    expect(err.op).toBe("pr_lookup");
+    expect(err.retryable).toBe(false);
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-");
+    expect(JSON.stringify(trackErrorSpy.mock.calls.flat())).not.toContain("PROJ-");
+  });
+
+  it("does not report operation_failed for a message absent from the op map, falling back to workspace_write", async () => {
+    const { send } = await openPanel();
+    const panel = (DeckPanel as any).current;
+    vi.spyOn(panel as any, "switchForgeAccount").mockRejectedValueOnce(new Error("boom"));
+    trackErrorSpy.mockClear();
+    await send({ type: "deck:switchAccount" });
+    const err = trackErrorSpy.mock.calls.flat().find((e: any) => e.name === "operation_failed") as any;
+    expect(err).toBeDefined();
+    expect(err.op).toBe("workspace_write");
   });
 });
 

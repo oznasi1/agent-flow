@@ -46,7 +46,7 @@ import { providerPin, resolveBatchProvider } from "./agentPick";
 // `import type` — erased at build time — for the reason forge/types.ts itself
 // documents: this module must add no runtime edge to the forge directory beyond
 // the registry call below.
-import { resolveForge } from "./engine/forge/registry";
+import { resolveForge, FORGE_IDS } from "./engine/forge/registry";
 import type { Forge, ForgeAccount, ForgeCaps, ForgeGap } from "./engine/forge/types";
 import { accountSlot } from "./engine/forge/accounts";
 import { ReviewCache, defaultReviewsFile, isReviewCacheStale, readReviewCache, writeReviewCache } from "./engine/review/store";
@@ -63,6 +63,11 @@ import { AttentionCandidate, attentionLabel, ownsWorkToLose } from "./engine/att
 // land where the user's value already lives. Saving a command is the same problem.
 import { pickExplicit } from "./modesNotice";
 import { CardAgent, FlowPromptMode, InboundMessage, MergeMethod, OpenSession, OutboundMessage, PendingResume, PrEntry, PrEntryMap, PromptMode, PrWorkReason, RepoGit, ReviewRequest, ReviewSort, ReviewVerb, Run, RunStatus, ServiceRef, isTicketRun, runKind, ticketKeyFor } from "./types";
+// Aliased: DeckPanel already has a private `track(key)` method (promotes a local
+// card), unrelated to analytics — every later Deck telemetry emit goes through
+// `trackEvent`/`trackError` instead, never the bare names.
+import { track as trackEvent, trackError } from "./telemetry/telemetry";
+import { classifyFailure, DeckAction, Op } from "./telemetry/events";
 
 export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
@@ -336,6 +341,44 @@ interface EdgeDone {
  * nothing was decided and the next pass should try again. */
 type EdgeResult = EdgeDone | { kind: "defer"; reason: string };
 
+/** `onMessage` cases that are a click-shaped user action, mapped to their `deck_action`
+ * enum member. `deck:inspect` and `deck:setGrouping` are handled separately (their event
+ * needs a payload field this table can't carry); everything else here emits with no
+ * further properties. Cases absent from this map — `deck:ready`, `deck:reviewExpand`,
+ * `deck:reviewLoadDraft`, `deck:setReviewSort`, `deck:reviewSubmit`, `deck:mergePr`,
+ * `deck:seedPrWork`, `deck:addressPr`, every `flow:*` case (its own `flow_action` event
+ * is a later task) — are read-plumbing or already funnel-instrumented elsewhere, not a
+ * bare action worth its own count. */
+const DECK_ACTIONS: Partial<Record<InboundMessage["type"], DeckAction>> = {
+  "deck:refresh": "refresh",
+  "deck:clearStale": "clear_stale",
+  "deck:switchAccount": "switch_account",
+  "deck:setGrouping": "set_grouping",
+  "deck:forget": "forget",
+  "deck:track": "track",
+  "deck:usageFor": "usage",
+  "openExternal": "open_external",
+};
+
+/** Last-resort `operation_failed` attribution for a message whose handler threw with
+ * no per-handler catch of its own to classify it more precisely — mirrors
+ * tasksView.ts's `MESSAGE_OPS`, but deliberately without its `resolveOp` escalation:
+ * nothing here reads a task source, so there is no jira_fetch/jira_write to prefer
+ * over the message's own op. A message absent from this map (e.g. `deck:ready`,
+ * `openExternal`) still falls back to `"workspace_write"` rather than reporting
+ * nothing — unlike tasksView, where an absent entry means "not itself a failure
+ * worth counting" and MESSAGE_OPS is consulted directly, not through a fallback. */
+const DECK_MESSAGE_OPS: Partial<Record<string, Op>> = {
+  "deck:reviewLaunch": "review_fetch",
+  "deck:reviewBatch": "review_fetch",
+  "deck:reviewSubmit": "review_fetch",
+  "deck:mergePr": "pr_lookup",
+  "deck:addressPr": "pr_lookup",
+  "deck:seedPrWork": "workspace_write",
+  "deck:track": "workspace_write",
+  "deck:refresh": "pr_lookup",
+};
+
 /** The Deck: a full-window board of every task launched via Agent Flow Deck, opened as a
  * singleton editor-area panel. Reuses the Jira client, runs store, and status engine. */
 export class DeckPanel {
@@ -484,6 +527,7 @@ export class DeckPanel {
   static show(context: vscode.ExtensionContext, connector: TaskConnector, log: (m: string) => void): void {
     if (DeckPanel.current) {
       DeckPanel.current.panel.reveal();
+      DeckPanel.current.trackOpened(true);
       return;
     }
     const panel = vscode.window.createWebviewPanel(
@@ -493,6 +537,30 @@ export class DeckPanel {
       { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [context.extensionUri] },
     );
     DeckPanel.current = new DeckPanel(panel, context, connector, log);
+    DeckPanel.current.trackOpened(false);
+  }
+
+  /** Emits `deck_opened`. `revealed` is the only thing the two call sites in `show()`
+   * differ on — everything else is the live state this panel (or the one about to
+   * exist) already holds: `prFacts`/`openAgents`/`reviewQueue` were seeded from config
+   * in the constructor and can have since been flipped by a setting, `orchestrator`
+   * and the flow counts are read fresh rather than cached, since either could have
+   * changed on disk since this panel last checked. `forge` validates the raw setting
+   * against the registry — never the resolved `Forge.id`, which a stale forge object
+   * cannot report as invalid — the same sentinel scheme settingsSnapshot.ts uses. */
+  private trackOpened(revealed: boolean): void {
+    const cfg = getConfig();
+    trackEvent({
+      name: "deck_opened",
+      revealed,
+      forge: (FORGE_IDS as readonly string[]).includes(cfg.forge) ? cfg.forge : "invalid",
+      pr_facts: this.prFacts,
+      open_agents: this.openAgents,
+      review_queue: this.reviewQueue,
+      orchestrator: cfg.orchestrator,
+      flow_count: readFlows(this.flowIo, this.flowsDir).length,
+      has_armed_flow: this.hasArmedFlow(),
+    });
   }
 
   private constructor(
@@ -3395,6 +3463,33 @@ export class DeckPanel {
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
+    // `deck_action` fires before the switch runs its handler, not after: the
+    // gesture happened the moment the webview sent it, regardless of whether the
+    // handler below goes on to succeed, fail (caught below), or is still in
+    // flight. `deck:inspect` and `deck:setGrouping` carry a payload the flat
+    // DECK_ACTIONS table can't express, so they're keyed by message shape instead.
+    if (m.type === "deck:inspect") {
+      trackEvent({ name: "deck_action", action: m.action === "diff" ? "inspect_diff" : "inspect_open" });
+    } else if (m.type === "deck:setGrouping") {
+      trackEvent({ name: "deck_action", action: "set_grouping", grouping: m.grouping });
+    } else {
+      const action = DECK_ACTIONS[m.type];
+      if (action) trackEvent({ name: "deck_action", action });
+    }
+    try {
+      await this.handle(m);
+    } catch (e) {
+      const op = DECK_MESSAGE_OPS[m.type] ?? "workspace_write";
+      trackError({ name: "operation_failed", op, failure_class: classifyFailure(e), retryable: false });
+      this.log(`deck: ${m.type} failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  /** The per-message switch itself, unchanged apart from living here now — split out
+   * of `onMessage` only so the last-resort catch above wraps it as one `await`,
+   * rather than the `try`/`catch` sitting inside a method whose every case already
+   * threads its own `return`/`break` through. */
+  private async handle(m: InboundMessage): Promise<void> {
     switch (m.type) {
       case "deck:ready":
         // Before the board build, not after it. `refresh()` only reaches
