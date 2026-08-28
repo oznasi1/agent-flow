@@ -133,19 +133,91 @@ describe("compatibility surface (frozen)", () => {
   });
 
   it("keeps the released settings and command ids in the manifest", () => {
+    type ConfigSection = { properties: Record<string, unknown> };
     const pkg = JSON.parse(
       fs.readFileSync(path.join(__dirname, "../../package.json"), "utf8"),
     ) as {
       contributes: {
-        configuration: { properties: Record<string, unknown> };
+        configuration: ConfigSection | ConfigSection[];
         commands: { command: string }[];
       };
     };
-    const props = Object.keys(pkg.contributes.configuration.properties);
+    // The manifest may present settings as one section or several; the ids
+    // users have in settings.json must survive either shape.
+    const sections = Array.isArray(pkg.contributes.configuration)
+      ? pkg.contributes.configuration
+      : [pkg.contributes.configuration];
+    const props = sections.flatMap((s) => Object.keys(s.properties));
+    expect(new Set(props).size).toBe(props.length);
     for (const id of [
+      "agentFlow.taskSource",
+      "agentFlow.forge",
       "agentFlow.jira.baseUrl",
       "agentFlow.jira.project",
+      "agentFlow.agileAccelerator.instanceUrl",
+      "agentFlow.agileAccelerator.team",
+      "agentFlow.agileAccelerator.targetOrg",
+      "agentFlow.reposRoot",
+      "agentFlow.workspaceDir",
+      "agentFlow.githubOrg",
+      "agentFlow.repoBlocklist",
+      "agentFlow.defaultFilter",
+      "agentFlow.filters.size",
+      "agentFlow.filters.status",
+      "agentFlow.filters.repo",
+      "agentFlow.filters.search",
+      "agentFlow.seedAgent",
+      "agentFlow.agentProvider",
+      "agentFlow.agentSurface",
+      "agentFlow.workspaceMode",
+      "agentFlow.openIn",
+      "agentFlow.taskMode",
+      "agentFlow.promptModes",
+      "agentFlow.commands",
+      "agentFlow.explorePrompt",
+      "agentFlow.exploreMode",
       "agentFlow.explorePrompts.jiraTicket",
+      "agentFlow.explorePrompts.knowledge",
+      "agentFlow.explorePrompts.debug",
+      "agentFlow.explorePrompts.general",
+      "agentFlow.explorePrompts.supervise",
+      "agentFlow.explorePrompts.verify",
+      "agentFlow.exploreSlackDm",
+      "agentFlow.environments",
+      "agentFlow.prReviewStatus",
+      "agentFlow.prReviewAutoFix",
+      "agentFlow.deck.showTokenTotal",
+      "agentFlow.prReviewPrompt",
+      "agentFlow.worktree",
+      "agentFlow.childWorktrees",
+      "agentFlow.remoteControl",
+      "agentFlow.batchLaunchConfirmThreshold",
+      "agentFlow.trackOpenWindows",
+      "agentFlow.prFacts",
+      "agentFlow.openAgents",
+      "agentFlow.deckGrouping",
+      "agentFlow.retireFinishedAfterHours",
+      "agentFlow.retireAbandonedAfterDays",
+      "agentFlow.retireClosedAfterHours",
+      "agentFlow.retireInPlaceAfterHours",
+      "agentFlow.inflightShowAll",
+      "agentFlow.notifyOnActionRequired",
+      "agentFlow.prFactsTtlSeconds",
+      "agentFlow.reviewRequests",
+      "agentFlow.reviewRequestsAlwaysVisible",
+      "agentFlow.reviewRequestsTtlSeconds",
+      "agentFlow.reviewWrites",
+      "agentFlow.mergeWrites",
+      "agentFlow.mergeMethod",
+      "agentFlow.orchestrator",
+      "agentFlow.reviewRequestModes",
+      "agentFlow.reviewRequestMode",
+      "agentFlow.reviewOpenIn",
+      "agentFlow.prWorkOpenIn",
+      "agentFlow.reviewRequestPrompt",
+      "agentFlow.stampLabelOnWrite",
+      "agentFlow.provenanceLabel",
+      "agentFlow.telemetry.enabled",
     ]) {
       expect(props).toContain(id);
     }

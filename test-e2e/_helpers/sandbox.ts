@@ -175,6 +175,10 @@ export function makeSandbox(settingsOverride: Record<string, unknown> = {}): San
   // must never start a session from a test.
   fs.writeFileSync(path.join(bin, "codex"), "#!/bin/sh\necho CODEX-SHIM-READY\nexec cat\n", { mode: 0o755 });
 
+  // And `cursor-agent`, for the patched cursor host (see cursorHostExecutable in
+  // host.ts) — the same never-run-the-real-CLI contract as the other two.
+  fs.writeFileSync(path.join(bin, "cursor-agent"), "#!/bin/sh\necho CURSOR-AGENT-SHIM-READY\nexec cat\n", { mode: 0o755 });
+
   return {
     root, home, userDataDir, extensionsDir, fixtureDir, reposRoot, repoPath,
     dispose: () => fs.rmSync(root, { recursive: true, force: true }),
