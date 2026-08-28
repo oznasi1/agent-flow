@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.57.0] — 2026-08-29
+
 ### Added
 - Usage analytics phase 2: the Deck, review queue, PR merge/address, batch launches,
   Explore, orchestrator flows, Marketplace, task lenses, setup and Doctor now report
