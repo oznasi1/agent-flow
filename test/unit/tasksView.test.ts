@@ -7397,6 +7397,33 @@ describe("no repos found — first-run path", () => {
   });
 });
 
+describe("fetch — truncated My-sprint pool (known limitation)", () => {
+  it("documents that a truncated fetch prunes saved order (known limitation)", async () => {
+    // fetchTasks caps at maxResults=50 with no pagination. On a sprint of 60
+    // tasks the fetch silently truncates to 50, and the full-view prune runs
+    // against that truncated list — so the manual order of every task past #50
+    // is PERMANENTLY discarded from workspaceState, even though those tasks are
+    // still in the sprint. Pagination is feature work; this pin exists so the
+    // data loss is named, not rediscovered.
+    const allKeys = Array.from({ length: 60 }, (_, i) => `PROJ-${i + 1}`);
+    const fetched = allKeys.slice(0, 50); // what a truncated fetch actually returns
+    clientStub.fetchTasks.mockResolvedValue(
+      fetched.map((key) => ({ key, summary: "", labels: [], components: [] })),
+    );
+    const { send, workspaceState } = setup({
+      workspaceState: { "agentFlow.sprintOrder": [...allKeys] },
+    });
+    await send({ type: "fetch", filter: "mysprint", size: "any" });
+    // Today's behaviour: the saved order is pruned to the 50 fetched keys —
+    // PROJ-51…PROJ-60 lose their manual rank for good.
+    expect(workspaceState.update).toHaveBeenCalledWith("agentFlow.sprintOrder", fetched);
+    const savedNow = workspaceState.store.get("agentFlow.sprintOrder") as string[];
+    expect(savedNow).toHaveLength(50);
+    expect(savedNow).not.toContain("PROJ-51");
+    expect(savedNow).not.toContain("PROJ-60");
+  });
+});
+
 describe("onMessage — throwing log fn", () => {
   it("a fetch still settles, posts the error, and clears loading when the output channel's log throws", async () => {
     // A disposed output channel makes the injected log throw. getConfig() and
