@@ -451,6 +451,13 @@ export class DeckPanel {
    * that listed the runs directory before `deck:forget` removed a file would
    * otherwise put the forgotten card straight back on the board. */
   private refreshSeq = 0;
+  /** Set the moment the panel is disposed. A refresh already past its build
+   * used to carry on after dispose(): acquiring the global flows lock, running
+   * commands, launching sessions, or raising askFirstSpend from a dead panel —
+   * contradicting the close dialog's promise that closing the Deck stops flows
+   * advancing. Checked in `refresh()` after its await boundary, before the
+   * stages with side effects. */
+  private disposed = false;
   /** How many refreshes are in flight. Only the last one out clears the webview's
    * busy indicator — an inner `finally` must not stop the spinner while an
    * overlapping refresh is still working. */
@@ -3324,6 +3331,11 @@ export class DeckPanel {
     try {
       const runs = await this.buildAll();
       if (seq !== this.refreshSeq) return; // a newer pass owns the board
+      // Disposed while the build was in flight: nothing below may run — see the
+      // `disposed` field's own comment. Everything between here and
+      // `advanceArmedFlows` is one synchronous stretch, so this single check
+      // covers the account read, the board post, and the flows pass alike.
+      if (this.disposed) return;
       this.startForgeAccountsRead();
       // Counted off the very runs being posted, so neither slot can claim a
       // number the board does not show. A run counts once however many of its
@@ -4222,6 +4234,7 @@ export class DeckPanel {
   }
 
   private dispose(): void {
+    this.disposed = true;
     DeckPanel.current = undefined;
     this.stopPolling();
     while (this.disposables.length) this.disposables.pop()?.dispose();

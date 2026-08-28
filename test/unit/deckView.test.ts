@@ -10210,3 +10210,28 @@ describe("hardening — PR-work double-seed", () => {
     expect(h.writePlanFile).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("hardening — a refresh outliving the panel", () => {
+  it("performs nothing once the panel is disposed mid-build", async () => {
+    // The close dialog promises that closing the Deck stops flows advancing —
+    // but a refresh already past its build used to carry on after dispose():
+    // acquiring the global flows lock, running commands, launching sessions,
+    // or raising askFirstSpend from a dead panel.
+    setConfig({ orchestrator: true });
+    const releases: (() => void)[] = [];
+    h.getStatus.mockImplementation(
+      () => new Promise((res) => releases.push(() => res({ status: "In Review", category: "indeterminate" }))),
+    );
+    show(true);
+    const p = lastPanel();
+    await settled(); // the constructor's refresh is now parked on the ticket read
+    expect(h.acquire).not.toHaveBeenCalled();
+    p._fireDispose();
+    releases.forEach((r) => r());
+    await settled();
+    await settled();
+    // Neither the flows lock nor the board post — the pass died with the panel.
+    expect(h.acquire).not.toHaveBeenCalled();
+    expect(posts(p).some((m) => m.type === "deck:runs")).toBe(false);
+  });
+});
