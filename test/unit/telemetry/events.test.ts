@@ -44,6 +44,8 @@ const SAMPLES = [
   { name: "unhandled_error", error_class: "TypeError", stack_digest: "at f (dist/extension.js:1:2)" },
   { name: "deck_opened", revealed: false, forge: "github", pr_facts: true, open_agents: true, review_queue: true, orchestrator: false, flow_count: 0, has_armed_flow: false },
   { name: "deck_action", action: "set_grouping", grouping: "workspaces" },
+  { name: "review_launched", outcome: "launched", mode: "stock", mode_was_pinned: true, destination: "new", provider: "claude-code", seeded_in_place: false, batch: false, requested_count: 1, launched_count: 1, failed_count: 0, skipped_count: 0 },
+  { name: "review_submitted", verb: "approve", from_draft: true, outcome: "ok" },
 ] satisfies AnalyticsEvent[];
 
 /** `Unsampled` is every EventName with no entry in SAMPLES above. `AssertNever`
@@ -63,7 +65,7 @@ describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
     const names = SAMPLES.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(12);
+    expect(names).toHaveLength(14);
   });
 
   it("carries no free-form strings outside the allow-list", () => {

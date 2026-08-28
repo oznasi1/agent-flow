@@ -3485,6 +3485,28 @@ describe("DeckPanel review launch", () => {
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success")).toBe(true);
   });
 
+  it("emits review_launched with outcome launched for a single review", async () => {
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev).toMatchObject({
+      outcome: "launched", mode: "stock", mode_was_pinned: true, destination: "new",
+      provider: "claude-code", seeded_in_place: false, batch: false,
+      requested_count: 1, launched_count: 1, failed_count: 0, skipped_count: 0,
+    });
+  });
+
+  it("emits review_launched with outcome cancelled when the mode picker is dismissed", async () => {
+    setConfig({ reviewRequestModes: TWO_MODES });
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    const p = await showAndWarm();
+    await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "review_launched") as any;
+    expect(ev.outcome).toBe("cancelled");
+    expect(ev.batch).toBe(false);
+    expect(ev.requested_count).toBe(1);
+  });
+
   it("still names Claude Code pre-seeded in the launch toast by default", async () => {
     const p = await showAndWarm();
     await p._fire({ type: "deck:reviewLaunch", id: "CyberJackGit/aws-ops#8491" });
@@ -3872,6 +3894,27 @@ describe("DeckPanel review launch", () => {
     expect(toastText(p).match(/ext-svc/g)).toHaveLength(1);
   });
 
+  it("emits ONE review_launched for a batch, with counts", async () => {
+    h.reviewCache = {
+      fetchedAt: Date.now(),
+      issueCount: 3,
+      requests: [
+        reviewFixture(),
+        { ...reviewFixture(), id: "x/ext-svc#1", repo: "x/ext-svc", repoName: "ext-svc", number: 1 },
+        { ...reviewFixture(), id: "x/ext-svc#2", repo: "x/ext-svc", repoName: "ext-svc", number: 2 },
+      ],
+    };
+    shareThisWindow();
+    const p = await showAndWarm();
+    pickMode(readOnlyReviewMode("github"));
+    await p._fire({ type: "deck:reviewBatch", ids: [ID_A, "x/ext-svc#1", "x/ext-svc#2"] });
+    const evs = trackSpy.mock.calls.flat().filter((e: any) => e.name === "review_launched");
+    expect(evs).toHaveLength(1);
+    expect(evs[0]).toMatchObject({
+      batch: true, requested_count: 3, launched_count: 1, failed_count: 0, skipped_count: 1,
+    });
+  });
+
   it("reviews nothing, and says why once, when no selected repo is checked out", async () => {
     h.reviewCache = {
       fetchedAt: Date.now(),
@@ -4055,6 +4098,16 @@ describe("DeckPanel review submit", () => {
     expect(posts(p)).toContainEqual({
       type: "deck:reviewSubmitDone", id: "CyberJackGit/aws-ops#8491", outcome: "ok",
     });
+  });
+
+  it("emits review_submitted mirroring deck:reviewSubmitDone and never the body", async () => {
+    h.reviewWrites = true;
+    const p = await showAndWarm();
+    await p._fire(submitMsg({ verb: "approve", body: "SECRET-BODY", fromDraft: true }));
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "review_submitted")).toMatchObject({
+      verb: "approve", from_draft: true, outcome: "ok",
+    });
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("SECRET-BODY");
   });
 
   it("appends the provenance line to an agent-drafted body", async () => {

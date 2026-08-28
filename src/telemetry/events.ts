@@ -221,7 +221,26 @@ export type UsageEvent =
   // SettingsSnapshot.forge; never the raw setting string. `revealed` distinguishes
   // an already-open panel refocused from one freshly constructed.
   | { name: "deck_opened"; revealed: boolean; forge: string; pr_facts: boolean; open_agents: boolean; review_queue: boolean; orchestrator: boolean; flow_count: number; has_armed_flow: boolean }
-  | { name: "deck_action"; action: DeckAction; grouping?: "agents" | "workspaces" };
+  | { name: "deck_action"; action: DeckAction; grouping?: "agents" | "workspaces" }
+  // One per user gesture: a batch review launch emits ONE of these with `batch: true`
+  // and the aggregate counts, never one per PR. `mode`/`mode_was_pinned` mirror
+  // `settingsSnapshot`'s `review_mode` vocabulary but reflect the mode actually used
+  // for THIS launch (the picked/pinned PromptMode's id), not merely the raw setting —
+  // the two diverge whenever `resolveReviewMode` falls back to the sole configured
+  // mode without asking. `destination`/`provider`/`seeded_in_place` are single-launch
+  // only (batch's shared-window path answers the same destination question once for
+  // everyone, but a per-PR provider/seeded-in-place would be batch-only information
+  // this event doesn't carry); `layout`/`layout_asked` are batch-only, since a single
+  // launch never lays anything out. The review body never reaches this event.
+  | {
+      name: "review_launched"; outcome: Outcome; mode: TaskModeProp; mode_was_pinned: boolean;
+      destination?: DestinationProp; provider?: "claude-code" | "copilot" | "cursor";
+      seeded_in_place?: boolean; batch: boolean; requested_count: number; launched_count: number;
+      failed_count: number; skipped_count: number; layout?: "separate" | "shared"; layout_asked?: boolean;
+    }
+  // Mirrors the outcome already computed for `deck:reviewSubmitDone` — never a second
+  // classification of the same write. The review body is never a property here.
+  | { name: "review_submitted"; verb: "approve" | "comment" | "request-changes"; from_draft: boolean; outcome: "ok" | "cancelled" | "failed" };
 
 /** Sent via logError — still delivered at telemetry level "error". */
 export type ErrorEvent =

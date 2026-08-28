@@ -8,8 +8,12 @@ import { FORGE_IDS } from "../engine/forge/registry";
 import { SettingsSnapshot, STOCK_PROMPT_MODES, STOCK_REVIEW_MODES, TaskModeProp } from "./events";
 
 /** Collapse an "ask, or a mode id" setting to a shape-only value. A custom id is
- * user-authored text and must never be transmitted; it becomes "custom". */
-function modeProp(value: string, stock: readonly string[]): TaskModeProp {
+ * user-authored text and must never be transmitted; it becomes "custom". Exported:
+ * `deckView.ts`'s review-launch telemetry reuses this to classify the PromptMode
+ * actually picked/pinned for one launch, not merely the raw `reviewRequestMode`
+ * setting — the two diverge whenever `resolveReviewMode` falls back to the sole
+ * configured mode without asking. */
+export function modeProp(value: string, stock: readonly string[]): TaskModeProp {
   if (value === "ask") return "ask";
   return stock.includes(value) ? "stock" : "custom";
 }

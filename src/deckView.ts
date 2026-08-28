@@ -67,7 +67,8 @@ import { CardAgent, FlowPromptMode, InboundMessage, MergeMethod, OpenSession, Ou
 // card), unrelated to analytics — every later Deck telemetry emit goes through
 // `trackEvent`/`trackError` instead, never the bare names.
 import { track as trackEvent, trackError } from "./telemetry/telemetry";
-import { classifyFailure, DeckAction, Op } from "./telemetry/events";
+import { classifyFailure, DeckAction, Op, STOCK_REVIEW_MODES, type TaskModeProp } from "./telemetry/events";
+import { modeProp } from "./telemetry/settingsSnapshot";
 
 export const POLL_MS = 6000;
 const TICKET_TTL_MS = 30_000;
@@ -2359,13 +2360,29 @@ export class DeckPanel {
     // Resolve — or ask — before launchReview runs, because launchReview's first
     // act is createWorktrees. A picker raised any later would leave a worktree
     // and a branch behind every time someone pressed Escape.
+    //
+    // `pinnedMode`/`modeWasPinned` are pulled out so every `review_launched` emit below
+    // — including the ones before a PromptMode is ever chosen — can report the same
+    // "was this launch asked or pinned" answer.
+    const pinnedMode = resolveReviewMode(cfg.reviewRequestModes, cfg.reviewRequestMode);
+    const modeWasPinned = pinnedMode !== null;
     const mode =
-      resolveReviewMode(cfg.reviewRequestModes, cfg.reviewRequestMode) ??
+      pinnedMode ??
       (await vscode.window.showQuickPick(
         cfg.reviewRequestModes.map((m) => ({ label: m.label, detail: m.detail, mode: m })),
         { title: `Review ${req.repoName}#${req.number}`, ignoreFocusOut: true },
       ))?.mode;
-    if (!mode) return; // picker cancelled — no worktree, no window, no toast
+    if (!mode) {
+      // No PromptMode was ever resolved — `modeWasPinned` is trivially false here,
+      // since a pinned mode would never have raised this picker to dismiss. The raw
+      // setting is the only shape left to report.
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: false, requested_count: 1, launched_count: 0, failed_count: 0, skipped_count: 0,
+      });
+      return; // picker cancelled — no worktree, no window, no toast
+    }
     // Where it opens, settled before launchReview for exactly the reason above: this is
     // the second question that can be Escaped, and createWorktrees is still ahead of
     // both. The count is 1 — a review is one repo — so `targetToOpenArgs` never reaches
@@ -2381,7 +2398,14 @@ export class DeckPanel {
       },
       openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
     );
-    if (!target) return; // dismissed — same silence as the mode picker
+    if (!target) {
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: false, requested_count: 1, launched_count: 0, failed_count: 0, skipped_count: 0,
+      });
+      return; // dismissed — same silence as the mode picker
+    }
     const openTarget = await targetToOpenArgs(target, 1, {
       currentWindow,
       chooseWorkspaceMode: async () => "per-window",
@@ -2395,10 +2419,28 @@ export class DeckPanel {
       // A dismissed agent picker is the user's own decision, not a failure — the same
       // silence the mode picker above returns with, for the same reason. Nothing was
       // opened, written or seeded, so there is nothing to report either way.
-      if ("cancelled" in res) return;
+      if ("cancelled" in res) {
+        trackEvent({
+          name: "review_launched", outcome: "cancelled",
+          mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+          destination: target.kind, batch: false, requested_count: 1, launched_count: 0, failed_count: 0, skipped_count: 0,
+        });
+        return;
+      }
+      trackEvent({
+        name: "review_launched", outcome: "failed",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        destination: target.kind, batch: false, requested_count: 1, launched_count: 0, failed_count: 1, skipped_count: 0,
+      });
       this.toast("error", res.message);
       return;
     }
+    trackEvent({
+      name: "review_launched", outcome: "launched",
+      mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+      destination: target.kind, provider: res.provider, seeded_in_place: !!res.seededInPlace,
+      batch: false, requested_count: 1, launched_count: 1, failed_count: 0, skipped_count: 0,
+    });
     // `res.provider`, not the setting: under `ask` the setting names nobody, and the
     // launch is the only thing that knows which agent the user picked for it.
     //
@@ -2431,15 +2473,27 @@ export class DeckPanel {
         { modal: true },
         "Review",
       );
-      if (go !== "Review") return;
+      if (go !== "Review") {
+        // No PromptMode is resolved yet at this point, so — same as launchReviewFor's
+        // own mode-picker dismissal — the raw setting is the only shape left to report,
+        // and `mode_was_pinned` is trivially false (a pinned mode never reaches here).
+        trackEvent({
+          name: "review_launched", outcome: "cancelled",
+          mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES), mode_was_pinned: false,
+          batch: true, requested_count: requests.length, launched_count: 0, failed_count: 0, skipped_count: 0,
+        });
+        return;
+      }
     }
 
     // 2 — the mode, once, for the whole batch. This list always holds at least two
     //     modes (read-only plus the stock one), so an unpinned batch always asks:
     //     worktrees-or-not is its one consequential choice.
     const modes = batchReviewModes(cfg.reviewRequestModes, cfg.forge);
+    const pinnedMode = resolveReviewMode(modes, cfg.reviewRequestMode);
+    const modeWasPinned = pinnedMode !== null;
     const mode =
-      resolveReviewMode(modes, cfg.reviewRequestMode) ??
+      pinnedMode ??
       (await vscode.window.showQuickPick(
         modes.map((m) => ({ label: m.label, detail: m.detail, mode: m })),
         {
@@ -2447,7 +2501,14 @@ export class DeckPanel {
           ignoreFocusOut: true,
         },
       ))?.mode;
-    if (!mode) return; // dismissed: nothing created, nothing said
+    if (!mode) {
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(cfg.reviewRequestMode, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: true, requested_count: requests.length, launched_count: 0, failed_count: 0, skipped_count: 0,
+      });
+      return; // dismissed: nothing created, nothing said
+    }
 
     // 3 — plan. A row with no local checkout is named once per repo, not once per PR.
     const { items, skipped } = planReviewBatch(requests, mode);
@@ -2473,12 +2534,20 @@ export class DeckPanel {
       },
       openTargetDeps(cfg.workspaceDir, (m) => this.toast("info", m)),
     );
-    if (!target) return;
+    if (!target) {
+      trackEvent({
+        name: "review_launched", outcome: "cancelled",
+        mode: modeProp(mode.id, STOCK_REVIEW_MODES), mode_was_pinned: modeWasPinned,
+        batch: true, requested_count: requests.length, launched_count: 0, failed_count: 0, skipped_count: skipped.length,
+      });
+      return;
+    }
 
     // 5 — layout. Only a new window can go either way; every other destination IS a
     //     single window. One PR is an ordinary single launch and needs no layout pick.
     let shared = target.kind !== "new";
-    if (target.kind === "new" && items.length > 1) {
+    const layoutAsked = target.kind === "new" && items.length > 1;
+    if (layoutAsked) {
       const p = await vscode.window.showQuickPick(
         [
           { label: "$(multiple-windows) Separate windows", detail: "One window per PR", shared: false },
@@ -2489,6 +2558,10 @@ export class DeckPanel {
       if (!p) return;
       shared = p.shared;
     }
+    const reviewLaunchedTelemetry = {
+      mode: modeProp(mode.id, STOCK_REVIEW_MODES), modeWasPinned,
+      requestedCount: requests.length, layout: shared ? ("shared" as const) : ("separate" as const), layoutAsked,
+    };
 
     // 6 — separate windows is the single-PR path, N times over. launchReview owns its
     //     own worktree and its own refusal to run without one, so nothing is
@@ -2520,7 +2593,7 @@ export class DeckPanel {
       // `true`, not `needsWorktrees(mode)`: launchReview ALWAYS cuts a worktree, whatever
       // the mode says, so read-only in separate windows still gets one per PR. The toast
       // has to say what happened rather than what the mode would have preferred.
-      this.reviewBatchToast(launched, true, skipped, failures);
+      this.reviewBatchToast(launched, true, skipped, failures, reviewLaunchedTelemetry);
       await this.refreshBusy();
       return;
     }
@@ -2585,15 +2658,26 @@ export class DeckPanel {
       this.toast("error", `Couldn't open the review workspace: ${e}`);
       return;
     }
-    this.reviewBatchToast(ready.length, needsWorktrees(mode), skipped, failures);
+    this.reviewBatchToast(ready.length, needsWorktrees(mode), skipped, failures, reviewLaunchedTelemetry);
     await this.refreshBusy(); // picks up the new runs so the rows show "reviewing"
   }
 
-  /** One toast for the whole batch, never one per PR. Says what launched, what could not
-   *  be, and whether worktrees were made — `worktrees` is passed rather than derived from
-   *  the mode because the two disagree: a separate-windows batch gets a worktree per PR
-   *  even under read-only, since that is what `launchReview` does. */
-  private reviewBatchToast(launched: number, worktrees: boolean, skipped: string[], failures: string[]): void {
+  /** One toast for the whole batch, never one per PR — and the one `review_launched`
+   *  emit for the whole gesture, from whichever of the two paths above (separate
+   *  windows or one shared window) actually ran. `worktrees` is passed rather than
+   *  derived from the mode because the two disagree: a separate-windows batch gets a
+   *  worktree per PR even under read-only, since that is what `launchReview` does. */
+  private reviewBatchToast(
+    launched: number, worktrees: boolean, skipped: string[], failures: string[],
+    telemetry: { mode: TaskModeProp; modeWasPinned: boolean; requestedCount: number; layout: "separate" | "shared"; layoutAsked: boolean },
+  ): void {
+    trackEvent({
+      name: "review_launched", outcome: launched > 0 ? "launched" : "failed",
+      mode: telemetry.mode, mode_was_pinned: telemetry.modeWasPinned,
+      batch: true, requested_count: telemetry.requestedCount, launched_count: launched,
+      failed_count: failures.length, skipped_count: skipped.length,
+      layout: telemetry.layout, layout_asked: telemetry.layoutAsked,
+    });
     if (!launched) {
       this.toast("error", `Nothing was reviewed. ${failures.join("; ")}`);
       return;
@@ -2634,6 +2718,7 @@ export class DeckPanel {
     // this call).
     if (!cfg.reviewWrites) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "cancelled" });
       return;
     }
     // The strip itself can go dark (PR facts toggled off, reviewRequests
@@ -2644,6 +2729,7 @@ export class DeckPanel {
     // GitHub from a strip the user just switched off.
     if (!this.reviewsEnabled()) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "cancelled" });
       return;
     }
     // `verb` arrives from a webview message, untyped at runtime no matter what
@@ -2659,6 +2745,7 @@ export class DeckPanel {
     // call that never reached GitHub.
     if (!Object.hasOwn(VERB_LABEL, verb)) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "cancelled" });
       return;
     }
     // Deliberately silent: this gate is only reachable while a genuine call for
@@ -2671,6 +2758,7 @@ export class DeckPanel {
     const req = this.reviewById(id);
     if (!req) {
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "cancelled" });
       return;
     }
     this.reviewSubmitsInFlight.add(id);
@@ -2693,6 +2781,7 @@ export class DeckPanel {
         // Distinct from a failure: nothing was attempted, so there is nothing to
         // warn about — just release the row's disable.
         this.post({ type: "deck:reviewSubmitDone", id, outcome: "cancelled" });
+        trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "cancelled" });
         return;
       }
       const text = fromDraft && cfg.stampLabelOnWrite && body.trim()
@@ -2713,6 +2802,7 @@ export class DeckPanel {
           action: { label: "Open PR", url: req.url },
         });
         this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
+        trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "failed" });
         return;
       }
       this.toast("success", `${label} sent on ${req.repoName}#${req.number}.`);
@@ -2732,6 +2822,7 @@ export class DeckPanel {
       }
       this.postReviews();
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "ok" });
+      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "ok" });
     } catch (e) {
       // Anything unexpected here (writeReviewCache, decorateReviews's fs calls,
       // `post` itself before its own guard was added — a disposed panel used to
@@ -2743,6 +2834,7 @@ export class DeckPanel {
       // have already gone through.
       this.log(`deck: review submit ${id} threw after starting: ${e}`);
       this.post({ type: "deck:reviewSubmitDone", id, outcome: "failed" });
+      trackEvent({ name: "review_submitted", verb, from_draft: fromDraft, outcome: "failed" });
     } finally {
       this.reviewSubmitsInFlight.delete(id);
     }
