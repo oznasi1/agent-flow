@@ -1117,13 +1117,23 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // Undo: put it back into the active sprint and refetch so the card returns.
     const choice = await vscode.window.showInformationMessage(`${key} removed from your sprint`, "Undo");
     if (choice !== "Undo") return;
-    const sprintId = await ops.activeId();
-    if (sprintId == null) {
-      this.toast("error", `No active sprint on the ${this.connector.info().scopeValue} board.`);
-      return;
+    try {
+      const sprintId = await ops.activeId();
+      if (sprintId == null) {
+        this.toast("error", `No active sprint on the ${this.connector.info().scopeValue} board.`);
+        return;
+      }
+      await ops.add(sprintId, key);
+      this.log(`removeFromSprint ${key}: undo → sprint ${sprintId}`);
+    } catch (e) {
+      // The remove already succeeded — the ticket really is out of the sprint. A
+      // throwing undo used to escape into the dispatcher's generic catch: a raw
+      // error toast with no refetch, and the card already gone read as an undone
+      // removal. Say what failed, then refetch below so the list shows reality.
+      const msg = e instanceof Error ? e.message : String(e);
+      this.log(`removeFromSprint ${key}: undo failed — ${msg}`);
+      this.toast("error", `Undo failed — ${key} is still out of the sprint. ${msg}`);
     }
-    await ops.add(sprintId, key);
-    this.log(`removeFromSprint ${key}: undo → sprint ${sprintId}`);
     await this.onMessage({ type: "fetch", filter: "mysprint", size });
   }
 

@@ -7349,6 +7349,43 @@ describe("takeTask — palette (command) failure surfacing", () => {
   });
 });
 
+describe("removeFromSprint — failed Undo", () => {
+  it("says the undo failed and refetches when the sprint re-add write rejects", async () => {
+    // The remove itself succeeded — the ticket really is out of the sprint. A
+    // throwing undo used to escape into the dispatcher's generic catch: raw
+    // error toast, no refetch, and the panel read as an undone removal.
+    vi.mocked(window.showInformationMessage).mockResolvedValue("Undo" as never);
+    clientStub.addIssueToSprint.mockRejectedValueOnce(new Error("sprint write refused"));
+    const { send, messages } = setup();
+    await send({ type: "removeFromSprint", key: "PROJ-1", size: "any" });
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "toast",
+        level: "error",
+        message: expect.stringMatching(/undo failed/i),
+      }),
+    );
+    // The refetch still runs, so the list shows reality (ticket out of the sprint).
+    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mysprint", "any", 50);
+  });
+
+  it("treats a throwing active-sprint lookup during undo the same way", async () => {
+    vi.mocked(window.showInformationMessage).mockResolvedValue("Undo" as never);
+    clientStub.getActiveSprintId.mockRejectedValueOnce(new Error("board list unreadable"));
+    const { send, messages } = setup();
+    await send({ type: "removeFromSprint", key: "PROJ-1", size: "any" });
+    expect(messages).toContainEqual(
+      expect.objectContaining({
+        type: "toast",
+        level: "error",
+        message: expect.stringMatching(/undo failed/i),
+      }),
+    );
+    expect(clientStub.addIssueToSprint).not.toHaveBeenCalled();
+    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mysprint", "any", 50);
+  });
+});
+
 describe("fetch — overlapping fetches", () => {
   it("lets the later-started lens win when an earlier fetch resolves last, and honors a subsequent sprint reorder", async () => {
     // Without a sequence token, an older fetch resolving late posts its (stale)
