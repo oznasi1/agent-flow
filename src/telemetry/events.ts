@@ -80,6 +80,15 @@ export function toPromptModeProp(id: string): PromptModeProp {
   return (STOCK_PROMPT_MODES as readonly string[]).includes(id) ? (id as StockPromptMode) : "custom";
 }
 
+/** The six stock Explore actions (EXPLORE_ACTION_DEFS in config.ts). A user-authored
+ * action id must never be sent — toExploreModeProp collapses it to "custom". */
+export const STOCK_EXPLORE_MODES = ["jiraTicket", "knowledge", "debug", "general", "supervise", "verify"] as const;
+export type ExploreModeProp = (typeof STOCK_EXPLORE_MODES)[number] | "custom";
+
+export function toExploreModeProp(id: string): ExploreModeProp {
+  return (STOCK_EXPLORE_MODES as readonly string[]).includes(id) ? (id as ExploreModeProp) : "custom";
+}
+
 /** The single review mode shipped in DEFAULT_REVIEW_REQUEST_MODES.
  * `agentFlow.reviewRequestModes` is user-configurable, so a custom mode's id is
  * a user-authored string and must never be sent — modeProp() in
@@ -280,6 +289,28 @@ export type UsageEvent =
       name: "pr_work_seeded"; reason: "ci" | "conflict" | "review"; source: "deck" | "tasks";
       outcome: "seeded" | "seeded-in-place" | "opened-not-seeded" | "open-failed" | "cancelled" | "refused";
       window_count: number; failed_repo_count: number; agent_seeded: boolean;
+    }
+  // Fires once a mode actually exists: right after chooseExploreAction resolves in
+  // explore() (source "command"), or immediately in runNotepadItem, whose mode is
+  // always the fixed "general" action it borrows (source "notepad"). The two
+  // pre-mode early exits (the Remote Control refusal, no repos found) therefore
+  // emit only explore_completed below — never this event — which is expected, not
+  // a bug: nobody has picked a mode yet to report.
+  | { name: "explore_started"; flow_id: string; mode: ExploreModeProp; source: "command" | "notepad" }
+  // The funnel terminator — exactly one per explore()/runNotepadItem call, from
+  // whichever exit it reaches. `cancel_point` is present only for `outcome:
+  // "cancelled"`; the two pre-mode cancels ("remote-control", "repos") still report
+  // the CONFIGURED mode (`cfg.exploreMode` via toExploreModeProp — "ask" collapses
+  // to "custom") since no picked mode exists yet. `env_picked` is present only when
+  // the environment step actually ran (the "verify" action). The topic, slug, and
+  // environment name are user strings and never sent — env_picked records only
+  // listed-vs-custom, never the name itself.
+  | {
+      name: "explore_completed"; flow_id: string; outcome: Outcome; mode: ExploreModeProp;
+      cancel_point?: "remote-control" | "repos" | "action" | "topic" | "env" | "kickoff" | "agent";
+      env_picked?: "listed" | "custom"; destination?: DestinationProp;
+      provider?: "claude-code" | "copilot" | "cursor"; seeded_in_place?: boolean;
+      repo_count: number; duration_ms: number; failure_class?: FailureClass;
     };
 
 /** Sent via logError — still delivered at telemetry level "error". */

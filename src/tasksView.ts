@@ -62,7 +62,7 @@ import {
   WorkspaceMode,
 } from "./types";
 import { track, trackError, startFlow, fingerprint, Flow } from "./telemetry/telemetry";
-import { toPromptModeProp, classifyFailure, DestinationProp, FailureClass, Op, Outcome, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
+import { toPromptModeProp, toExploreModeProp, classifyFailure, DestinationProp, ExploreModeProp, FailureClass, Op, Outcome, PromptModeProp, RepoSource, TakeSource } from "./telemetry/events";
 
 const SPRINT_ORDER_KEY = "agentFlow.sprintOrder";
 // globalState, not workspaceState: a notepad belongs to the user, not to whichever
@@ -1287,98 +1287,162 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * agent for investigation/knowledge — a Jira ticket can come out of it later. */
   public async explore(): Promise<void> {
     const cfg = getConfig();
-    if (this.remoteControlBlocksLaunch(cfg)) return;
-    const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
-    if (repos.length === 0) {
-      this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
-      return;
-    }
+    const flow = startFlow();
+    // Reported at the two pre-mode early exits below, where no picked mode exists
+    // yet: the CONFIGURED mode is the honest answer there, not a guess at what the
+    // picker would have returned. "ask" collapses to "custom", same as an
+    // unrecognised id.
+    let mode: ExploreModeProp = toExploreModeProp(cfg.exploreMode);
+    let repoCount = 0;
+    let destination: DestinationProp | undefined;
+    let envPicked: "listed" | "custom" | undefined;
+    const done = (outcome: Outcome, cancelPoint?: "remote-control" | "repos" | "action" | "topic" | "env" | "kickoff" | "agent", extra?: { provider?: "claude-code" | "copilot" | "cursor"; seededInPlace?: boolean; failureClass?: FailureClass }) =>
+      track({
+        name: "explore_completed",
+        flow_id: flow.id,
+        outcome,
+        mode,
+        ...(cancelPoint !== undefined ? { cancel_point: cancelPoint } : {}),
+        ...(destination !== undefined ? { destination } : {}),
+        ...(envPicked !== undefined ? { env_picked: envPicked } : {}),
+        ...(extra?.provider !== undefined ? { provider: extra.provider } : {}),
+        ...(extra?.seededInPlace !== undefined ? { seeded_in_place: extra.seededInPlace } : {}),
+        repo_count: repoCount,
+        duration_ms: flow.elapsedMs(),
+        ...(extra?.failureClass !== undefined ? { failure_class: extra.failureClass } : {}),
+      });
 
-    const action = await this.chooseExploreAction(cfg);
-    if (!action) return; // picker cancelled
+    // Everything after startFlow runs inside this try, so the funnel always gets its
+    // terminator even if something explore() itself calls throws — the dispatcher's
+    // own catch (tasksView.ts onMessage) still owns the user-facing handling and
+    // reports its own operation_failed, on purpose (same double-report discipline as
+    // take()'s funnel).
+    try {
+      if (this.remoteControlBlocksLaunch(cfg)) {
+        done("cancelled", "remote-control");
+        return;
+      }
+      const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
+      if (repos.length === 0) {
+        this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
+        done("cancelled", "repos");
+        return;
+      }
 
-    const raw = await vscode.window.showInputBox(
-      action.needsEnv
-        ? {
-            title: "Verify — which feature or change?",
-            prompt: "The feature or change to verify on the environment.",
-            placeHolder: "e.g. the new retry banner on checkout",
-            ignoreFocusOut: true,
-            validateInput: (v) => (v.trim() ? undefined : "Name the feature or change to verify"),
-          }
-        : action.id === "supervise"
+      const action = await this.chooseExploreAction(cfg);
+      if (!action) {
+        done("cancelled", "action");
+        return;
+      }
+      // A mode now exists — this is the earliest point explore_started can honestly fire.
+      mode = toExploreModeProp(action.id);
+      track({ name: "explore_started", flow_id: flow.id, mode, source: "command" });
+
+      const raw = await vscode.window.showInputBox(
+        action.needsEnv
           ? {
-              title: "Supervise — anything specific to prioritize?",
-              prompt: "Optional — a priority among your other active tasks. Leave blank to check on all of them.",
-              placeHolder: "e.g. the deck-agents-view task",
+              title: "Verify — which feature or change?",
+              prompt: "The feature or change to verify on the environment.",
+              placeHolder: "e.g. the new retry banner on checkout",
               ignoreFocusOut: true,
+              validateInput: (v) => (v.trim() ? undefined : "Name the feature or change to verify"),
             }
-          : {
-              title: "Explore — what do you want to dig into?",
-              prompt: "A focus for the session (optional). A Jira ticket can come later.",
-              placeHolder: "e.g. how the aggregator retries failed scans",
-              ignoreFocusOut: true,
-            },
-    );
-    if (raw === undefined) return; // cancelled (empty is allowed → generic focus)
-    const topic = raw.trim() || (action.id === "supervise" ? "Check on active tasks" : "Codebase exploration");
+          : action.id === "supervise"
+            ? {
+                title: "Supervise — anything specific to prioritize?",
+                prompt: "Optional — a priority among your other active tasks. Leave blank to check on all of them.",
+                placeHolder: "e.g. the deck-agents-view task",
+                ignoreFocusOut: true,
+              }
+            : {
+                title: "Explore — what do you want to dig into?",
+                prompt: "A focus for the session (optional). A Jira ticket can come later.",
+                placeHolder: "e.g. how the aggregator retries failed scans",
+                ignoreFocusOut: true,
+              },
+      );
+      if (raw === undefined) {
+        done("cancelled", "topic");
+        return;
+      } // cancelled (empty is allowed → generic focus)
+      const topic = raw.trim() || (action.id === "supervise" ? "Check on active tasks" : "Codebase exploration");
 
-    // Verify needs to know where; the other actions never ask. Before the destination
-    // step, so cancelling here has created and opened nothing.
-    let env: string | undefined;
-    if (action.needsEnv) {
-      env = await this.chooseEnvironment(cfg);
-      if (!env) return; // environment pick cancelled
+      // Verify needs to know where; the other actions never ask. Before the destination
+      // step, so cancelling here has created and opened nothing.
+      let env: string | undefined;
+      if (action.needsEnv) {
+        env = await this.chooseEnvironment(cfg);
+        if (!env) {
+          done("cancelled", "env");
+          return;
+        } // environment pick cancelled
+        envPicked = cfg.environments.includes(env) ? "listed" : "custom";
+      }
+
+      // Destination first — an existing workspace / live folder already fixes its repos.
+      const kickoff = await this.resolveKickoffTarget(cfg, repos, "Explore", "Explore");
+      if (!kickoff) {
+        done("cancelled", "kickoff");
+        return;
+      }
+      const { services, args, wantRemoteControl } = kickoff;
+      destination = kickoff.target.kind;
+      repoCount = services.length;
+
+      const slug = slugify(topic) || "explore";
+      const serviceNames = services.map((s) => s.name).join(", ");
+      const key = env ? `verify-${slugify(env) || "env"}-${slug}` : `explore-${slug}`;
+      const summary = env ? `${topic} on ${env}` : topic;
+      const planMd = env
+        ? `## Verify: ${topic} on ${env}\n\n_Verification session — environment: ${env}. Services in scope: ${serviceNames}._`
+        : action.id === "supervise"
+          ? `## Supervise: ${topic}\n\n_No Jira ticket yet — a supervision session over your other active Agent Flow Deck tasks._\n\n` +
+            describeActiveTasks(readRuns(defaultRunsDir()), new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys()))
+          : `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
+      const result = await openWorkspace({
+        ticket: { key, summary, url: "" },
+        planMd,
+        descriptionText: "",
+        services,
+        mode: args.mode,
+        // Slack sentence first: it anchors on {files} in the *authored* template, so a
+        // typed environment containing "{files}" can never become that anchor.
+        promptTemplate: applyExploreVars(injectSlackDm(action.prompt, action.slackDm), { env, services: serviceNames }),
+        workspaceDir: cfg.workspaceDir,
+        seedAgent: cfg.seedAgent,
+        openIn: args.openIn,
+        existingWorkspaceFile: args.existingWorkspaceFile,
+        existingFolder: args.existingFolder,
+        currentWindow: args.currentWindow,
+        remoteControl: wantRemoteControl,
+        kind: "explore",
+      });
+      // The agent picker was dismissed, which dismisses the launch: nothing was opened,
+      // written or seeded, so there is nothing to report. Not an error toast either — a
+      // cancellation is the user's own decision, and every other picker on this path
+      // returns just as quietly.
+      if (result.cancelled) {
+        done("cancelled", "agent");
+        return;
+      }
+
+      const where = this.openedWhere(result, cfg.seedAgent);
+      const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
+      const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
+      const what = env
+        ? `to verify on ${env}`
+        : action.id === "supervise"
+          ? "to check on your other tasks"
+          : "to explore";
+      this.toast("success", `Opened ${where} ${what}. Brief seeded in each repo.${seeded}${rcNote}`);
+      // Last statement in the try, same discipline as take(): nothing after this can
+      // throw and reach the catch below, so a "launched" completion can never be
+      // followed by a second, contradictory "failed" one.
+      done("launched", undefined, { provider: result.provider, seededInPlace: result.seededInPlace });
+    } catch (e) {
+      done("failed", undefined, { failureClass: classifyFailure(e) });
+      throw e; // onMessage's existing catch (tasksView.ts:255) still owns the user-facing handling.
     }
-
-    // Destination first — an existing workspace / live folder already fixes its repos.
-    const kickoff = await this.resolveKickoffTarget(cfg, repos, "Explore", "Explore");
-    if (!kickoff) return;
-    const { services, args, wantRemoteControl } = kickoff;
-
-    const slug = slugify(topic) || "explore";
-    const serviceNames = services.map((s) => s.name).join(", ");
-    const key = env ? `verify-${slugify(env) || "env"}-${slug}` : `explore-${slug}`;
-    const summary = env ? `${topic} on ${env}` : topic;
-    const planMd = env
-      ? `## Verify: ${topic} on ${env}\n\n_Verification session — environment: ${env}. Services in scope: ${serviceNames}._`
-      : action.id === "supervise"
-        ? `## Supervise: ${topic}\n\n_No Jira ticket yet — a supervision session over your other active Agent Flow Deck tasks._\n\n` +
-          describeActiveTasks(readRuns(defaultRunsDir()), new Set(groupByPlace(readOpenSessions(defaultSessionsDir())).keys()))
-        : `## Exploration: ${topic}\n\n_No Jira ticket yet — a knowledge/exploration session. If it turns into work, open a ticket afterwards._`;
-    const result = await openWorkspace({
-      ticket: { key, summary, url: "" },
-      planMd,
-      descriptionText: "",
-      services,
-      mode: args.mode,
-      // Slack sentence first: it anchors on {files} in the *authored* template, so a
-      // typed environment containing "{files}" can never become that anchor.
-      promptTemplate: applyExploreVars(injectSlackDm(action.prompt, action.slackDm), { env, services: serviceNames }),
-      workspaceDir: cfg.workspaceDir,
-      seedAgent: cfg.seedAgent,
-      openIn: args.openIn,
-      existingWorkspaceFile: args.existingWorkspaceFile,
-      existingFolder: args.existingFolder,
-      currentWindow: args.currentWindow,
-      remoteControl: wantRemoteControl,
-      kind: "explore",
-    });
-    // The agent picker was dismissed, which dismisses the launch: nothing was opened,
-    // written or seeded, so there is nothing to report. Not an error toast either — a
-    // cancellation is the user's own decision, and every other picker on this path
-    // returns just as quietly.
-    if (result.cancelled) return;
-
-    const where = this.openedWhere(result, cfg.seedAgent);
-    const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
-    const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
-    const what = env
-      ? `to verify on ${env}`
-      : action.id === "supervise"
-        ? "to check on your other tasks"
-        : "to explore";
-    this.toast("success", `Opened ${where} ${what}. Brief seeded in each repo.${seeded}${rcNote}`);
   }
 
   /** Launch an agent for one notepad item. Same shape as explore(): pick repos and
@@ -1391,16 +1455,53 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     if (!note) return;
 
     const cfg = getConfig();
-    if (this.remoteControlBlocksLaunch(cfg)) return;
+    const flow = startFlow();
+    // The notepad run has no action picker — it always borrows the "general" explore
+    // action (see the comment on `generic` below), so the mode is fixed and known
+    // from the start; unlike explore()'s configured-vs-picked split, there is no
+    // "before a mode exists" ambiguity to preserve here.
+    const mode: ExploreModeProp = "general";
+    let repoCount = 0;
+    let destination: DestinationProp | undefined;
+    const done = (
+      outcome: Outcome,
+      cancelPoint?: "remote-control" | "repos" | "kickoff" | "agent",
+      extra?: { provider?: "claude-code" | "copilot" | "cursor"; seededInPlace?: boolean },
+    ) =>
+      track({
+        name: "explore_completed",
+        flow_id: flow.id,
+        outcome,
+        mode,
+        ...(cancelPoint !== undefined ? { cancel_point: cancelPoint } : {}),
+        ...(destination !== undefined ? { destination } : {}),
+        ...(extra?.provider !== undefined ? { provider: extra.provider } : {}),
+        ...(extra?.seededInPlace !== undefined ? { seeded_in_place: extra.seededInPlace } : {}),
+        repo_count: repoCount,
+        duration_ms: flow.elapsedMs(),
+      });
+
+    if (this.remoteControlBlocksLaunch(cfg)) {
+      done("cancelled", "remote-control");
+      return;
+    }
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
     if (repos.length === 0) {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
+      done("cancelled", "repos");
       return;
     }
 
+    track({ name: "explore_started", flow_id: flow.id, mode, source: "notepad" });
+
     const kickoff = await this.resolveKickoffTarget(cfg, repos, "Notepad", "Notepad");
-    if (!kickoff) return;
+    if (!kickoff) {
+      done("cancelled", "kickoff");
+      return;
+    }
     const { services, args, wantRemoteControl } = kickoff;
+    destination = kickoff.target.kind;
+    repoCount = services.length;
 
     // The generic explore action's prompt/slackDm — a notepad run has no action to
     // choose (there is no Explore-style picker for it), so it borrows the one action
@@ -1476,7 +1577,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     });
     // Dismissed at the agent picker: no window, no brief, no plan, no run. Returning
     // HERE — before saveNotes below — is what makes that comment true.
-    if (result.cancelled) return;
+    if (result.cancelled) {
+      done("cancelled", "agent");
+      return;
+    }
 
     // Point the note at its run so the badge has something to derive from. Written
     // after the launch, not before: a cancelled picker must leave no pointer to a
@@ -1487,6 +1591,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     const seeded = this.seededNote(cfg.seedAgent, result.remoteControl, result.provider, result.seededInPlace);
     const rcNote = this.remoteControlNote(wantRemoteControl, result.remoteControl, result.provider);
     this.toast("success", `Opened ${where} for “${topic}”. Brief seeded in each repo.${seeded}${rcNote}`);
+    done("launched", undefined, { provider: result.provider, seededInPlace: result.seededInPlace });
   }
 
   /** One repo → its own window; multiple → per the workspaceMode setting (asking if configured). */

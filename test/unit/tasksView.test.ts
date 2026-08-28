@@ -1738,6 +1738,158 @@ describe("explore", () => {
   });
 });
 
+describe("explore telemetry", () => {
+  const names = () => trackSpy.mock.calls.flat().map((e: any) => e.name);
+  const events = () => trackSpy.mock.calls.flat() as any[];
+  const find = (n: string) => events().find((e) => e.name === n);
+
+  it("emits explore_started then explore_completed, sharing one flow_id, with the seeded provider on success", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "jiraTicket" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+
+    expect(find("explore_started")).toMatchObject({ flow_id: "flow-1", mode: "jiraTicket", source: "command" });
+    expect(find("explore_completed")).toMatchObject({
+      flow_id: "flow-1", outcome: "launched", mode: "jiraTicket",
+      provider: "claude-code", repo_count: 1, duration_ms: 42,
+    });
+  });
+
+  it("emits only explore_completed with cancel_point 'remote-control' and the configured mode when the RC block refuses", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on", agentProvider: "copilot", exploreMode: "knowledge" });
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(names()).not.toContain("explore_started");
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "remote-control", mode: "knowledge", repo_count: 0 });
+  });
+
+  it("emits only explore_completed with cancel_point 'repos' and the configured mode when no repos are found", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "debug" });
+    vi.mocked(discoverRepos).mockReturnValue([]);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(names()).not.toContain("explore_started");
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "repos", mode: "debug", repo_count: 0 });
+  });
+
+  it("emits only explore_completed with cancel_point 'action' and mode 'custom' ('ask' collapsed) when the action picker is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined); // cancel action pick
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(names()).not.toContain("explore_started");
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "action", mode: "custom", repo_count: 0 });
+  });
+
+  it("fires explore_started only once a mode exists, carrying the picked mode — not the configured one", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "ask" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ action: CFG.exploreActions[2] } as never) // action picker → Debug
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+    const { send } = setup();
+    await send({ type: "explore" });
+
+    const startedIdx = events().findIndex((e) => e.name === "explore_started");
+    expect(startedIdx).toBeGreaterThan(-1);
+    expect(events()[startedIdx].mode).toBe("debug");
+    // Nothing before explore_started is an explore_completed — the two pre-mode
+    // early exits are the only ones allowed to precede a start, and this run never
+    // hits either.
+    expect(events().slice(0, startedIdx).some((e) => e.name === "explore_completed")).toBe(false);
+  });
+
+  it("cancels with cancel_point 'topic' when the focus input box is dismissed", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "debug" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce(undefined);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_started")).toMatchObject({ mode: "debug" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "topic", mode: "debug", repo_count: 0 });
+  });
+
+  it("cancels with cancel_point 'env' when the environment picker is dismissed", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel env pick
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "env", mode: "verify", repo_count: 0 });
+  });
+
+  it("cancels with cancel_point 'kickoff' when the open-target picker is dismissed", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask", exploreMode: "knowledge" });
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel open-target pick
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "kickoff", mode: "knowledge", repo_count: 0 });
+  });
+
+  it("cancels with cancel_point 'agent' and the resolved repo_count when the agent picker is dismissed", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "knowledge" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("x");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    vi.mocked(openWorkspace).mockResolvedValue({
+      mode: "per-window", briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true,
+    });
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "agent", mode: "knowledge", repo_count: 1 });
+  });
+
+  it("carries env_picked 'listed' vs 'custom' on a successful verify launch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("retry banner");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "staging", env: "staging" } as never) // env picker (listed)
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "launched", env_picked: "listed" });
+  });
+
+  it("marks a typed environment as env_picked 'custom'", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "verify" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox)
+      .mockResolvedValueOnce("retry banner")
+      .mockResolvedValueOnce("staging-eu");
+    vi.mocked(window.showQuickPick)
+      .mockResolvedValueOnce({ label: "$(edit) Custom…" } as never)
+      .mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(find("explore_completed")).toMatchObject({ outcome: "launched", env_picked: "custom" });
+  });
+
+  it("never sends the typed topic string", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "jiraTicket" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("SECRET-TOPIC");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    const { send } = setup();
+    await send({ type: "explore" });
+    expect(JSON.stringify(events())).not.toContain("SECRET-TOPIC");
+  });
+});
+
 describe("passthrough messages", () => {
   it("opens external links via vscode.env", async () => {
     const { send } = setup();
@@ -6057,6 +6209,76 @@ describe("notepad", () => {
       store.set("agentFlow.notepadSections", { corrupt: true });
       provider.postNotepad();
       expect(postedSections(posted)).toEqual([]);
+    });
+  });
+
+  describe("explore telemetry", () => {
+    const names = () => trackSpy.mock.calls.flat().map((e: any) => e.name);
+    const events = () => trackSpy.mock.calls.flat() as any[];
+    const find = (n: string) => events().find((e) => e.name === n);
+
+    it("emits explore_started with source 'notepad' and mode 'general', then explore_completed on success", async () => {
+      const repos = mkRepos(["account-service"]);
+      vi.mocked(discoverRepos).mockReturnValue(repos);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never); // repo picker
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+
+      expect(find("explore_started")).toMatchObject({ flow_id: "flow-1", mode: "general", source: "notepad" });
+      expect(find("explore_completed")).toMatchObject({
+        flow_id: "flow-1", outcome: "launched", mode: "general", provider: "claude-code", repo_count: 1, duration_ms: 42,
+      });
+    });
+
+    it("emits only explore_completed with cancel_point 'remote-control' when the RC block refuses", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on", agentProvider: "copilot" });
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+      expect(names()).not.toContain("explore_started");
+      expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "remote-control", mode: "general", repo_count: 0 });
+    });
+
+    it("emits only explore_completed with cancel_point 'repos' when no repos are found", async () => {
+      vi.mocked(discoverRepos).mockReturnValue([]);
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+      expect(names()).not.toContain("explore_started");
+      expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "repos", mode: "general", repo_count: 0 });
+    });
+
+    it("cancels with cancel_point 'kickoff' when the open-target picker is dismissed", async () => {
+      vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never); // cancel open-target pick
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+      expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "kickoff", mode: "general", repo_count: 0 });
+    });
+
+    it("cancels with cancel_point 'agent' and the resolved repo_count when the agent picker is dismissed", async () => {
+      const repos = mkRepos(["account-service"]);
+      vi.mocked(discoverRepos).mockReturnValue(repos);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+      vi.mocked(openWorkspace).mockResolvedValue({
+        mode: "per-window", briefs: [], opened: [], remoteControl: false, provider: "claude-code", cancelled: true,
+      });
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "Fix the retry banner", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+      expect(find("explore_completed")).toMatchObject({ outcome: "cancelled", cancel_point: "agent", mode: "general", repo_count: 1 });
+    });
+
+    it("never sends the note title", async () => {
+      const repos = mkRepos(["account-service"]);
+      vi.mocked(discoverRepos).mockReturnValue(repos);
+      vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+      const { store, sendMsg } = mkProvider();
+      await sendMsg({ type: "notepad:add", title: "SECRET-TOPIC", body: "" });
+      await sendMsg({ type: "notepad:run", id: notesIn(store)![0].id });
+      expect(JSON.stringify(events())).not.toContain("SECRET-TOPIC");
     });
   });
 });

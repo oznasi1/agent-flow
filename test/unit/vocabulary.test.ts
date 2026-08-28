@@ -110,6 +110,12 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "the repository URL" },
   { location: "src/tasksView.ts", text: "e.g. the deck-agents-view task",
     why: "an example branch name in a placeholder, not the noun" },
+  // Task 6: explore_completed's cancel_point wire value naming the step where
+  // openWorkspace's own agent picker was dismissed — a telemetry enum member
+  // passed as a value (not a type position), same class of hit as the
+  // orchestrator condition keys above.
+  { location: "src/tasksView.ts", text: "agent",
+    why: "the explore_completed cancel_point wire value for the agent-picker step, not copy" },
   { location: "src/webview/MarketplaceApp.tsx", text: "agent",
     why: "the AssetType wire value for a subagent" },
   { location: "src/webview/MarketplaceApp.tsx", text: "Agents",

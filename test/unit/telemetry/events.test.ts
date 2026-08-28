@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  AnalyticsEvent, EventName, OPEN_STRING_PROPS, STOCK_PROMPT_MODES, classifyFailure, toPromptModeProp,
+  AnalyticsEvent, EventName, OPEN_STRING_PROPS, STOCK_EXPLORE_MODES, STOCK_PROMPT_MODES, classifyFailure,
+  toExploreModeProp, toPromptModeProp,
 } from "../../../src/telemetry/events";
 // The REAL class, not a local stand-in — classifyFailure relies on its constructor
 // setting `this.name` explicitly (src/tasks/jira/client.ts), and a hand-rolled stand-in
@@ -50,6 +51,8 @@ const SAMPLES = [
   { name: "review_submitted", verb: "approve", from_draft: true, outcome: "ok" },
   { name: "pr_merged", outcome: "refused", refusal: "writes-off" },
   { name: "pr_work_seeded", reason: "review", source: "deck", outcome: "seeded", window_count: 1, failed_repo_count: 0, agent_seeded: true },
+  { name: "explore_started", flow_id: "f1", mode: "debug", source: "command" },
+  { name: "explore_completed", flow_id: "f1", outcome: "cancelled", mode: "debug", cancel_point: "topic", repo_count: 2, duration_ms: 30 },
 ] satisfies AnalyticsEvent[];
 
 /** `Unsampled` is every EventName with no entry in SAMPLES above. `AssertNever`
@@ -69,7 +72,7 @@ describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
     const names = SAMPLES.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(18);
+    expect(names).toHaveLength(20);
   });
 
   it("carries no free-form strings outside the allow-list", () => {
@@ -104,6 +107,17 @@ describe("toPromptModeProp", () => {
 
   it("collapses a user-authored id to 'custom'", () => {
     expect(toPromptModeProp("acme-billing-hotfix")).toBe("custom");
+  });
+});
+
+describe("toExploreModeProp", () => {
+  it("passes the six shipped ids through", () => {
+    for (const id of STOCK_EXPLORE_MODES) expect(toExploreModeProp(id)).toBe(id);
+  });
+
+  it("collapses 'ask' and any other unrecognised id to 'custom'", () => {
+    expect(toExploreModeProp("ask")).toBe("custom");
+    expect(toExploreModeProp("acme-billing-hotfix")).toBe("custom");
   });
 });
 
