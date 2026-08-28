@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor, within, createEvent } from "@testing-library/react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { act, render, screen, fireEvent, waitFor, within, createEvent } from "@testing-library/react";
 import * as React from "react";
 
 const sendSpy = vi.fn();
@@ -717,5 +717,107 @@ describe("Notepad — images", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit note" }));
     fireEvent.click(screen.getByRole("button", { name: /Remove a\.png/ }));
     expect(sendSpy).toHaveBeenCalledWith({ type: "notepad:removeImage", id: "n1", imageId: "i1" });
+  });
+
+  /** The body clamp cuts a long note to a few lines and offers to reveal the rest.
+   * Whether it *has* anything to reveal is measured, not guessed from the text —
+   * and jsdom lays nothing out, so every element here reports 0 for both metrics
+   * and neither branch can be reached without saying what the box measures. That
+   * is the same blindness that hides drag-vs-selection from this suite: these
+   * tests pin the logic, and the clamp itself is verified in a real editor. */
+  describe("body clamp", () => {
+    const heights = { scroll: 0, client: 0 };
+    let undo: (() => void)[] = [];
+
+    /** Shadow one layout metric on HTMLElement.prototype, reading it back from
+     * `heights` so a test can change what the box measures mid-render. */
+    const shadow = (prop: "scrollHeight" | "clientHeight", read: () => number) => {
+      const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, prop);
+      Object.defineProperty(HTMLElement.prototype, prop, { configurable: true, get: read });
+      undo.push(() => {
+        // jsdom defines these on Element, not HTMLElement, so there is usually no
+        // own descriptor to put back — the shadow has to be deleted instead.
+        if (own) Object.defineProperty(HTMLElement.prototype, prop, own);
+        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[prop];
+      });
+    };
+
+    beforeEach(() => {
+      undo = [];
+      heights.scroll = 0;
+      heights.client = 0;
+      shadow("scrollHeight", () => heights.scroll);
+      shadow("clientHeight", () => heights.client);
+    });
+
+    afterEach(() => {
+      undo.forEach((f) => f());
+      undo = [];
+    });
+
+    /** A body taller than the box it renders in — the clamp has cut something off. */
+    const clipped = () => { heights.scroll = 120; heights.client = 60; };
+    /** A body that fits its four lines with nothing hidden. */
+    const fits = () => { heights.scroll = 40; heights.client = 40; };
+
+    it("offers Show more when the clamp hides part of the body", async () => {
+      clipped();
+      render(<Notepad ordered={false} notes={[note({ body: "line\nline\nline\nline\nline\nline" })]} />);
+      const more = await screen.findByRole("button", { name: "Show more" });
+      expect(more).toHaveAttribute("aria-expanded", "false");
+    });
+
+    it("offers no toggle when the whole body already fits", async () => {
+      fits();
+      render(<Notepad ordered={false} notes={[note({ body: "one short line" })]} />);
+      // Nothing is hidden, so a control to reveal it would be chrome for its own sake.
+      await waitFor(() => expect(screen.getByText("one short line")).toBeTruthy());
+      expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+    });
+
+    it("unclamps the body and offers Show less once expanded", async () => {
+      clipped();
+      render(<Notepad ordered={false} notes={[note({ body: "a very long note" })]} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+      const less = screen.getByRole("button", { name: "Show less" });
+      expect(less).toHaveAttribute("aria-expanded", "true");
+      // The class is what turns the CSS clamp off, and jsdom cannot see the
+      // clipping itself — so it is the only honest observable for "unclamped".
+      expect(screen.getByText("a very long note")).toHaveClass("expanded");
+    });
+
+    it("keeps Show less offered while expanded, though nothing overflows any more", async () => {
+      clipped();
+      const { rerender } = render(<Notepad ordered={false} notes={[note({ body: "a very long note" })]} />);
+      fireEvent.click(await screen.findByRole("button", { name: "Show more" }));
+      // Expanding removes the clamp, so the box now measures its full content —
+      // re-measuring here would retract the very control that undoes the expansion.
+      fits();
+      rerender(<Notepad ordered={false} notes={[note({ body: "a very long note" })]} />);
+      expect(screen.getByRole("button", { name: "Show less" })).toBeTruthy();
+    });
+
+    it("offers Show more once the panel narrows enough to clip the body", async () => {
+      fits();
+      const seen: ResizeObserverCallback[] = [];
+      class FakeObserver {
+        constructor(cb: ResizeObserverCallback) { seen.push(cb); }
+        observe(): void {}
+        unobserve(): void {}
+        disconnect(): void {}
+      }
+      const priorRO = globalThis.ResizeObserver;
+      globalThis.ResizeObserver = FakeObserver as unknown as typeof ResizeObserver;
+      try {
+        render(<Notepad ordered={false} notes={[note({ body: "a body that fits a wide panel" })]} />);
+        await waitFor(() => expect(seen.length).toBeGreaterThan(0));
+        expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+        clipped();
+        act(() => seen.forEach((cb) => cb([], {} as ResizeObserver)));
+        expect(await screen.findByRole("button", { name: "Show more" })).toBeTruthy();
+      } finally {
+        globalThis.ResizeObserver = priorRO;
+      }
+    });
   });
 });

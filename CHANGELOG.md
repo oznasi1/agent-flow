@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Long notepad notes stay scannable.** A note's detail is shown to four lines
+  with a **Show more** control beneath it; short notes are unchanged and gain no
+  control. Expanding is per-note and lasts as long as the tab stays open. The
+  note's title, status, attachments and actions are never hidden.
+
 ## [0.57.0] — 2026-08-29
 
 ### Added

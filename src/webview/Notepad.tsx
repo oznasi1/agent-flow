@@ -3,6 +3,7 @@ import { send } from "./vscodeApi";
 import { NotepadImage, NotepadItemView, NotepadRunStatus, NotepadSectionView } from "../types";
 import { DotsIcon, ImageIcon, PenIcon, PlayIcon, TrashIcon } from "./icons";
 import { moveKey } from "./helpers";
+import { useOverflowing } from "./useOverflowing";
 
 /** Which notes the list shows. Local state, defaulting to Active on every mount:
  * a persisted "Done" selection would greet the user with an empty-looking notepad
@@ -570,6 +571,12 @@ function NoteRow({ note, sections, editing, onEdit, onDone, dnd }: {
   // same-tick React state update flushes before that threshold, since the
   // threshold needs a further mousemove event the render beats to the queue.
   const [armed, setArmed] = React.useState(false);
+  // The body is clamped to a few lines until asked otherwise. Local and collapsed
+  // on every mount, for the reason the filter and the ⋯ menu are: a remembered
+  // expansion would be chrome the user did not ask for on a note they may not
+  // even recognise a session later.
+  const [expanded, setExpanded] = React.useState(false);
+  const [bodyRef, clipped] = useOverflowing<HTMLDivElement>(!expanded);
   // Re-sync when the host sends a changed copy of this note while the row sits
   // open — otherwise Save would write back a value the user never saw.
   React.useEffect(() => { setTitle(note.title); setBody(note.body); }, [note.title, note.body]);
@@ -703,7 +710,23 @@ function NoteRow({ note, sections, editing, onEdit, onDone, dnd }: {
           <span className="status">{STATUS_LABEL[note.runStatus]}</span>
         )}
       </div>
-      {note.body && <div className="np-body">{note.body}</div>}
+      {note.body && (
+        <>
+          <div ref={bodyRef} className={expanded ? "np-body expanded" : "np-body"}>{note.body}</div>
+          {/* Only when the clamp is actually hiding something: a "Show more" under a
+              body that already fits would be a standing hint line, which this panel
+              does not do. */}
+          {clipped && (
+            <button
+              className="np-body-more"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((e) => !e)}
+            >
+              {expanded ? "Show less" : "Show more"}
+            </button>
+          )}
+        </>
+      )}
       <ImageStrip note={note} />
       <div className="np-acts">
         <button className="take" onClick={() => send({ type: "notepad:run", id: note.id })} title="Start this note as a session">
