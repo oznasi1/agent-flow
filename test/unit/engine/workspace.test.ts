@@ -2787,7 +2787,11 @@ describe("maybeSeedAgent — malformed plan files", () => {
   const goodPlan = (prompt = "do it") =>
     JSON.stringify({
       key: "PROJ-1",
-      createdAt: Date.now(),
+      // Firmly in the past: this builder runs lazily inside the readFileSync
+      // mock, AFTER runSeedPass has captured `now` — a live Date.now() here can
+      // land 1ms ahead of it under load, and the future-stamp rule under test
+      // would then (correctly) delete the plan this test needs seeded.
+      createdAt: Date.now() - 60_000,
       seedAgent: true,
       matches: [{ matchPath: IDENTITY, prompt }],
     });
