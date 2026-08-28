@@ -7397,6 +7397,42 @@ describe("no repos found — first-run path", () => {
   });
 });
 
+describe("onMessage — throwing log fn", () => {
+  it("a fetch still settles, posts the error, and clears loading when the output channel's log throws", async () => {
+    // A disposed output channel makes the injected log throw. getConfig() and
+    // this.log() sat ABOVE onMessage's try, so the rejection escaped the handler
+    // unhandled and the panel got nothing — no error post, no loading:false.
+    const { context } = fakeContext();
+    const auth = fakeAuth({ authed: true });
+    const provider = new TasksViewProvider(context, jiraConnector(auth), () => {
+      throw new Error("Channel has been closed");
+    });
+    const messages: OutboundMessage[] = [];
+    let handler: (m: InboundMessage) => Promise<void> = async () => {};
+    provider.resolveWebviewView({
+      title: "Tasks",
+      description: undefined,
+      onDidDispose: () => ({ dispose() {} }),
+      webview: {
+        options: {},
+        html: "",
+        asWebviewUri: (u: unknown) => u,
+        cspSource: "vscode-resource:",
+        postMessage: (m: OutboundMessage) => void messages.push(m),
+        onDidReceiveMessage: (cb: (m: InboundMessage) => Promise<void>) => {
+          handler = cb;
+          return { dispose() {} };
+        },
+      },
+    } as never);
+    await expect(handler({ type: "fetch", filter: "mine", size: "any" })).resolves.toBeUndefined();
+    expect(messages).toContainEqual({ type: "loading", loading: false });
+    expect(messages).toContainEqual(
+      expect.objectContaining({ type: "error", message: "Channel has been closed" }),
+    );
+  });
+});
+
 describe("removeFromSprint — failed Undo", () => {
   it("says the undo failed and refetches when the sprint re-add write rejects", async () => {
     // The remove itself succeeded — the ticket really is out of the sprint. A

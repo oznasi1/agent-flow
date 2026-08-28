@@ -660,9 +660,13 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   }
 
   private async onMessage(m: InboundMessage): Promise<void> {
-    const cfg = getConfig();
-    this.log(`webview → host: ${m.type}`);
     try {
+      // Inside the try, not above it: a disposed output channel makes `this.log`
+      // throw, and getConfig can throw on a malformed settings value. Either
+      // landing outside the try rejected out of the message handler unhandled —
+      // nothing posted, no error surfaced, and any spinner already on stayed on.
+      const cfg = getConfig();
+      this.log(`webview → host: ${m.type}`);
       switch (m.type) {
         case "ready":
         case "retry": {
