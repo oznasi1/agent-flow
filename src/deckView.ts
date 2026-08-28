@@ -3828,11 +3828,15 @@ export class DeckPanel {
       }
       case "flow:addPlanned": {
         if (!getConfig().orchestrator) return;
-        await this.addPlanned(m.id);
-        // One per gesture, whether or not the ticket picker was answered:
-        // `addPlanned` swallows its own cancels, and reaching for its outcome
-        // would mean giving it a return value nothing else wants.
-        trackEvent({ name: "flow_action", action: "add_planned" });
+        // Only on the node actually landing: an unauthenticated connector, an
+        // empty ticket list, any of the four QuickPick cancellations, or the
+        // flow having vanished under the four modals are all refusals, and the
+        // docs promise "a message the host does not honor emits nothing" for
+        // exactly this reason — a `flow_action` for a picker the user backed out
+        // of would say a gesture happened when nothing was added.
+        if (await this.addPlanned(m.id)) {
+          trackEvent({ name: "flow_action", action: "add_planned" });
+        }
         return;
       }
       case "flow:delete": {
@@ -4031,10 +4035,16 @@ export class DeckPanel {
       }
       case "flow:saveCommand": {
         if (!getConfig().orchestrator) return;
-        await this.saveCommand(m.run, m.label);
-        // The command string and its label are user-authored — free-text shell
-        // that can carry hostnames or tokens — so only the gesture is reported.
-        trackEvent({ name: "flow_action", action: "save_command" });
+        // Only on an actual write: "invalid" (unreachable from the drawer but
+        // not from a hand-authored message), "duplicate", and a failed config
+        // write are all refusals with a toast already telling the user nothing
+        // happened, and the docs promise this event fires only on a gesture
+        // that did something.
+        if (await this.saveCommand(m.run, m.label)) {
+          // The command string and its label are user-authored — free-text shell
+          // that can carry hostnames or tokens — so only the gesture is reported.
+          trackEvent({ name: "flow_action", action: "save_command" });
+        }
         return;
       }
       case "flow:dryRun": {
@@ -4091,7 +4101,11 @@ export class DeckPanel {
    *    hostnames, paths and sometimes tokens; only `commands_count` is ever
    *    emitted, and `settingsSnapshot` already derives that on its own.
    */
-  private async saveCommand(run: string, label: string): Promise<void> {
+  /** `true` only once the command is actually written to config — "invalid",
+   * "duplicate" and a failed config write are refusals, and the caller's
+   * telemetry gesture rides on this return so a no-op save never reports as one
+   * that did something. */
+  private async saveCommand(run: string, label: string): Promise<boolean> {
     const c = vscode.workspace.getConfiguration("agentFlow");
     const explicit = pickExplicit<unknown>(c.inspect<unknown>("commands"));
     // A non-array value under the key (a hand-edited file can hold anything) is
@@ -4108,7 +4122,7 @@ export class DeckPanel {
       // could ever post one, and a blank id in settings is a command that can
       // never be picked.
       this.post({ type: "toast", level: "info", message: "A saved command needs a name and something to run." });
-      return;
+      return false;
     }
     if (outcome.kind === "duplicate") {
       this.post({
@@ -4116,7 +4130,7 @@ export class DeckPanel {
         level: "info",
         message: `Already saved as “${outcome.duplicateLabel}” — pick it from the command list.`,
       });
-      return;
+      return false;
     }
     try {
       await c.update("commands", outcome.entries, target);
@@ -4125,7 +4139,7 @@ export class DeckPanel {
       // Workspace target with no workspace open). Say so: the alternative is a
       // drawer that looks like it saved and a picker that never gains the entry.
       this.post({ type: "toast", level: "error", message: `Couldn't save the command: ${e}` });
-      return;
+      return false;
     }
     // The config-change listener re-posts flows on its own, but not synchronously
     // and not from every scope in every host build — posting here means the picker
@@ -4136,6 +4150,7 @@ export class DeckPanel {
       level: "info",
       message: `Saved “${outcome.command.label}” to agentFlow.commands.`,
     });
+    return true;
   }
 
   /**
@@ -4159,12 +4174,16 @@ export class DeckPanel {
    * owns "write a whole flow," and sending a half-built node across the wire to
    * be completed later would be a second source of truth for the same graph.
    */
-  private async addPlanned(flowId: string): Promise<void> {
+  /** `true` only once the node is actually written — every early return below
+   * is a refusal (unauthenticated, nothing to pick from, or a cancelled
+   * QuickPick), and the caller's telemetry gesture rides on this so a backed-out
+   * picker never reports as a gesture that did something. */
+  private async addPlanned(flowId: string): Promise<boolean> {
     // An unauthenticated source must not produce an empty picker with no
     // explanation — say so and stop before anything is asked.
     if (!(await this.connector.isAuthenticated())) {
       this.toast("error", `Sign in to ${this.connector.info().label} to add planned work.`);
-      return;
+      return false;
     }
     // "all" / "any": the fullest candidate list this connector can offer. Unlike
     // the task pool's own fetch, there is no lens the user picked for this — the
@@ -4173,13 +4192,13 @@ export class DeckPanel {
     const tasks = await this.connector.provider().list("all", "any");
     if (tasks.length === 0) {
       this.toast("error", `No tickets available from ${this.connector.info().label}.`);
-      return;
+      return false;
     }
     const ticketPick = await vscode.window.showQuickPick(
       tasks.map((t) => ({ label: t.key, description: t.summary, task: t })),
       { title: "Add planned work — which ticket?", placeHolder: "Pick a ticket", ignoreFocusOut: true },
     );
-    if (!ticketPick) return;
+    if (!ticketPick) return false;
 
     const cfg = getConfig();
     const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
@@ -4190,7 +4209,7 @@ export class DeckPanel {
     // recognises it here rather than parsing a second phrasing of the same fact.
     if (repos.length === 0) {
       this.toast("error", `No repos found under ${cfg.reposRoot}. Check agentFlow.reposRoot.`);
-      return;
+      return false;
     }
     const repoPicks = await vscode.window.showQuickPick(
       repos.map((r) => ({ label: r.name, detail: r.isGit ? r.path : `${r.path}  (not a git repo)`, repo: r })),
@@ -4204,13 +4223,13 @@ export class DeckPanel {
     // Cancelled (undefined) or nothing toggled on (empty array) are the same
     // refusal here: a launch that fires on no repos is nothing to launch into
     // (see launchPlanned's own identical check on `node.repos.length`).
-    if (!repoPicks || repoPicks.length === 0) return;
+    if (!repoPicks || repoPicks.length === 0) return false;
 
     const modePick = await vscode.window.showQuickPick(
       cfg.promptModes.map((mode) => ({ label: mode.label, detail: mode.detail, mode })),
       { title: "Add planned work — which prompt mode?", placeHolder: "Pick a prompt mode", ignoreFocusOut: true },
     );
-    if (!modePick) return;
+    if (!modePick) return false;
 
     const DEST_OPTIONS: { label: string; dest: LaunchDest }[] = [
       { label: "Worktree", dest: "worktree" },
@@ -4222,14 +4241,14 @@ export class DeckPanel {
       placeHolder: "Pick a destination",
       ignoreFocusOut: true,
     });
-    if (!destPick) return;
+    if (!destPick) return false;
 
     // Re-read, not the caller's stale copy: four modals were just up, in which
     // time the flow could have been renamed, deleted, or edited from another
     // window — the same reasoning every other flow:* handler in this file
     // re-reads for before it writes.
     const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flowId);
-    if (!flow) return;
+    if (!flow) return false;
     const node: PlannedNode = {
       // Same minting scheme as the webview's own `nextNodeId` (OrchestratorDrawer.tsx):
       // the lowest unused "n<N>", scanning past whatever is already taken rather than
@@ -4249,6 +4268,7 @@ export class DeckPanel {
     };
     writeFlow(this.flowIo, this.flowsDir, { ...flow, nodes: [...flow.nodes, node] });
     this.postFlows();
+    return true;
   }
 
   /**

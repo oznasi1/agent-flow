@@ -5734,6 +5734,105 @@ describe("orchestrator flows", () => {
       expect(added.y).toBe(200);
       expect(saved.nodes.some((n) => n.id !== added.id && n.x === added.x && n.y === added.y)).toBe(false);
     });
+
+    // `addPlanned` returns `true` only once the node is actually written — every
+    // early return below is a refusal — and the `flow_action{add_planned}` emit
+    // in the switch case rides on that return, not on the message merely having
+    // arrived. One control (the node lands) plus one refusal per distinct early
+    // return proves the boolean is threaded correctly at every site, not just
+    // the first.
+    describe("flow_action{add_planned} fires only once the node actually lands", () => {
+      it("emits it once the node is appended", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "Ship it")];
+        h.discoverRepos.mockReturnValueOnce([REPO]);
+        pickAllFour();
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([
+          { name: "flow_action", action: "add_planned" },
+        ]);
+      });
+
+      it("stays silent when the connector is not authenticated", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        const { send } = await openPanel(); // the outer describe's unauthenticated default
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the connector has no tickets to offer", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        h.taskList.mockResolvedValueOnce([]);
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the ticket picker is cancelled", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        quickPick().mockResolvedValueOnce(undefined);
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when no repos are picked (an empty multi-select)", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        quickPick()
+          .mockResolvedValueOnce({ label: TASK.key, task: TASK })
+          .mockResolvedValueOnce([]);
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the prompt-mode picker is cancelled", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        quickPick()
+          .mockResolvedValueOnce({ label: TASK.key, task: TASK })
+          .mockResolvedValueOnce([{ label: REPO.name, repo: REPO }])
+          .mockResolvedValueOnce(undefined);
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the destination picker is cancelled, even with every other answer already given", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [mkFlow("f1", "n")];
+        quickPick()
+          .mockResolvedValueOnce({ label: TASK.key, task: TASK })
+          .mockResolvedValueOnce([{ label: REPO.name, repo: REPO }])
+          .mockResolvedValueOnce({ label: MODE.label, mode: MODE })
+          .mockResolvedValueOnce(undefined);
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the flow was deleted while the pickers were open", async () => {
+        setConfig({ orchestrator: true });
+        h.flows = [];
+        pickAllFour();
+        const { send } = await openAuthedPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:addPlanned", id: "f1" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+    });
   });
 
   describe("flow:saveCommand — keeping a free-text command in settings", () => {
@@ -5878,6 +5977,46 @@ describe("orchestrator flows", () => {
       const { send } = await openPanel();
       await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
       expect(commands()).toEqual([]);
+    });
+
+    // `saveCommand` returns `true` only once the config write actually lands —
+    // "invalid", "duplicate", and a failed `update()` are all refusals, each with
+    // its own toast already saying nothing happened — and the switch case's
+    // `flow_action{save_command}` emit rides on that return. The success side of
+    // this claim is already covered by "emits a flow_action for each flow
+    // gesture that did something" above (in the `orchestrator telemetry`
+    // describe further down this file), which includes `flow:saveCommand` in its
+    // sequence.
+    describe("flow_action{save_command} stays silent on every refusal", () => {
+      it("stays silent on a blank label", async () => {
+        setConfig({ orchestrator: true, commands: [] });
+        const { send } = await openPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:saveCommand", run: "deploy.sh", label: "  " });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent on a duplicate command", async () => {
+        setConfig({ orchestrator: true, commands: [{ id: "d", label: "Deploy to staging", run: "deploy.sh" }] });
+        const { send } = await openPanel();
+        trackSpy.mockClear();
+        await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Ship it" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
+
+      it("stays silent when the settings write itself fails", async () => {
+        setConfig({ orchestrator: true });
+        const { send } = await openPanel();
+        const factory = workspace.getConfiguration.getMockImplementation()!;
+        workspace.getConfiguration.mockImplementation((section?: string) => {
+          const c = factory(section);
+          (c.update as any).mockRejectedValue(new Error("EROFS"));
+          return c;
+        });
+        trackSpy.mockClear();
+        await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+        expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action")).toEqual([]);
+      });
     });
   });
 });
@@ -10664,6 +10803,10 @@ describe("orchestrator telemetry", () => {
     await send({ type: "flow:save", flow: mkFlow("intruder", "x") });
     await send({ type: "flow:delete", id: "intruder" });
     await send({ type: "flow:resumeApprove", id: "f1" }); // no gate is held
+    // `openPanel()` here defaults to an unauthenticated connector, so this
+    // refuses before ever opening a picker — `addPlanned` returns `false`, and
+    // that return is what the switch case's emit is gated on.
+    await send({ type: "flow:addPlanned", id: "f1" });
     expect(events("flow_action")).toEqual([]);
   });
 
