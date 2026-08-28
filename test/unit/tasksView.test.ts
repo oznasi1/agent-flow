@@ -1888,6 +1888,33 @@ describe("explore telemetry", () => {
     await send({ type: "explore" });
     expect(JSON.stringify(events())).not.toContain("SECRET-TOPIC");
   });
+
+  // Mirrors takeWithFailingLaunch / "reports failed with a failure class when the
+  // launch throws" (tasksView.test.ts:2842-2906): proves explore()'s own try/catch —
+  // added specifically to give the funnel a terminator on a thrown failure, and to
+  // guard the reordering fix that made the success track() call the LAST statement
+  // in its branch — actually fires exactly once, with outcome "failed" and a
+  // failure_class, and that the error still propagates for onMessage's existing
+  // catch (tasksView.ts:255) to handle.
+  it("reports failed with a failure class when openWorkspace throws, emits explore_completed exactly once, and still propagates the error", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, exploreMode: "jiraTicket" });
+    const repos = mkRepos(["account-service"]);
+    vi.mocked(discoverRepos).mockReturnValue(repos);
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("focus");
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce([{ repo: repos[0] }] as never);
+    vi.mocked(openWorkspace).mockRejectedValueOnce(new Error("disk full"));
+    const { provider } = setup();
+
+    await expect((provider as unknown as { explore: () => Promise<void> }).explore()).rejects.toThrow("disk full");
+
+    const completedEvents = events().filter((e) => e.name === "explore_completed");
+    expect(completedEvents).toHaveLength(1);
+    expect(completedEvents[0]).toMatchObject({ flow_id: "flow-1", outcome: "failed", mode: "jiraTicket", repo_count: 1 });
+    expect(completedEvents[0].failure_class).toBeDefined();
+    // The action WAS picked before openWorkspace threw, so explore_started fired once
+    // (and only once) ahead of the single explore_completed above.
+    expect(names().filter((n: string) => n === "explore_started")).toHaveLength(1);
+  });
 });
 
 describe("passthrough messages", () => {
