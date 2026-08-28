@@ -17,10 +17,13 @@ import {
   COMMAND_NONE,
   COMMAND_NONE_LABEL,
   COMMAND_NOT_SET,
+  CWD_REPO_DEFAULT,
+  DEFAULT_IDLE_MINUTES,
   INSPECTOR_NONE,
 } from "../../src/webview/orchestratorRule";
 import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
 import type { PrEntryMap, RunStatus } from "../../src/types";
+import { CondParams } from "../../src/webview/CondParams";
 
 // This repo's pinned jsdom has no PointerEvent constructor. Without it, a
 // fireEvent.pointer* call falls through to a bare Event with no clientX/clientY,
@@ -1244,16 +1247,21 @@ describe("the inspector", () => {
     expect(saved.edges[0].cond).toEqual({ kind: "ci-failed" });
   });
 
-  it("does not offer a condition it has no input for", () => {
-    // agent-idle-over needs a minute count and ticket-status-is needs a status
-    // name; with no field for either, offering them would build a rule that waits
-    // on a hardcoded 10 minutes or on the empty string.
+  // The inverse of what this used to assert. The picker withheld the
+  // parameterised kinds for as long as there was nowhere to ask for a minute
+  // count, a status or a branch — offering one then would have built a rule
+  // waiting on a hardcoded 10 minutes or on the empty string. `CondParams` is
+  // that input, so the withholding is over; the tests below are what keep the
+  // honesty the filter used to buy (a seeded value, a marked blank, and an arm
+  // warning), which is the half that must not regress.
+  it("offers every condition kind, now that each has an input", () => {
     open();
     const values = Array.from(
       screen.getByLabelText("Condition").querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    expect(values).not.toContain("agent-idle-over");
-    expect(values).not.toContain("ticket-status-is");
+    expect(values).toContain("agent-idle-over");
+    expect(values).toContain("ticket-status-is");
+    expect(values).toContain("branch-ci-passed");
     expect(values).toContain("pr-merged");
   });
 
@@ -1291,10 +1299,13 @@ describe("the inspector", () => {
 
   // A `<select>` whose `value` matches none of its options has `selectedIndex`
   // -1 and renders BLANK — not "the first option", which is what the same
-  // mistake does to the Mode select. `branch-ci-passed` is not offered (no
-  // input for a repo and a branch yet), so a hand-authored rule using it showed
-  // an EMPTY Condition control: the one condition built to gate a deploy,
-  // displayed as nothing at all.
+  // mistake does to the Mode select. `branch-ci-passed` used to be withheld from
+  // the picker, so a hand-authored rule using it showed an EMPTY Condition
+  // control: the one condition built to gate a deploy, displayed as nothing at
+  // all. It is offered now, which fixes that at the root — this test stays
+  // because the OTHER half of the defect has not moved: the rule's own repo and
+  // branch must still be on screen, and they are, in the fields below the
+  // select rather than crammed into its option text.
   it("renders a hand-authored branch-CI condition instead of a blank select", () => {
     const branchRule = flow({
       nodes: wired().nodes,
@@ -1313,8 +1324,12 @@ describe("the inspector", () => {
     // defect either way (a blank select in Chrome, "PR is merged" under jsdom,
     // and in neither case the branch rule the user wrote).
     expect(select.value).toBe("branch-ci-passed");
-    // And it names the branch, which `COND_LABEL` — keyed by kind alone — cannot.
-    expect(select.selectedOptions[0].textContent).toBe("CI passed on agent-flow#main");
+    // And the repo and branch it names are on screen and EDITABLE. They used to
+    // be readable only as the select's own option text (`condOptionLabel`),
+    // which was the best a picker with no fields could do; now that the fields
+    // exist, the option reads as its bare kind and these hold the answer.
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).value).toBe("agent-flow");
+    expect((screen.getByLabelText("Branch") as HTMLInputElement).value).toBe("main");
   });
 
   it("lets a parameterised condition be swapped for one the picker can build", () => {
@@ -3558,5 +3573,374 @@ describe("the dry run", () => {
     const second = screen.getByTestId("orch-dryrun-e2").textContent ?? "";
     expect(second).toContain("would close the join");
     expect(second).not.toContain("would fire");
+  });
+});
+
+describe("the dry run and a blank condition", () => {
+  it("says a rule with a blank branch never fires, rather than that it is waiting", () => {
+    // The panel's `waiting` is documented as "the ordinary resting state" and
+    // shows the source place's own observation as its reason — both wrong for a
+    // rule nothing on any board could satisfy. Before the condition picker
+    // offered the parameterised kinds this shape only came from hand-editing a
+    // flow file; now it is two clicks away, so the dry run has to name it.
+    const blank = flow({
+      nodes: wired().nodes,
+      edges: [{
+        id: "e1", from: "n1", to: "n2",
+        cond: { kind: "branch-ci-passed", repo: "agent-flow", branch: "" },
+      }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [blank], runs: [runStatus("PROJ-1", "agent-flow")] })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    const row = screen.getByTestId("orch-dryrun-e1");
+    expect(row.textContent).toContain("never fires");
+    // In `condIncomplete`'s own words — the same string the inspector marks the
+    // field with and the arm warning counts, not a third phrasing of one fact.
+    expect(row.textContent).toContain("no branch set");
+    expect(row.textContent).not.toContain("waiting");
+  });
+});
+
+// ── The controls for what the engine could already do ────────────────────────
+// `join: "all"`, `branch-ci-passed`, `agent-idle-over`, `ticket-status-is` and a
+// command node's `cwdRepo` all shipped in the engine and ran correctly, with no
+// control anywhere in the UI. "Wait for master's build, then deploy" needed a
+// hand-edited JSON file under ~/.agentflow/flows.
+
+/** Three runs across three checkouts, with `agent-flow` on two of them, so a
+ * repo picker's options are provably the board's own list — deduped and sorted —
+ * and not some hardcoded default. The same reasoning `MODES` and `COMMANDS`
+ * above are built on. Ordered web/payments-api/agent-flow on purpose: the board
+ * order is not the sorted one, so a picker that merely echoed it would fail. */
+const BOARD: RunStatus[] = [
+  runStatus("PROJ-1", "web"),
+  runStatus("PROJ-2", "payments-api"),
+  runStatus("PROJ-3", "agent-flow"),
+];
+
+describe("a condition's parameters", () => {
+  const branchRule = () =>
+    flow({
+      nodes: wired().nodes,
+      edges: [{
+        id: "e1", from: "n1", to: "n2",
+        cond: { kind: "branch-ci-passed", repo: "agent-flow", branch: "main" },
+      }],
+    });
+
+  const openBranchRule = (over = {}) => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, runs: BOARD, flows: [branchRule()], ...over })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    return onSave;
+  };
+
+  it("offers the board's own checkouts, sorted", () => {
+    // Agent Flow's "repo" is a CHECKOUT name (`run.repos[].name`), not a GitHub
+    // `owner/name` — which is exactly why this is a picker and not a text field:
+    // a user typing the latter gets a rule that never fires and no hint why.
+    openBranchRule();
+    const values = Array.from(
+      (screen.getByLabelText("Repo") as HTMLSelectElement).querySelectorAll("option"),
+    ).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["agent-flow", "payments-api", "web"]);
+  });
+
+  it("names a repo the board cannot see rather than silently showing another", () => {
+    // A `<select>` whose `value` matches no option shows its FIRST option, so a
+    // rule watching a repo whose cards are all closed would read as one watching
+    // whatever sorts first — the same defect the command and mode pickers each
+    // carry an extra option for.
+    const f = branchRule();
+    (f.edges[0].cond as { repo: string }).repo = "infra";
+    render(<OrchestratorDrawer {...props({ runs: BOARD, flows: [f] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const sel = screen.getByLabelText("Repo") as HTMLSelectElement;
+    expect(sel.value).toBe("infra");
+    expect(sel.selectedOptions[0].textContent).toContain("not on the board");
+  });
+
+  it("writes a chosen repo without disturbing the branch beside it", () => {
+    const onSave = openBranchRule();
+    fireEvent.change(screen.getByLabelText("Repo"), { target: { value: "payments-api" } });
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].cond)
+      .toEqual({ kind: "branch-ci-passed", repo: "payments-api", branch: "main" });
+  });
+
+  it("writes the branch on blur, not on every keystroke", () => {
+    // The grammar every other free-text field on this surface already uses: a
+    // rule is not rewritten, and a flow file not rewritten across windows, once
+    // per character.
+    const onSave = openBranchRule();
+    const box = screen.getByLabelText("Branch");
+    fireEvent.change(box, { target: { value: "release/9" } });
+    expect(onSave).not.toHaveBeenCalled();
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].cond)
+      .toEqual({ kind: "branch-ci-passed", repo: "agent-flow", branch: "release/9" });
+  });
+
+  it("seeds a newly picked branch-CI rule with the source place's own repo", () => {
+    // The one half a guess can get right: the rule is being drawn out of a node
+    // already narrowed to a checkout. The branch stays blank, because "main"
+    // would read as a configured answer on a repo whose trunk is `master`.
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, runs: BOARD, flows: [wired()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "branch-ci-passed" } });
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].cond)
+      .toEqual({ kind: "branch-ci-passed", repo: "agent-flow", branch: "" });
+  });
+
+  it("seeds a newly picked idle rule with a real span", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    fireEvent.change(screen.getByLabelText("Condition"), { target: { value: "agent-idle-over" } });
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].cond)
+      .toEqual({ kind: "agent-idle-over", minutes: DEFAULT_IDLE_MINUTES });
+  });
+
+  it("keeps a minute count a number, and refuses to read a cleared field as zero", () => {
+    // `Number("")` is 0, and "fires the moment a session goes idle" is a real
+    // rule — just not what clearing a field means. A cleared box snaps back.
+    const idle = flow({
+      nodes: wired().nodes,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "agent-idle-over", minutes: 45 } }],
+    });
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [idle] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const box = screen.getByLabelText("Idle minutes") as HTMLInputElement;
+    fireEvent.change(box, { target: { value: "90" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].cond)
+      .toEqual({ kind: "agent-idle-over", minutes: 90 });
+
+    onSave.mockClear();
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(box.value).toBe("45");
+  });
+
+  it("marks a blank parameter, in the same words arming will use", () => {
+    // The honesty the old picker filter bought, kept without the capability it
+    // cost. `condIncomplete` is the ONE predicate behind both this mark and
+    // `unfirableRules`' own report, so the panel cannot call a rule fine that
+    // arming then calls dead.
+    const f = branchRule();
+    (f.edges[0].cond as { branch: string }).branch = "";
+    render(<OrchestratorDrawer {...props({ runs: BOARD, flows: [f] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByTestId("orch-cond-params").textContent).toContain("no branch set");
+  });
+
+  it("edits the status a ticket rule waits for", () => {
+    // `evalCond` matches it EXACTLY (`ticketStatus === cond.status`), which is
+    // why the field proposes no status of its own: a suggested "In Review" on a
+    // board that spells it "In review" is a rule that never fires and looks
+    // configured.
+    const statusRule = flow({
+      nodes: wired().nodes,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ticket-status-is", status: "In Review" } }],
+    });
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [statusRule] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    const box = screen.getByLabelText("Ticket status") as HTMLInputElement;
+    expect(box.value).toBe("In Review");
+    fireEvent.change(box, { target: { value: "Ready to deploy" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].cond)
+      .toEqual({ kind: "ticket-status-is", status: "Ready to deploy" });
+  });
+
+  it("marks a blank status too, not only a blank branch", () => {
+    const blankStatus = flow({
+      nodes: wired().nodes,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "ticket-status-is", status: "" } }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [blankStatus] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByTestId("orch-cond-params").textContent).toContain("no status set");
+  });
+
+  it("survives a hand-edited rule whose parameters are missing entirely", () => {
+    // `store.ts`'s `validEdge` admits an edge on the strength of its `kind`, so
+    // `{"kind":"branch-ci-passed"}` can reach the panel with no `repo` and no
+    // `branch` at all. An `undefined` on a `<select>`'s `value` makes React treat
+    // it as uncontrolled and warn on the first change; on `defaultValue` it does
+    // the reverse. Both fields must render, and the rule must read as unset.
+    const bare = flow({
+      nodes: wired().nodes,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "branch-ci-passed" } as never }],
+    });
+    render(<OrchestratorDrawer {...props({ runs: BOARD, flows: [bare] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect((screen.getByLabelText("Repo") as HTMLSelectElement).value).toBe("");
+    expect((screen.getByLabelText("Branch") as HTMLInputElement).value).toBe("");
+    expect(screen.getByTestId("orch-cond-params").textContent).toContain("no repo set");
+  });
+
+  it("falls back for a hand-edited idle or status rule with its parameter missing", () => {
+    // The other two arms of the same hazard. An idle rule with no `minutes` is
+    // the one that would otherwise reach `defaultValue={undefined}` and then
+    // warn on the first keystroke; a status rule with no `status` reads as the
+    // blank it effectively is.
+    const bare = (cond: unknown) => flow({
+      nodes: wired().nodes,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: cond as never }],
+    });
+    const { unmount } = render(<OrchestratorDrawer {...props({ flows: [bare({ kind: "agent-idle-over" })] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect((screen.getByLabelText("Idle minutes") as HTMLInputElement).value)
+      .toBe(String(DEFAULT_IDLE_MINUTES));
+    unmount();
+
+    render(<OrchestratorDrawer {...props({ flows: [bare({ kind: "ticket-status-is" })] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect((screen.getByLabelText("Ticket status") as HTMLInputElement).value).toBe("");
+    expect(screen.getByTestId("orch-cond-params").textContent).toContain("no status set");
+  });
+
+  it("renders nothing when handed a bare kind, so the component is total", () => {
+    // Both callers guard with `isBareCond` before rendering this at all, so the
+    // switch's default is unreachable through the UI — and that is exactly why
+    // it is asserted directly. It is what keeps `CondParams` safe to call
+    // unconditionally if a third caller ever does, rather than a branch whose
+    // behaviour nobody has checked.
+    const { container } = render(
+      <CondParams cond={{ kind: "pr-merged" }} repos={[]} editKey="e1" onEdit={vi.fn()} />,
+    );
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("renders no parameter row at all for a condition that carries none", () => {
+    // Absent, not empty: the thirteen bare kinds must leave the panel exactly as
+    // it was, or every existing rule gains a blank row.
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.queryByTestId("orch-cond-params")).toBeNull();
+  });
+});
+
+describe("a junction's join mode", () => {
+  /** Two places both wired into one notify terminal — the only shape in which a
+   * join mode means anything at all. */
+  const junction = (join: "any" | "all" = "any") =>
+    flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+        { id: "n2", kind: "place", x: 0, y: 90, join: "any", runKey: "PROJ-2", repo: "web" },
+        { id: "n3", kind: "notify", x: 320, y: 45, join, message: "both landed" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" } },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "pr-merged" } },
+      ],
+    });
+
+  const selectNode = (id: string) => {
+    fireEvent.pointerDown(screen.getByTestId(`orch-node-${id}`), { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+  };
+
+  it("offers the choice on a node two rules point at", () => {
+    render(<OrchestratorDrawer {...props({ flows: [junction()] })} />);
+    selectNode("n3");
+    expect((screen.getByLabelText("Join for notify") as HTMLSelectElement).value).toBe("any");
+  });
+
+  it("writes it on the target node", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [junction()] })} />);
+    selectNode("n3");
+    fireEvent.change(screen.getByLabelText("Join for notify"), { target: { value: "all" } });
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes[2]).toMatchObject({ join: "all" });
+    // On the NODE, and on no edge — `JoinMode`'s own doc comment is explicit that
+    // it is a property of the junction, not of one arrow into it.
+    expect(saved.edges.every((e) => !("join" in e))).toBe(true);
+  });
+
+  it("reads back a flow already set to all", () => {
+    render(<OrchestratorDrawer {...props({ flows: [junction("all")] })} />);
+    selectNode("n3");
+    expect((screen.getByLabelText("Join for notify") as HTMLSelectElement).value).toBe("all");
+  });
+
+  it("is absent on a node only one rule points at", () => {
+    // The model is explicit that a node with fewer than two incoming edges is
+    // unaffected by its `join`. A control whose every value provably changes
+    // nothing is the thing this panel already deleted an action `<select>` over.
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    fireEvent.pointerDown(screen.getByTestId("orch-node-n2"), { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+    expect(screen.queryByLabelText("Join for notify")).toBeNull();
+  });
+
+  it("opens the panel for a PLACE node, but only as a junction", () => {
+    // A place has no field of its own this panel edits, so it used to fall
+    // through to the empty state always. Being a junction is the one thing there
+    // is to say about one — and the only reason to open a panel for it.
+    const f = junction();
+    f.edges.push({ id: "e3", from: "n3", to: "n1", cond: { kind: "pr-merged" } });
+    f.edges.push({ id: "e4", from: "n2", to: "n1", cond: { kind: "pr-merged" } });
+    render(<OrchestratorDrawer {...props({ flows: [f] })} />);
+    selectNode("n1");
+    expect(screen.getByLabelText("Join for PROJ-1")).toBeTruthy();
+    // And the panel names it, so two junctions are told apart.
+    expect(screen.getByTestId("orch-node-inspector").textContent).toContain("PROJ-1");
+  });
+});
+
+describe("a command node's checkout", () => {
+  const cmd = (over: Record<string, unknown> = {}) =>
+    flow({
+      nodes: [{ id: "c1", kind: "command", x: 24, y: 24, join: "any", commandId: "deploy-staging", ...over }],
+    });
+
+  const selectCommand = () => {
+    fireEvent.pointerDown(screen.getByTestId("orch-node-c1"), { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+  };
+
+  it("starts on the model's own default, named out loud", () => {
+    // Absent `cwdRepo` means "the repo of the place the incoming edge came
+    // from". A picker offering only repo names would make that reachable exactly
+    // once — before anything was chosen.
+    render(<OrchestratorDrawer {...props({ runs: BOARD, flows: [cmd()] })} />);
+    selectCommand();
+    const sel = screen.getByLabelText("Repo for deploy-staging") as HTMLSelectElement;
+    expect(sel.value).toBe("");
+    expect(sel.selectedOptions[0].textContent).toBe(CWD_REPO_DEFAULT);
+  });
+
+  it("pins the command to a checkout", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, runs: BOARD, flows: [cmd()] })} />);
+    selectCommand();
+    fireEvent.change(screen.getByLabelText("Repo for deploy-staging"), { target: { value: "payments-api" } });
+    expect((onSave.mock.calls.at(-1)![0] as Flow).nodes[0]).toMatchObject({ cwdRepo: "payments-api" });
+  });
+
+  it("goes back to the default by REMOVING the field, not by storing a blank", () => {
+    // A stored `""` would send `resolveCommand` looking for a checkout named the
+    // empty string, which is precisely what the absent-means-default rule exists
+    // to avoid.
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, runs: BOARD, flows: [cmd({ cwdRepo: "web" })] })} />);
+    selectCommand();
+    fireEvent.change(screen.getByLabelText("Repo for deploy-staging"), { target: { value: "" } });
+    expect("cwdRepo" in (onSave.mock.calls.at(-1)![0] as Flow).nodes[0]).toBe(false);
+  });
+
+  it("names a checkout the board cannot see rather than showing the default", () => {
+    render(<OrchestratorDrawer {...props({ runs: BOARD, flows: [cmd({ cwdRepo: "infra" })] })} />);
+    selectCommand();
+    const sel = screen.getByLabelText("Repo for deploy-staging") as HTMLSelectElement;
+    expect(sel.value).toBe("infra");
+    expect(sel.selectedOptions[0].textContent).toContain("not on the board");
   });
 });

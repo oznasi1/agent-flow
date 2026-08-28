@@ -2,7 +2,8 @@ import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, edgeAction, Flow, FlowEdge, FlowNode, isSettled, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { Condition, edgeAction, Flow, FlowEdge, FlowNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { CondParams, RepoOptions } from "./CondParams";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
 import { MultiCombo } from "./combo";
 import { Drawer, useDrawerExit } from "./Drawer";
@@ -14,6 +15,7 @@ import {
   COMMAND_FREE_TEXT,
   COMMAND_NONE_LABEL,
   COMMAND_NOT_SET,
+  CWD_REPO_DEFAULT,
   commandFieldsOf,
   commandTargetOf,
   condOffered,
@@ -35,18 +37,25 @@ import {
   notifyMessageOf,
   observationFallback,
   observationOf,
+  isBareCond,
+  JOIN_LABEL,
+  NODE_KIND_LABEL,
   ruleOneLine,
   offeredConds,
+  repoOptions,
   OFFERED_DESTS,
   verdictLabel,
   verdictWhy,
   withCommandId,
   withCommandRun,
   withCond,
+  withCondParams,
   withDest,
   withMode,
   withNodeCommandId,
   withNodeCommandRun,
+  withNodeCwdRepo,
+  withNodeJoin,
   withNodeNotifyMessage,
   withNote,
   withNotifyMessage,
@@ -796,17 +805,48 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * three ways. */
   const commandNode = edge ? commandTargetOf(flow, edge) : undefined;
   const cmd = commandFieldsOf(commandNode, p.commands);
+  /** Every checkout the board can see, for the two repo pickers on this surface:
+   * a `branch-ci-passed` rule's repo half and a command node's `cwdRepo`. Derived
+   * once here rather than at each `<select>`, so the two cannot offer different
+   * lists — and so the sort runs once per render instead of twice. */
+  const boardRepos = repoOptions(p.runs);
+  /** The selected rule's condition parameters, or `null` when its kind carries
+   * none. `isBareCond`, not a truthiness check on the element: `CondParams`
+   * renders `null` for a bare kind, but CALLING it as a component yields an
+   * element regardless, so the caller cannot learn from the result whether there
+   * is a row to draw. The predicate is what `withCond`'s own seeding switch
+   * splits on, which is what keeps the two in step. */
+  const condParams = edge && !isBareCond(edge.cond.kind) ? (
+    <CondParams
+      cond={edge.cond}
+      repos={boardRepos}
+      editKey={edge.id}
+      onEdit={(patch) => p.onSave(withCondParams(flow, edge.id, patch))}
+    />
+  ) : null;
 
   /** The node the inspector answers to when NO connection is selected — a
    * command node's command and a notify node's message are the node's own data
    * (`withNodeCommandId`, `withNodeNotifyMessage`), and until now the only
    * controls that wrote them were keyed on an edge, so a node had to be wired
-   * into a rule before it could be configured at all. A place or a planned node
-   * is deliberately not here: neither has a field this panel edits (a launch's
-   * mode and destination are set on the rule that spends them), so selecting one
-   * leaves the empty state up rather than opening an empty panel. */
+   * into a rule before it could be configured at all.
+   *
+   * A place or a planned node now opens it too, but ONLY as a junction: neither
+   * has a field of its own this panel edits (a launch's mode and destination are
+   * set on the rule that spends them), so the one thing there is to say about one
+   * is what its several incoming rules mean together. `nodeJoins` below is that
+   * test, and it is what keeps a one-in place node on the empty state rather than
+   * opening a panel with nothing in it. */
   const inspNode = !edge && sel ? flow.nodes.find((n) => n.id === sel) : undefined;
-  const nodeInsp = inspNode && (inspNode.kind === "command" || inspNode.kind === "notify") ? inspNode : undefined;
+  /** Is this node a JUNCTION — somewhere two or more rules meet? The model is
+   * explicit that a node with fewer than two incoming edges is unaffected by its
+   * `join` (see `JoinMode`), so this is what decides whether the control below
+   * exists at all. Rendering it always would put a `<select>` on screen whose
+   * every value provably changes nothing, which is the same objection this file
+   * already spends four paragraphs on for the action `<select>` it deleted. */
+  const nodeJoins = inspNode !== undefined && incomingEdges(flow, inspNode.id).length > 1;
+  const nodeInsp =
+    inspNode && (inspNode.kind === "command" || inspNode.kind === "notify" || nodeJoins) ? inspNode : undefined;
   /** How the node inspector names the node it is about — the same `endLabel`
    * every other surface names it with. Also what its controls' aria-labels are
    * scoped by: "Command", bare, is the edge inspector's and an open list row's
@@ -981,13 +1021,17 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     <div className="orch-insp" data-testid="orch-node-inspector">
       <div className="t">
         <span>
-          {nodeInsp.kind === "command" ? "Command" : "Notify"}
+          {NODE_KIND_LABEL[nodeInsp.kind] ?? "Node"}
           {/* The identifier, exempt from this row's uppercase (see
               `.orch-insp .t .k`): a free-text command is case-sensitive shell
               text, and "DEPLOY.SH --ENV=STAGING" is not the command that runs.
               A notify node has no identifier to print — its message is prose,
-              which this row would shout — so the kind word stands alone. */}
-          {nodeInsp.kind === "command" && (
+              which this row would shout — so the kind word stands alone, and
+              `endLabel` returns the bare word "notify" for it, which repeated
+              here would read as "Notify · notify". A place and a planned node
+              each have one (a run key, a ticket key) and it is the only way to
+              tell two junctions apart. */}
+          {nodeInsp.kind !== "notify" && (
             <>
               {" · "}
               <span className="k" style={{ fontFamily: "var(--mono)" }}>{nodeInspName}</span>
@@ -1058,8 +1102,30 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <SaveCommandRow key={nodeInsp.id} runNow={() => runRef.current?.value ?? nodeCmd.run ?? ""} />
             )
           )}
+          {/* Which checkout the command runs in. Last of the command's own rows,
+              because it is the qualifier on everything above it rather than a
+              fact of its own — "run deploy.sh, in the payments-api checkout".
+
+              Its first option is the model's DEFAULT, not a repo: absent
+              `cwdRepo` means "the repo of the place the incoming edge came
+              from", which is the common case and the one that needs no
+              configuration (see `CommandNode.cwdRepo`). Naming that default out
+              loud is what makes it choosable again — `withNodeCwdRepo` deletes
+              the field for `""` rather than storing one. */}
+          <div className="orch-clause">
+            <span className="orch-kw">IN</span>
+            <select
+              className="orch-sel"
+              aria-label={`Repo for ${nodeInspName}`}
+              value={nodeInsp.cwdRepo ?? ""}
+              onChange={(ev) => p.onSave(withNodeCwdRepo(flow, nodeInsp.id, ev.currentTarget.value))}
+            >
+              <option value="">{CWD_REPO_DEFAULT}</option>
+              <RepoOptions value={nodeInsp.cwdRepo ?? ""} repos={boardRepos} />
+            </select>
+          </div>
         </>
-      ) : (
+      ) : nodeInsp.kind === "notify" ? (
         <div className="orch-clause">
           <span className="orch-kw">SAYS</span>
           <input
@@ -1069,6 +1135,31 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             defaultValue={nodeInsp.message}
             onBlur={(ev) => p.onSave(withNodeNotifyMessage(flow, nodeInsp.id, ev.currentTarget.value))}
           />
+        </div>
+      ) : null}
+      {/* What several incoming rules mean where they meet. Last, after whatever
+          the node's own kind had to say, because it is a fact about the WIRING
+          rather than about the node — and it is the only row a place or a
+          planned node ever shows, which is why those kinds open this panel at
+          all now (see `nodeJoins`).
+
+          Rendered only for a real junction. The model is explicit that a node
+          with fewer than two incoming edges is unaffected by its `join`, and a
+          control that provably changes nothing is the thing this file already
+          deleted an action `<select>` over. */}
+      {nodeJoins && (
+        <div className="orch-clause">
+          <span className="orch-kw">JOINS</span>
+          <select
+            className="orch-sel"
+            aria-label={`Join for ${nodeInspName}`}
+            value={nodeInsp.join}
+            onChange={(ev) => p.onSave(withNodeJoin(flow, nodeInsp.id, ev.currentTarget.value as JoinMode))}
+          >
+            {(Object.keys(JOIN_LABEL) as JoinMode[]).map((j) => (
+              <option key={j} value={j}>{JOIN_LABEL[j]}</option>
+            ))}
+          </select>
         </div>
       )}
     </div>
@@ -1626,6 +1717,23 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 ))}
               </select>
             </div>
+            {/* The condition's own parameters, on a row of their own under the
+                kind that needs them. An empty keyword cell rather than no cell:
+                `.orch-kw`'s 40px column is what makes every value in this panel
+                start at the same x, and a parameter that began at the panel edge
+                would read as a new clause rather than as part of WHEN.
+
+                `CondParams` renders NOTHING for a bare kind, so this row is
+                absent — not empty — for the thirteen conditions that carry no
+                parameter, and the panel is byte-identical to what it was for
+                them. The same component fills the same hole in a flowList row,
+                which is the whole reason it is a component: see its header. */}
+            {condParams !== null && (
+              <div className="orch-clause" data-testid="orch-cond-params">
+                <span className="orch-kw" />
+                {condParams}
+              </div>
+            )}
             {/* THEN is a STATEMENT, not a choice. The action is whatever the
                 node this rule points at implies (`edgeAction`), so a `<select>`
                 here could not decide anything: the pick was silently overridden

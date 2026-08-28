@@ -3701,6 +3701,7 @@ export class DeckPanel {
             const live = dead.filter((d) => d.needs === "live-signal").length;
             const pr = dead.filter((d) => d.needs === "pr-facts").length;
             const forge = dead.filter((d) => d.needs === "forge-unsupported").length;
+            const blank = dead.filter((d) => d.needs === "unset-parameter").length;
             const offParts: string[] = [];
             if (pr > 0) offParts.push(`${pr} need${pr === 1 ? "s" : ""} PR facts`);
             if (live > 0) offParts.push(`${live} need${live === 1 ? "s" : ""} the Live signal`);
@@ -3713,6 +3714,15 @@ export class DeckPanel {
             // naturally alongside the "needs PR facts"/"needs the Live signal"
             // siblings above, rather than as an em-dash aside.
             if (forge > 0) reasons.push(`${forge} rule${forge === 1 ? "'s" : "s'"} forge cannot report this`);
+            // First in the sentence, matching `unfirableRules`' own precedence: a
+            // blank branch or status is the one reason here the user can fix
+            // without touching a setting, and it is fixed in the same panel they
+            // just armed from. A count, not the specific blank — the inspector's
+            // own mark on the field is what names WHICH parameter is missing, and
+            // repeating it here would put the same fact in two voices.
+            if (blank > 0) {
+              reasons.unshift(`${blank} ${blank === 1 ? "rule has" : "rules have"} a setting left blank`);
+            }
             this.post({
               type: "toast",
               level: "info",

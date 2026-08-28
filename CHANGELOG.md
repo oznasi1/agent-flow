@@ -60,6 +60,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Jira detail on an empty 200 body** (some proxies) now fails with a
     Jira-shaped error instead of a TypeError.
 
+## [0.54.0] — 2026-08-28
+
+### Added
+
+- **Every condition is now editable in the orchestrator drawer.** `branch CI passed`,
+  `ticket status is` and `session idle over` each carry a parameter, and until now the
+  drawer's condition picker withheld them because there was nowhere to ask for a branch, a
+  status or a minute count. They are offered now, with fields beside them — so "wait for the
+  build to pass on `master`, then run the deploy command" is something you can draw, instead
+  of hand-editing a JSON file under `~/.agentflow/flows`. The fields appear on the canvas
+  inspector and in the keyboard list alike, and the repo half is a picker over the checkouts
+  the board can see rather than free text.
+
+- **`JOINS` — what several rules meeting at one node mean.** Select a node two or more rules
+  point at and choose `any one rule` (fire on the first met, the existing behaviour) or
+  `all rules` (wait for every one). The engine has always honoured this; nothing in the UI
+  could set it. A place or planned node opens the panel for this reason alone — nodes with a
+  single incoming rule are unaffected by the setting and do not show the control.
+
+- **`IN` — which checkout a command node runs in.** A command node runs in the repo of the
+  place its incoming rule came from unless you say otherwise; that override (`cwdRepo`) now
+  has a picker.
+
+### Changed
+
+- **"What would fire?" tells a rule that can never fire from one that is merely waiting.**
+  A rule whose condition names a blank branch, repo or status now reads `never fires` with
+  the blank named, instead of `waiting` — which the panel documents as "the ordinary resting
+  state" and which for this rule never ends. It is the same predicate behind the marked field
+  in the inspector and the arm-time warning, so the three cannot disagree about one rule.
+
+- **Arming names a rule whose condition has a blank setting.** A rule waiting on an empty
+  branch or status can never fire, so it joins "needs PR facts" in the warning shown when a
+  flow is armed — listed first, because unlike the others it is fixed in the panel you just
+  armed from rather than in a setting. The field itself is marked in the drawer while the
+  blank is being made.
 ## [0.53.0] — 2026-08-28
 
 ### Added

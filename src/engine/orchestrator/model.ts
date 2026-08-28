@@ -327,3 +327,50 @@ export function edgeAction(flow: Flow, e: FlowEdge): FlowAction | undefined {
  * disagrees with its target. Exported so the migration, the drawer's copy, and
  * the tests all name it once. */
 export const ACTION_MISMATCH_PREFIX = "This rule's action no longer matches where it points";
+
+/** Why this condition can never be met as written, or `undefined` when it is
+ * complete. A parameterised condition with a blank parameter is not merely
+ * unconfigured — it is a rule the engine will evaluate forever and never
+ * satisfy: `evalCond` compares `ticketStatus === ""` and looks up
+ * `branchCi["#"]`, neither of which any board can produce.
+ *
+ * It lives HERE rather than beside the pickers in `orchestratorRule.ts` because
+ * two very different callers must agree about it and neither can import the
+ * other: the webview's inspector, which marks the field so the blank is visible
+ * while it is being made, and `armability.ts`, which is what makes arming SAY so
+ * rather than leaving the user waiting on a rule that cannot fire. That is the
+ * same drift argument `isSettled` above is written for.
+ *
+ * `agent-idle-over` is deliberately absent: `withCond` seeds it with a real
+ * minute count and the picker's own control cannot produce a blank one, so it
+ * has no incomplete shape to report. A hand-edited flow naming `minutes: 0`
+ * is not incomplete either — it means "fires as soon as the session is idle",
+ * which is a rule that works.
+ *
+ * The returned string is the REASON, phrased to sit inside both callers'
+ * sentences ("branch CI passed… — no branch set" and "1 rule has no branch
+ * set"), so neither has to invent wording the other might contradict. */
+export function condIncomplete(cond: Condition): string | undefined {
+  switch (cond.kind) {
+    case "ticket-status-is":
+      return blank(cond.status) ? "no status set" : undefined;
+    case "branch-ci-passed":
+      if (blank(cond.repo)) return "no repo set";
+      return blank(cond.branch) ? "no branch set" : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/** Is this parameter missing? A `typeof` check and not just `=== ""`, because
+ * the value can be genuinely ABSENT despite what `Condition` claims: a flow file
+ * is JSON somebody can hand-edit, and `store.ts`'s `validEdge` admits an edge on
+ * the strength of its `kind` without reading the parameters beside it — so
+ * `{"kind":"ticket-status-is"}` reaches this function with no `status` at all.
+ * A bare `.trim()` on that throws, and it throws inside `unfirableRules`, which
+ * is called while ARMING: one hand-edited rule would take the whole arm down
+ * rather than being reported as the one rule that cannot fire. Absent and blank
+ * mean the same thing here anyway — nothing to match against. */
+function blank(v: unknown): boolean {
+  return typeof v !== "string" || v.trim() === "";
+}

@@ -108,6 +108,51 @@ describe("unfirableRules", () => {
     expect(unfirableRules(flow, { liveSignal: true, prFacts: false }).map((r) => r.edgeId)).toEqual(["e2"]);
   });
 
+  // A blank parameter is the one reason here that is not about a toggle. It is
+  // what replaces the old picker filter: the parameterised kinds are offered now
+  // (see `OFFERED_CONDS`), so a rule CAN be built with a status nobody typed —
+  // and arming has to say so, or a user waits forever on a rule that looks
+  // configured. `condIncomplete` (model.ts) is the shared predicate, so the
+  // field the inspector marks and the rule this names cannot disagree.
+  it("names a rule whose condition has a blank parameter, with every source on", () => {
+    const flow = flowOf(edge("e1", { kind: "ticket-status-is", status: "" }));
+    expect(unfirableRules(flow, ALL_ON)).toEqual([
+      { edgeId: "e1", needs: "unset-parameter", label: expect.any(String) },
+    ]);
+  });
+
+  it("says nothing about a parameterised rule that is filled in", () => {
+    const flow = flowOf(
+      edge("e1", { kind: "ticket-status-is", status: "In Review" }),
+      edge("e2", { kind: "agent-idle-over", minutes: 30 }),
+    );
+    expect(unfirableRules(flow, ALL_ON)).toEqual([]);
+  });
+
+  it("blames the blank before the toggle, because the toggle would not help", () => {
+    // A `branch-ci-passed` rule is in `NEEDS_PR`, so with PR facts off it
+    // qualifies for BOTH reasons. Reporting "needs PR facts" would send the user
+    // to turn on a setting that still leaves the rule dead — the branch is the
+    // fix, and it is the one this has to name.
+    const flow = flowOf(edge("e1", { kind: "branch-ci-passed", repo: "api", branch: "" }));
+    expect(unfirableRules(flow, { liveSignal: true, prFacts: false })).toEqual([
+      { edgeId: "e1", needs: "unset-parameter", label: expect.any(String) },
+    ]);
+  });
+
+  it("still reports one reason per edge", () => {
+    const flow = flowOf(edge("e1", { kind: "branch-ci-passed", repo: "", branch: "" }));
+    expect(unfirableRules(flow, { liveSignal: false, prFacts: false })).toHaveLength(1);
+  });
+
+  it("skips a settled edge even when its parameter is blank", () => {
+    // `isSettled` is checked first for every reason, and this one is no
+    // exception: a rule that already fired is not waiting on anything, and an
+    // errored one has a real failure the drawer already shows.
+    const fired: FlowEdge = { ...edge("e1", { kind: "ticket-status-is", status: "" }), firedAt: 5 };
+    expect(unfirableRules(flowOf(fired), ALL_ON)).toEqual([]);
+  });
+
   it("gives each rule a human label naming its condition", () => {
     const flow = flowOf(edge("e1", { kind: "ci-failed" }));
     const [only] = unfirableRules(flow, { liveSignal: true, prFacts: false });
