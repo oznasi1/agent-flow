@@ -2777,6 +2777,10 @@ describe("writeBriefInto", () => {
 
 describe("maybeSeedAgent — malformed plan files", () => {
   const IDENTITY = "/ws/PROJ-1.code-workspace";
+  // Pinned, not inherited: the seed route asserted below exists only for the
+  // claude-code provider, and leftover setConfig state from earlier describes
+  // must not be what selects it.
+  beforeEach(() => setConfig({ agentProvider: "claude-code", agentSurface: undefined }));
   const withWorkspaceFile = () => {
     workspace.workspaceFile = { scheme: "file", fsPath: IDENTITY };
   };
