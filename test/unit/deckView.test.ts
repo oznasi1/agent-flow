@@ -4767,6 +4767,86 @@ describe("deck:mergePr", () => {
     await openWith(greenFacts());
     expect(lastRunsPost().mergeWrites).toBe(false);
   });
+
+  it("emits pr_merged refused/writes-off when mergeWrites is off, with no repo or key in the serialized calls", async () => {
+    h.mergeWrites = false;
+    trackSpy.mockClear();
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged")).toMatchObject({
+      outcome: "refused", refusal: "writes-off",
+    });
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("svc");
+  });
+
+  it.each([
+    ["facts-off", () => { h.mergeWrites = true; h.prFacts = false; }],
+    ["no-run", () => { h.mergeWrites = true; }],
+    ["target-mismatch", () => { h.mergeWrites = true; }],
+    ["no-checkout", () => { h.mergeWrites = true; }],
+  ] as const)("emits pr_merged refused/%s for that gate", async (refusal, setup) => {
+    setup();
+    trackSpy.mockClear();
+    let p: ReturnType<typeof lastPanel>;
+    if (refusal === "no-run") {
+      p = await openWith(greenFacts());
+      await p._fire({ type: "deck:mergePr", key: "NOPE-9", repo: "svc", number: 124 });
+    } else if (refusal === "target-mismatch") {
+      p = await openWith(greenFacts());
+      await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 999 });
+    } else if (refusal === "no-checkout") {
+      h.runs = [mkRun({ repos: [{ name: "other", path: "/r/other", isGit: true, branch: "b" }] })];
+      h.prEntries = { svc: { facts: greenFacts(), fetchedAt: Date.now() } };
+      show();
+      await settled();
+      p = lastPanel();
+      await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    } else {
+      p = await openWith(greenFacts());
+      await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    }
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged")).toMatchObject({
+      outcome: "refused", refusal,
+    });
+  });
+
+  it("emits pr_merged ok with merge_method on a successful merge", async () => {
+    h.mergeWrites = true;
+    h.mergeMethod = "squash";
+    vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
+    trackSpy.mockClear();
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged")).toMatchObject({
+      outcome: "ok", merge_method: "squash",
+    });
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("124");
+  });
+
+  it("emits pr_merged failed with merge_method when the forge rejects the merge", async () => {
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockResolvedValue("Squash and merge");
+    h.prMerge.mockResolvedValue({ ok: false, message: "Pull request is not mergeable" });
+    trackSpy.mockClear();
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged")).toMatchObject({
+      outcome: "failed", merge_method: "squash",
+    });
+  });
+
+  it("emits pr_merged cancelled, with no merge_method, when the confirmation is declined", async () => {
+    h.mergeWrites = true;
+    vi.mocked(window.showWarningMessage).mockResolvedValue(undefined);
+    trackSpy.mockClear();
+    const p = await openWith(greenFacts());
+    await p._fire({ type: "deck:mergePr", key: "PROJ-1", repo: "svc", number: 124 });
+    const ev = trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_merged") as any;
+    expect(ev).toMatchObject({ outcome: "cancelled" });
+    expect(ev.merge_method).toBeUndefined();
+  });
 });
 
 describe("DeckPanel — Address PR", () => {
@@ -4958,6 +5038,50 @@ describe("DeckPanel — Address PR", () => {
       expect.objectContaining({ type: "toast", level: "info", message: expect.stringContaining("agentFlow.seedAgent") }),
     );
   });
+
+  it("emits pr_work_seeded with reason review and source deck, and no ticket key in the serialized calls", async () => {
+    h.runs = [mkRun()];
+    show();
+    trackSpy.mockClear();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      reason: "review", source: "deck", outcome: "seeded",
+      window_count: 1, failed_repo_count: 0, agent_seeded: true,
+    });
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+  });
+
+  it("emits pr_work_seeded opened-not-seeded when agentFlow.seedAgent is off", async () => {
+    h.seedAgent = false;
+    h.runs = [mkRun()];
+    show();
+    trackSpy.mockClear();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "opened-not-seeded", agent_seeded: false,
+    });
+  });
+
+  it("emits pr_work_seeded open-failed, with the failed count, when the editor refuses to open", async () => {
+    h.runs = [mkRun()];
+    h.openInEditor.mockResolvedValueOnce(false);
+    show();
+    trackSpy.mockClear();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "open-failed", window_count: 1, failed_repo_count: 1,
+    });
+  });
+
+  it("emits pr_work_seeded refused for a run with nothing to open", async () => {
+    h.runs = [mkRun({ repos: [] })];
+    show();
+    trackSpy.mockClear();
+    await lastPanel()._fire({ type: "deck:addressPr", key: "PROJ-1" });
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "refused",
+    });
+  });
 });
 
 // I3: nothing here ever fired `deck:seedPrWork` before this — every existing
@@ -5090,6 +5214,25 @@ describe("DeckPanel — PR-work destination", () => {
     expect(h.writePlanFile).not.toHaveBeenCalled();
     expect(h.openInEditor).not.toHaveBeenCalled();
     expect(posts(p).some((m) => m.type === "toast")).toBe(false);
+  });
+
+  it("emits pr_work_seeded cancelled when the destination picker is dismissed", async () => {
+    window.showQuickPick.mockResolvedValueOnce(undefined);
+    trackSpy.mockClear();
+    await fire();
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "cancelled",
+    });
+  });
+
+  it("emits pr_work_seeded seeded-in-place when re-seeding this window without opening anything", async () => {
+    h.currentWindow = HERE;
+    window.showQuickPick.mockResolvedValueOnce({ target: { kind: "current" } });
+    trackSpy.mockClear();
+    await fire();
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "seeded-in-place", window_count: 0, agent_seeded: true,
+    });
   });
 
   it("asks nothing at all when the setting pins the run's own window", async () => {

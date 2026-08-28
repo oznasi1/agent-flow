@@ -2946,15 +2946,39 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * checks out its branch, assesses readiness, and (when prReviewAutoFix) implements the
    * requested changes. Surfaced on a card whose status matches cfg.prReviewStatus. */
   public async addressPr(key: string, preselected?: string[]): Promise<void> {
-    // Its own read rather than hoisting the `const cfg` below: that one is deliberately
-    // taken AFTER resolveKickoff's pickers, and moving it would change which settings
-    // snapshot the Claude Code path sees.
-    if (this.remoteControlBlocksLaunch(getConfig())) return;
+    // Its own read, not the `const cfg` taken below: THAT one is deliberately taken
+    // AFTER resolveKickoff's pickers, and moving it would change which settings
+    // snapshot the Claude Code path sees. `gateCfg` only ever informs this gate and
+    // the two telemetry emits that can fire before that later read exists.
+    const gateCfg = getConfig();
+    if (this.remoteControlBlocksLaunch(gateCfg)) {
+      track({
+        name: "pr_work_seeded", reason: "review", source: "tasks", outcome: "refused",
+        window_count: 0, failed_repo_count: 0, agent_seeded: gateCfg.seedAgent,
+      });
+      return;
+    }
     const resolved = await this.resolveKickoff(key, preselected);
-    if (!resolved) return;
+    if (!resolved) {
+      track({
+        name: "pr_work_seeded", reason: "review", source: "tasks", outcome: "cancelled",
+        window_count: 0, failed_repo_count: 0, agent_seeded: gateCfg.seedAgent,
+      });
+      return;
+    }
     const { detail, services, target } = resolved;
     const cfg = getConfig();
-    await this.launch(detail, services, prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix), true, target);
+    const launched = await this.launch(detail, services, prReviewTemplate(cfg.prReviewPrompt, cfg.prReviewAutoFix), true, target);
+    // No "failed" here: unlike take_completed, pr_work_seeded's outcome enum has no
+    // failure member — a throw out of launch() propagates to onMessage's own catch,
+    // which already reports it as operation_failed. window_count is the repo/worktree
+    // count launch() was asked to seed; launch() doesn't expose a per-repo failure
+    // count of its own, so failed_repo_count stays 0 on this path.
+    track({
+      name: "pr_work_seeded", reason: "review", source: "tasks",
+      outcome: launched ? (cfg.seedAgent ? "seeded" : "opened-not-seeded") : "cancelled",
+      window_count: services.length, failed_repo_count: 0, agent_seeded: cfg.seedAgent,
+    });
   }
 
   /** Where to open a taken task — new window, this window, a saved workspace, or a

@@ -2877,8 +2877,15 @@ export class DeckPanel {
     const release = (): void => {
       this.post({ type: "deck:mergeDone", key, repo, number, outcome: "cancelled" });
     };
+    // Every refusal below emits its own `pr_merged` with the matching `refusal`
+    // member — never the key/repo/number the message carried, which stay
+    // webview-only in the `deck:mergeDone` post above.
+    const refuse = (refusal: "writes-off" | "facts-off" | "no-run" | "local" | "target-mismatch" | "no-checkout" | "in-flight"): void => {
+      trackEvent({ name: "pr_merged", outcome: "refused", refusal });
+    };
     if (!cfg.mergeWrites) {
       this.log(`deck: mergePr ignored — agentFlow.mergeWrites is off`);
+      refuse("writes-off");
       release();
       return;
     }
@@ -2891,12 +2898,14 @@ export class DeckPanel {
     // board was built from, and `onConfigChanged` re-seeds it.
     if (!this.prFacts) {
       this.log(`deck: mergePr ignored — agentFlow.prFacts is off`);
+      refuse("facts-off");
       release();
       return;
     }
     const run = this.run(key);
     if (!run) {
       this.toast("error", `No run record for ${key}.`);
+      refuse("no-run");
       release();
       return;
     }
@@ -2904,18 +2913,21 @@ export class DeckPanel {
     // from a branch name that may belong to somebody else's ticket.
     if (runKind(run) === "local") {
       this.log(`deck: mergePr ignored for local card ${key}`);
+      refuse("local");
       release();
       return;
     }
     const target = mergeTarget(readPrEntries(defaultPrFactsDir(), key));
     if (!target || target.repo !== repo || target.number !== number) {
       this.log(`deck: mergePr refused — ${key}/${repo}#${number} is not this run's merge target`);
+      refuse("target-mismatch");
       release();
       return;
     }
     const checkout = run.repos.find((r) => r.name === target.repo);
     if (!checkout) {
       this.log(`deck: mergePr refused — no checkout for ${target.repo} in ${key}`);
+      refuse("no-checkout");
       release();
       return;
     }
@@ -2926,7 +2938,10 @@ export class DeckPanel {
     // "cancelled" from this rejected duplicate would release the button mid-merge —
     // the opposite of what the guard exists for. Do not "fix" this to match the
     // gates above.
-    if (this.mergesInFlight.has(inflightKey)) return;
+    if (this.mergesInFlight.has(inflightKey)) {
+      refuse("in-flight");
+      return;
+    }
     this.mergesInFlight.add(inflightKey);
     try {
       const label = MERGE_LABEL[cfg.mergeMethod];
@@ -2940,8 +2955,10 @@ export class DeckPanel {
       );
       if (answer !== label) {
         // Distinct from a failure: nothing was attempted, so there is nothing to
-        // warn about — just release the row's disable.
+        // warn about — just release the row's disable. No merge_method: the forge
+        // was never called.
         this.post({ type: "deck:mergeDone", key, repo: target.repo, number: target.number, outcome: "cancelled" });
+        trackEvent({ name: "pr_merged", outcome: "cancelled" });
         return;
       }
       this.log(`deck: merging ${target.repo}#${target.number} with ${cfg.mergeMethod}`);
@@ -2958,6 +2975,7 @@ export class DeckPanel {
           action: { label: "Open PR", url: target.url },
         });
         this.post({ type: "deck:mergeDone", key, repo: target.repo, number: target.number, outcome: "failed" });
+        trackEvent({ name: "pr_merged", outcome: "failed", merge_method: cfg.mergeMethod });
         return;
       }
       this.toast("success", `${target.repo}#${target.number} merged.`);
@@ -2967,11 +2985,13 @@ export class DeckPanel {
       const stored = readPrEntries(defaultPrFactsDir(), key)[target.repo];
       if (stored) writePrEntry(defaultPrFactsDir(), key, target.repo, { ...stored, fetchedAt: 0 });
       this.post({ type: "deck:mergeDone", key, repo: target.repo, number: target.number, outcome: "ok" });
+      trackEvent({ name: "pr_merged", outcome: "ok", merge_method: cfg.mergeMethod });
     } catch (e) {
       // A throw anywhere above (a disposed panel's post, a rejected modal) must
       // still release the button — otherwise the row stays disabled forever.
       this.log(`deck: mergePr threw: ${e instanceof Error ? e.message : String(e)}`);
       this.post({ type: "deck:mergeDone", key, repo, number, outcome: "failed" });
+      trackEvent({ name: "pr_merged", outcome: "failed", merge_method: cfg.mergeMethod });
     } finally {
       this.mergesInFlight.delete(inflightKey);
     }
@@ -4229,10 +4249,22 @@ export class DeckPanel {
    * makes a live window seed itself when the plan lands, and openInEditor shells to
    * `open -a`, which focuses an existing window rather than opening a second one.
    */
-  private async seedPrWork(key: string, reason: PrWorkReason, detail?: string): Promise<void> {
+  private async seedPrWork(
+    key: string, reason: PrWorkReason, detail?: string,
+    // `"deck"` for both of this class's own dispatch sites (deck:addressPr,
+    // deck:seedPrWork) — tasksView's addressPr reaches `pr_work_seeded` through
+    // its own separate emit, not through this function, so no caller here ever
+    // passes anything else.
+    source: "deck" | "tasks" = "deck",
+  ): Promise<void> {
+    // cfg read up front (ahead of the two early guards below) so every
+    // refusal/cancellation emit below has `agent_seeded` to report, not just the
+    // terminals past the destination question.
+    const cfg = getConfig();
     const run = this.run(key);
     if (!run) {
       this.toast("error", `No run record for ${key}.`);
+      trackEvent({ name: "pr_work_seeded", reason, source, outcome: "refused", window_count: 0, failed_repo_count: 0, agent_seeded: cfg.seedAgent });
       return;
     }
     // The webview only ever sends this for a card gated on the review column's
@@ -4247,9 +4279,9 @@ export class DeckPanel {
     // against a future caller that isn't as careful.
     if (runKind(run) === "local") {
       this.log(`deck: seedPrWork ignored for local card ${key}`);
+      trackEvent({ name: "pr_work_seeded", reason, source, outcome: "refused", window_count: 0, failed_repo_count: 0, agent_seeded: cfg.seedAgent });
       return;
     }
-    const cfg = getConfig();
     const clause = prWorkClause(reason, detail);
     // The user's configured review prompt, preceded by what is actually wrong.
     // An empty clause (reason "review") leaves the template byte-identical to
@@ -4271,12 +4303,17 @@ export class DeckPanel {
     // this path has.
     if (!run.workspaceFile && run.repos.length === 0) {
       this.toast("error", `Nothing to open for ${key}.`);
+      trackEvent({ name: "pr_work_seeded", reason, source, outcome: "refused", window_count: 0, failed_repo_count: 0, agent_seeded: cfg.seedAgent });
       return;
     }
     // Where — asked BEFORE anything is written, so an Escape leaves no plan file behind
     // for some window to act on later. Same ordering, same reason, as launchReviewFor's.
     const target = await this.prWorkTarget(cfg, run, key, reason);
-    if (!target) return; // dismissed — nothing written, nothing opened, no toast
+    if (!target) {
+      // dismissed — nothing written, nothing opened, no toast
+      trackEvent({ name: "pr_work_seeded", reason, source, outcome: "cancelled", window_count: 0, failed_repo_count: 0, agent_seeded: cfg.seedAgent });
+      return;
+    }
     // Which windows that destination means, and which brief each renders against.
     // mentions is empty: file hints come from the ticket description, and re-fetching
     // Jira is exactly what this path exists to avoid.
@@ -4285,6 +4322,7 @@ export class DeckPanel {
       // `current` in a window that lost its identity between the pick and here — the one
       // case prWorkPlan refuses, and the same one targetToOpenArgs refuses.
       this.toast("error", `Couldn't seed ${key} here — this window has no workspace file and no single folder.`);
+      trackEvent({ name: "pr_work_seeded", reason, source, outcome: "refused", window_count: 0, failed_repo_count: 0, agent_seeded: cfg.seedAgent });
       return;
     }
     const matches = plan.seats.map((s) => ({ matchPath: s.matchPath, prompt: agentPrompt(ticket, [], template, s.briefPath) }));
@@ -4301,12 +4339,21 @@ export class DeckPanel {
       if (await openInEditor(p)) continue;
       failedRepos.push(run.repos.find((r) => r.path === p)?.name ?? p);
     }
+    // The four terminal shapes below map 1:1 onto pr_work_seeded's outcome enum:
+    // any repo failing to open is "open-failed" regardless of seedAgent (the plan
+    // file, if any, was already written above); with nothing to open the run
+    // seeded (or didn't) right where it already was, "seeded-in-place" /
+    // "opened-not-seeded"; and with every repo opened, "seeded" or, mirroring the
+    // in-place case, "opened-not-seeded" once more when seedAgent is off.
+    let outcome: "seeded" | "seeded-in-place" | "opened-not-seeded" | "open-failed";
     if (failedRepos.length === 1 && plan.toOpen.length === 1) {
       // The common case (one repo, or the single multiroot workspace file) keeps
       // the plain message — naming the sole repo would just repeat the key.
       this.toast("error", `Couldn't open ${key}.`);
+      outcome = "open-failed";
     } else if (failedRepos.length > 0) {
       this.toast("error", `Couldn't open ${key} (${failedRepos.join(", ")}).`);
+      outcome = "open-failed";
     } else if (plan.toOpen.length === 0) {
       // This window: nothing opened, nothing focused, so silence here would be
       // indistinguishable from a click that did nothing at all.
@@ -4316,13 +4363,23 @@ export class DeckPanel {
           ? `${prWorkLabel(reason)} for ${key} — seeded in this window.`
           : `Nothing seeded for ${key} — agentFlow.seedAgent is off.`,
       );
+      outcome = cfg.seedAgent ? "seeded-in-place" : "opened-not-seeded";
     } else if (!cfg.seedAgent) {
       // Address PR with seedAgent off is otherwise silently indistinguishable
       // from plain Open — nothing seeded, no toast, no way to tell the two
       // apart from what actually happened. Only reached when every window did
       // open: a failure already got its own explanation above.
       this.toast("info", `Opened ${key}'s window — nothing seeded, agentFlow.seedAgent is off.`);
+      outcome = "opened-not-seeded";
+    } else {
+      // Every window opened and the agent was seeded — the windows themselves are
+      // the notification, so there is no toast for this, the plain success case.
+      outcome = "seeded";
     }
+    trackEvent({
+      name: "pr_work_seeded", reason, source, outcome,
+      window_count: plan.toOpen.length, failed_repo_count: failedRepos.length, agent_seeded: cfg.seedAgent,
+    });
   }
 
   /**

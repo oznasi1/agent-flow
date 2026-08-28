@@ -240,7 +240,27 @@ export type UsageEvent =
     }
   // Mirrors the outcome already computed for `deck:reviewSubmitDone` — never a second
   // classification of the same write. The review body is never a property here.
-  | { name: "review_submitted"; verb: "approve" | "comment" | "request-changes"; from_draft: boolean; outcome: "ok" | "cancelled" | "failed" };
+  | { name: "review_submitted"; verb: "approve" | "comment" | "request-changes"; from_draft: boolean; outcome: "ok" | "cancelled" | "failed" }
+  // `mergePr`'s own re-checked gates, each refusing before anything reaches the forge —
+  // never the repo name or PR number the message carried (`repo`/`number` stay
+  // webview-only, in the `deck:mergeDone` post, not here). `merge_method` is present
+  // only once a merge was actually attempted (past the confirm modal), so it is absent
+  // for every refusal and for a declined confirm.
+  | {
+      name: "pr_merged"; outcome: "ok" | "cancelled" | "failed" | "refused"; merge_method?: "squash" | "merge" | "rebase";
+      refusal?: "writes-off" | "facts-off" | "no-run" | "local" | "target-mismatch" | "no-checkout" | "in-flight";
+    }
+  // One emit per terminal, from whichever of the two separate re-seed paths reached
+  // one: the Deck card's `seedPrWork` (`source: "deck"`) or the sidebar's `addressPr`
+  // (`source: "tasks"`), which launches through the ordinary Take machinery
+  // (`launch()`) rather than sharing seedPrWork's code. `window_count`/`failed_repo_count`
+  // are always present (0 where nothing was attempted); no PR/ticket/repo name ever
+  // rides along.
+  | {
+      name: "pr_work_seeded"; reason: "ci" | "conflict" | "review"; source: "deck" | "tasks";
+      outcome: "seeded" | "seeded-in-place" | "opened-not-seeded" | "open-failed" | "cancelled" | "refused";
+      window_count: number; failed_repo_count: number; agent_seeded: boolean;
+    };
 
 /** Sent via logError — still delivered at telemetry level "error". */
 export type ErrorEvent =

@@ -3097,11 +3097,16 @@ describe("Take funnel", () => {
     expect(done.repo_count).toBe(2);
   });
 
-  it("does not instrument addressPr's shared resolveKickoff call — no funnel events fire", async () => {
+  it("does not instrument addressPr's shared resolveKickoff call — no Take-funnel events fire", async () => {
+    // addressPr calls resolveKickoff with no `flow`, so neither
+    // take_destination_picked nor take_repos_picked fires from that shared call —
+    // pinned here since Task 4 gave addressPr its own separate telemetry
+    // (pr_work_seeded), which is expected to fire and is not a funnel event.
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["acme-billing"]));
     const { provider } = setup();
     await provider.addressPr("BILL-1234", ["acme-billing"]);
-    expect(trackSpy).not.toHaveBeenCalled();
+    const names = trackSpy.mock.calls.flat().map((e: any) => e.name);
+    expect(names).toEqual(["pr_work_seeded"]);
   });
 });
 
@@ -4408,6 +4413,35 @@ describe("addressPr", () => {
     const { provider } = setup({ authed: false });
     await provider.addressPr("PROJ-1", ["account-service"]);
     expect(openWorkspace).not.toHaveBeenCalled();
+  });
+
+  it("emits pr_work_seeded with source tasks and reason review on a successful launch, with no ticket key in the serialized calls", async () => {
+    const { provider } = setup();
+    await provider.addressPr("PROJ-1", ["account-service"]);
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      reason: "review", source: "tasks", outcome: "seeded", agent_seeded: true,
+    });
+    expect(JSON.stringify(trackSpy.mock.calls.flat())).not.toContain("PROJ-1");
+  });
+
+  it("emits pr_work_seeded cancelled when the open-target picker is cancelled", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, openIn: "ask" });
+    vi.mocked(window.showQuickPick).mockResolvedValueOnce(undefined as never);
+    const { provider } = setup();
+    await provider.addressPr("PROJ-1", ["account-service"]);
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "cancelled",
+    });
+  });
+
+  it("emits pr_work_seeded refused when Remote Control blocks the launch", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, remoteControl: "on", agentProvider: "copilot", seedAgent: true });
+    const { provider } = setup();
+    await provider.addressPr("PROJ-1", ["account-service"]);
+    expect(openWorkspace).not.toHaveBeenCalled();
+    expect(trackSpy.mock.calls.flat().find((e: any) => e.name === "pr_work_seeded")).toMatchObject({
+      outcome: "refused",
+    });
   });
 });
 
