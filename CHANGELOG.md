@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   choice of two), Doctor checks the `codex` CLI is on PATH, and — like Copilot
   and Cursor — Codex sessions don't appear as live cards on the Deck, which
   reads Claude Code's session files.
+- **A way to say thanks** — a Buy me a coffee link
+  ([buymeacoffee.com/oznasi1](https://buymeacoffee.com/oznasi1)) as a README badge and
+  Support section, a GitHub Sponsor button (`.github/FUNDING.yml`), and a sponsor link on
+  the Marketplace listing (`sponsor` in the manifest).
 
 ## [0.55.0] — 2026-08-28
 

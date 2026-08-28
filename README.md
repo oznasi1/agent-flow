@@ -13,6 +13,7 @@ that ticket touches, with a coding tool already briefed — Claude Code, Copilot
 [![VS Marketplace version](https://img.shields.io/github/package-json/v/oznasi1/agent-flow?label=VS%20Marketplace&color=007ACC)](https://marketplace.visualstudio.com/items?itemName=Oznasi1.oznasi1-agent-flow)
 [![Open VSX downloads](https://img.shields.io/open-vsx/dt/Oznasi1/oznasi1-agent-flow?label=downloads&color=blue)](https://open-vsx.org/extension/Oznasi1/oznasi1-agent-flow)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![Buy me a coffee](https://img.shields.io/badge/Buy%20me%20a%20coffee-%E2%98%95-FFDD00?logo=buymeacoffee&logoColor=black)](https://buymeacoffee.com/oznasi1)
 
 [![Install in VS Code](https://img.shields.io/badge/Install-VS%20Code-007ACC?style=for-the-badge&logo=visualstudiocode&logoColor=white)](https://vscode.dev/redirect?url=vscode:extension/Oznasi1.oznasi1-agent-flow)
 [![Install in Cursor](https://img.shields.io/badge/Install-Cursor-0b0b0b?style=for-the-badge&logo=cursor&logoColor=white)](https://open-vsx.org/extension/Oznasi1/oznasi1-agent-flow)
@@ -192,6 +193,12 @@ See [docs/TELEMETRY.md](docs/TELEMETRY.md) for the itemized disclosure.
 
 v1. See [CHANGELOG.md](CHANGELOG.md) for the release history. Deferred: OAuth web sign-in,
 cloning not-yet-checked-out repos, multi-project.
+
+## Support
+
+Agent Flow Deck is free and MIT-licensed, built and maintained in my spare time. If it
+saves you time, you can [buy me a coffee](https://buymeacoffee.com/oznasi1) ☕ — it keeps
+the releases coming.
 
 ## License
 
