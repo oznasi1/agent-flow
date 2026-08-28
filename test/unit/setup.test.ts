@@ -1,11 +1,25 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as vscode from "../_mocks/vscode";
-import { runSetup, maybeRunSetup, SETUP_COMPLETE_KEY } from "../../src/setup";
 import { fakeContext } from "../_helpers/factories";
 import { makeFixtureConnector } from "../_helpers/fixtureConnector";
 import type { TaskConnector } from "../../src/tasks/provider";
 
+// Telemetry: mocked wholesale, same pattern as tasksView/deckView/marketplaceView's
+// test files, so the setup_started/setup_completed assertions below observe track()
+// calls without a real PostHog singleton (which is uninitialised in tests, making
+// the real track() a silent no-op).
+const trackSpy = vi.fn();
+vi.mock("../../src/telemetry/telemetry", () => ({
+  track: (...a: unknown[]) => trackSpy(...a),
+}));
+
+import { runSetup, maybeRunSetup, SETUP_COMPLETE_KEY } from "../../src/setup";
+
 const log = vi.fn();
+
+beforeEach(() => {
+  trackSpy.mockClear();
+});
 
 /** Queue the value(s) the wizard's own showInputBox step (repos root) should
  * resolve to, in order. The connector's own settings (site URL, project key
@@ -82,6 +96,10 @@ describe("runSetup", () => {
     // key), not just the repos root — setup.ts no longer holds that value itself,
     // so it has to come from the connector's own info().
     expect(log).toHaveBeenCalledWith("setup: config saved (board FX, root ~/code)");
+    // The funnel: started (defaulting to source "command" — no fifth arg here),
+    // then completed with signed_in true on the happy path.
+    expect(trackSpy).toHaveBeenCalledWith({ name: "setup_started", source: "command", connector_steps: 1 });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "setup_completed", outcome: "complete", signed_in: true });
   });
 
   it("does not mark setup complete when the connector's configure is cancelled", async () => {
@@ -94,6 +112,7 @@ describe("runSetup", () => {
     expect(vscode.window.showInputBox).not.toHaveBeenCalled(); // never reached the repos-root step
     expect(c.signIn).not.toHaveBeenCalled();
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
+    expect(trackSpy).toHaveBeenCalledWith({ name: "setup_completed", outcome: "cancelled-source", signed_in: false });
   });
 
   it("aborts when the repos root step is cancelled, leaving the connector's own settings unwritten", async () => {
@@ -116,6 +135,9 @@ describe("runSetup", () => {
     expect(readCfg("workspaceDir")).toBeUndefined();
     expect(c.signIn).not.toHaveBeenCalled();
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
+    // Telemetry is track()-only instrumentation, never a config or globalState write —
+    // the zero-write assertions above are the load-bearing ones and stay untouched.
+    expect(trackSpy).toHaveBeenCalledWith({ name: "setup_completed", outcome: "cancelled-root", signed_in: false });
   });
 
   it("commits the connector's settings only after the repos-root step, in the same block as ours", async () => {
@@ -144,6 +166,7 @@ describe("runSetup", () => {
     expect(readCfg("reposRoot")).toBe("~/code"); // config was saved
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined(); // but not marked complete
     expect(vscode.window.showWarningMessage).toHaveBeenCalled();
+    expect(trackSpy).toHaveBeenCalledWith({ name: "setup_completed", outcome: "signin-skipped", signed_in: false });
   });
 
   it("names the connector's own label in the sign-in-cancelled warning", async () => {
@@ -222,6 +245,8 @@ describe("maybeRunSetup", () => {
 
     expect(c.signIn).toHaveBeenCalled();
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBe(true);
+    // The offer routes through runSetup with source "offer", not the palette's "command".
+    expect(trackSpy).toHaveBeenCalledWith({ name: "setup_started", source: "offer", connector_steps: 1 });
   });
 
   it("leaves setup pending when the user defers", async () => {
@@ -232,5 +257,8 @@ describe("maybeRunSetup", () => {
     await maybeRunSetup(context, c, log);
 
     expect(globalState.get(SETUP_COMPLETE_KEY)).toBeUndefined();
+    expect(trackSpy).toHaveBeenCalledWith({ name: "setup_completed", outcome: "deferred", signed_in: false });
+    // Never routes through runSetup at all — no funnel start for a deferred offer.
+    expect(trackSpy).not.toHaveBeenCalledWith(expect.objectContaining({ name: "setup_started" }));
   });
 });

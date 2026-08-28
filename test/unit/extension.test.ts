@@ -244,7 +244,16 @@ describe("activate", () => {
     const { context } = fakeContext();
     activate(context);
     await cmd("agentFlow.setup")!();
-    expect(runSetup).toHaveBeenCalledWith(context, expect.anything(), expect.any(Function), expect.any(Function));
+    // Mechanical update for the Task 10 signature change (runSetup gained a trailing
+    // `source` parameter) — the palette command passes "command", not the welcome
+    // offer's "offer".
+    expect(runSetup).toHaveBeenCalledWith(
+      context,
+      expect.anything(),
+      expect.any(Function),
+      expect.any(Function),
+      "command",
+    );
   });
 
   it("refresh command triggers a provider refresh", async () => {

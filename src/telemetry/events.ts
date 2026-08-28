@@ -427,7 +427,39 @@ export type UsageEvent =
   // `notepad:pickImage` (both `image_add` — paste and file-picker are two paths to
   // the same gesture) / `notepad:removeImage` (`image_remove`). Note text, section
   // names and image names never appear here.
-  | { name: "notepad_action"; action: "add" | "run" | "edit" | "remove" | "reorder" | "image_add" | "image_remove" };
+  | { name: "notepad_action"; action: "add" | "run" | "edit" | "remove" | "reorder" | "image_add" | "image_remove" }
+  // Fires right after `runSetup` computes its step total. `source` is passed in by
+  // the caller that knows: `maybeRunSetup`'s welcome offer passes "offer", the
+  // `agentFlow.setup` palette command passes "command" — never inferred from the
+  // arguments. `connector_steps` is `connector.setupSteps`, the source's own step
+  // count, not the wizard's grand total (which also counts the repos-root step
+  // this module owns) — so a Jira wizard and a future connector's wizard are
+  // comparable on the part that is actually theirs.
+  | { name: "setup_started"; source: "offer" | "command"; connector_steps: number }
+  // The setup funnel's terminator — exactly one per `runSetup`/`maybeRunSetup` call,
+  // from whichever exit it reaches. `abort()` itself stays telemetry-free (it is a
+  // log-and-return helper); each call site maps its own reason onto the enum here.
+  // `signed_in` is true only for `"complete"` — every other outcome means the wizard
+  // ended before (or without) a successful sign-in.
+  | {
+      name: "setup_completed";
+      outcome: "complete" | "cancelled-source" | "cancelled-root" | "signin-skipped" | "deferred";
+      signed_in: boolean;
+    }
+  // Fires once per `showDoctor` call, after the QuickPick resolves. `fails`/`warns`
+  // are the same counts `summarize(checks)` bases its title on. `outcome` is
+  // `"dismissed"` for an Escape *and* for picking a passing row with nothing to
+  // fix (both leave nothing applied), `"copied"` for the Copy-report row, and
+  // `"action"` for a check's own fix — `action_kind` is that check's
+  // `DoctorAction.kind`, present only then. No check label, detail, path or URL
+  // is ever a property here.
+  | {
+      name: "doctor_run";
+      fails: number;
+      warns: number;
+      outcome: "dismissed" | "copied" | "action";
+      action_kind?: "command" | "setting" | "extension" | "external";
+    };
 
 /** Sent via logError — still delivered at telemetry level "error". */
 export type ErrorEvent =

@@ -1,5 +1,6 @@
 import * as vscode from "vscode";
 import { TaskConnector } from "./tasks/provider";
+import { track } from "./telemetry/telemetry";
 
 /** globalState flag marking that first-run setup has been handled. */
 export const SETUP_COMPLETE_KEY = "agentFlow.setupComplete";
@@ -40,14 +41,17 @@ export async function runSetup(
   connector: TaskConnector,
   log: Log,
   refresh?: Refresh,
+  source: "offer" | "command" = "command",
 ): Promise<boolean> {
   log("setup: started");
 
   const total = connector.setupSteps + 1; // + the repos root, which is ours not theirs
+  track({ name: "setup_started", source, connector_steps: connector.setupSteps });
   // Collected, not yet written: `null` means the user cancelled inside the
   // connector's own steps, anything else is the write to perform below.
   const commitSource = await connector.configure(1, total);
   if (!commitSource) {
+    track({ name: "setup_completed", outcome: "cancelled-source", signed_in: false });
     return abort(log, "cancelled at source configuration");
   }
 
@@ -58,7 +62,10 @@ export async function runSetup(
     value: "~/projects",
     validateInput: (v) => (v.trim() ? undefined : "Enter a directory path"),
   });
-  if (reposRoot === undefined) return abort(log, "cancelled at repos root");
+  if (reposRoot === undefined) {
+    track({ name: "setup_completed", outcome: "cancelled-root", signed_in: false });
+    return abort(log, "cancelled at repos root");
+  }
 
   // Persist config (global) before credentials — the connector's settings and ours
   // together, past the last point the user can back out. workspaceDir is derived
@@ -81,11 +88,13 @@ export async function runSetup(
     vscode.window.showWarningMessage(
       `Agent Flow Deck: settings saved, but ${label} sign-in was cancelled. Use "Sign in to ${label}" to finish.`,
     );
+    track({ name: "setup_completed", outcome: "signin-skipped", signed_in: false });
     return abort(log, "sign-in skipped (config saved)");
   }
 
   await context.globalState.update(SETUP_COMPLETE_KEY, true);
   log("setup: complete");
+  track({ name: "setup_completed", outcome: "complete", signed_in: true });
   vscode.window.showInformationMessage("Agent Flow Deck is set up. Loading your tasks…");
   await refresh?.();
   return true;
@@ -117,9 +126,10 @@ export async function maybeRunSetup(
     "Later",
   );
   if (choice === "Set up") {
-    await runSetup(context, connector, log, refresh);
+    await runSetup(context, connector, log, refresh, "offer");
   } else {
     log("setup: deferred by user");
+    track({ name: "setup_completed", outcome: "deferred", signed_in: false });
     // Leave the flag unset so setup is offered again next activation.
   }
 }

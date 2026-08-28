@@ -63,6 +63,9 @@ const SAMPLES = [
   { name: "lens_used", lens: "search" },
   { name: "card_action", action: "change_status" },
   { name: "notepad_action", action: "run" },
+  { name: "setup_started", source: "offer", connector_steps: 2 },
+  { name: "setup_completed", outcome: "signin-skipped", signed_in: false },
+  { name: "doctor_run", fails: 1, warns: 2, outcome: "action", action_kind: "command" },
 ] satisfies AnalyticsEvent[];
 
 /** `Unsampled` is every EventName with no entry in SAMPLES above. `AssertNever`
@@ -82,7 +85,7 @@ describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
     const names = SAMPLES.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(30);
+    expect(names).toHaveLength(33);
   });
 
   it("carries no free-form strings outside the allow-list", () => {

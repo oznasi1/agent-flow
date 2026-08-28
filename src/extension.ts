@@ -135,7 +135,7 @@ export function activate(context: vscode.ExtensionContext): void {
     registerTracked("agentFlow.openMarketplace", () => MarketplacePanel.show(context, log)),
 
     registerTracked("agentFlow.setup", () =>
-      runSetup(context, connector, log, () => provider.refresh()),
+      runSetup(context, connector, log, () => provider.refresh(), "command"),
     ),
 
     registerTracked("agentFlow.doctor", () => showDoctor(defaultDeps(connector, log))),

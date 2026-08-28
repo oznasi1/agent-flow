@@ -8,6 +8,7 @@ import { discoverRepos } from "./engine/repos";
 import { resolveForge } from "./engine/forge/registry";
 import type { Forge } from "./engine/forge/types";
 import { resolveBin } from "./engine/pr/which";
+import { track } from "./telemetry/telemetry";
 import { defaultRunsDir, readRuns } from "./engine/runs";
 import { defaultPrFactsDir, summarisePrReads } from "./engine/pr/store";
 import {
@@ -198,18 +199,33 @@ export async function showDoctor(d: DoctorDeps): Promise<void> {
   const checks = runChecks(inputs);
   const summary = summarize(checks);
   d.log(`doctor: ${summary}`);
+  // Same counts summarize() bases its title on — recomputed here rather than
+  // parsed back out of that string, since summarize()'s job is a title, not a
+  // machine-readable pair.
+  const fails = checks.filter((c) => c.status === "fail").length;
+  const warns = checks.filter((c) => c.status === "warn").length;
 
   const picked = await vscode.window.showQuickPick(buildItems(checks), {
     title: `Agent Flow Deck Doctor — ${summary}`,
     placeHolder: "Pick a problem to fix, or copy the report",
     ignoreFocusOut: true,
   });
-  if (!picked) return;
-  if (picked.copy) {
-    await vscode.env.clipboard.writeText(formatReport(checks, inputs.sourceLabel));
+  if (!picked) {
+    track({ name: "doctor_run", fails, warns, outcome: "dismissed" });
     return;
   }
-  if (picked.check?.action) await applyAction(picked.check.action);
+  if (picked.copy) {
+    await vscode.env.clipboard.writeText(formatReport(checks, inputs.sourceLabel));
+    track({ name: "doctor_run", fails, warns, outcome: "copied" });
+    return;
+  }
+  if (picked.check?.action) {
+    await applyAction(picked.check.action);
+    track({ name: "doctor_run", fails, warns, outcome: "action", action_kind: picked.check.action.kind });
+    return;
+  }
+  // A passing row with no action to apply: nothing was fixed, same as an Escape.
+  track({ name: "doctor_run", fails, warns, outcome: "dismissed" });
 }
 
 /** Nothing in the extension checked this before: `workspace.ts` calls Claude Code's
