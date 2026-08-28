@@ -362,7 +362,31 @@ export type UsageEvent =
   // not stored — the model has no terminal state — and emitted on the TRANSITION
   // only, so a settled flow left armed on the board does not re-report it every
   // six seconds.
-  | { name: "flow_settled"; node_count: number; edge_count: number };
+  | { name: "flow_settled"; node_count: number; edge_count: number }
+  // Fires on every open of the Marketplace panel. `revealed: true` is an
+  // already-open panel refocused — its counts are the last scan's, kept on the
+  // panel instance (zero before that instance has ever rendered, which cannot
+  // happen here since a panel only exists after its first render). `revealed:
+  // false` fires once, at the first `render()` this panel instance completes —
+  // never on a later re-render (re-focus after the stale window, `mkt:refresh`) —
+  // with the real counts of that scan: `asset_count`/`plugin_count`/
+  // `marketplace_count` are `view.assets/plugins/marketplaces.length`; `skills`/
+  // `commands`/`agents`/`hooks` are `view.assets` grouped by `AssetType`.
+  | {
+      name: "marketplace_opened"; revealed: boolean; asset_count: number; plugin_count: number;
+      marketplace_count: number; skills: number; commands: number; agents: number; hooks: number;
+      not_set_up: boolean;
+    }
+  // One per `onMessage` click-shaped gesture on the Marketplace panel. `allowed`
+  // is present for `"open"`/`"reveal"` — whether the file was on the last scan's
+  // allow-list, emitted whether or not the case goes on to act. `truncated` is
+  // present for `"read"` only, once the file was actually read — a refused read
+  // emits no event at all, unlike open/reveal. `"copy"` and `"open_external"`
+  // carry neither property — a copy has nothing to refuse, and
+  // `open_external`'s scheme guard is a silent drop, mirroring `deck_action`'s
+  // own `"open_external"` member. No file path, asset name, or URL is ever a
+  // property here.
+  | { name: "marketplace_action"; action: "open" | "reveal" | "read" | "copy" | "open_external"; allowed?: boolean; truncated?: boolean };
 
 /** Sent via logError — still delivered at telemetry level "error". */
 export type ErrorEvent =

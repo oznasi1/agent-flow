@@ -2,6 +2,41 @@ import * as vscode from "vscode";
 import { scanClaudeAssets } from "./engine/claudeAssets";
 import { claudeConfigDir, fsReader } from "./engine/claudeAssetsFs";
 import { InboundMessage, OutboundMessage, ClaudeAssetsView } from "./types";
+import { track, trackError } from "./telemetry/telemetry";
+import { classifyFailure } from "./telemetry/events";
+
+/** The counts `marketplace_opened` reports — grouped by `AssetType` plus the
+ * plugin/marketplace totals and `notSetUp`. Kept on the panel instance across
+ * renders (see `MarketplacePanel.counts`) so a reveal of an already-open panel
+ * can report the last scan's numbers without re-scanning. */
+interface MarketplaceCounts {
+  asset_count: number;
+  plugin_count: number;
+  marketplace_count: number;
+  skills: number;
+  commands: number;
+  agents: number;
+  hooks: number;
+  not_set_up: boolean;
+}
+
+const ZERO_COUNTS: MarketplaceCounts = {
+  asset_count: 0, plugin_count: 0, marketplace_count: 0,
+  skills: 0, commands: 0, agents: 0, hooks: 0, not_set_up: false,
+};
+
+function countsOf(view: ClaudeAssetsView): MarketplaceCounts {
+  return {
+    asset_count: view.assets.length,
+    plugin_count: view.plugins.length,
+    marketplace_count: view.marketplaces.length,
+    skills: view.assets.filter((a) => a.type === "skill").length,
+    commands: view.assets.filter((a) => a.type === "command").length,
+    agents: view.assets.filter((a) => a.type === "agent").length,
+    hooks: view.assets.filter((a) => a.type === "hook").length,
+    not_set_up: view.notSetUp,
+  };
+}
 
 const STALE_MS = 30_000; // re-scan on re-focus only if the last scan is older than this
 const MAX_PREVIEW = 262_144; // chars, not bytes — bounds parse/render cost, which scales with length
@@ -15,9 +50,17 @@ export class MarketplacePanel {
   /** Paths the last scan emitted — the allow-list for open/reveal. */
   private openable = new Set<string>();
   private lastScan = 0;
+  /** The last scan's counts, for a reveal of an already-open panel — zeroed
+   * until this instance's first render() completes. */
+  private counts: MarketplaceCounts = ZERO_COUNTS;
+  /** Guards `marketplace_opened{revealed:false}` to the first render() this
+   * instance ever completes; later re-renders (stale re-focus, mkt:refresh) must
+   * not re-emit it. */
+  private openedEmitted = false;
 
   static show(context: vscode.ExtensionContext, log: (m: string) => void): void {
     if (MarketplacePanel.current) {
+      track({ name: "marketplace_opened", revealed: true, ...MarketplacePanel.current.counts });
       MarketplacePanel.current.panel.reveal();
       return;
     }
@@ -73,6 +116,7 @@ export class MarketplacePanel {
       view = this.scan();
     } catch (e) {
       this.log(`marketplace: scan failed: ${e}`);
+      trackError({ name: "operation_failed", op: "marketplace_read", failure_class: classifyFailure(e), retryable: true });
       view = { marketplaces: [], plugins: [], assets: [], notSetUp: true, scannedAt: Date.now() };
     }
     this.lastScan = Date.now();
@@ -80,6 +124,11 @@ export class MarketplacePanel {
       ...view.assets.map((a) => a.file),
       ...view.plugins.map((p) => p.readme).filter(Boolean),
     ]);
+    this.counts = countsOf(view);
+    if (!this.openedEmitted) {
+      this.openedEmitted = true;
+      track({ name: "marketplace_opened", revealed: false, ...this.counts });
+    }
     this.post({ type: "mkt:assets", view });
     this.post({ type: "mkt:loading", loading: false });
   }
@@ -100,19 +149,25 @@ export class MarketplacePanel {
         this.render();
         break;
       case "mkt:open": {
-        if (!this.allowed(m.file)) return;
+        const allowed = this.allowed(m.file);
+        track({ name: "marketplace_action", action: "open", allowed });
+        if (!allowed) return;
         const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(m.file));
         await vscode.window.showTextDocument(doc, { preview: true });
         break;
       }
-      case "mkt:reveal":
-        if (!this.allowed(m.file)) return;
+      case "mkt:reveal": {
+        const allowed = this.allowed(m.file);
+        track({ name: "marketplace_action", action: "reveal", allowed });
+        if (!allowed) return;
         await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(m.file));
         break;
+      }
       case "mkt:read": {
         if (!this.allowed(m.file)) return;
         const raw = fsReader().readFile(m.file) ?? "";
         const truncated = raw.length > MAX_PREVIEW;
+        track({ name: "marketplace_action", action: "read", truncated });
         this.post({
           type: "mkt:file",
           file: m.file,
@@ -123,11 +178,19 @@ export class MarketplacePanel {
       }
       case "mkt:copy":
         await vscode.env.clipboard.writeText(m.text);
+        track({ name: "marketplace_action", action: "copy" });
         this.toast("success", "Copied to clipboard.");
         break;
-      case "openExternal":
-        await vscode.env.openExternal(vscode.Uri.parse(m.url));
+      case "openExternal": {
+        track({ name: "marketplace_action", action: "open_external" });
+        const u = vscode.Uri.parse(m.url);
+        // Mirrors deckView's own openExternal guard: a check-run or plugin manifest
+        // URL is not a trusted source for a scheme handed straight to the OS (e.g. a
+        // vscode://<publisher>.<ext>/… reaching another extension's UriHandler).
+        if (u.scheme !== "https" && u.scheme !== "http") break;
+        await vscode.env.openExternal(u);
         break;
+      }
     }
   }
 
