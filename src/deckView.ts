@@ -137,7 +137,9 @@ export const reviewProvenance = (p: AgentProvider): string =>
  *  that string today; correcting it is a separate change from adding a new value that
  *  would otherwise ship wrong on day one. */
 function unattendedAgentLabel(cfg: { agentProvider: AgentFlowConfig["agentProvider"] }): string {
-  return cfg.agentProvider === "cursor" ? providerLabel("cursor") : providerLabel("claude-code");
+  return cfg.agentProvider === "cursor" || cfg.agentProvider === "codex"
+    ? providerLabel(cfg.agentProvider)
+    : providerLabel("claude-code");
 }
 
 const VERB_LABEL: Record<ReviewVerb, string> = {

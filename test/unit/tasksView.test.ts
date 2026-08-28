@@ -3202,6 +3202,7 @@ describe("takeBatch", () => {
     expect(agentPicks()[0][0]).toEqual([
       { label: "Claude Code", provider: "claude-code" },
       { label: "Cursor", provider: "cursor" },
+      { label: "Codex", provider: "codex" },
     ]);
   });
 
@@ -3256,16 +3257,25 @@ describe("takeBatch", () => {
     expect(vi.mocked(openWorkspace).mock.calls[0][0].planMd).toContain("Claude Code");
   });
 
-  it("raises no batch agent picker on a host with only one possible agent", async () => {
-    // `hostProviders()` is exactly ["claude-code"] outside VS Code and Cursor, so the
-    // picker there could only be answered one way — and `ignoreFocusOut` would hold
-    // that one-item modal open on every launch.
+  it("raises the batch agent picker even on a host with no editor-specific agent", async () => {
+    // Codex is on every host's picker, so outside VS Code and Cursor `hostProviders()`
+    // is ["claude-code", "codex"] — two real answers, which is a question worth the
+    // modal that a one-item list never was.
     vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "ask" });
     vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
     env.uriScheme = "windsurf";
+    vi.mocked(window.showQuickPick).mockImplementation(
+      async (_items: unknown, opts?: unknown) =>
+        ((opts as { title?: string } | undefined)?.title === "Which tool?"
+          ? { label: "Claude Code", provider: "claude-code" }
+          : { shared: false }) as never,
+    );
     const { provider } = setup();
     await provider.takeBatch(twoKeys, ["api"]);
-    expect(agentPicks()).toHaveLength(0);
+    expect(agentPicks()[0][0]).toEqual([
+      { label: "Claude Code", provider: "claude-code" },
+      { label: "Codex", provider: "codex" },
+    ]);
     expect(openWorkspace).toHaveBeenCalledTimes(2);
     for (const call of vi.mocked(openWorkspace).mock.calls) expect(call[0].provider).toBe("claude-code");
   });
@@ -4045,6 +4055,15 @@ describe("takeBatch", () => {
     await provider.takeBatch(twoKeys, ["api"]);
     const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
     expect(toast.message).toBe("Launched 2 of 2 in one shared window. A worktree + Cursor session per task.");
+  });
+
+  it("names Codex in the per-task note across separate windows", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, agentProvider: "codex", openIn: "new-window" });
+    vi.mocked(discoverRepos).mockReturnValue(mkRepos(["api"]));
+    const { provider, posted } = setup();
+    await provider.takeBatch(twoKeys, ["api"]);
+    const toast = posted().find((m) => m.type === "toast" && m.level === "success") as { message: string };
+    expect(toast.message).toBe("Launched 2 of 2 in parallel. A worktree + Codex session per task.");
   });
 
   it("names the agent the batch's ask picker chose, not Claude", async () => {

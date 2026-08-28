@@ -310,6 +310,29 @@ describe("agent checks by provider", () => {
     expect(row?.status).toBe("fail");
     expect(row?.action).toBeUndefined();
   });
+
+  it("shows the Codex CLI row and the Claude session-files row under codex", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "codex", codexCli: { foundAt: "/usr/local/bin/codex" } });
+    const row = checks.find((c) => c.label === "Codex CLI on PATH");
+    expect(row?.status).toBe("ok");
+    expect(row?.detail).toBe("/usr/local/bin/codex");
+    // Codex sessions don't show up on the Deck, which reads Claude Code's session
+    // files — so the session-files row still has to explain itself.
+    expect(checks.find((c) => c.label === "Claude session files")).toBeDefined();
+    expect(checks.find((c) => c.label === "Claude Code installed")).toBeUndefined();
+  });
+
+  it("fails the Codex CLI row with an install pointer when the CLI is missing", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "codex", codexCli: { foundAt: null } });
+    const row = checks.find((c) => c.label === "Codex CLI on PATH");
+    expect(row?.status).toBe("fail");
+    expect(row?.action).toMatchObject({ kind: "external", label: "Install codex" });
+  });
+
+  it("treats an absent codexCli probe as a missing CLI rather than claiming it is fine", () => {
+    const checks = runChecks({ ...healthy(), agentProvider: "codex" });
+    expect(checks.find((c) => c.label === "Codex CLI on PATH")?.status).toBe("fail");
+  });
 });
 
 describe("agent checks under ask", () => {
@@ -336,6 +359,19 @@ describe("agent checks under ask", () => {
     const groups = checks.map((c) => c.group);
     expect(groups).toContain("Copilot");
     expect(groups).not.toContain("Cursor");
+  });
+
+  it("under ask, shows the Codex rows when codex is one of the host's agents", () => {
+    const checks = runChecks({
+      ...healthy(),
+      agentProvider: "ask",
+      hostProviders: ["claude-code", "cursor", "codex"],
+      chatCommand: { available: true },
+      codexCli: { foundAt: "/usr/local/bin/codex" },
+    });
+    const groups = checks.map((c) => c.group);
+    expect(groups).toContain("Codex");
+    expect(groups).toContain("Cursor");
   });
 
   it("under ask, still shows the Claude Code rows themselves, not just the other agents'", () => {

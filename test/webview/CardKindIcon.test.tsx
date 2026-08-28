@@ -52,7 +52,7 @@ describe("CardKindIcon", () => {
   });
 });
 
-const PROVIDERS = ["claude-code", "copilot", "cursor"] as const;
+const PROVIDERS = ["claude-code", "copilot", "cursor", "codex"] as const;
 
 describe("CardKindIcon provider badge", () => {
   it("shows no badge when no provider is known", () => {

@@ -657,8 +657,18 @@ describe("getConfig — agentProvider", () => {
 
   it("falls back to claude-code for an unrecognized value", () => {
     env.uriScheme = "vscode";
-    setConfig({ agentProvider: "codex" });
+    setConfig({ agentProvider: "zed" });
     expect(getConfig().agentProvider).toBe("claude-code");
+  });
+
+  // Unlike copilot and cursor, the Codex CLI is not tied to an editor — it runs in
+  // any host's integrated terminal — so the value survives every host unchanged.
+  it("keeps codex in every host", () => {
+    for (const scheme of ["cursor", "vscode", "windsurf"]) {
+      env.uriScheme = scheme;
+      setConfig({ agentProvider: "codex" });
+      expect(getConfig().agentProvider).toBe("codex");
+    }
   });
 
   it("keeps cursor in a Cursor host", () => {
@@ -702,19 +712,19 @@ describe("hostProviders", () => {
     env.uriScheme = "cursor";
   });
 
-  it("offers Claude Code and Copilot in VS Code", () => {
+  it("offers Claude Code, Copilot, and Codex in VS Code", () => {
     env.uriScheme = "vscode";
-    expect(hostProviders()).toEqual(["claude-code", "copilot"]);
+    expect(hostProviders()).toEqual(["claude-code", "copilot", "codex"]);
   });
 
-  it("offers Claude Code and Cursor in Cursor", () => {
+  it("offers Claude Code, Cursor, and Codex in Cursor", () => {
     env.uriScheme = "cursor";
-    expect(hostProviders()).toEqual(["claude-code", "cursor"]);
+    expect(hostProviders()).toEqual(["claude-code", "cursor", "codex"]);
   });
 
-  it("offers only Claude Code in an unrelated host", () => {
+  it("offers Claude Code and Codex in an unrelated host", () => {
     env.uriScheme = "windsurf";
-    expect(hostProviders()).toEqual(["claude-code"]);
+    expect(hostProviders()).toEqual(["claude-code", "codex"]);
   });
 });
 
@@ -736,6 +746,7 @@ describe("isCursorHost / providerLabel", () => {
     expect(providerLabel("claude-code")).toBe("Claude Code");
     expect(providerLabel("copilot")).toBe("Copilot");
     expect(providerLabel("cursor")).toBe("Cursor");
+    expect(providerLabel("codex")).toBe("Codex");
   });
 });
 
@@ -745,6 +756,7 @@ describe("resolvedProvider", () => {
     expect(resolvedProvider("claude-code")).toBe("claude-code");
     expect(resolvedProvider("copilot")).toBe("copilot");
     expect(resolvedProvider("cursor")).toBe("cursor");
+    expect(resolvedProvider("codex")).toBe("codex");
   });
 
   // Every copy site that names an agent composes providerLabel over resolvedProvider,
@@ -752,9 +764,9 @@ describe("resolvedProvider", () => {
   // the label as a product name ("a X agent", "3 X sessions", "The X prompt"), and a
   // label that is not one breaks all of them. Pinned so nobody reintroduces a phrase.
   it("always yields a bare product name, never a phrase, for every setting", () => {
-    for (const setting of ["claude-code", "copilot", "cursor", "ask"] as const) {
+    for (const setting of ["claude-code", "copilot", "cursor", "codex", "ask"] as const) {
       const label = providerLabel(resolvedProvider(setting));
-      expect(["Claude Code", "Copilot", "Cursor"]).toContain(label);
+      expect(["Claude Code", "Copilot", "Cursor", "Codex"]).toContain(label);
       expect(label).not.toMatch(/^(your|the|a|an) /i);
     }
   });

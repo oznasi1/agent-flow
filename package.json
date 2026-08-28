@@ -262,16 +262,18 @@
             "claude-code",
             "copilot",
             "cursor",
+            "codex",
             "ask"
           ],
           "enumDescriptions": [
             "Claude Code",
             "GitHub Copilot — VS Code only",
             "Cursor's composer — Cursor only",
+            "OpenAI Codex CLI — runs in a terminal in any editor",
             "Ask every launch — pick from the tools this editor can run"
           ],
           "default": "claude-code",
-          "markdownDescription": "Which tool Agent Flow Deck starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. Note that neither Copilot nor Cursor sessions appear as live cards on the Deck, which reads Claude Code's session files.\n\nSet to `ask` to choose per launch. Batch launches ask once for the whole batch, and Orchestrator rules — which run unattended — always use Claude Code, because there is nobody there to answer a picker."
+          "markdownDescription": "Which tool Agent Flow Deck starts a session with. `copilot` works only in VS Code and `cursor` only in Cursor — each falls back to Claude Code in the other editor. `codex` runs the Codex CLI in a terminal in any editor, whatever agentFlow.agentSurface says. Note that only Claude Code sessions appear as live cards on the Deck, which reads Claude Code's session files.\n\nSet to `ask` to choose per launch. Batch launches ask once for the whole batch, and Orchestrator rules — which run unattended — always use Claude Code, because there is nobody there to answer a picker."
         },
         "agentFlow.agentSurface": {
           "type": "string",

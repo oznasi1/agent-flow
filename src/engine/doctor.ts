@@ -43,7 +43,7 @@ export interface Check {
 /** Inlined rather than importing `AgentProvider` from src/config.ts — this module
  *  has zero imports by design, staying free of `vscode` and testable as a plain
  *  table. */
-type Provider = "claude-code" | "copilot" | "cursor";
+type Provider = "claude-code" | "copilot" | "cursor" | "codex";
 
 /** A live `GET /myself`. Distinguishing these three is the whole reason Doctor
  *  cannot reuse `getMyself()`, which collapses every failure to `null`. */
@@ -135,6 +135,12 @@ export interface DoctorInputs {
    *  Cursor registers the same command, which is why one field and one probe serve
    *  both non-Claude providers. Renamed from `copilotChat` now that it does. */
   chatCommand: { available: boolean };
+  /** Where the Codex CLI resolved on PATH, or null when it didn't — Codex seeds
+   *  through a terminal, so the binary is the whole availability question.
+   *  Optional so the existing constructions of this object keep compiling
+   *  untouched; absent reads the same as not found, which is the honest answer
+   *  when nothing probed. */
+  codexCli?: { foundAt: string | null };
 }
 
 const SIGN_IN: DoctorAction = { kind: "command", command: "agentFlow.signIn", label: "Sign in" };
@@ -370,6 +376,22 @@ function agentChecks(i: DoctorInputs): Check[] {
  *  "agent checks by provider" suite); Cursor's agent ships built into the editor,
  *  so its row carries no action to point at. */
 function chatChecks(i: DoctorInputs, provider: Exclude<Provider, "claude-code">): Check[] {
+  // Codex is not a chat-panel agent — it seeds through a terminal — so its row
+  // probes the CLI on PATH rather than workbench.action.chat.open.
+  if (provider === "codex") {
+    const foundAt = i.codexCli?.foundAt ?? null;
+    return [
+      {
+        group: "Codex",
+        label: "Codex CLI on PATH",
+        status: foundAt ? "ok" : "fail",
+        detail: foundAt ?? "codex is not on PATH — sessions seed a terminal that says `command not found`",
+        ...(foundAt
+          ? {}
+          : { action: { kind: "external", url: "https://developers.openai.com/codex/cli", label: "Install codex" } }),
+      },
+    ];
+  }
   const ok = i.chatCommand.available;
   if (provider === "copilot") {
     return [

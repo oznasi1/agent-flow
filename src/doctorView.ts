@@ -201,6 +201,11 @@ export async function collectInputs(d: DoctorDeps): Promise<DoctorInputs> {
       cfg.agentProvider !== "claude-code"
         ? await guardAsync("chat command probe", { available: false }, () => d.chatCommand())
         : { available: false },
+    // Probed whenever Codex could be the agent that runs — a fixed `codex`
+    // setting, or `ask`, where Codex is on every host's picker.
+    ...(cfg.agentProvider === "codex" || cfg.agentProvider === "ask"
+      ? { codexCli: guard("codex lookup", { foundAt: null }, () => ({ foundAt: d.which("codex") })) }
+      : {}),
   };
 }
 

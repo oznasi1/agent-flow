@@ -2606,7 +2606,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           ? isBatch && shared && cfg.agentSurface !== "terminal"
             ? `A worktree + brief per task — ${providerLabel(cfg.agentProvider)} isn't seeded for a batch; open each brief to start it.`
             : `A worktree + ${providerLabel(cfg.agentProvider)} session per task.`
-          : cfg.agentProvider === "cursor" || cfg.agentProvider === "ask"
+          : cfg.agentProvider === "cursor" || cfg.agentProvider === "codex" || cfg.agentProvider === "ask"
             ? `A worktree + ${providerLabel(batchProvider ?? seededProvider ?? resolvedProvider(cfg.agentProvider))} session per task.`
             : "A worktree + Claude session per task.";
       this.toast("success", `${summary} ${perTaskNote}${extra}${rcNote}`);

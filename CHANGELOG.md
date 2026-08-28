@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **OpenAI Codex as a session tool.** `agentFlow.agentProvider` accepts `codex`,
+  which starts sessions by running the Codex CLI in an integrated terminal with
+  the task prompt pre-typed — in any editor, whatever `agentFlow.agentSurface`
+  says, because Codex has no chat panel to pre-fill. Codex appears on every
+  host's `ask` picker (so a host that is neither VS Code nor Cursor now offers a
+  choice of two), Doctor checks the `codex` CLI is on PATH, and — like Copilot
+  and Cursor — Codex sessions don't appear as live cards on the Deck, which
+  reads Claude Code's session files.
+
 ## [0.55.0] — 2026-08-28
 
 ### Fixed
