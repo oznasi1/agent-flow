@@ -53,6 +53,10 @@ const SAMPLES = [
   { name: "pr_work_seeded", reason: "review", source: "deck", outcome: "seeded", window_count: 1, failed_repo_count: 0, agent_seeded: true },
   { name: "explore_started", flow_id: "f1", mode: "debug", source: "command" },
   { name: "explore_completed", flow_id: "f1", outcome: "cancelled", mode: "debug", cancel_point: "topic", repo_count: 2, duration_ms: 30 },
+  { name: "flow_action", action: "dry_run", edge_count: 3, fired_count: 1, blocked_count: 0 },
+  { name: "flow_armed", armed: true, node_count: 4, edge_count: 3, unfirable_live: 0, unfirable_pr_facts: 1, unfirable_forge: 0, source: "toggle" },
+  { name: "flow_edge_fired", edge_action: "launch", ok: true, deferred: false, dest: "worktree", prompt_mode: "implementation", repo_count: 1 },
+  { name: "flow_settled", node_count: 4, edge_count: 3 },
 ] satisfies AnalyticsEvent[];
 
 /** `Unsampled` is every EventName with no entry in SAMPLES above. `AssertNever`
@@ -72,7 +76,7 @@ describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
     const names = SAMPLES.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(20);
+    expect(names).toHaveLength(24);
   });
 
   it("carries no free-form strings outside the allow-list", () => {

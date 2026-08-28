@@ -1296,7 +1296,32 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             type="button"
             className="orch-mini"
             aria-pressed={dryRun}
-            onClick={() => setDryRun((v) => !v)}
+            onClick={() => {
+              // Told to the host on the way IN, once, and never on the way out:
+              // closing the panel is not a dry run. Deliberately not posted from
+              // the `dry` computation above either — that recomputes on every
+              // render (see its comment), so a post from there would be a message
+              // per frame for as long as the panel stays open. `previewFlow` is
+              // pure and cheap enough to call a second time here rather than
+              // reach for a render-order dependency to reuse the first result.
+              //
+              // Counts only, and no telemetry import: the webview cannot reach
+              // the host's event catalog and has no business deciding what is
+              // recorded — it reports what it did, the host decides. `blocked` is
+              // every PENDING rule that would not fire on this pass — waiting,
+              // held by the cap, unobservable or blank alike — which is why it and
+              // `fired` need not add up to `edges`: a settled rule is in neither.
+              if (!dryRun) {
+                const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi);
+                send({
+                  type: "flow:dryRun",
+                  edges: flow.edges.length,
+                  fired: rows.filter((r) => r.verdict === "fire").length,
+                  blocked: rows.filter((r) => r.verdict !== "fire").length,
+                });
+              }
+              setDryRun((v) => !v);
+            }}
           >
             What would fire?
           </button>

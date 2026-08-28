@@ -10528,3 +10528,288 @@ describe("switching the forge account", () => {
     expect(lastRunsPost().ghAccount).toEqual({ cli: "gh", login: "oznasi1", canSwitch: true });
   });
 });
+
+describe("orchestrator telemetry", () => {
+  /** Open a panel and return it plus a way to deliver an inbound message — the
+   * same `show()` + `settled()` + `_fire` idiom every other describe block in
+   * this file uses. */
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  const events = (name: string) => trackSpy.mock.calls.flat().filter((e: any) => e.name === name) as any[];
+
+  /** A place node wired to a notify terminal by one `pr-merged` rule — the
+   * smallest flow that can both be armed and fire. */
+  const wired = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    ...over,
+  });
+
+  /** A place whose PR is watched, wired to planned work — the launch fixture the
+   * "a met launch rule acts" block uses, with its first-spend question already
+   * answered. */
+  const launchFlow = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      {
+        id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+        ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+      },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    ...over,
+  });
+
+  /** Warm the resume gate with the condition UNMET, then leave the met status in
+   * place for the pass under test — the two-pass idiom every firing test in this
+   * file uses. Telemetry from the warm-up passes is cleared, so each assertion is
+   * about the pass the test itself asks for. */
+  const warmed = async (flows: Flow[]) => {
+    setConfig({ orchestrator: true });
+    h.flows = flows;
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    trackSpy.mockClear();
+    return opened;
+  };
+
+  it("emits flow_armed on the arm toggle, with the unfirable split by what each rule needs", async () => {
+    // PR facts off, so the one `pr-merged` rule is unfirable for want of them —
+    // h.prFacts, not setConfig, for the reason the arm block above documents.
+    setConfig({ orchestrator: true });
+    h.prFacts = false;
+    h.flows = [wired()];
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    expect(events("flow_armed")).toHaveLength(1);
+    expect(events("flow_armed")[0]).toEqual({
+      name: "flow_armed", armed: true, node_count: 2, edge_count: 1,
+      unfirable_live: 0, unfirable_pr_facts: 1, unfirable_forge: 0, source: "toggle",
+    });
+  });
+
+  it("never carries the flow's id, its name or a node's ticket key", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [wired({ nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      {
+        id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+        ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+      },
+    ] })];
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    await send({ type: "flow:save", flow: wired() });
+    const wire = JSON.stringify(trackSpy.mock.calls.flat());
+    // A minted flow id is not ours to send, not even fingerprinted; the name, the
+    // ticket key and the repo are user strings.
+    for (const secret of ["f1", "Ship the migration", "PROJ-12", "aws-ops"]) {
+      expect(wire).not.toContain(secret);
+    }
+  });
+
+  it("emits flow_armed with zeroed counts and the toggle source on a disarm", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...wired(), armed: true }];
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:arm", id: "f1", armed: false });
+    expect(events("flow_armed")[0]).toMatchObject({
+      armed: false, source: "toggle", unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+    });
+  });
+
+  it("emits a flow_action for each flow gesture that did something", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [wired()];
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:create" });
+    await send({ type: "flow:rename", id: "f1", name: "Ship it" });
+    await send({ type: "flow:save", flow: wired() });
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    await send({ type: "flow:saveCommand", run: "deploy.sh", label: "Deploy" });
+    await send({ type: "flow:delete", id: "f1" });
+    expect(events("flow_action").map((e) => e.action)).toEqual([
+      "create", "rename", "save", "reset_edge", "save_command", "delete",
+    ]);
+    // Only `save` knows the shape of a graph.
+    expect(events("flow_action").find((e) => e.action === "save")).toMatchObject({ node_count: 2, edge_count: 1 });
+    expect(events("flow_action").find((e) => e.action === "create").node_count).toBeUndefined();
+  });
+
+  it("emits nothing for a flow gesture the host refuses", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [wired()];
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:rename", id: "intruder", name: "x" });
+    await send({ type: "flow:save", flow: mkFlow("intruder", "x") });
+    await send({ type: "flow:delete", id: "intruder" });
+    await send({ type: "flow:resumeApprove", id: "f1" }); // no gate is held
+    expect(events("flow_action")).toEqual([]);
+  });
+
+  it("emits resume_approve and resume_disarm from the resume banner, and the disarm's flow_armed", async () => {
+    // A real resume gate: the first pass to find a rule ready HOLDS it and
+    // reports, rather than firing, so the banner this test clicks is genuine.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...wired(), armed: true }];
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    const { p, send } = await openPanel();
+    await settle();
+    const gated = posts(p).filter((m) => m.type === "deck:flows").at(-1) as any;
+    expect(gated.pendingResume).toHaveLength(1);
+    trackSpy.mockClear();
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    expect(events("flow_action").map((e) => e.action)).toEqual(["resume_approve"]);
+    trackSpy.mockClear();
+    await send({ type: "flow:resumeDisarm", id: "f1" });
+    expect(events("flow_action").map((e) => e.action)).toEqual(["resume_disarm"]);
+    expect(events("flow_armed")[0]).toMatchObject({ armed: false, source: "resume-banner" });
+  });
+
+  it("emits flow_action dry_run from the webview's counts", async () => {
+    setConfig({ orchestrator: true });
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:dryRun", edges: 3, fired: 1, blocked: 0 });
+    expect(events("flow_action")).toEqual([
+      { name: "flow_action", action: "dry_run", edge_count: 3, fired_count: 1, blocked_count: 0 },
+    ]);
+  });
+
+  it("drops a dry-run payload whose counts are not finite, non-negative numbers", async () => {
+    setConfig({ orchestrator: true });
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    // A webview payload is untrusted whatever the wire type says.
+    await send({ type: "flow:dryRun", edges: "x", fired: 1, blocked: 0 });
+    await send({ type: "flow:dryRun", edges: 3, fired: -1, blocked: 0 });
+    await send({ type: "flow:dryRun", edges: 3, fired: 1, blocked: Number.NaN });
+    await send({ type: "flow:dryRun", edges: 3, fired: 1 });
+    expect(events("flow_action")).toEqual([]);
+  });
+
+  it("emits nothing at all for any flow message when the orchestrator is off", async () => {
+    setConfig({ orchestrator: false });
+    const { send } = await openPanel();
+    trackSpy.mockClear();
+    await send({ type: "flow:create" });
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    await send({ type: "flow:dryRun", edges: 3, fired: 1, blocked: 0 });
+    expect(trackSpy.mock.calls.flat().filter((e: any) => /^flow_/.test(e.name))).toEqual([]);
+  });
+
+  it("emits flow_edge_fired for a launch that acted, with the planned node's own launch shape", async () => {
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    expect(events("flow_edge_fired")).toEqual([{
+      name: "flow_edge_fired", edge_action: "launch", ok: true, deferred: false,
+      dest: "worktree", prompt_mode: "implementation", repo_count: 1,
+    }]);
+  });
+
+  it("reports a launch that tried and failed as ok:false, still not deferred", async () => {
+    h.launchPlanned.mockResolvedValue({ ok: false, message: "Couldn't create a git worktree in aws-ops" });
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(events("flow_edge_fired")[0]).toMatchObject({ ok: false, deferred: false });
+  });
+
+  it("emits no flow_edge_fired for a pass in which nothing was performed", async () => {
+    // A notify spends nothing and is not performed through this seam.
+    const { send } = await warmed([{ ...wired(), armed: true }]);
+    await send({ type: "deck:refresh" });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0].firedAt).toBeTypeOf("number");
+    expect(events("flow_edge_fired")).toEqual([]);
+  });
+
+  it("emits exactly one flow_settled when the last edge settles, and never again", async () => {
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(events("flow_settled")).toEqual([{ name: "flow_settled", node_count: 2, edge_count: 1 }]);
+    // The store now holds the stamped flow, as disk would. A settled flow left
+    // armed on the board is polled every six seconds and must not re-report.
+    h.flows = [h.writeFlow.mock.calls.at(-1)![2] as Flow];
+    trackSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    await send({ type: "deck:refresh" });
+    expect(events("flow_settled")).toEqual([]);
+  });
+
+  it("does not call a flow settled while one of its rules is still pending", async () => {
+    const twoRules = launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "shipped" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "ticket-status-is", status: "Shipped" }, action: "notify" },
+      ],
+    });
+    const { send } = await warmed([twoRules]);
+    await send({ type: "deck:refresh" });
+    const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(written.edges[0].firedAt).toBeTypeOf("number");
+    expect(written.edges[1].firedAt).toBeUndefined();
+    expect(events("flow_settled")).toEqual([]);
+  });
+
+  it("reports a mid-pass disarm once, as an auto-skip, however many rules it skipped", async () => {
+    // Three acting edges, so this pass has three `performEdge` calls to make —
+    // room for another window's Disarm to land between the first and the second,
+    // leaving TWO rules skipped by one disarm. The event must be about the
+    // disarm, not about the rules.
+    const many = (): Flow => ({
+      ...launchFlow(),
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        ...[1, 2, 3].map((i) => ({
+          id: `p${i}`, kind: "planned" as const, x: 0, y: 0, join: "any" as const,
+          ticketKey: `PROJ-2${i}`, repos: ["aws-ops"], mode: "implementation", dest: "worktree" as const,
+        })),
+      ],
+      edges: [1, 2, 3].map((i) => ({
+        id: `e${i}`, from: "n1", to: `p${i}`, cond: { kind: "pr-merged" as const }, action: "launch" as const,
+      })),
+    });
+    const { send } = await warmed([many()]);
+    h.launchPlanned.mockClear().mockImplementation(async (req: { node: { ticketKey: string; repos: string[] } }) => {
+      // The disarm itself, landing on disk while this pass sits inside the first
+      // launch's await — exactly as another window's write would.
+      h.flows = h.flows.map((f) => ({ ...f, armed: false }));
+      return { ok: true, runKey: req.node.ticketKey, repo: req.node.repos[0] };
+    });
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    // Two rules skipped, one event.
+    expect(events("flow_armed")).toEqual([{
+      name: "flow_armed", armed: false, node_count: 4, edge_count: 3,
+      unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0, source: "auto-skip",
+    }]);
+  });
+});

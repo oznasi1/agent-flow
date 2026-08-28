@@ -67,7 +67,7 @@ import { CardAgent, FlowPromptMode, InboundMessage, MergeMethod, OpenSession, Ou
 // card), unrelated to analytics — every later Deck telemetry emit goes through
 // `trackEvent`/`trackError` instead, never the bare names.
 import { track as trackEvent, trackError } from "./telemetry/telemetry";
-import { classifyFailure, DeckAction, Op, STOCK_REVIEW_MODES, type TaskModeProp } from "./telemetry/events";
+import { classifyFailure, DeckAction, Op, STOCK_REVIEW_MODES, toPromptModeProp, type TaskModeProp } from "./telemetry/events";
 import { modeProp } from "./telemetry/settingsSnapshot";
 
 export const POLL_MS = 6000;
@@ -967,6 +967,11 @@ export class DeckPanel {
         const receipts: { level: "success" | "error"; message: string }[] = [];
         // The junction targets of rules that could not even be DECIDED this pass.
         const deferredTargets = new Set<string>();
+        // A mid-pass disarm is ONE thing that happened to this flow, not one per
+        // rule it skipped: up to three rules can be left pending by a single
+        // Disarm click in another window, and three identical events would read
+        // as three disarms.
+        let skipReported = false;
         for (const f of firing) {
           // An earlier step in this pass lost the lock. EVERY remaining edge is left
           // exactly as it was — deferred, not stamped — and this check sits above the
@@ -995,10 +1000,49 @@ export class DeckPanel {
           const stillArmed = readFlows(this.flowIo, this.flowsDir).find((fl) => fl.id === flow.id)?.armed;
           if (!stillArmed) {
             this.log(`deck: flow ${flow.id} rule ${f.edge.id} skipped — disarmed mid-pass`);
+            if (!skipReported) {
+              skipReported = true;
+              // Not a gesture in this window: something else — the other window's
+              // toggle, or its resume banner — turned this flow off, and each of
+              // those emitted its own `flow_armed` where it happened. This one
+              // records that a pass in flight noticed and stopped spending, which
+              // is the only place that fact exists. Nothing here computes an
+              // armability split, so the three counts are zero.
+              trackEvent({
+                name: "flow_armed", armed: false,
+                node_count: fresh.nodes.length, edge_count: fresh.edges.length,
+                unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+                source: "auto-skip",
+              });
+            }
             deferredTargets.add(f.edge.to);
             continue;
           }
           const done = await this.performEdge(fresh, f.edge, runs, f.action);
+          // One per edge this pass actually PERFORMED — never per evaluation, and
+          // never for a rule merely stamped as a sibling, which is what keeps this
+          // to at most MAX_LAUNCHES_PER_PASS events per six seconds. Emitted here,
+          // where the act's own result is in hand: a `defer` never reaches
+          // `outcomes` at all, and reading it off the write below would lose it.
+          //
+          // The launch trio comes from the planned node as `fresh` holds it — the
+          // same copy `performEdge` just launched against, resolved through the
+          // same helper — so a node retargeted mid-pass reports nothing rather
+          // than reporting the shape of some other node. `node.mode` is a
+          // PromptMode id and `agentFlow.promptModes` is user-configurable, hence
+          // `toPromptModeProp`; `repos` is a count, never the repo names.
+          const launched = f.action === "launch" ? this.plannedTarget(fresh, f.edge) : undefined;
+          const edgeOk = done.kind === "done" && done.outcome.ok;
+          if (launched) {
+            trackEvent({
+              name: "flow_edge_fired", edge_action: "launch", ok: edgeOk, deferred: done.kind === "defer",
+              dest: launched.dest, prompt_mode: toPromptModeProp(launched.mode), repo_count: launched.repos.length,
+            });
+          } else {
+            trackEvent({
+              name: "flow_edge_fired", edge_action: f.action, ok: edgeOk, deferred: done.kind === "defer",
+            });
+          }
           // Renewed AFTER the act, against the real clock rather than this pass's
           // `nowMs` — a stamp dated when the poll started would be no renewal at
           // all. `false` means another window reaped this lock while the step above
@@ -1068,12 +1112,28 @@ export class DeckPanel {
         // Gone from the store between `fresh` and here (deleted mid-pass). Writing
         // would resurrect it, the same reasoning as the `!fresh` check above.
         if (!atWrite) continue;
+        // Read BEFORE the stamps land: `flow_settled` is about the transition, and
+        // the only way to know a flow just became settled is to know it was not
+        // already. A settled flow left armed on the board is still evaluated every
+        // six seconds, so without this a finished flow would report itself
+        // forever. (Nothing normally fires in such a pass — every edge is latched
+        // — but "nothing to fire" is `evaluate.ts`'s business, not a guarantee
+        // this event may rest on: one `flow:resetEdge` puts an edge back in play.)
+        const wasSettled = atWrite.edges.length > 0 && atWrite.edges.every(isSettled);
         let next = applyFired(atWrite, stamping, nowMs, outcomes);
         // `nowMs` — this pass's own clock, the same one `applyFired` stamped with a
         // line above: a promotion settles the rules that pointed at the node as
         // planned work, and those stamps belong to this pass, not to a later read.
         for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo, nowMs);
         writeFlow(this.flowIo, this.flowsDir, next);
+        // After the write, and computed from `next` AFTER the promotions: a
+        // promotion settles the rules that pointed at the node as planned work,
+        // so a flow can reach its end through one. The model has no terminal
+        // state — "settled" is every edge stamped or errored — so this is derived
+        // here rather than read off a field.
+        if (!wasSettled && next.edges.length > 0 && next.edges.every(isSettled)) {
+          trackEvent({ name: "flow_settled", node_count: next.nodes.length, edge_count: next.edges.length });
+        }
         // `next`, not `fresh`: the message should describe what was actually just
         // written — same reasoning as building `next` from `atWrite` above — and
         // `next` already carries the promotions too.
@@ -3704,6 +3764,9 @@ export class DeckPanel {
         for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
         if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
         writeFlow(this.flowIo, this.flowsDir, emptyFlow(id, "New flow", now));
+        // After the write, not before: a create that lost nine id races created
+        // nothing, and the counts of an empty flow say nothing worth carrying.
+        trackEvent({ name: "flow_action", action: "create" });
         this.postFlows();
         return;
       }
@@ -3712,6 +3775,8 @@ export class DeckPanel {
         const existing = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
         if (!existing) return;
         writeFlow(this.flowIo, this.flowsDir, { ...existing, name: m.name });
+        // The name itself is the user's own text and never leaves the machine.
+        trackEvent({ name: "flow_action", action: "rename" });
         this.postFlows();
         return;
       }
@@ -3752,12 +3817,22 @@ export class DeckPanel {
             return { ...e, firedAt: host.firedAt, firedNote: host.firedNote, error: host.error };
           }),
         });
+        // The shape of the graph the user just drew — counts only. Node kinds,
+        // ticket keys, conditions and notes stay on disk.
+        trackEvent({
+          name: "flow_action", action: "save",
+          node_count: m.flow.nodes.length, edge_count: m.flow.edges.length,
+        });
         this.postFlows();
         return;
       }
       case "flow:addPlanned": {
         if (!getConfig().orchestrator) return;
         await this.addPlanned(m.id);
+        // One per gesture, whether or not the ticket picker was answered:
+        // `addPlanned` swallows its own cancels, and reaching for its outcome
+        // would mean giving it a return value nothing else wants.
+        trackEvent({ name: "flow_action", action: "add_planned" });
         return;
       }
       case "flow:delete": {
@@ -3769,6 +3844,7 @@ export class DeckPanel {
         const existing = readFlows(this.flowIo, this.flowsDir).some((f) => f.id === m.id);
         if (!existing) return;
         removeFlow(this.flowIo, this.flowsDir, m.id);
+        trackEvent({ name: "flow_action", action: "delete" });
         this.postFlows();
         return;
       }
@@ -3777,6 +3853,13 @@ export class DeckPanel {
         const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
         if (!flow) return;
         writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed });
+        // The armability split the toast below is built from, lifted so the event
+        // reports the same numbers the user was just shown rather than a second
+        // count of its own. Zero on a disarm, which computes no armability at all
+        // — there is nothing to warn a user about when they are switching a flow
+        // off — so a zero here means "not asked", exactly as on the other two
+        // `flow_armed` sources.
+        let unfirable = { live: 0, pr: 0, forge: 0 };
         if (m.armed) {
           // Warn and name, rather than refuse: a flow with one dead rule and three
           // live ones is still worth arming, and silence is how a user ends up
@@ -3793,10 +3876,11 @@ export class DeckPanel {
           // ever reads as unfirable here once the panel actually knows its forge
           // cannot report that.
           const dead = unfirableRules(flow, { liveSignal: true, prFacts: this.prFacts, forge: this.caps() });
+          const live = dead.filter((d) => d.needs === "live-signal").length;
+          const pr = dead.filter((d) => d.needs === "pr-facts").length;
+          const forge = dead.filter((d) => d.needs === "forge-unsupported").length;
+          unfirable = { live, pr, forge };
           if (dead.length > 0) {
-            const live = dead.filter((d) => d.needs === "live-signal").length;
-            const pr = dead.filter((d) => d.needs === "pr-facts").length;
-            const forge = dead.filter((d) => d.needs === "forge-unsupported").length;
             const blank = dead.filter((d) => d.needs === "unset-parameter").length;
             const offParts: string[] = [];
             if (pr > 0) offParts.push(`${pr} need${pr === 1 ? "s" : ""} PR facts`);
@@ -3832,6 +3916,12 @@ export class DeckPanel {
           this.pendingResume.delete(m.id);
           this.resumeCleared.delete(m.id);
         }
+        trackEvent({
+          name: "flow_armed", armed: m.armed,
+          node_count: flow.nodes.length, edge_count: flow.edges.length,
+          unfirable_live: unfirable.live, unfirable_pr_facts: unfirable.pr, unfirable_forge: unfirable.forge,
+          source: "toggle",
+        });
         this.postFlows();
         return;
       }
@@ -3894,6 +3984,7 @@ export class DeckPanel {
             return kept;
           }),
         });
+        trackEvent({ name: "flow_action", action: "reset_edge" });
         this.postFlows();
         return;
       }
@@ -3909,6 +4000,10 @@ export class DeckPanel {
         // Clearing the gate is all approval does — it does not fire anything
         // itself. The refresh that follows is what lets the next pass fire.
         this.resumeCleared.add(m.id);
+        // Emitted before the refresh, which is a whole pass and can throw: the
+        // approval is already recorded by then, and this event is about the
+        // click, not about what the next pass makes of it.
+        trackEvent({ name: "flow_action", action: "resume_approve" });
         await this.refreshBusy();
         return;
       }
@@ -3919,12 +4014,43 @@ export class DeckPanel {
         this.pendingResume.delete(m.id);
         this.resumeCleared.add(m.id);
         writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: false });
+        // Two events for one click, and deliberately: it is a gesture on the
+        // resume banner (`flow_action`) AND a disarm (`flow_armed`), and the arm
+        // question — how often does a held flow get switched off rather than
+        // approved — cannot be answered from either one alone. No armability
+        // split: nothing computes one on a disarm.
+        trackEvent({ name: "flow_action", action: "resume_disarm" });
+        trackEvent({
+          name: "flow_armed", armed: false,
+          node_count: flow.nodes.length, edge_count: flow.edges.length,
+          unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+          source: "resume-banner",
+        });
         this.postFlows();
         return;
       }
       case "flow:saveCommand": {
         if (!getConfig().orchestrator) return;
         await this.saveCommand(m.run, m.label);
+        // The command string and its label are user-authored — free-text shell
+        // that can carry hostnames or tokens — so only the gesture is reported.
+        trackEvent({ name: "flow_action", action: "save_command" });
+        return;
+      }
+      case "flow:dryRun": {
+        if (!getConfig().orchestrator) return;
+        // The drawer's counts, validated before they reach an event. The wire
+        // type says three numbers; a webview payload is untrusted regardless, and
+        // a NaN, an Infinity, a negative or a string would be a nonsense property
+        // in the catalog rather than an error anyone would see. Dropped silently:
+        // a dry run is a read the user has already got their answer from, and
+        // there is nothing to tell them about our own bookkeeping.
+        const ok = (v: unknown): v is number => typeof v === "number" && Number.isFinite(v) && v >= 0;
+        if (!ok(m.edges) || !ok(m.fired) || !ok(m.blocked)) return;
+        trackEvent({
+          name: "flow_action", action: "dry_run",
+          edge_count: m.edges, fired_count: m.fired, blocked_count: m.blocked,
+        });
         return;
       }
       case "openExternal": {

@@ -117,6 +117,17 @@ export type DeckAction =
   | "refresh" | "clear_stale" | "switch_account" | "set_grouping"
   | "inspect_open" | "inspect_diff" | "forget" | "track" | "usage" | "open_external";
 
+/** The orchestrator's user gestures, one member per `flow:*` message the Deck's
+ * `onMessage` treats as an action. A flow's own id is NOT one of these events'
+ * properties and never will be: unlike `flow_id` (a random UUID minted per Take),
+ * an orchestrator flow id is minted from a clock plus a short salt (`newFlowId`),
+ * so it is neither random nor ours to send — not even fingerprinted. The counts
+ * carry the analysis instead. Flow names, node ticket keys, run keys, repo names
+ * and receipt messages are user strings and never appear here either. */
+export type FlowActionKind =
+  | "create" | "rename" | "save" | "delete" | "add_planned" | "reset_edge"
+  | "resume_approve" | "resume_disarm" | "save_command" | "dry_run";
+
 export type WorkspaceModeProp = "multiroot" | "per-window";
 export type RepoSource = "preselected" | "destination" | "quickpick";
 export type Outcome = "launched" | "cancelled" | "failed";
@@ -311,7 +322,47 @@ export type UsageEvent =
       env_picked?: "listed" | "custom"; destination?: DestinationProp;
       provider?: "claude-code" | "copilot" | "cursor"; seeded_in_place?: boolean;
       repo_count: number; duration_ms: number; failure_class?: FailureClass;
-    };
+    }
+  // One per `flow:*` gesture that actually did something — the membership checks
+  // those cases make (an id the store does not hold) refuse before this. The
+  // counts are per action: `save` carries the graph it just wrote, `dry_run` the
+  // three the drawer computed, and the rest carry none, because a create or a
+  // delete says nothing about the shape of a graph.
+  | {
+      name: "flow_action"; action: FlowActionKind; node_count?: number; edge_count?: number;
+      fired_count?: number; blocked_count?: number;
+    }
+  // Every arm and disarm, from all three seams that can perform one. The
+  // `unfirable_*` split is `unfirableRules`' own `needs` breakdown — how many
+  // rules can never fire as configured — and is reported only where the code
+  // genuinely computes it, which is the arming half of the `toggle` source. A
+  // disarm computes no armability at all (there is nothing to warn about), so
+  // the three counts are zero on every disarm, including `resume-banner` and
+  // `auto-skip`. `"auto-skip"` is not a gesture: it is this window noticing,
+  // mid-pass, that the flow was disarmed under it — at most once per flow per
+  // pass, never once per skipped rule.
+  | {
+      name: "flow_armed"; armed: boolean; node_count: number; edge_count: number;
+      unfirable_live: number; unfirable_pr_facts: number; unfirable_forge: number;
+      source: "toggle" | "resume-banner" | "auto-skip";
+    }
+  // One per edge this pass actually performed — never one per evaluation pass,
+  // and never for a rule merely stamped as a sibling. `deferred` is a pre-flight
+  // read that failed, so nothing was spent and the next pass retries; `ok: false`
+  // with `deferred: false` is a rule that tried and latched. The launch trio
+  // (`dest`/`prompt_mode`/`repo_count`) is present only for a launch, whose
+  // planned node carries all three. `"notify"` is reserved: a notify spends
+  // nothing and is not performed through this seam, so nothing emits it today.
+  | {
+      name: "flow_edge_fired"; edge_action: "launch" | "seed" | "notify" | "run"; ok: boolean;
+      deferred: boolean; dest?: "worktree" | "new-window" | "current-window";
+      prompt_mode?: PromptModeProp; repo_count?: number;
+    }
+  // The flow has nothing left to do: every edge is stamped or errored. Derived,
+  // not stored — the model has no terminal state — and emitted on the TRANSITION
+  // only, so a settled flow left armed on the board does not re-report it every
+  // six seconds.
+  | { name: "flow_settled"; node_count: number; edge_count: number };
 
 /** Sent via logError — still delivered at telemetry level "error". */
 export type ErrorEvent =

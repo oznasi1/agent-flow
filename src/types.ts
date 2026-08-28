@@ -700,6 +700,13 @@ export type InboundMessage =
   // `saveCommand`. The node itself is deliberately left as free text — see that
   // method's own comment.
   | { type: "flow:saveCommand"; run: string; label: string }
+  // The dry run happened. Posted once per invocation of the drawer's "What would
+  // fire?" toggle, and the ONLY thing the host ever learns about a dry run: the
+  // verdicts themselves stay in the webview, which computes them itself and acts
+  // on nothing. Counts only — no flow id, no edge ids, no rule text — and the
+  // host still validates all three as finite, non-negative numbers before they
+  // reach an event, because a webview payload is untrusted whatever this type says.
+  | { type: "flow:dryRun"; edges: number; fired: number; blocked: number }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }

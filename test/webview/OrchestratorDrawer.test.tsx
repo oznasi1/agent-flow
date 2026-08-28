@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
-import { act, render, screen, fireEvent, within } from "@testing-library/react";
+import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { ORCH_ANIM_MS, ORCH_CSS, ORCH_EDGE_PAINT_DY } from "../../src/webview/orchestratorStyles";
 import type { Flow } from "../../src/engine/orchestrator/model";
@@ -3496,6 +3496,44 @@ describe("the dry run", () => {
     render(<OrchestratorDrawer {...props({ flows: [wired()], runs: [merged()] })} />);
     expect(screen.queryByTestId("orch-dryrun")).toBeNull();
     expect(screen.getByRole("button", { name: /what would fire/i })).toHaveAttribute("aria-pressed", "false");
+  });
+
+  // The host has no other way to learn a dry run happened — the verdicts are
+  // computed here and acted on nowhere — so the panel tells it, in counts. The
+  // webview knows nothing about telemetry: it posts, and the host decides.
+  it("tells the host it ran, in counts and nothing else", async () => {
+    openDryRun();
+    await waitFor(() => expect(send).toHaveBeenCalledWith({
+      type: "flow:dryRun", edges: 1, fired: 1, blocked: 0,
+    }));
+    // Numbers, not strings the host would have to coerce — and no id, name or
+    // rule text riding along.
+    const msg = vi.mocked(send).mock.calls.flat().find((m) => m.type === "flow:dryRun") as
+      { edges: unknown; fired: unknown; blocked: unknown };
+    for (const v of [msg.edges, msg.fired, msg.blocked]) expect(typeof v).toBe("number");
+    expect(JSON.stringify(msg)).not.toContain("PROJ-1");
+    expect(JSON.stringify(msg)).not.toContain("Ship the migration");
+  });
+
+  it("counts the rules that would NOT fire as blocked", async () => {
+    // The same wired flow with its PR still open: one pending rule, none firing.
+    openDryRun({ runs: [runStatus("PROJ-1", "agent-flow")] });
+    await waitFor(() => expect(send).toHaveBeenCalledWith({
+      type: "flow:dryRun", edges: 1, fired: 0, blocked: 1,
+    }));
+  });
+
+  // Once per invocation. Closing the panel is not a dry run, and the verdicts
+  // recompute on every render — a post from there would be a message per frame.
+  it("posts once per invocation, not on close and not per render", async () => {
+    render(<OrchestratorDrawer {...props({ flows: [wired()], runs: [merged()] })} />);
+    const btn = screen.getByRole("button", { name: /what would fire/i });
+    fireEvent.click(btn);
+    await waitFor(() => expect(screen.getByTestId("orch-dryrun")).toBeTruthy());
+    fireEvent.click(btn); // closed again
+    fireEvent.click(screen.getByLabelText("Flow name")); // any other interaction
+    const posts = vi.mocked(send).mock.calls.flat().filter((m) => m.type === "flow:dryRun");
+    expect(posts).toHaveLength(1);
   });
 
   it("names a met rule as one that would fire", () => {
