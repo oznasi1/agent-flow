@@ -907,21 +907,37 @@ async function runSeedPass(context: vscode.ExtensionContext, log: (m: string) =>
     try {
       plan = JSON.parse(fs.readFileSync(full, "utf8"));
     } catch {
-      continue;
-    }
-    if (now - plan.createdAt > PLAN_TTL_MS) {
+      // A plan that cannot be parsed will never seed — clear it the way the
+      // expired branch below already clears stale ones. These files are
+      // transient 15-minute handshakes; leaving one wedges nothing, but it
+      // would sit there forever.
       fs.rmSync(full, { force: true });
       continue;
     }
-    if (!plan.seedAgent) continue;
-    const match = plan.matches.find((m) => canon(m.matchPath) === identity);
-    log(`plan ${plan.key}: ${match ? "MATCHED this window" : "no match"}`);
-    if (!match) continue;
-    if (context.globalState.get<boolean>(seededGuard(plan, identity))) {
-      log(`plan ${plan.key}: already seeded this window — skipping`);
-      continue;
+    // Everything past the parse is wrapped too: one malformed plan (e.g. no
+    // `matches`) used to throw out of the whole pass, blocking every other
+    // plan in every window — and with a corrupt createdAt its TTL never
+    // elapsed, so the wedge was permanent.
+    try {
+      const age = now - plan.createdAt;
+      // NaN (missing/corrupt createdAt) and a future stamp both read as
+      // expired — either way the 15-minute TTL could otherwise never elapse.
+      if (!(age >= 0) || age > PLAN_TTL_MS) {
+        fs.rmSync(full, { force: true });
+        continue;
+      }
+      if (!plan.seedAgent) continue;
+      const match = plan.matches.find((m) => canon(m.matchPath) === identity);
+      log(`plan ${plan.key}: ${match ? "MATCHED this window" : "no match"}`);
+      if (!match) continue;
+      if (context.globalState.get<boolean>(seededGuard(plan, identity))) {
+        log(`plan ${plan.key}: already seeded this window — skipping`);
+        continue;
+      }
+      due.push(plan);
+    } catch {
+      fs.rmSync(full, { force: true });
     }
-    due.push(plan);
   }
   if (!due.length) return;
 

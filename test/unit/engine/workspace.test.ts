@@ -2774,3 +2774,95 @@ describe("writeBriefInto", () => {
     ]);
   });
 });
+
+describe("maybeSeedAgent — malformed plan files", () => {
+  const IDENTITY = "/ws/PROJ-1.code-workspace";
+  const withWorkspaceFile = () => {
+    workspace.workspaceFile = { scheme: "file", fsPath: IDENTITY };
+  };
+  const goodPlan = (prompt = "do it") =>
+    JSON.stringify({
+      key: "PROJ-1",
+      createdAt: Date.now(),
+      seedAgent: true,
+      matches: [{ matchPath: IDENTITY, prompt }],
+    });
+
+  it("seeds the good plan beside one missing `matches`, and removes the bad one", async () => {
+    // plan.matches.find used to throw OUTSIDE the read/parse try, aborting the
+    // whole pass — and with no createdAt the TTL never elapsed, so the wedge
+    // was permanent for every window.
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["BAD-1.json", "PROJ-1-1.json"] as never);
+    readFileSync.mockImplementation((p) =>
+      String(p).includes("BAD-1")
+        ? JSON.stringify({ key: "BAD-1", createdAt: Date.now(), seedAgent: true })
+        : goodPlan(),
+    );
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+    expect(rmSync).toHaveBeenCalledWith(expect.stringContaining("BAD-1"), { force: true });
+  });
+
+  it("removes a future-dated plan instead of seeding it", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
+    readFileSync.mockReturnValue(
+      JSON.stringify({
+        key: "PROJ-1",
+        createdAt: Date.now() + 60 * 60 * 1000,
+        seedAgent: true,
+        matches: [{ matchPath: IDENTITY, prompt: "do it" }],
+      }),
+    );
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(rmSync).toHaveBeenCalledWith(expect.stringContaining("PROJ-1-1.json"), { force: true });
+    expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+  });
+
+  it("removes a plan with no createdAt at all — a TTL that can never elapse", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
+    readFileSync.mockReturnValue(
+      JSON.stringify({ key: "PROJ-1", seedAgent: true, matches: [{ matchPath: IDENTITY, prompt: "do it" }] }),
+    );
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(rmSync).toHaveBeenCalledWith(expect.stringContaining("PROJ-1-1.json"), { force: true });
+    expect(commands.executeCommand).not.toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "do it");
+  });
+
+  it("removes a plan file that fails to parse, so it cannot linger past its TTL", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
+    readFileSync.mockReturnValue("{ not json");
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(rmSync).toHaveBeenCalledWith(expect.stringContaining("PROJ-1-1.json"), { force: true });
+  });
+
+  it("still seeds a plan written this very millisecond (age 0 is not expired)", async () => {
+    withWorkspaceFile();
+    readdirSync.mockReturnValue(["PROJ-1-1.json"] as never);
+    readFileSync.mockReturnValue(goodPlan("fresh"));
+    commands.getCommands.mockResolvedValue([CLAUDE_OPEN_CMD]);
+    const { context } = fakeContext();
+
+    await maybeSeedAgent(context, () => {});
+
+    expect(commands.executeCommand).toHaveBeenCalledWith(CLAUDE_OPEN_CMD, undefined, "fresh");
+  });
+});
