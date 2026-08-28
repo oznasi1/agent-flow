@@ -150,13 +150,29 @@ export function App(): JSX.Element {
   // Client-side status lens: the set of selected statuses (empty = show all).
   const [statuses, setStatuses] = React.useState<Set<string>>(new Set());
   const [selectedRepos, setSelectedRepos] = React.useState<Set<string>>(new Set());
-  const toggleRepo = (name: string) =>
+  // Lens-usage telemetry lives entirely in the host (`lens_used` fires from the
+  // `tasks:lensUsed` case) — this webview never imports telemetry. One timer per
+  // lens kind, so a run of keystrokes in the search box and a run of repo toggles
+  // debounce independently: re-arming one must never swallow the other's pending
+  // post. 500ms mirrors the host's own debounce discipline elsewhere.
+  const lensTimers = React.useRef<{ repo: number | null; search: number | null }>({ repo: null, search: null });
+  const scheduleLensUsed = (lens: "repo" | "search") => {
+    const timers = lensTimers.current;
+    if (timers[lens] != null) window.clearTimeout(timers[lens] as number);
+    timers[lens] = window.setTimeout(() => {
+      timers[lens] = null;
+      send({ type: "tasks:lensUsed", lens });
+    }, 500);
+  };
+  const toggleRepo = (name: string) => {
     setSelectedRepos((prev) => {
       const next = new Set(prev);
       if (next.has(name)) next.delete(name);
       else next.add(name);
       return next;
     });
+    scheduleLensUsed("repo");
+  };
   const clearRepos = () => setSelectedRepos(new Set());
   // Multi-select batch launch (only surfaced when the repo filter is one repo).
   const [batchSelected, setBatchSelected] = React.useState<Set<string>>(new Set());
@@ -616,7 +632,10 @@ export function App(): JSX.Element {
             value={textQuery}
             spellCheck={false}
             placeholder="Search title…"
-            onChange={(e) => setTextQuery(e.target.value)}
+            onChange={(e) => {
+              setTextQuery(e.target.value);
+              scheduleLensUsed("search");
+            }}
           />
           {textQuery && (
             <span className="text-search-clear" title="Clear search" onClick={() => setTextQuery("")}>×</span>

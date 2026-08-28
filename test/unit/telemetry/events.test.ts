@@ -59,6 +59,10 @@ const SAMPLES = [
   { name: "flow_settled", node_count: 4, edge_count: 3 },
   { name: "marketplace_opened", revealed: false, asset_count: 7, plugin_count: 2, marketplace_count: 1, skills: 3, commands: 2, agents: 1, hooks: 1, not_set_up: false },
   { name: "marketplace_action", action: "read", truncated: true },
+  { name: "tasks_fetched", filter: "sprint", lens: "mysprint", size: "any", task_count: 12, repo_count: 3, live_window_count: 2, authed: true },
+  { name: "lens_used", lens: "search" },
+  { name: "card_action", action: "change_status" },
+  { name: "notepad_action", action: "run" },
 ] satisfies AnalyticsEvent[];
 
 /** `Unsampled` is every EventName with no entry in SAMPLES above. `AssertNever`
@@ -78,7 +82,7 @@ describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
     const names = SAMPLES.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(26);
+    expect(names).toHaveLength(30);
   });
 
   it("carries no free-form strings outside the allow-list", () => {

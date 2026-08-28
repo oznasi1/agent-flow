@@ -134,7 +134,7 @@ import {
   markTaskNetworkFailure, SerializedCaps, TaskConnector, TaskProvider, TaskWriteError,
 } from "../../src/tasks/provider";
 import type { JiraAuth } from "../../src/tasks/jira/auth";
-import { makeFixtureConnector } from "../_helpers/fixtureConnector";
+import { FIXTURE_TASKS, makeFixtureConnector } from "../_helpers/fixtureConnector";
 import { TasksViewProvider } from "../../src/tasksView";
 import type { TakeSource } from "../../src/telemetry/events";
 import type { InboundMessage, OutboundMessage } from "../../src/types";
@@ -5473,6 +5473,129 @@ describe("a source with no optional capabilities", () => {
     // tab whose contents were never requested.
     expect(posted()).toContainEqual(expect.objectContaining({ type: "tasks", filter: "mine" }));
   });
+
+  it("reports the requested filter and the clamped lens as distinct properties on tasks_fetched", async () => {
+    const list = vi.fn(async () => [{ ...FIXTURE_TASKS[0] }]);
+    const { send } = setup({ connector: withProvider({ list }) });
+    await send({ type: "fetch", filter: "sprint", size: "any" });
+    expect(trackSpy).toHaveBeenCalledWith({
+      name: "tasks_fetched", filter: "sprint", lens: "mine", size: "any",
+      task_count: 1, repo_count: 2, live_window_count: 0, authed: true,
+    });
+  });
+});
+
+describe("tasks_fetched telemetry", () => {
+  it("emits authed:false with zero counts on the unauthenticated early return", async () => {
+    const { send } = setup({ authed: false });
+    await send({ type: "fetch", filter: "mysprint", size: "any" });
+    // No provider was ever asked to clamp anything, so `lens` reports the
+    // requested filter verbatim.
+    expect(trackSpy).toHaveBeenCalledWith({
+      name: "tasks_fetched", filter: "mysprint", lens: "mysprint", size: "any",
+      task_count: 0, repo_count: 0, live_window_count: 0, authed: false,
+    });
+  });
+
+  it("omits live_window_count when trackOpenWindows is off, on both the authed and unauthed paths", async () => {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, trackOpenWindows: false });
+    const { send } = setup({ authed: false });
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    const event = trackSpy.mock.calls.flat().find((e: any) => e.name === "tasks_fetched") as any;
+    expect("live_window_count" in event).toBe(false);
+  });
+
+  it("fires exactly once per fetch — no double emit when the same message is sent twice", async () => {
+    const { send } = setup();
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    await send({ type: "fetch", filter: "mine", size: "any" });
+    expect(trackSpy.mock.calls.flat().filter((e: any) => e.name === "tasks_fetched")).toHaveLength(2);
+  });
+});
+
+describe("card_action telemetry", () => {
+  it("emits card_action for a changeStatus message, from the dispatcher itself", async () => {
+    const { send } = setup();
+    await send({ type: "changeStatus", key: "PROJ-1" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "card_action", action: "change_status" });
+  });
+
+  it("emits card_action for a detail message", async () => {
+    const { send } = setup();
+    await send({ type: "detail", key: "PROJ-1" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "card_action", action: "detail" });
+  });
+
+  it("emits card_action for addToMySprint, removeFromSprint, and setComponent messages", async () => {
+    const { send } = setup();
+    await send({ type: "addToMySprint", key: "PROJ-1" });
+    await send({ type: "removeFromSprint", key: "PROJ-1", size: "any" });
+    await send({ type: "setComponent", key: "PROJ-1", repo: "account-service", on: true, movedChip: false });
+    const names = trackSpy.mock.calls.flat().filter((e: any) => e.name === "card_action").map((e: any) => e.action);
+    expect(names).toEqual(["add_to_sprint", "remove_from_sprint", "set_component"]);
+  });
+
+  it("emits card_action{reorder} only once the drag actually applies within My-sprint", async () => {
+    const { send } = setup();
+    await send({ type: "fetch", filter: "unassigned", size: "any" }); // lastFilter = unassigned
+    await send({ type: "reorder", order: ["C", "A", "B"] });
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "card_action")).toBe(false);
+    await send({ type: "fetch", filter: "mysprint", size: "any" }); // lastFilter = mysprint
+    await send({ type: "reorder", order: ["C", "A", "B"] });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "card_action", action: "reorder" });
+  });
+
+  it("emits card_action{reset_order}", async () => {
+    const { send } = setup();
+    await send({ type: "resetOrder", size: "any" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "card_action", action: "reset_order" });
+  });
+});
+
+describe("tasks:lensUsed", () => {
+  it("tracks lens_used for a recognised lens", async () => {
+    const { send } = setup();
+    await send({ type: "tasks:lensUsed", lens: "search" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "lens_used", lens: "search" });
+  });
+
+  it("tracks lens_used for the repo lens", async () => {
+    const { send } = setup();
+    await send({ type: "tasks:lensUsed", lens: "repo" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "lens_used", lens: "repo" });
+  });
+
+  it("silently drops an unrecognised lens value", async () => {
+    const { send } = setup();
+    await send({ type: "tasks:lensUsed", lens: "bogus" as never });
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "lens_used")).toBe(false);
+  });
+});
+
+describe("notepad_action telemetry", () => {
+  it("emits notepad_action for add, edit, and remove", async () => {
+    const { send } = setup();
+    await send({ type: "notepad:add", title: "First", body: "" });
+    await send({ type: "notepad:update", id: "irrelevant", title: "x", body: "y" });
+    await send({ type: "notepad:delete", id: "irrelevant" });
+    const names = trackSpy.mock.calls.flat().filter((e: any) => e.name === "notepad_action").map((e: any) => e.action);
+    expect(names).toEqual(["add", "edit", "remove"]);
+  });
+
+  it("emits notepad_action{image_add} for both notepad:addImage and notepad:pickImage", async () => {
+    const { send } = setup();
+    await send({ type: "notepad:add", title: "note", body: "" });
+    await send({ type: "notepad:addImage", id: "ghost", dataBase64: "", mime: "image/png", name: "a.png" });
+    expect(trackSpy).toHaveBeenCalledWith({ name: "notepad_action", action: "image_add" });
+  });
+
+  it("emits notepad_action{reorder} only once the drop actually changes the order", async () => {
+    const { send } = setup();
+    // No known notes at all — the reorder is a no-op and must not report a gesture
+    // that changed nothing.
+    await send({ type: "notepad:reorder", order: ["ghost"] });
+    expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "notepad_action")).toBe(false);
+  });
 });
 
 describe("a refused write that names fields to retry", () => {
@@ -6138,6 +6261,21 @@ describe("notepad", () => {
       await sendMsg({ type: "notepad:delete", id: "ghost" });
       expect(orderIn(store)).toEqual([ids[0], ids[2], ids[1]]);
     });
+
+    it("emits notepad_action{reorder} once the drop actually applies", async () => {
+      const { sendMsg, ids } = await threeNotes();
+      trackSpy.mockClear();
+      const [a, b, c] = ids;
+      await sendMsg({ type: "notepad:reorder", order: [a, c, b] });
+      expect(trackSpy).toHaveBeenCalledWith({ name: "notepad_action", action: "reorder" });
+    });
+
+    it("does not emit notepad_action for a reorder that names no known note", async () => {
+      const { sendMsg } = await threeNotes();
+      trackSpy.mockClear();
+      await sendMsg({ type: "notepad:reorder", order: ["ghost"] });
+      expect(trackSpy.mock.calls.flat().some((e: any) => e.name === "notepad_action")).toBe(false);
+    });
   });
 
   describe("sections", () => {
@@ -6256,6 +6394,13 @@ describe("notepad", () => {
       expect(find("explore_completed")).toMatchObject({
         flow_id: "flow-1", outcome: "launched", mode: "general", provider: "claude-code", repo_count: 1, duration_ms: 42,
       });
+      // notepad:run also emits the Task 9 notepad_action{run} click signal —
+      // a separate event from the explore funnel above, fired at the dispatcher
+      // itself rather than from inside runNotepadItem. `find` above would return
+      // the EARLIER notepad_action{add} from the add call, so this reads the last
+      // notepad_action instead of the first.
+      const notepadActions = events().filter((e) => e.name === "notepad_action");
+      expect(notepadActions.at(-1)).toMatchObject({ action: "run" });
     });
 
     it("emits only explore_completed with cancel_point 'remote-control' when the RC block refuses", async () => {

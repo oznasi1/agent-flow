@@ -628,6 +628,11 @@ export type InboundMessage =
   // One chip on one ticket. `movedChip` says whether the chip's presence in the
   // list changed too — which is what makes a rejected write exactly undoable.
   | { type: "setComponent"; key: string; repo: string; on: boolean; movedChip: boolean }
+  /** The webview's own lens-usage signal — a search-box edit or a repo-lens
+   * pick, debounced 500ms per lens kind (one timer for "search", one for
+   * "repo") so a run of keystrokes or toggles reports once. The host validates
+   * the enum and drops an unrecognised value silently. */
+  | { type: "tasks:lensUsed"; lens: "repo" | "search" }
   // The Deck (separate webview panel)
   | { type: "deck:ready" }
   | { type: "deck:refresh" }

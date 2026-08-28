@@ -386,7 +386,48 @@ export type UsageEvent =
   // `open_external`'s scheme guard is a silent drop, mirroring `deck_action`'s
   // own `"open_external"` member. No file path, asset name, or URL is ever a
   // property here.
-  | { name: "marketplace_action"; action: "open" | "reveal" | "read" | "copy" | "open_external"; allowed?: boolean; truncated?: boolean };
+  | { name: "marketplace_action"; action: "open" | "reveal" | "read" | "copy" | "open_external"; allowed?: boolean; truncated?: boolean }
+  // Fires on every `fetch` (that IS the lens-usage signal, not a separate click
+  // event) — the tasksView case tracked at tasksView.ts:677. `filter` is the
+  // REQUESTED value the webview asked for; `lens` is what `effectiveFilter`
+  // actually clamped it to, which is the same value unless the connector cannot
+  // serve the requested lens. The unauthenticated early return (no provider to
+  // clamp against) reports `lens` equal to the requested `filter` and zero
+  // counts, `authed: false`; every other exit reports the real counts with
+  // `authed: true`. `live_window_count` is present only when
+  // `agentFlow.trackOpenWindows` is on, mirroring the `state`/`tasks` messages'
+  // own `liveCount` gating.
+  | {
+      name: "tasks_fetched";
+      filter: "unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
+      lens: "unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
+      size: "any" | "s" | "m" | "l";
+      task_count: number; repo_count: number; live_window_count?: number; authed: boolean;
+    }
+  // The webview-only signal for a lens the fetch-driven `tasks_fetched` above
+  // cannot see: which secondary lens (repo multiselect, title search) someone is
+  // actually using, debounced 500ms in App.tsx so a keystroke run or a run of
+  // toggles reports once, not once per keystroke/click. Sent via the new
+  // `tasks:lensUsed` wire message; the host validates the enum and drops an
+  // unrecognised value silently.
+  | { name: "lens_used"; lens: "repo" | "search" }
+  // One per card affordance click in the tasksView switch (`detail`,
+  // `changeStatus`, `addToMySprint`, `removeFromSprint`, `setComponent`) plus the
+  // two manual-order gestures (`reorder`, `resetOrder`) — never the ticket key,
+  // repo name, or search text.
+  | {
+      name: "card_action";
+      action: "detail" | "change_status" | "add_to_sprint" | "remove_from_sprint" | "set_component" | "reorder" | "reset_order";
+    }
+  // One per notepad gesture that maps onto this enum — `notepad:add` (add),
+  // `notepad:update` (edit), `notepad:delete` (remove), `notepad:reorder` (reorder,
+  // emitted only once the drop actually changes the saved order), `notepad:run`
+  // (run — the notepad's own Task 6 `explore_started{source:"notepad"}` still
+  // fires separately, from inside runNotepadItem), and `notepad:addImage` /
+  // `notepad:pickImage` (both `image_add` — paste and file-picker are two paths to
+  // the same gesture) / `notepad:removeImage` (`image_remove`). Note text, section
+  // names and image names never appear here.
+  | { name: "notepad_action"; action: "add" | "run" | "edit" | "remove" | "reorder" | "image_add" | "image_remove" };
 
 /** Sent via logError — still delivered at telemetry level "error". */
 export type ErrorEvent =

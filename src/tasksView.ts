@@ -677,6 +677,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         case "fetch": {
           if (!(await this.connector.isAuthenticated())) {
             this.postState(false, this.connector.isConfigured(), null);
+            // No provider to clamp against — `lens` is the requested `filter`
+            // verbatim, and every count is honestly zero: nothing was fetched.
+            track({
+              name: "tasks_fetched", filter: m.filter, lens: m.filter, size: m.size,
+              task_count: 0, repo_count: 0,
+              ...(cfg.trackOpenWindows ? { live_window_count: 0 } : {}),
+              authed: false,
+            });
             return;
           }
           this.post({ type: "loading", loading: true });
@@ -690,6 +698,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           const tasks = await provider.list(lens, m.size);
           const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
           for (const t of tasks) t.services = this.guessServices(t, repos);
+          // Fires on every fetch, by design — this IS the lens-usage signal.
+          // `filter` is what the webview asked for; `lens` is what the clamp above
+          // actually answered, which differ exactly when a tab survived a
+          // `taskSource` switch to a source that cannot serve it.
+          track({
+            name: "tasks_fetched", filter: m.filter, lens, size: m.size,
+            task_count: tasks.length, repo_count: repos.length,
+            ...(cfg.trackOpenWindows ? { live_window_count: this.liveWindows().length } : {}),
+            authed: true,
+          });
           let outgoing = tasks;
           if (lens === "mysprint") {
             if (m.size === "any") {
@@ -704,6 +722,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "detail": {
+          track({ name: "card_action", action: "detail" });
           if (!(await this.connector.isAuthenticated())) return;
           const provider = this.provider();
           const info = this.connector.info();
@@ -764,18 +783,22 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "changeStatus": {
+          track({ name: "card_action", action: "change_status" });
           await this.changeStatus(m.key);
           break;
         }
         case "addToMySprint": {
+          track({ name: "card_action", action: "add_to_sprint" });
           await this.addToMySprint(m.key);
           break;
         }
         case "removeFromSprint": {
+          track({ name: "card_action", action: "remove_from_sprint" });
           await this.removeFromSprint(m.key, m.size);
           break;
         }
         case "setComponent": {
+          track({ name: "card_action", action: "set_component" });
           await this.setComponent(m.key, m.repo, m.on, m.movedChip);
           break;
         }
@@ -784,22 +807,27 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "notepad:add": {
+          track({ name: "notepad_action", action: "add" });
           await this.addNote(m.title, m.body, m.images);
           break;
         }
         case "notepad:update": {
+          track({ name: "notepad_action", action: "edit" });
           await this.updateNote(m.id, m.title, m.body);
           break;
         }
         case "notepad:addImage": {
+          track({ name: "notepad_action", action: "image_add" });
           await this.attachImage(m.id, Buffer.from(m.dataBase64, "base64"), m.mime, m.name);
           break;
         }
         case "notepad:pickImage": {
+          track({ name: "notepad_action", action: "image_add" });
           await this.pickImage(m.id);
           break;
         }
         case "notepad:removeImage": {
+          track({ name: "notepad_action", action: "image_remove" });
           await this.removeImage(m.id, m.imageId);
           break;
         }
@@ -812,6 +840,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "notepad:delete": {
+          track({ name: "notepad_action", action: "remove" });
           await this.deleteNote(m.id);
           break;
         }
@@ -820,6 +849,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "notepad:run": {
+          track({ name: "notepad_action", action: "run" });
           await this.runNotepadItem(m.id);
           break;
         }
@@ -835,6 +865,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           const base = saved.length > 0 ? saved : this.orderedNotes().map((n) => n.id);
           await this.saveNoteOrder(applyReorder(base, visible, new Set(visible)));
           this.postNotepad();
+          track({ name: "notepad_action", action: "reorder" });
           break;
         }
         case "notepad:resetOrder": {
@@ -868,11 +899,17 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           if (this.lastFilter !== "mysprint") break;
           const next = applyReorder(this.savedOrder(), m.order, new Set(m.order));
           await this.saveOrder(next);
+          track({ name: "card_action", action: "reorder" });
           break;
         }
         case "resetOrder": {
           await this.saveOrder([]);
           await this.onMessage({ type: "fetch", filter: "mysprint", size: m.size });
+          track({ name: "card_action", action: "reset_order" });
+          break;
+        }
+        case "tasks:lensUsed": {
+          if (m.lens === "repo" || m.lens === "search") track({ name: "lens_used", lens: m.lens });
           break;
         }
       }
