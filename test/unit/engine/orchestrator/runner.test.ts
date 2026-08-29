@@ -375,6 +375,11 @@ describe("applyFired — an ask edge", () => {
   });
 
   it("says nothing in a toast — a gate is not a notify", () => {
+    // Architectural guard: the spec rejected posting an unawaited toast for a gate. A promise
+    // can resolve an hour later into a flow that has since been disarmed, deleted, renamed or
+    // Reset, and every one of those needs a guard. The drawer is the only answering surface.
+    // This does NOT exercise `performedNote` (Task 3's code); it exercises `notifyLines`'s
+    // action guard that prevents non-notify actions from producing toast lines.
     const flow = gateFlow();
     expect(notifyLines(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }])).toEqual([]);
   });
