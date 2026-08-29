@@ -117,12 +117,15 @@ export const OFFERED_CONDS: Condition["kind"][] = Object.keys(COND_LABEL) as Con
  * as `OFFERED_CONDS`, split by the one thing that makes a condition answerable
  * at all: what kind of node is watching.
  *
- * `evaluate.ts`'s `isMet` has exactly two answers. `command-succeeded` it reads
- * off the FLOW (the receipt on the command node's own incoming edge), and every
- * other kind it reads off the source's `RunStatus` — returning `undefined`
- * forever for a source that is not a place. So the two sets are disjoint, not
- * nested: on a rule out of a command node every place-shaped condition is inert,
- * and on a rule out of anything else `command-succeeded` is. Task 7 shipped
+ * `evaluate.ts`'s `isMet` has exactly three answers. `command-succeeded` it reads
+ * off the FLOW (the receipt on the command node's own incoming edge),
+ * `gate-approved`/`gate-rejected` it reads off the gate node's own incoming edge
+ * the same way, and every other kind it reads off the source's `RunStatus` —
+ * returning `undefined` forever for a source that is neither. So the THREE sets
+ * are disjoint, not nested: on a rule out of a command node every place-shaped or
+ * gate-shaped condition is inert, on a rule out of a gate node every place-shaped
+ * or command-shaped condition is inert, and on a rule out of anything else both
+ * `command-succeeded` and the two gate kinds are. Task 7 shipped
  * `command-succeeded` offered on every rule regardless of source, which the
  * engine's guard makes safe (never wrongly true) but which still put a choice
  * that provably cannot work in front of the user.
@@ -138,10 +141,12 @@ export const OFFERED_CONDS: Condition["kind"][] = Object.keys(COND_LABEL) as Con
  * pickers offer: a reader trusting it would strip every condition from rules out
  * of planned work and break the chain this phase exists to support. */
 export function offeredConds(flow: Flow, fromId: string): Condition["kind"][] {
-  const fromCommand = flow.nodes.find((n) => n.id === fromId)?.kind === "command";
-  // One predicate, both directions: keep `command-succeeded` exactly when the
-  // source IS a command node, and every other kind exactly when it is not.
-  return OFFERED_CONDS.filter((k) => (k === "command-succeeded") === fromCommand);
+  const kind = flow.nodes.find((n) => n.id === fromId)?.kind;
+  if (kind === "command") return ["command-succeeded"];
+  if (kind === "gate") return ["gate-approved", "gate-rejected"];
+  return OFFERED_CONDS.filter(
+    (k) => k !== "command-succeeded" && k !== "gate-approved" && k !== "gate-rejected",
+  );
 }
 
 /** Is this rule's own condition one the picker for it offers? When it is not —
@@ -175,16 +180,17 @@ export function condOptionLabel(cond: Condition): string {
 
 /** The condition a BRAND NEW rule out of `fromId` starts on. Keyed off the
  * source node's kind for the same reason `offeredConds` is: `evaluate.ts`'s
- * `isMet` answers `command-succeeded` from the flow itself and every other
- * kind from the source's `RunStatus`, so a place-shaped condition on a rule
- * out of a COMMAND node can never be met — a new wire out of a command node
- * seeded with `pr-merged` would be inert from the moment it was drawn. Every
- * other source keeps `pr-merged`, which is what the drawer has always seeded
- * and what `OFFERED_CONDS` lists first. */
+ * `isMet` answers `command-succeeded` and the two gate kinds from the flow
+ * itself and every other kind from the source's `RunStatus`, so a place-shaped
+ * condition on a rule out of a COMMAND or GATE node can never be met — a new
+ * wire out of a gate seeded with `pr-merged` would be inert from the moment it
+ * was drawn. Every other source keeps `pr-merged`, which is what the drawer has
+ * always seeded and what `OFFERED_CONDS` lists first. */
 export function defaultCondFor(flow: Flow, fromId: string): Condition {
-  return flow.nodes.find((n) => n.id === fromId)?.kind === "command"
-    ? { kind: "command-succeeded" }
-    : { kind: "pr-merged" };
+  const kind = flow.nodes.find((n) => n.id === fromId)?.kind;
+  if (kind === "command") return { kind: "command-succeeded" };
+  if (kind === "gate") return { kind: "gate-approved" };
+  return { kind: "pr-merged" };
 }
 
 /** What a join mode means, in the words the panel says it in. "any one rule"
@@ -390,6 +396,7 @@ export function endLabel(flow: Flow, id: string): string {
   if (n.kind === "planned") return n.ticketKey;
   if (n.kind === "command") return commandLabel(n);
   if (n.kind === "notify") return "notify";
+  if (n.kind === "gate") return "gate";
   // A kind this build does not know — `store.ts`'s `validNode` admits one on
   // purpose so a flow written by a NEWER build still renders. It has no
   // identifier to show, and it is certainly not a notify terminal: naming
@@ -1027,7 +1034,7 @@ export function verdictLabel(v: RulePreview): string {
  * is what the source place currently LOOKS like, which is `observationOf`'s
  * question, and the caller already has that pair to hand.
  *
- * `blocked`'s two reasons get their first user-facing wording here.
+ * `blocked`'s three reasons get their first user-facing wording here.
  * `BlockedNote` has been computed on every armed pass since the orchestrator
  * shipped and read by nothing — `evaluate.ts`'s own doc comment claims the
  * drawer's footer surfaces it, which was never true. The dry run is its first
@@ -1041,7 +1048,7 @@ export function verdictWhy(v: RulePreview): string | null {
   // third phrasing here would be a third claim about one fact.
   if (v.verdict === "unset") return v.blank ?? null;
   if (v.verdict !== "blocked") return null;
-  return v.reason === "gone"
-    ? "its card is not on the board right now"
-    : "its session activity cannot be read";
+  if (v.reason === "gone") return "its card is not on the board right now";
+  if (v.reason === "awaiting-answer") return "it is waiting on your answer";
+  return "its session activity cannot be read";
 }
