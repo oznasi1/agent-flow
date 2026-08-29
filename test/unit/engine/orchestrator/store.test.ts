@@ -425,3 +425,43 @@ describe("readFlows — a filename that does not match the record's own id", () 
     expect(readFlows(io, DIR)).toEqual([]);
   });
 });
+
+describe("a gate flow on disk", () => {
+  it("round-trips the node, the ask edge and the answer", () => {
+    const { io } = fakeIo();
+    const gateFlow: Flow = {
+      ...flow({ id: "f1" }),
+      nodes: [{ id: "g", kind: "gate", x: 8, y: 8, join: "any", question: "deploy to prod?" }],
+      edges: [{
+        id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" },
+        firedAt: 1, performed: true, gateAnswer: "approved",
+      }],
+    };
+    writeFlow(io, DIR, gateFlow);
+    const back = readFlows(io, DIR)[0];
+    expect(back.nodes[0]).toMatchObject({ kind: "gate", question: "deploy to prod?" });
+    expect(back.edges[0].gateAnswer).toBe("approved");
+  });
+
+  it("derives ask onto an edge into a gate that has no stored action", () => {
+    const { io } = fakeIo();
+    const gateFlow: Flow = {
+      ...flow({ id: "f2" }),
+      nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "q" }],
+      edges: [{ id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" } }],
+    };
+    writeFlow(io, DIR, gateFlow);
+    expect(readFlows(io, DIR)[0].edges[0].action).toBe("ask");
+  });
+
+  it("does not latch an action mismatch on a settled gate edge", () => {
+    const { io } = fakeIo();
+    const gateFlow: Flow = {
+      ...flow({ id: "f3" }),
+      nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "q" }],
+      edges: [{ id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" }, action: "ask" }],
+    };
+    writeFlow(io, DIR, gateFlow);
+    expect(readFlows(io, DIR)[0].edges[0].error).toBeUndefined();
+  });
+});
