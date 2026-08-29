@@ -1482,6 +1482,16 @@ export class DeckPanel {
         : { launchConfirmedAt: Date.now() };
       writeFlow(this.flowIo, this.flowsDir, { ...latest, ...stamp });
     } else if (answer === DISARM) writeFlow(this.flowIo, this.flowsDir, { ...latest, armed: false });
+    // Journalled on ALL THREE answers, dismissal included. A dismissed question
+    // writes nothing at all, so without this the flow's history shows a pass that
+    // asked and then simply nothing — indistinguishable from a window that was
+    // closed before the modal was ever seen. After the write, like every other
+    // journal call, so a line is never ahead of the fact it describes.
+    this.journal(
+      latest.id,
+      { kind: "consented", answer: answer === ACT ? "act" : answer === DISARM ? "disarm" : "dismissed" },
+      Date.now(),
+    );
   }
 
   /** The configured PromptMode for an id, or a `done` refusal naming what will not
@@ -4165,6 +4175,11 @@ export class DeckPanel {
         const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
         if (!flow) return;
         writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed });
+        // `source: "toggle"` matches the `flow_armed` telemetry this handler
+        // already emits below, so the two records of one gesture agree. The
+        // pass's own auto-skip records its disarm as its own `skipped` events
+        // rather than as an `armed` — nothing was toggled there.
+        this.journal(m.id, { kind: "armed", armed: m.armed, source: "toggle" }, Date.now());
         // The armability split the toast below is built from, lifted so the event
         // reports the same numbers the user was just shown rather than a second
         // count of its own. Zero on a disarm, which computes no armability at all
@@ -4296,6 +4311,12 @@ export class DeckPanel {
             return kept;
           }),
         });
+        // The event this whole journal exists for. Reset's job is to DELETE the
+        // edge's receipt — `firedAt`, `firedNote`, `error`, `performed` — so that
+        // the rule can run again, which until now meant a failed 2am deploy left
+        // no evidence it had ever happened. The receipt moves here instead of
+        // vanishing.
+        this.journal(m.id, { kind: "reset", edge: m.edgeId }, Date.now());
         trackEvent({ name: "flow_action", action: "reset_edge" });
         this.postFlows();
         return;

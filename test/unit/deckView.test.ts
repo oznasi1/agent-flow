@@ -6817,6 +6817,17 @@ describe("a met launch rule acts", () => {
     expect(journal().some((e) => e.kind === "fired")).toBe(false);
   });
 
+  it("journals the answer to a first-spend question", async () => {
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    // The second pass acts on the stored approval and asks nothing, so the answer
+    // is recorded once per question rather than once per pass.
+    await send({ type: "deck:refresh" });
+    const consented = journal().filter((e) => e.kind === "consented");
+    expect(consented).toHaveLength(1);
+    expect(consented[0]).toMatchObject({ kind: "consented", answer: "act", flow: "f1" });
+  });
+
   it("includes the edge's note in the spend confirmation when one is set", async () => {
     const note = "Careful: this repo has a flaky test suite.";
     const { send } = await warmed([launchFlow({
@@ -6878,6 +6889,19 @@ describe("a met launch rule acts", () => {
     expect(h.launchPlanned).not.toHaveBeenCalled();
   });
 
+  it("journals a Disarm answer to a first-spend question", async () => {
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_m: string, _o: unknown, ...items: string[]) => items[1], // "Disarm"
+    );
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    // Disarmed by that answer, so no later pass can ask — or answer — again.
+    await send({ type: "deck:refresh" });
+    const consented = journal().filter((e) => e.kind === "consented");
+    expect(consented).toHaveLength(1);
+    expect(consented[0]).toMatchObject({ kind: "consented", answer: "disarm", flow: "f1" });
+  });
+
   it("writes nothing and launches nothing when the question is dismissed", async () => {
     // Escape, or the modal being closed. Neither approval nor disarm: the flow
     // stays armed and is asked again on a later pass.
@@ -6886,6 +6910,18 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     expect(h.writeFlow).not.toHaveBeenCalled();
     expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("journals a dismissed first-spend question as neither act nor disarm", async () => {
+    // A dismissal writes no flow file at all, so this line is the ONLY evidence
+    // the question was seen and waved away rather than never shown.
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const consented = journal().filter((e) => e.kind === "consented");
+    expect(consented).toHaveLength(1);
+    expect(consented[0]).toMatchObject({ kind: "consented", answer: "dismissed", flow: "f1" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
   });
 
   it("does not ask a second time while its own question is still on screen", async () => {
@@ -9685,6 +9721,26 @@ describe("arm, disarm and reset", () => {
     expect(again.pendingResume).toHaveLength(1);
   });
 
+  it("journals arming and disarming, naming which gesture it was", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    await send({ type: "flow:arm", id: "f1", armed: false });
+    const armed = journal().filter((e) => e.kind === "armed");
+    expect(armed).toHaveLength(2);
+    expect(armed[0]).toMatchObject({ kind: "armed", armed: true, source: "toggle", flow: "f1" });
+    expect(armed[1]).toMatchObject({ kind: "armed", armed: false, source: "toggle", flow: "f1" });
+  });
+
+  it("does not journal an arm for a flow id that is not on disk", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    await send({ type: "flow:arm", id: "nope", armed: true });
+    expect(journal().filter((e) => e.kind === "armed")).toEqual([]);
+  });
+
   it("flow:resetEdge clears firedAt, firedNote and error for one edge only", async () => {
     setConfig({ orchestrator: true });
     h.flows = [{
@@ -9809,6 +9865,22 @@ describe("arm, disarm and reset", () => {
     // The user's own configuration is not dropped along with the mirror — a seed's
     // prompt mode lives on the edge and has nowhere else to go.
     expect(e.mode).toBe("implementation");
+  });
+
+  it("journals a Reset, which is the gesture that destroys the edge's receipt", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [
+        { id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you", error: "boom" },
+        { id: "e2", from: "a", to: "y", cond: { kind: "pr-merged" }, action: "notify", firedAt: 7 },
+      ],
+    }];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    const reset = journal().filter((e) => e.kind === "reset");
+    expect(reset).toHaveLength(1);
+    expect(reset[0]).toMatchObject({ kind: "reset", edge: "e1", flow: "f1" });
   });
 
   it("flow:resetEdge ignores an unknown flow id", async () => {
