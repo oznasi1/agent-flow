@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **All open Dependabot alerts cleared** (9 alerts: 1 critical, 4 high, 4 medium).
+  Every one was in the development toolchain, which `vsce package
+  --no-dependencies` never ships, so no installed build was affected. `vitest`
+  and `@vitest/coverage-v8` move 2.1 → 3.2 (the critical Vitest UI arbitrary
+  file read has no 2.x patch), which also carries `vite` to 6.4.3 and clears
+  three `vite` alerts; `esbuild` 0.20 → 0.25, `@playwright/test` and
+  `@playwright/experimental-ct-react` 1.49.1 → 1.55.1; and `js-yaml`,
+  `fast-uri`, `postcss` and `brace-expansion` move to their patched versions.
+  `npm audit` now reports zero vulnerabilities.
+
 ### Changed
 
 - **Long notepad notes stay scannable.** A note's detail is shown to four lines
