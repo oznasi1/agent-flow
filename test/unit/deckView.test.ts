@@ -205,6 +205,11 @@ const h = vi.hoisted(() => ({
   // Whatever logger the panel handed nodeLockIo, so a test can prove it passed one
   // and that it reaches the output channel.
   lockIoLog: undefined as ((m: string) => void) | undefined,
+  // Every journal line this pass wrote, in order. A recording fake rather than a
+  // spy on the module: the panel is meant to survive a journal that throws, and
+  // that is only testable if the IO itself is the thing under the test's control.
+  journalLines: [] as string[],
+  journalThrows: false,
   discoverRepos: vi.fn((_root: string, _blocklist: string[]) => [] as ServiceRef[]),
   release: vi.fn(),
   // The launcher (Task 4), stubbed so no test opens a window or a worktree. The
@@ -416,12 +421,21 @@ vi.mock("../../src/engine/review/store", () => ({
 vi.mock("../../src/engine/repos", () => ({
   discoverRepos: (root: string, blocklist: string[]) => h.discoverRepos(root, blocklist),
 }));
-vi.mock("../../src/engine/orchestrator/store", () => ({
-  defaultFlowsDir: () => "/flows",
-  readFlows: () => h.readFlows(),
-  writeFlow: h.writeFlow,
-  removeFlow: h.removeFlow,
-}));
+vi.mock("../../src/engine/orchestrator/store", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/engine/orchestrator/store")>();
+  return {
+    defaultFlowsDir: () => "/flows",
+    readFlows: () => h.readFlows(),
+    writeFlow: h.writeFlow,
+    removeFlow: h.removeFlow,
+    // `journal.ts` turns a flow id straight into a path and checks it against the
+    // SAME charset regex `fileFor` uses, from this module. It is re-exported real
+    // rather than restated, because a second copy of that rule here could drift
+    // from the one the store enforces — and it is not stubbed at all, since a
+    // journal path is derived, never read back through `h`.
+    VALID_FLOW_ID: actual.VALID_FLOW_ID,
+  };
+});
 // Partial mock: LOCK_TTL_MS and lockPath stay real (the panel passes the real TTL,
 // and a test asserting on it should not be asserting on a number this file made
 // up) — only the two side-effecting calls are replaced.
@@ -451,6 +465,15 @@ vi.mock("../../src/engine/orchestrator/flowIo", () => ({
   // the re-mint-on-collision path is reachable. A constant would make the retry
   // loop indistinguishable from a refusal.
   newFlowId: () => `fTEST-${++h.idSeq}`,
+  nodeJournalIo: () => ({
+    append: (_p: string, text: string) => {
+      if (h.journalThrows) throw new Error("ENOSPC");
+      h.journalLines.push(text.trimEnd());
+    },
+    size: () => null,
+    readFile: () => null,
+    replace: () => {},
+  }),
 }));
 // Partial mock: deckView.ts and everything it pulls in (engine/worktree,
 // engine/gitExclude, jsonc-parser's consumers, etc.) use far more of `fs` than
@@ -650,6 +673,9 @@ const posts = (p: ReturnType<typeof lastPanel>) => p.webview.postMessage.mock.ca
 const show = (authed = false, label = "Jira") => DeckPanel.show(fakeContext().context as any, fakeConnector(authed, label), () => {});
 const settled = () => new Promise<void>((r) => setTimeout(r, 0));
 
+/** The journal events this pass recorded, parsed. Order is write order. */
+const journal = () => h.journalLines.map((l) => JSON.parse(l) as Record<string, unknown>);
+
 /** The gh probe is kicked off inside the very tick that reads it, so it can
  * never be resolved by the time that same tick's `ghReady()` call returns —
  * a promise can't settle synchronously with the statement that created it.
@@ -783,6 +809,8 @@ beforeEach(() => {
   h.acquire.mockClear().mockReturnValue(true);
   h.renew.mockClear().mockReturnValue(true);
   h.lockIoLog = undefined;
+  h.journalLines = [];
+  h.journalThrows = false;
   h.discoverRepos.mockClear().mockImplementation(() => h.repos);
   h.release.mockClear();
   h.launchPlanned.mockClear().mockImplementation(
@@ -6898,6 +6926,114 @@ describe("a met launch rule acts", () => {
     expect(posts(p).some((m) => m.type === "toast" && /PROJ-12/.test(m.message ?? ""))).toBe(true);
   });
 
+  it("journals a fired rule with the verb evaluation decided, after the flow is written", async () => {
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const fired = journal().filter((e) => e.kind === "fired");
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({ kind: "fired", action: "launch", edge: "e1", from: "n1", to: "n2" });
+    expect(fired[0].note).toEqual(expect.stringContaining("launched"));
+  });
+
+  it("journals the promotion alongside the rule that caused it", async () => {
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const promoted = journal().filter((e) => e.kind === "promoted");
+    expect(promoted).toHaveLength(1);
+    expect(promoted[0]).toMatchObject({ kind: "promoted", node: "n2" });
+  });
+
+  it("journals a failed launch as errored, carrying the reason the edge was latched with", async () => {
+    h.launchPlanned.mockResolvedValue({ ok: false, message: "Couldn't create a git worktree in aws-ops" });
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const errored = journal().filter((e) => e.kind === "errored");
+    expect(errored).toHaveLength(1);
+    expect(errored[0]).toMatchObject({ kind: "errored", action: "launch", edge: "e1" });
+    expect(errored[0].error).toBeTruthy();
+    expect(journal().some((e) => e.kind === "fired")).toBe(false);
+  });
+
+  it("journals nothing at all for a pass in which no rule was decided", async () => {
+    h.getDetail.mockRejectedValue(new Error("Jira said 503"));
+    const { send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        {
+          id: "n3", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-13", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.getDetail).toHaveBeenCalledTimes(2); // both rules really were attempted
+    expect(journal().filter((e) => ["fired", "errored", "promoted"].includes(e.kind as string))).toEqual([]);
+  });
+
+  it("keeps firing when the journal itself is broken — a lost record is not a lost deploy", async () => {
+    h.journalThrows = true;
+    const log = vi.fn();
+    const { send } = await warmed([launchFlow()], log);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalled();
+    expect(lastWrite().edges[0].firedAt).toBeTypeOf("number");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("flow journal unavailable"));
+  });
+
+  it("says the journal is unavailable ONCE, not once per rule", async () => {
+    h.journalThrows = true;
+    const log = vi.fn();
+    const { send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        {
+          id: "n3", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-13", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch" },
+      ],
+    })], log);
+    await send({ type: "deck:refresh" });
+    // Both rules really did fire — otherwise "once" would be trivially true.
+    expect(h.launchPlanned).toHaveBeenCalledTimes(2);
+    const complaints = log.mock.calls.flat().filter((m) => String(m).includes("flow journal unavailable"));
+    expect(complaints).toHaveLength(1);
+  });
+
+  it("writes the flow BEFORE it journals, so a crash cannot invent an event", async () => {
+    // The harness has no `writeFlow` hook, so the ordering is recorded from the
+    // store mock itself. `h.journalLines` IS the journal fake's record, so how
+    // many lines it holds AT THE MOMENT OF THE WRITE is exactly how many events
+    // were journaled first — zero, or this pass invented an event the flow file
+    // has no stamp for. Moving the journal block above `writeFlow` makes this
+    // read "write after 3 journal lines".
+    const { send } = await warmed([launchFlow()]);
+    const order: string[] = [];
+    h.writeFlow.mockImplementation((_io: unknown, _dir: string, flow: Flow) => {
+      order.push(`write after ${h.journalLines.length} journal lines`);
+      const i = h.flows.findIndex((f) => f.id === flow.id);
+      h.flows = i >= 0 ? h.flows.map((f, idx) => (idx === i ? flow : f)) : [...h.flows, flow];
+    });
+    await send({ type: "deck:refresh" });
+    expect(order).toEqual(["write after 0 journal lines"]);
+    expect(h.journalLines.length).toBeGreaterThan(0); // and it did journal, after
+  });
+
   it("does not notify for a successful launch — the opened window already announces it", async () => {
     // A successful launch already announces itself by opening a window; a
     // notification on top would be noise. Assert the call COUNT is zero, not
@@ -8185,6 +8321,18 @@ describe("a met run rule acts", () => {
     });
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success" && /deploy\.sh staging/.test(m.message ?? ""))).toBe(true);
     expect(window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it("journals a run rule's command output, which the flow file has never carried", async () => {
+    const { send } = await warmed([cmdFlow()]);
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) => cb(null, "deploying to staging", ""));
+    await send({ type: "deck:refresh" });
+    // The edge itself carries only the one-sentence receipt — the output reached
+    // the output channel and nowhere else before the journal existed.
+    expect(lastWrite().edges[0].firedNote).not.toContain("deploying to staging");
+    const fired = journal().filter((e) => e.kind === "fired");
+    expect(fired).toHaveLength(1);
+    expect(fired[0].output).toEqual(expect.stringContaining("deploying to staging"));
   });
 
   it("stamps a rule pointing at an unknown node kind with what is wrong, not with 'undefined'", async () => {

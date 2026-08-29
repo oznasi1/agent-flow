@@ -8,7 +8,8 @@ import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
-import { nodeFlowIo, nodeLockIo, newFlowId } from "./engine/orchestrator/flowIo";
+import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
+import { appendEvent, truncateOutput, JournalEventInput } from "./engine/orchestrator/journal";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
 import { unfirableRules } from "./engine/orchestrator/armability";
@@ -338,6 +339,12 @@ interface EdgeDone {
   outcome: ActOutcome;
   promote?: { nodeId: string; runKey: string; repo: string };
   receipt?: { level: "success" | "error"; message: string };
+  /** A command's stdout+stderr, for the journal. `ActOutcome` cannot carry it:
+   * that type is what `applyFired` stamps onto the edge, and an edge receipt is
+   * one sentence by design. Before this field existed the output reached the
+   * output channel and nowhere else, so it died with the window — which is the
+   * whole reason the journal exists. Only a `run` sets it. */
+  output?: string;
 }
 
 /** What acting on one edge can answer: it happened (or deterministically cannot), or
@@ -521,6 +528,12 @@ export class DeckPanel {
    * directly so this initializer cannot depend on whether TypeScript assigns
    * constructor parameter properties before or after field initializers. */
   private readonly lockIo = nodeLockIo((m) => this.log(m));
+  private readonly journalIo = nodeJournalIo();
+  /** Whether the journal has already failed once this session. The complaint is
+   * worth making, but a broken journal fails on every event of every pass — six
+   * seconds apart, forever — and an output channel full of one repeated line is
+   * how the useful lines get lost. */
+  private journalFailed = false;
   /** Is a flows pass running right now? One at a time per panel: a pass releases the
    * flows-directory lock BEFORE it ever asks a spend-confirmation modal (asking
    * performs nothing, so there is nothing left to hold the lock for), which means the
@@ -783,6 +796,23 @@ export class DeckPanel {
     }
   }
 
+  /** Record one event, and NEVER throw. The journal observes a pass; it does not
+   * participate in one. A full disk, a permissions error or a bug in the trim
+   * must not stop a deploy rule from firing — a missing line is a lost record, an
+   * aborted pass is a lost deploy, and only one of those is recoverable by
+   * looking again in six seconds. */
+  private journal(flowId: string, ev: JournalEventInput, nowMs: number): void {
+    try {
+      appendEvent(this.journalIo, this.flowsDir, flowId, ev, nowMs);
+    } catch (e) {
+      if (this.journalFailed) return;
+      this.journalFailed = true;
+      this.log(
+        `deck: flow journal unavailable — ${(e as Error).message}. Flows keep running; their history is not being recorded.`,
+      );
+    }
+  }
+
   /** The body of a pass, with the lock held. Returns the flows that need the user's
    * consent before they can ever spend anything — the caller asks once the lock is
    * released. Split out so the lock's `try`/`finally` above stays readable, and so
@@ -989,6 +1019,10 @@ export class DeckPanel {
         // spec's Known limitations, alongside `openWorkspace`'s equally-unrecorded
         // `writeRun` failure.
         const outcomes = new Map<string, ActOutcome>();
+        // Kept separate from `outcomes` rather than folded into it: `outcomes` is
+        // what `applyFired` stamps onto the edge, and an edge receipt is one
+        // sentence. The output is for the journal alone.
+        const outputs = new Map<string, string>();
         const promotions: { nodeId: string; runKey: string; repo: string }[] = [];
         const receipts: { level: "success" | "error"; message: string }[] = [];
         // The junction targets of rules that could not even be DECIDED this pass.
@@ -1101,6 +1135,9 @@ export class DeckPanel {
             continue;
           }
           outcomes.set(f.edge.id, done.outcome);
+          if (done.output !== undefined && done.output.length > 0) {
+            outputs.set(f.edge.id, truncateOutput(done.output));
+          }
           if (done.promote) promotions.push(done.promote);
           if (done.receipt) receipts.push(done.receipt);
         }
@@ -1162,6 +1199,35 @@ export class DeckPanel {
         // planned work, and those stamps belong to this pass, not to a later read.
         for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo, nowMs);
         writeFlow(this.flowIo, this.flowsDir, next);
+        // AFTER the write, never before. A crash in between loses a line rather
+        // than inventing an event the flow file has no stamp for — the same
+        // direction as this loop's act-then-record trade-off above. A missing
+        // line is visibly missing; a false one is not.
+        //
+        // Read off `next` (what was actually written) but keyed by `stamping`,
+        // and the verb comes from `f.action` — the action EVALUATION decided —
+        // never from `e.action`, for the reason `applyFired` gives: a concurrent
+        // edit can make the two disagree, and the journal must say what ran.
+        for (const f of stamping) {
+          const e = next.edges.find((x) => x.id === f.edge.id);
+          if (!e) continue;
+          const output = outputs.get(f.edge.id);
+          const action = f.action ?? "unknown";
+          if (e.error !== undefined) {
+            this.journal(flow.id, {
+              kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error,
+              ...(output === undefined ? {} : { output }),
+            }, nowMs);
+          } else if (e.firedAt !== undefined) {
+            this.journal(flow.id, {
+              kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "",
+              ...(output === undefined ? {} : { output }),
+            }, nowMs);
+          }
+        }
+        for (const p of promotions) {
+          this.journal(flow.id, { kind: "promoted", node: p.nodeId, runKey: p.runKey, repo: p.repo }, nowMs);
+        }
         // After the write, and computed from `next` AFTER the promotions: a
         // promotion settles the rules that pointed at the node as planned work,
         // so a flow can reach its end through one. The model has no terminal
@@ -1687,6 +1753,7 @@ export class DeckPanel {
         kind: "done",
         outcome: { ok: false, error: outcome.message },
         receipt: { level: "error", message },
+        output: outcome.output,
       };
     }
     return {
@@ -1696,6 +1763,7 @@ export class DeckPanel {
       // place, so there is nothing to promote — the same as a seed.
       outcome: { ok: true, note: `ran ${outcome.label} in ${where.repo}` },
       receipt: { level: "success", message: `${flow.name}: ran ${outcome.label} in ${where.repo}.` },
+      output: outcome.output,
     };
   }
 
