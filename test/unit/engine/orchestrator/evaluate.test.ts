@@ -552,6 +552,14 @@ describe("evaluateFlow — a gate", () => {
   });
 
   it("fires a gate-approved rule once the gate is approved", () => {
+    // Also pins the gate interception's POSITION in `isMet`, not just its
+    // existence: move it below the `isPlace` guard and this goes red, because
+    // a gate node fails `isPlace` and the guard returns `undefined` before the
+    // interception is ever reached — the fired edge disappears. (A dedicated
+    // "never reports a gate source as gone" test tried to cover that ordering
+    // risk directly and was deleted: a gate can never reach the `isPlace` ===
+    // false branch's `note(..., "gone")` call in any ordering, so it could not
+    // fail no matter where the interception sat.)
     const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
       [asked({ gateAnswer: "approved" }), edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
     expect(run(flow, [status("PROJ-1")]).fired.map((f) => f.edge.id)).toEqual(["e2"]);
@@ -616,14 +624,6 @@ describe("evaluateFlow — a gate", () => {
       [asked(), edge("e2", "g", "y", { cond: { kind: "gate-approved" } }),
        edge("e3", "g", "z", { cond: { kind: "gate-rejected" } })]);
     expect(run(flow, [status("PROJ-1")]).blocked).toEqual([{ nodeId: "g", reason: "awaiting-answer" }]);
-  });
-
-  it("never reports a gate source as gone", () => {
-    // The interception must happen BEFORE the place/status lookup, or a gate
-    // source — which has no runKey to find — is reported as a missing card.
-    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
-      [asked({ gateAnswer: "approved" }), edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
-    expect(run(flow, [status("PROJ-1")]).blocked.some((b) => b.reason === "gone")).toBe(false);
   });
 
   it("never spends a launch slot on an ask", () => {
