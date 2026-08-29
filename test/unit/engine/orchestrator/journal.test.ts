@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   JournalIo, journalPath, createIdMinter, appendEvent, readJournal,
+  truncateOutput, JOURNAL_CAP_BYTES, OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES,
 } from "../../../../src/engine/orchestrator/journal";
 
 /** An in-memory JournalIo. `files` is the whole store. */
@@ -134,5 +135,87 @@ describe("appendEvent / readJournal", () => {
   it("refuses to append under an id that would escape the directory", () => {
     const { io } = fakeIo();
     expect(() => appendEvent(io, DIR, "../../.zshrc", { kind: "reset", edge: "e1" }, 1_000)).toThrow(/invalid flow id/);
+  });
+});
+
+describe("truncateOutput", () => {
+  it("leaves an output that fits alone, with no marker", () => {
+    const s = "deploying\nok\n";
+    expect(truncateOutput(s)).toBe(s);
+    expect(truncateOutput(s)).not.toContain("elided");
+  });
+
+  it("keeps the head and the tail and states how much went missing", () => {
+    const head = "H".repeat(OUTPUT_HEAD_BYTES);
+    const middle = "M".repeat(5_000);
+    const tail = "T".repeat(OUTPUT_TAIL_BYTES);
+    const out = truncateOutput(head + middle + tail);
+
+    // The banner that says which command ran survives...
+    expect(out.startsWith(head)).toBe(true);
+    // ...and so does the stack trace at the end, which is what you actually read.
+    expect(out.endsWith(tail)).toBe(true);
+    expect(out).toContain("5000 bytes elided");
+    expect(out).not.toContain("M");
+  });
+
+  it("is shorter than what it truncated, so the cap is actually defended", () => {
+    const huge = "x".repeat(500_000);
+    expect(truncateOutput(huge).length).toBeLessThan(huge.length);
+    expect(truncateOutput(huge).length).toBeLessThan(OUTPUT_HEAD_BYTES + OUTPUT_TAIL_BYTES + 100);
+  });
+});
+
+describe("the journal's byte cap", () => {
+  /** One event whose serialised line is a known, large size. */
+  const bigEvent = (edge: string) => ({ kind: "reset" as const, edge: edge + "p".repeat(10_000) });
+
+  it("stays under the cap once it starts trimming", () => {
+    const { io, files } = fakeIo();
+    for (let i = 0; i < 200; i++) appendEvent(io, DIR, "f1", bigEvent(`e${i}`), 1_000 + i);
+    expect(files[journalPath(DIR, "f1")].length).toBeLessThanOrEqual(JOURNAL_CAP_BYTES);
+  });
+
+  it("evicts the OLDEST events, keeping the newest", () => {
+    const { io } = fakeIo();
+    for (let i = 0; i < 200; i++) appendEvent(io, DIR, "f1", bigEvent(`e${i}`), 1_000 + i);
+
+    const events = readJournal(io, DIR, "f1") as unknown as { edge: string }[];
+    expect(events.length).toBeGreaterThan(0);
+    expect(events.length).toBeLessThan(200);
+    // The most recent event is always present; the first is long gone.
+    expect(events[events.length - 1].edge).toContain("e199");
+    expect(events.some((e) => e.edge.startsWith("e0p"))).toBe(false);
+  });
+
+  it("never leaves a partial line at the front — every surviving line still reads", () => {
+    const { io, files } = fakeIo();
+    for (let i = 0; i < 200; i++) appendEvent(io, DIR, "f1", bigEvent(`e${i}`), 1_000 + i);
+
+    const raw = files[journalPath(DIR, "f1")];
+    const lines = raw.split("\n").filter((l) => l.length > 0);
+    // Nothing was dropped as unreadable: the trim cut on line boundaries only.
+    expect(readJournal(io, DIR, "f1")).toHaveLength(lines.length);
+  });
+
+  it("does not trim a journal that fits", () => {
+    const { io, files } = fakeIo();
+    appendEvent(io, DIR, "f1", { kind: "reset", edge: "e1" }, 1_000);
+    const afterFirst = files[journalPath(DIR, "f1")];
+    appendEvent(io, DIR, "f1", { kind: "reset", edge: "e2" }, 1_001);
+    // The first line is still there, byte for byte.
+    expect(files[journalPath(DIR, "f1")].startsWith(afterFirst)).toBe(true);
+  });
+
+  it("still writes a readable file when ONE event is bigger than the cap on its own", () => {
+    const { io } = fakeIo();
+    appendEvent(io, DIR, "f1", { kind: "reset", edge: "e1" }, 1_000);
+    appendEvent(io, DIR, "f1", { kind: "reset", edge: "z".repeat(JOURNAL_CAP_BYTES + 1_000) }, 1_001);
+
+    const events = readJournal(io, DIR, "f1") as unknown as { edge: string }[];
+    // The oversized line is kept rather than silently dropped — losing the event
+    // outright would be worse than exceeding the cap for one line.
+    expect(events).toHaveLength(1);
+    expect(events[0].edge.startsWith("z")).toBe(true);
   });
 });

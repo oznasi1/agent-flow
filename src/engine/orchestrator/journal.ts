@@ -23,6 +23,23 @@ export interface JournalIo {
   replace(p: string, text: string): void;
 }
 
+/** How large one flow's journal may grow. A `run` edge can emit output every six
+ * seconds and the journal deliberately OUTLIVES its flow (`removeFlow` deletes
+ * `<id>.json` only), so "append-only, forever" is a disk leak on an unattended
+ * machine. The trade-off is stated rather than hidden: a sufficiently chatty flow
+ * does lose its oldest history.
+ *
+ * Capped by BYTES rather than by line count because a single command output can
+ * be larger than a hundred ordinary events — a line cap would bound the wrong
+ * quantity and leave the real one unbounded. */
+export const JOURNAL_CAP_BYTES = 1_000_000;
+
+/** How much of a command's output each end of a truncated record keeps. The head
+ * carries which command actually ran; the tail carries the failure. The middle is
+ * what a person scrolls past. */
+export const OUTPUT_HEAD_BYTES = 4_000;
+export const OUTPUT_TAIL_BYTES = 4_000;
+
 /** What happened, without the fields every event gets. One member per thing a
  * pass can decide — including the three ways a rule can fail to fire, which are
  * the half of the story the flow file has never recorded at all. */
@@ -134,6 +151,49 @@ export function journalPath(dir: string, flowId: string): string {
   return path.join(dir, `${flowId}.log.jsonl`);
 }
 
+/** A command's stdout+stderr, cut to fit. Without this one verbose deploy evicts
+ * a flow's entire history under `JOURNAL_CAP_BYTES`, which would make the cap
+ * self-defeating: the point of trimming is to keep MORE history, not to spend it
+ * all on one run.
+ *
+ * The elision is explicit in the stored text so nobody mistakes a truncated log
+ * for a complete one and concludes the command printed nothing in between. */
+export function truncateOutput(s: string): string {
+  if (s.length <= OUTPUT_HEAD_BYTES + OUTPUT_TAIL_BYTES) return s;
+  const elided = s.length - OUTPUT_HEAD_BYTES - OUTPUT_TAIL_BYTES;
+  return `${s.slice(0, OUTPUT_HEAD_BYTES)}\n… ${elided} bytes elided …\n${s.slice(s.length - OUTPUT_TAIL_BYTES)}`;
+}
+
+/** Make room for `incoming` bytes by dropping WHOLE lines from the front.
+ *
+ * Whole lines only: half a JSON object at the head of the file is a line
+ * `readJournal` would skip anyway, so cutting mid-line would silently cost an
+ * extra event on top of the ones the cap already claims.
+ *
+ * `replace` rather than a truncating write, because it is atomic: a crash between
+ * emptying the file and refilling it would otherwise destroy the entire journal
+ * to save a few kilobytes.
+ *
+ * An incoming line larger than the cap ALL BY ITSELF empties the file and is then
+ * appended anyway. That is deliberate — exceeding the cap for one line is better
+ * than dropping an event on the floor, and the alternative (refusing the write)
+ * would silently lose exactly the enormous failure someone most wants to read. */
+function trimFor(io: JournalIo, p: string, incoming: number): void {
+  const size = io.size(p);
+  if (size === null || size + incoming <= JOURNAL_CAP_BYTES) return;
+  const text = io.readFile(p);
+  if (text === null) return;
+  const lines = text.split("\n").filter((l) => l.length > 0);
+  let bytes = lines.reduce((n, l) => n + l.length + 1, 0);
+  let first = 0;
+  while (first < lines.length && bytes + incoming > JOURNAL_CAP_BYTES) {
+    bytes -= lines[first].length + 1;
+    first += 1;
+  }
+  const kept = lines.slice(first);
+  io.replace(p, kept.length > 0 ? kept.join("\n") + "\n" : "");
+}
+
 function serialize(ev: Record<string, unknown>): string {
   const body = canonicalJson(ev);
   // Spliced in rather than added to the object, so `sum` is always last and the
@@ -155,6 +215,7 @@ export function appendEvent(
 ): void {
   const p = journalPath(dir, flowId);
   const line = serialize({ id: mint(nowMs), at: nowMs, flow: flowId, ...ev }) + "\n";
+  trimFor(io, p, line.length);
   io.append(p, line);
 }
 
