@@ -107,16 +107,30 @@ describe("compatibility surface (frozen)", () => {
     // inside configure(). Zero `update` calls is the only form of this assertion
     // that can fail for the right reason.
     const update = vi.fn(async () => undefined);
-    // Scoped with spyOn + onTestFinished, not a bare mockReturnValue: `clearMocks`
-    // clears call history but not implementations, so a replaced implementation is
+    // Scoped with onTestFinished, not a bare mockReturnValue: `clearMocks` clears
+    // call history but not implementations, so a replaced implementation is
     // otherwise only un-leaked by `resetVscodeMocks()`'s per-test restore over in
     // test/_setup.ts. Relying on that would make this file's isolation depend on a
     // distant setup file; `onTestFinished` restores even when an assertion throws,
     // so the stub cannot outlive this test by any path.
-    const configStub = vi
-      .spyOn(workspace, "getConfiguration")
-      .mockReturnValue({ get: vi.fn(() => ""), update, inspect: vi.fn(() => ({})) } as never);
-    onTestFinished(() => configStub.mockRestore());
+    //
+    // Restored by re-installing the implementation rather than with spyOn +
+    // mockRestore: `workspace.getConfiguration` is already a `vi.fn()`, and since
+    // vitest 3 `mockRestore()` on a spy over a mock unwraps to the raw underlying
+    // function instead of reinstating the mock. That leaves the shared vscode mock
+    // a plain function, and the NEXT test dies in `resetVscodeMocks()` on
+    // `getConfiguration.mockReset is not a function`.
+    const configStub = vi.mocked(workspace.getConfiguration);
+    const realConfig = configStub.getMockImplementation();
+    configStub.mockReturnValue({
+      get: vi.fn(() => ""),
+      update,
+      inspect: vi.fn(() => ({})),
+    } as never);
+    onTestFinished(() => {
+      configStub.mockReset();
+      if (realConfig) configStub.mockImplementation(realConfig);
+    });
     vi.mocked(window.showInputBox)
       .mockResolvedValueOnce("https://x.atlassian.net") // (1/3) site URL
       .mockResolvedValueOnce("ABC") // (2/3) project key
