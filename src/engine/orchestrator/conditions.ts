@@ -328,5 +328,19 @@ export function describeCond(cond: Condition, c: CondContext): string {
         "describeCond cannot describe command-succeeded: there is no place-shaped " +
           "observation for it. observationOf (orchestratorRule.ts) must keep refusing this kind.",
       );
+    case "gate-approved":
+    case "gate-rejected":
+      // Unreachable, deliberately, and for the same reason the arm above is: the
+      // verdict for a gate lives on the gate node's INCOMING edge (`gateAnswer`,
+      // model.ts), never in a `CondContext` built from one place's `RunStatus` —
+      // so this function has nothing it could read to answer from, regardless of
+      // what `c` holds. `observationOf` (orchestratorRule.ts) must refuse this
+      // kind before ever calling here, the same way it already refuses
+      // `command-succeeded`.
+      throw new Error(
+        "describeCond cannot describe gate-approved/gate-rejected: there is no " +
+          "CondContext-shaped observation for a gate. observationOf (orchestratorRule.ts) " +
+          "must refuse this kind the same way it refuses command-succeeded.",
+      );
   }
 }

@@ -82,6 +82,11 @@ const LABEL: Record<Condition["kind"], string> = {
   // can currently observe (see `evaluate.ts`'s `commandSucceeded`). Deliberately
   // absent from both `NEEDS_LIVE` and `NEEDS_PR` below for that reason.
   "command-succeeded": "the command succeeded",
+  // Same reason and same absence from NEEDS_LIVE/NEEDS_PR below as
+  // command-succeeded above: a gate's verdict comes from its own incoming
+  // edge (`gateAnswer`), not from any toggleable signal.
+  "gate-approved": "you approved",
+  "gate-rejected": "you rejected",
 };
 
 export function unfirableRules(flow: Flow, sources: SourceState): UnfirableRule[] {

@@ -58,6 +58,11 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   // branch a given rule is about; a `Record` keyed by kind cannot.
   "branch-ci-passed": "branch CI passed…",
   "command-succeeded": "the command succeeded",
+  // No trailing ellipsis: both are bare, and the ellipsis in this list means
+  // "carries a parameter". Second person on purpose — a gate is the one
+  // condition about something YOU did rather than something the world did.
+  "gate-approved": "you approved",
+  "gate-rejected": "you rejected",
 };
 
 /** Every condition kind that carries a parameter, and so needs a seed value the
@@ -221,6 +226,7 @@ export const ACTION_LABEL: Record<FlowAction, string> = {
   seed: "seed",
   notify: "Notify me in VS Code",
   run: "run",
+  ask: "Ask me to approve",
 };
 
 /** How a launch destination reads as words — the closed row's own text and
@@ -487,7 +493,15 @@ export function observationOf(
   // `describeCond`'s matching arm, which throws — see that arm's own doc
   // comment for why throwing there is the right failure mode as long as this
   // guard keeps it unreachable.
-  if (e.cond.kind === "command-succeeded") return null;
+  //
+  // `gate-approved`/`gate-rejected` join it here for the identical reason: a
+  // gate's verdict lives on its own incoming edge (`gateAnswer`, model.ts), not
+  // in a place-shaped `CondContext`, so `describeCond`'s matching arms throw too
+  // — this guard is what keeps them unreachable, same as it always has for
+  // `command-succeeded`.
+  if (e.cond.kind === "command-succeeded" || e.cond.kind === "gate-approved" || e.cond.kind === "gate-rejected") {
+    return null;
+  }
   const from = flow.nodes.find((n) => n.id === e.from);
   if (!from || from.kind !== "place") return null;
   const status = runs.find((r) => r.run.key === from.runKey);
