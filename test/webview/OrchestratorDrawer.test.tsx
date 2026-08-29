@@ -4,7 +4,7 @@ import * as React from "react";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { ORCH_ANIM_MS, ORCH_CSS, ORCH_EDGE_PAINT_DY } from "../../src/webview/orchestratorStyles";
-import type { Flow } from "../../src/engine/orchestrator/model";
+import type { Flow, FlowEdge } from "../../src/engine/orchestrator/model";
 // The real store, so the "a new wire is never latched" test below is answered by
 // the migration itself rather than by this file restating its rule. Its io is
 // injected (see `FlowIo`), so importing it here costs no temp directory.
@@ -21,7 +21,7 @@ import {
   DEFAULT_IDLE_MINUTES,
   INSPECTOR_NONE,
 } from "../../src/webview/orchestratorRule";
-import { anchor, edgePath, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
+import { anchor, edgePath, GATE_H, GRID, labelPoint, NODE_H, NODE_W } from "../../src/engine/orchestrator/layout";
 import type { PrEntryMap, RunStatus } from "../../src/types";
 import { CondParams } from "../../src/webview/CondParams";
 
@@ -3980,5 +3980,123 @@ describe("a command node's checkout", () => {
     const sel = screen.getByLabelText("Repo for deploy-staging") as HTMLSelectElement;
     expect(sel.value).toBe("infra");
     expect(sel.selectedOptions[0].textContent).toContain("not on the board");
+  });
+});
+
+describe("a gate node on the canvas", () => {
+  // `from: "a"` names no node in this fixture — deliberately: `gateStateOf`
+  // reads the performer edge by `to`/`performed`/`firedAt` alone, and never
+  // touches `from`, so a source that does not exist on the board must not
+  // stop the gate from rendering its own state.
+  const gateFlow = (over: Partial<FlowEdge> = {}): Flow =>
+    flow({
+      armed: true,
+      nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?" }],
+      edges: [{ id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" }, action: "ask", ...over }],
+    });
+
+  it("offers Approve and Reject once the question has been asked", async () => {
+    // Scoped to the canvas node itself: the shared "Actions" tray (actionsSection)
+    // renders alongside the graph in canvas view too and now offers the identical
+    // pair of buttons — by design, since it is the List's own route to them — so
+    // an unscoped query here would find two matching buttons, not one.
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true })] })} />);
+    const node = within(screen.getByTestId("orch-node-g"));
+    await waitFor(() => expect(node.getByRole("button", { name: /Approve deploy to prod\?/ })).toBeTruthy());
+    expect(node.getByRole("button", { name: /Reject deploy to prod\?/ })).toBeTruthy();
+  });
+
+  it("offers neither before the question has been asked", () => {
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow()] })} />);
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+    // Paired with a positive assertion so this cannot pass by rendering nothing
+    // at all: the node itself, and its still-a-question body, are on screen.
+    expect(screen.getByTestId("orch-node-g").textContent).toContain("deploy to prod?");
+  });
+
+  it("offers neither once it is answered", () => {
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true, gateAnswer: "approved" })] })} />);
+    expect(screen.queryByRole("button", { name: /Approve/ })).toBeNull();
+    expect(screen.getByTestId("orch-node-g").textContent).toContain("approved");
+  });
+
+  it("sends the answer against the performer edge", async () => {
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true })] })} />);
+    const node = within(screen.getByTestId("orch-node-g"));
+    fireEvent.click(await node.findByRole("button", { name: /Approve deploy to prod\?/ }));
+    // `send`, not a captured prop: this is the same mock every other message
+    // assertion in this file reads (see the `flow:addPlanned` tests above),
+    // and `clearMocks` (vitest.config.ts) resets it between tests.
+    await waitFor(() => expect(send).toHaveBeenCalledWith(
+      { type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" }));
+  });
+
+  it("does not let a press on a button start a node drag", () => {
+    // jsdom cannot prove the real drag gesture (see this suite's own note on
+    // drag) — the true check is Task 8's editor window. But `ev.cancelBubble`
+    // is the wrong proxy here: measured directly, React 18 never mirrors a
+    // synthetic `stopPropagation()` onto the native event it wraps, so that
+    // assertion is false regardless of whether the handler ran (confirmed
+    // against a minimal repro). What IS observable under jsdom is the
+    // consequence `startDrag` would have: it calls `selectNode` SYNCHRONOUSLY,
+    // which is what puts the `sel` class on the node. A press that reaches it
+    // would select — and thus visibly start dragging — the node the button
+    // sits on; stopPropagation is what keeps that from happening at all.
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true })] })} />);
+    const nodeEl = screen.getByTestId("orch-node-g");
+    const btn = within(nodeEl).getByRole("button", { name: /Approve deploy to prod\?/ });
+    fireEvent.pointerDown(btn);
+    expect(nodeEl.className).not.toContain("sel");
+  });
+
+  it("names a gate in the List row instead of calling it a command", () => {
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow()] })} />);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    const tray = screen.getByTestId("orch-actions");
+    expect(within(tray).getByText("gate")).toBeTruthy();
+    expect(tray.textContent).not.toContain("runs a command");
+  });
+
+  // Guards the wire-misses-its-port defect Task 5 could not test: `boxOf`
+  // switches height per kind (`GATE_H` for a gate, `NODE_H` for everything
+  // else), and `anchor` reads that height straight into the "in" side's y —
+  // so a reverted ternary shows up only in where the wire actually lands.
+  // jsdom does not lay out, so this pins the SVG path's `d`, computed from the
+  // SAME layout functions the component calls, exactly the way the existing
+  // "pins the connector's geometry" test above does for an ordinary node.
+  it("anchors a wire into a gate at the gate's real height, and leaves an ordinary node's anchor alone", () => {
+    const toGate = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+        { id: "g", kind: "gate", x: 320, y: 24, join: "any", question: "ok?" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "g", cond: { kind: "pr-merged" } }],
+    });
+    const fromBox = { x: 24, y: 24, w: NODE_W, h: NODE_H };
+    const gateBox = { x: 320, y: 24, w: NODE_W, h: GATE_H };
+    const expectedGatePath = edgePath(anchor(fromBox, "out"), anchor(gateBox, "in"));
+    // What the SAME edge would render as if `boxOf` fell back to the bare
+    // `NODE_H` a reverted ternary would produce — the mutant this test exists
+    // to catch, computed rather than guessed at.
+    const revertedBox = { x: 320, y: 24, w: NODE_W, h: NODE_H };
+    const revertedPath = edgePath(anchor(fromBox, "out"), anchor(revertedBox, "in"));
+    expect(revertedPath).not.toBe(expectedGatePath); // the fixture must actually distinguish the two
+
+    const { container } = render(<OrchestratorDrawer {...props({ flows: [toGate] })} />);
+    const path = container.querySelector("svg path");
+    expect(path?.getAttribute("d")).toBe(expectedGatePath);
+    expect(path?.getAttribute("d")).not.toBe(revertedPath);
+  });
+});
+
+describe("GATE_H and the stylesheet must agree", () => {
+  // The entire defect this constant exists to avoid: the SVG anchors edges at
+  // GATE_H/2 while the CSS port sits at 50% of the node's REAL rendered
+  // height. `orchestratorStyles.ts` exports its sheet as a plain string, so
+  // this reads the actual rule rather than restating the number a second
+  // time — a future edit to either GATE_H or the CSS rule alone, without the
+  // other, fails this.
+  it("gives .orch-node.gate the exact height GATE_H names", () => {
+    expect(ORCH_CSS).toContain(`.orch-node.gate { height: ${GATE_H}px; }`);
   });
 });

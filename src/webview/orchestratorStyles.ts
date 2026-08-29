@@ -317,6 +317,22 @@ export const ORCH_CSS = `
      chrome entirely. */
   .orch-node.plan { border-style: dashed; background: transparent; }
   .orch-node.notify { width: 138px; border-radius: 16px; }
+  /* A gate is the one node that carries a control, so it is the one node taller
+     than NODE_H. The height is fixed rather than content-driven and MUST match
+     GATE_H (layout.ts): edges anchor through boxOf at GATE_H/2, and a node that
+     rendered at a different height would show its wire missing its own port. */
+  .orch-node.gate { height: 70px; }
+  .orch-node .gbtns { display: flex; gap: 5px; margin-top: 6px; }
+  .orch-node .gbtn { flex: 1; height: 18px; border-radius: var(--r-chip);
+    border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);
+    font-size: var(--t-micro); cursor: pointer; font-family: inherit; line-height: 1; }
+  /* --c-done, not --brand: this is a STATE, and tokens.test.ts asserts set
+     equality over each stylesheet's --brand rules, so a new brand rule would
+     fail that gate until registered. Reject takes the neutral edge — grey, not
+     --c-danger, because a rejection is your decision and not a failure. */
+  .orch-node .gbtn.ok { border-color: color-mix(in srgb, var(--c-done) 55%, transparent);
+    color: var(--c-done); }
+  .orch-node .gbtn:hover { background: var(--vscode-toolbar-hoverBackground); }
   .orch-node .l1 { display: flex; align-items: center; gap: 6px; }
   .orch-node .l1 .d { width: 6px; height: 6px; border-radius: 50%; flex: none; }
   .orch-node .k { font-family: var(--mono); font-size: var(--t-data); }

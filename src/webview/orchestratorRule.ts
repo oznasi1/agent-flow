@@ -215,6 +215,7 @@ export const NODE_KIND_LABEL: Partial<Record<string, string>> = {
   planned: "Planned",
   notify: "Notify",
   command: "Command",
+  gate: "Gate",
 };
 
 /** The verb (and, for `notify`, the whole rest of the clause) a rule's action
@@ -811,6 +812,12 @@ export function withNodeNotifyMessage(flow: Flow, nodeId: string, message: strin
     ...flow,
     nodes: flow.nodes.map((n) => (n.id === nodeId && n.kind === "notify" ? { ...n, message } : n)),
   };
+}
+
+/** The question a gate asks. The same shape as `withNodeNotifyMessage` — a node
+ * builder that rewrites one field and leaves the rest of the flow alone. */
+export function withNodeGateQuestion(flow: Flow, id: string, question: string): Flow {
+  return { ...flow, nodes: flow.nodes.map((n) => (n.id === id && n.kind === "gate" ? { ...n, question } : n)) };
 }
 
 /** Which repo's checkout a command node runs in. `""` CLEARS the field rather
