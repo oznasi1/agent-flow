@@ -1005,6 +1005,16 @@ export class DeckPanel {
           // is answered. A pass that asked performs nothing anyway, so nothing is
           // delayed by more than a poll — and two modals stacked from one pass would
           // be a worse way to meet a flow.
+          // The question is the only thing that happened this pass, and it is the
+          // one event the flow file cannot record: consent lands on a flow-level
+          // field only if the user says yes, so an unanswered ask leaves no trace
+          // at all. "It never fired and never asked" and "it asked and nobody
+          // answered" are different problems.
+          this.journal(fresh.id, {
+            kind: "consent-asked",
+            action: wantsSpend.action,
+            target: wantsSpend.node.id,
+          }, nowMs);
           asks.push({ flow: fresh, target: wantsSpend });
           continue;
         }
@@ -1044,6 +1054,7 @@ export class DeckPanel {
           // out of existence.
           if (lostLock) {
             deferredTargets.add(f.edge.to);
+            this.journal(flow.id, { kind: "skipped", edge: f.edge.id, reason: "lock-lost" }, nowMs);
             continue;
           }
           // A stamped-only sibling performs nothing, and a notify's whole action is
@@ -1060,6 +1071,10 @@ export class DeckPanel {
           const stillArmed = readFlows(this.flowIo, this.flowsDir).find((fl) => fl.id === flow.id)?.armed;
           if (!stillArmed) {
             this.log(`deck: flow ${flow.id} rule ${f.edge.id} skipped — disarmed mid-pass`);
+            // OUTSIDE the `skipReported` guard below: the log line and the
+            // telemetry event are per flow, but a skip is per rule, and the
+            // journal is the only record of WHICH rules were left pending.
+            this.journal(flow.id, { kind: "skipped", edge: f.edge.id, reason: "disarmed-mid-pass" }, nowMs);
             if (!skipReported) {
               skipReported = true;
               // Not a gesture in this window: something else — the other window's
@@ -1125,12 +1140,17 @@ export class DeckPanel {
               `deck: flow ${flow.id} rule ${f.edge.id} was the last step of this pass — the flows lock was lost (reaped past its ${LOCK_TTL_MS} ms TTL); another window may be advancing now, so nothing further is performed`,
             );
             lostLock = true;
+            // The edge that WAS the last step, matching what the log line above
+            // says. Every edge after it is skipped by the `if (lostLock)` guard
+            // at the top of the loop, which journals its own line.
+            this.journal(flow.id, { kind: "skipped", edge: f.edge.id, reason: "lock-lost" }, nowMs);
           }
           if (done.kind === "defer") {
             // The log, and nothing else: a transient read failure on an unattended
             // flow is not worth a notification, but a rule quietly not advancing is
             // invisible without this.
             this.log(`deck: flow ${flow.id} rule ${f.edge.id} deferred — ${done.reason}`);
+            this.journal(flow.id, { kind: "deferred", edge: f.edge.id, reason: done.reason }, nowMs);
             deferredTargets.add(f.edge.to);
             continue;
           }

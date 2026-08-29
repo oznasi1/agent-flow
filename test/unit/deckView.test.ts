@@ -588,6 +588,9 @@ import {
 import { COMMAND_TIMEOUT_MS } from "../../src/engine/orchestrator/command";
 // The real constant, through the partial mock above (which spreads the actual module):
 // a test that restated the number could not catch the call site passing a literal.
+// The real thresholds `truncateOutput` elides at — restating them here could not
+// catch the call site dropping the call.
+import { OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES } from "../../src/engine/orchestrator/journal";
 import { LOCK_TTL_MS } from "../../src/engine/orchestrator/lock";
 import { ACTION_MISMATCH_PREFIX } from "../../src/engine/orchestrator/model";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
@@ -6804,6 +6807,16 @@ describe("a met launch rule acts", () => {
     expect(window.showWarningMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("journals the question a pass asked instead of spending", async () => {
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const asked = journal().filter((e) => e.kind === "consent-asked");
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ kind: "consent-asked", action: "launch", target: "n2" });
+    // A pass that asks performs nothing, so it must claim nothing.
+    expect(journal().some((e) => e.kind === "fired")).toBe(false);
+  });
+
   it("includes the edge's note in the spend confirmation when one is set", async () => {
     const note = "Careful: this repo has a flaky test suite.";
     const { send } = await warmed([launchFlow({
@@ -6986,6 +6999,9 @@ describe("a met launch rule acts", () => {
     expect(h.launchPlanned).toHaveBeenCalled();
     expect(lastWrite().edges[0].firedAt).toBeTypeOf("number");
     expect(log).toHaveBeenCalledWith(expect.stringContaining("flow journal unavailable"));
+    // The IO's OWN message, not merely that something complained: a journal never
+    // called at all would satisfy the line above.
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("ENOSPC"));
   });
 
   it("says the journal is unavailable ONCE, not once per rule", async () => {
@@ -7013,6 +7029,8 @@ describe("a met launch rule acts", () => {
     expect(h.launchPlanned).toHaveBeenCalledTimes(2);
     const complaints = log.mock.calls.flat().filter((m) => String(m).includes("flow journal unavailable"));
     expect(complaints).toHaveLength(1);
+    // And it carries what actually failed, not a generic apology.
+    expect(complaints[0]).toEqual(expect.stringContaining("ENOSPC"));
   });
 
   it("writes the flow BEFORE it journals, so a crash cannot invent an event", async () => {
@@ -7217,6 +7235,31 @@ describe("a met launch rule acts", () => {
     expect(deferredEdge.firedAt).toBeUndefined();
     expect(deferredEdge.error).toBeUndefined();
     expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/the migration has landed/));
+  });
+
+  it("journals a deferred rule with the reason, so a silently-stalled flow is diagnosable", async () => {
+    // Same fixture as the case above: e1's Jira read fails, so it defers, while the
+    // notify beside it decides normally.
+    h.getDetail.mockRejectedValue(new Error("Jira said 503"));
+    const { send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "notify" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    const deferred = journal().filter((e) => e.kind === "deferred");
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0]).toMatchObject({ kind: "deferred", edge: "e1" });
+    expect(deferred[0].reason).toBeTruthy();
   });
 
   it("never routes a seed rule through the launcher — see \"a met seed rule acts\" below for its own path", async () => {
@@ -7508,6 +7551,37 @@ describe("a met launch rule acts", () => {
     h.launchPlanned.mockClear();
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("journals a rule skipped because the flow was disarmed mid-pass", async () => {
+    // The fixture above, exactly: three acting rules, and the first launch disarms
+    // the flow from under the pass.
+    const many = (): Flow => ({
+      ...launchFlow(),
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        ...[1, 2, 3].map((i) => ({
+          id: `p${i}`, kind: "planned" as const, x: 0, y: 0, join: "any" as const,
+          ticketKey: `PROJ-2${i}`, repos: ["aws-ops"], mode: "implementation", dest: "worktree" as const,
+        })),
+      ],
+      edges: [1, 2, 3].map((i) => ({
+        id: `e${i}`, from: "n1", to: `p${i}`, cond: { kind: "pr-merged" as const }, action: "launch" as const,
+      })),
+    });
+    const { send } = await warmed([many()]);
+    h.launchPlanned.mockClear().mockImplementation(async (req: { node: { ticketKey: string; repos: string[] } }) => {
+      h.flows = h.flows.map((f) => ({ ...f, armed: false }));
+      return { ok: true, runKey: req.node.ticketKey, repo: req.node.repos[0] };
+    });
+    await send({ type: "deck:refresh" });
+    // BOTH rules the single Disarm left pending, not one: the log line and the
+    // telemetry event are per flow (one disarm happened), but a skip is per rule,
+    // and which rules were left pending is the fact only the journal carries.
+    const skipped = journal().filter((e) => e.kind === "skipped");
+    expect(skipped).toHaveLength(2);
+    expect(skipped.every((e) => e.kind === "skipped" && e.reason === "disarmed-mid-pass")).toBe(true);
+    expect(skipped.map((e) => e.edge)).toEqual(["e2", "e3"]);
   });
 
   it("a concurrent flow:resetEdge on another edge survives this pass's write", async () => {
@@ -8335,6 +8409,34 @@ describe("a met run rule acts", () => {
     expect(fired[0].output).toEqual(expect.stringContaining("deploying to staging"));
   });
 
+  it("journals a FAILED command's output — the whole reason this record exists", async () => {
+    // The headline case: a 2am deploy that failed, Reset the next morning, and the
+    // only evidence of what went wrong was a line in an output channel nobody kept.
+    // The edge's own stamp carries a one-sentence receipt and nothing else.
+    failsWith(2, 'psql: FATAL: role "deployer" does not exist');
+    const { send } = await warmed([cmdFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(lastWrite().edges[0].error).not.toContain("deployer");
+    const errored = journal().filter((e) => e.kind === "errored");
+    expect(errored).toHaveLength(1);
+    expect(errored[0].output).toEqual(expect.stringContaining('role "deployer" does not exist'));
+  });
+
+  it("elides the middle of an enormous command output rather than journalling all of it", async () => {
+    // Over the head+tail budget, so `truncateOutput` actually has something to do —
+    // an ordinary deploy's output is far under it, which is why every other case
+    // here passes with the call removed.
+    const huge = "x".repeat(OUTPUT_HEAD_BYTES + OUTPUT_TAIL_BYTES + 5_000);
+    const { send } = await warmed([cmdFlow()]);
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) => cb(null, huge, ""));
+    await send({ type: "deck:refresh" });
+    const fired = journal().filter((e) => e.kind === "fired");
+    expect(fired).toHaveLength(1);
+    const output = fired[0].output as string;
+    expect(output).toContain("bytes elided");
+    expect(output.length).toBeLessThan(huge.length);
+  });
+
   it("stamps a rule pointing at an unknown node kind with what is wrong, not with 'undefined'", async () => {
     // End to end for the arm `applyFired` now owns: `validNode` admits an unknown
     // kind on purpose (a newer build's flow must still render), nothing derives a
@@ -8825,6 +8927,24 @@ describe("a met run rule acts", () => {
     // which would latch a rule that never executed.
     expect(w.edges[1].firedAt).toBeUndefined();
     expect(w.edges[1].error).toBeUndefined();
+  });
+
+  it("journals a rule skipped because this window lost the flows lock", async () => {
+    // The fixture above: two met run rules, and `renew` answers false after the
+    // first command.
+    //
+    // TWO sites emit lock-lost and both are correct — the rule that WAS the last
+    // step (journalled where `renew` answered false) and every rule the
+    // `if (lostLock)` guard then skips. So this asserts the reason and the specific
+    // edge, not a count: the count is a property of the fixture.
+    h.renew.mockReturnValue(false);
+    const { send } = await warmed([twoCommandFlow()]);
+    await send({ type: "deck:refresh" });
+    const skipped = journal().filter((e) => e.kind === "skipped");
+    expect(skipped.length).toBeGreaterThan(0);
+    expect(skipped.every((e) => e.reason === "lock-lost")).toBe(true);
+    // The rule that never got its turn is recorded, which is the point.
+    expect(skipped.map((e) => e.edge)).toContain("e2");
   });
 
   it("leaves the un-run command for the next pass, once the lock is held again", async () => {
