@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   JournalIo, journalPath, createIdMinter, appendEvent, readJournal,
-  truncateOutput, JOURNAL_CAP_BYTES, OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES,
+  truncateOutput, JOURNAL_CAP_BYTES, JOURNAL_TRIM_TO_BYTES, OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES,
 } from "../../../../src/engine/orchestrator/journal";
 
 /** An in-memory JournalIo. `files` is the whole store. */
@@ -205,6 +205,50 @@ describe("the journal's byte cap", () => {
     appendEvent(io, DIR, "f1", { kind: "reset", edge: "e2" }, 1_001);
     // The first line is still there, byte for byte.
     expect(files[journalPath(DIR, "f1")].startsWith(afterFirst)).toBe(true);
+  });
+
+  /** A JournalIo that counts its rewrites, so a test can assert how OFTEN the
+   * expensive read-rewrite-rename path runs, not merely that it runs. */
+  const countingIo = () => {
+    const files: Record<string, string> = {};
+    let replaces = 0;
+    const io: JournalIo = {
+      append: (p, text) => { files[p] = (files[p] ?? "") + text; },
+      size: (p) => (p in files ? files[p].length : null),
+      readFile: (p) => files[p] ?? null,
+      replace: (p, text) => { replaces += 1; files[p] = text; },
+    };
+    return { io, files, count: () => replaces };
+  };
+
+  it("cuts back to the low-water mark, not merely under the cap", () => {
+    const { io, files, count } = countingIo();
+    const p = journalPath(DIR, "f1");
+    const afterATrim: number[] = [];
+    let seen = 0;
+    for (let i = 0; i < 200; i++) {
+      appendEvent(io, DIR, "f1", bigEvent(`e${i}`), 1_000 + i);
+      if (count() > seen) {
+        seen = count();
+        afterATrim.push(files[p].length);
+      }
+    }
+    // The point of the low-water mark: a trim leaves real headroom, so the file
+    // does not sit AT the cap paying a rewrite on every later append.
+    expect(afterATrim.length).toBeGreaterThan(0);
+    for (const size of afterATrim) expect(size).toBeLessThanOrEqual(JOURNAL_TRIM_TO_BYTES);
+    expect(JOURNAL_TRIM_TO_BYTES).toBeLessThan(JOURNAL_CAP_BYTES);
+  });
+
+  it("amortizes the rewrite — appending after a trim does not trigger another one", () => {
+    const { io, count } = countingIo();
+    const appends = 200;
+    for (let i = 0; i < appends; i++) appendEvent(io, DIR, "f1", bigEvent(`e${i}`), 1_000 + i);
+    // Without a low-water mark the file settles at the cap and EVERY append past
+    // that point rewrites the whole journal — roughly half of these 200. With one,
+    // a rewrite buys ~250 KB of plain appends, so the count stays in single digits.
+    expect(count()).toBeGreaterThan(0);
+    expect(count()).toBeLessThan(appends / 10);
   });
 
   it("still writes a readable file when ONE event is bigger than the cap on its own", () => {

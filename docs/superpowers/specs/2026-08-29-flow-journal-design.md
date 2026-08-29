@@ -230,6 +230,18 @@ continues. The journal observes; it never participates. A full disk, a permissio
 error, or a bug in the trim path must not stop a deploy rule from firing — a missing
 line is a lost record, an aborted pass is a lost deploy.
 
+**The trim's cross-window race is accepted, not fixed.** `trimFor` is
+read-modify-rename: window A reads the journal, window B appends, A renames its
+trimmed copy over the file, and B's lines are gone. The per-line checksum defends a
+torn line, not a discarded append. The low-water mark makes it rare — a trim now runs
+once per ~250 KB of appends rather than once per line at the cap — but does not
+eliminate it. We do not take the flows lock to close it, for two reasons.
+`journal.ts` is the pure half of the pure/`*Fs` split and must not learn about
+locking; and making a user gesture (arm, reset, consent) block on another window's
+120-second command just to write a log line would be a real behavioural regression —
+strictly worse than losing journal lines. The cost is bounded to journal lines and
+never touches flow state.
+
 ## Out of scope
 
 - **The drawer timeline.** No read path into the webview, no new message type, no

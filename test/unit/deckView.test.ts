@@ -8969,18 +8969,26 @@ describe("a met run rule acts", () => {
     // The fixture above: two met run rules, and `renew` answers false after the
     // first command.
     //
-    // TWO sites emit lock-lost and both are correct — the rule that WAS the last
-    // step (journalled where `renew` answered false) and every rule the
-    // `if (lostLock)` guard then skips. So this asserts the reason and the specific
-    // edge, not a count: the count is a property of the fixture.
+    // ONE site emits lock-lost — the `if (lostLock)` guard at the top of the
+    // acting loop, which covers every rule that never got its turn. The rule that
+    // WAS the last step is NOT journalled as skipped: it ran, and its outcome is
+    // recorded as `fired`/`errored`.
     h.renew.mockReturnValue(false);
     const { send } = await warmed([twoCommandFlow()]);
     await send({ type: "deck:refresh" });
-    const skipped = journal().filter((e) => e.kind === "skipped");
+    const events = journal();
+    const skipped = events.filter((e) => e.kind === "skipped");
     expect(skipped.length).toBeGreaterThan(0);
     expect(skipped.every((e) => e.reason === "lock-lost")).toBe(true);
     // The rule that never got its turn is recorded, which is the point.
     expect(skipped.map((e) => e.edge)).toContain("e2");
+    // e1 DID run: it must appear as an outcome and never as a skip. An edge
+    // journalled both ways would make the documented "why did nothing fire?"
+    // query (`kind == "deferred" or "skipped"`) name a rule that acted.
+    const acted = events.filter((e) => e.kind === "fired" || e.kind === "errored").map((e) => e.edge);
+    expect(acted).toContain("e1");
+    expect(skipped.map((e) => e.edge)).not.toContain("e1");
+    for (const edge of acted) expect(skipped.map((e) => e.edge)).not.toContain(edge);
   });
 
   it("leaves the un-run command for the next pass, once the lock is held again", async () => {
@@ -9731,6 +9739,32 @@ describe("arm, disarm and reset", () => {
     expect(armed).toHaveLength(2);
     expect(armed[0]).toMatchObject({ kind: "armed", armed: true, source: "toggle", flow: "f1" });
     expect(armed[1]).toMatchObject({ kind: "armed", armed: false, source: "toggle", flow: "f1" });
+  });
+
+  it("journals the resume banner's disarm, naming that gesture rather than the toggle", async () => {
+    // The banner's Disarm switches the flow off exactly as the toggle does, and a
+    // journal that recorded only one of the two ways would leave a flow reading
+    // as armed when it is not. `source` matches the `flow_armed` telemetry the
+    // same handler emits, so the two records of one gesture agree.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      armed: true,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "done" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    }];
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    const { p, send } = await openPanel();
+    await settle();
+    const held = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { pendingResume: unknown[] };
+    expect(held.pendingResume).toHaveLength(1);
+    await send({ type: "flow:resumeDisarm", id: "f1" });
+    const armed = journal().filter((e) => e.kind === "armed");
+    expect(armed).toHaveLength(1);
+    expect(armed[0]).toMatchObject({ kind: "armed", armed: false, source: "resume-banner", flow: "f1" });
   });
 
   it("does not journal an arm for a flow id that is not on disk", async () => {

@@ -74,5 +74,9 @@ it are unaffected.
   when you want it gone.
 - **It is capped at 1 MB per flow.** Past that, the oldest whole lines are dropped
   as new ones arrive. A single event larger than the cap is kept anyway.
+- **A trim can lose a line or two under heavy concurrent use.** Dropping the oldest
+  lines rewrites the file, so if another editor window is appending at that exact
+  moment its lines can be discarded. It is rare, it costs only journal lines, and it
+  never affects the flow itself.
 - **A journal failure never stops a flow.** If the file cannot be written, the Agent
   Flow Deck output channel says so once and flows keep running unrecorded.

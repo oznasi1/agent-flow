@@ -1140,10 +1140,12 @@ export class DeckPanel {
               `deck: flow ${flow.id} rule ${f.edge.id} was the last step of this pass — the flows lock was lost (reaped past its ${LOCK_TTL_MS} ms TTL); another window may be advancing now, so nothing further is performed`,
             );
             lostLock = true;
-            // The edge that WAS the last step, matching what the log line above
-            // says. Every edge after it is skipped by the `if (lostLock)` guard
-            // at the top of the loop, which journals its own line.
-            this.journal(flow.id, { kind: "skipped", edge: f.edge.id, reason: "lock-lost" }, nowMs);
+            // No `skipped` line for THIS edge: it acted, and its outcome is
+            // recorded below as `fired` or `errored`. Journalling it as skipped
+            // too would make the "why did nothing fire?" query
+            // (`kind == "deferred" or "skipped"`) name a rule that ran. Every
+            // edge AFTER it is skipped by the `if (lostLock)` guard at the top of
+            // the loop, which journals its own line.
           }
           if (done.kind === "defer") {
             // The log, and nothing else: a transient read failure on an unattended
@@ -4314,8 +4316,10 @@ export class DeckPanel {
         // The event this whole journal exists for. Reset's job is to DELETE the
         // edge's receipt — `firedAt`, `firedNote`, `error`, `performed` — so that
         // the rule can run again, which until now meant a failed 2am deploy left
-        // no evidence it had ever happened. The receipt moves here instead of
-        // vanishing.
+        // no evidence it had ever happened. This records that the reset HAPPENED;
+        // the receipt it cleared is not copied here, and survives only as the
+        // earlier `fired`/`errored` line for that edge — which exists just when
+        // the journal was already running at the moment the rule fired.
         this.journal(m.id, { kind: "reset", edge: m.edgeId }, Date.now());
         trackEvent({ name: "flow_action", action: "reset_edge" });
         this.postFlows();
@@ -4347,6 +4351,12 @@ export class DeckPanel {
         this.pendingResume.delete(m.id);
         this.resumeCleared.add(m.id);
         writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: false });
+        // `source: "resume-banner"` matches the `flow_armed` telemetry below, so
+        // the two records of one gesture agree — the same rule the `flow:arm`
+        // site follows. A disarm from the banner switches the flow off exactly as
+        // the toggle does, and a journal that recorded only one of the two ways
+        // would make a flow look armed when it was not.
+        this.journal(m.id, { kind: "armed", armed: false, source: "resume-banner" }, Date.now());
         // Two events for one click, and deliberately: it is a gesture on the
         // resume banner (`flow_action`) AND a disarm (`flow_armed`), and the arm
         // question — how often does a held flow get switched off rather than

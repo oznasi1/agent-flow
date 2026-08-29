@@ -34,6 +34,13 @@ export interface JournalIo {
  * quantity and leave the real one unbounded. */
 export const JOURNAL_CAP_BYTES = 1_000_000;
 
+/** What a trim cuts the journal back TO, not merely under. Without a low-water
+ * mark the file settles exactly AT `JOURNAL_CAP_BYTES` and every later append
+ * pays a full read-rewrite-rename — about 2 MB of synchronous IO per line, on
+ * the extension host, for as long as the flow keeps journalling. Cutting to 75%
+ * amortizes that over roughly 250 KB of appends instead. */
+export const JOURNAL_TRIM_TO_BYTES = Math.floor(JOURNAL_CAP_BYTES * 0.75);
+
 /** How much of a command's output each end of a truncated record keeps. The head
  * carries which command actually ran; the tail carries the failure. The middle is
  * what a person scrolls past. */
@@ -166,6 +173,12 @@ export function truncateOutput(s: string): string {
 
 /** Make room for `incoming` bytes by dropping WHOLE lines from the front.
  *
+ * A trim STARTS at `JOURNAL_CAP_BYTES` but cuts all the way down to
+ * `JOURNAL_TRIM_TO_BYTES`. Trimming to the cap alone would leave the file
+ * sitting exactly at it, so every subsequent append would read, rewrite and
+ * rename the whole megabyte again; the low-water mark buys roughly 250 KB of
+ * plain appends between rewrites instead.
+ *
  * Whole lines only: half a JSON object at the head of the file is a line
  * `readJournal` would skip anyway, so cutting mid-line would silently cost an
  * extra event on top of the ones the cap already claims.
@@ -174,8 +187,8 @@ export function truncateOutput(s: string): string {
  * emptying the file and refilling it would otherwise destroy the entire journal
  * to save a few kilobytes.
  *
- * An incoming line larger than the cap ALL BY ITSELF empties the file and is then
- * appended anyway. That is deliberate — exceeding the cap for one line is better
+ * An incoming line larger than the budget ALL BY ITSELF empties the file and is
+ * then appended anyway. That is deliberate — exceeding the cap for one line is better
  * than dropping an event on the floor, and the alternative (refusing the write)
  * would silently lose exactly the enormous failure someone most wants to read. */
 function trimFor(io: JournalIo, p: string, incoming: number): void {
@@ -186,7 +199,7 @@ function trimFor(io: JournalIo, p: string, incoming: number): void {
   const lines = text.split("\n").filter((l) => l.length > 0);
   let bytes = lines.reduce((n, l) => n + l.length + 1, 0);
   let first = 0;
-  while (first < lines.length && bytes + incoming > JOURNAL_CAP_BYTES) {
+  while (first < lines.length && bytes + incoming > JOURNAL_TRIM_TO_BYTES) {
     bytes -= lines[first].length + 1;
     first += 1;
   }
