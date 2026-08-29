@@ -228,6 +228,12 @@ in `FlowAction`; `gate-approved` and `gate-rejected` in `CondKind`; `gateAnswer`
 `commandSucceeded`; two interception lines in `isMet`; `"awaiting-answer"` on
 `BlockedNote["reason"]` and the note that emits it.
 
+**`src/engine/orchestrator/conditions.ts`** — two throwing arms in `evalCond` and
+two unreachable arms in `describeCond`, mirroring `command-succeeded`'s. Both
+kinds are intercepted before either function, so a `false` here would be a
+silent wrong guess rather than an answer; throwing is the choice its neighbour
+already documents.
+
 **`src/engine/orchestrator/runner.ts`** — one arm in `performedNote` returning
 `asked you: ${question}` for `action === "ask"`, mirroring the notify arm. The
 neutral `"fired"` default that its comment reserves for a future non-spending verb
