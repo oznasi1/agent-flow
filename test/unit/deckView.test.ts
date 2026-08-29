@@ -9558,16 +9558,24 @@ describe("arm, disarm and reset", () => {
     beforeEach(() => setConfig({ orchestrator: true }));
 
     // A gate `g` with two incoming edges: `ask1` already fired and is the
-    // PERFORMER (it posed the question); `sibling` is an ordinary rule into the
-    // same gate that never fired. Mirrors the shape `flow:resetEdge`'s own
-    // fixtures use above, plus the gate node and the second edge this handler
-    // has to tell apart from the performer.
+    // PERFORMER (it posed the question, hence `performed: true`). `sibling`
+    // is the shape `FlowEdge.performed`'s own doc comment names — a
+    // per-target-dedupe or "all"-junction sibling that `applyFired`
+    // (runner.ts) stamps with the identical `firedAt`-set, `error`-absent
+    // shape without ever running anything, so it carries `firedAt` but never
+    // `performed`. Giving it `firedAt` here (rather than leaving the edge
+    // unfired) is what makes "ignores an answer for an edge that is not the
+    // performer" a real test of the guard's `performed` half: an unfired
+    // sibling would also be refused by the guard's separate `firedAt` half,
+    // masking a deleted `performed` check. Mirrors the shape
+    // `flow:resetEdge`'s own fixtures use above, plus the gate node and the
+    // second edge this handler has to tell apart from the performer.
     const gateFixture = (): Flow => ({
       ...mkFlow("f1", "n"),
       nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?" }],
       edges: [
         { id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" }, action: "ask", firedAt: 5, performed: true },
-        { id: "sibling", from: "b", to: "g", cond: { kind: "pr-merged" }, action: "ask" },
+        { id: "sibling", from: "b", to: "g", cond: { kind: "pr-merged" }, action: "ask", firedAt: 5 },
       ],
     });
 
@@ -9604,6 +9612,33 @@ describe("arm, disarm and reset", () => {
       expect(h.writeFlow).not.toHaveBeenCalled();
       // A valid answer on the SAME fixture does land — proof this is a targeted
       // refusal (not-the-performer) and not a handler that never writes at all.
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges.find((e) => e.id === "ask1")!.gateAnswer)
+        .toBe("approved");
+    });
+
+    it("ignores an answer for an edge that errored before it ever asked", async () => {
+      // The other half of the guard's shape: `performed: true` names it as the
+      // one that ran, but no `firedAt` — exactly what a FAILED action gets (see
+      // `applyFired`, runner.ts: a failure takes `error` and NO `firedAt`, so a
+      // failed launch can't look done). If the guard's `firedAt === undefined`
+      // clause were removed, this edge would read as "already asked" and take
+      // an answer to a question it never actually posed.
+      h.flows = [{
+        ...gateFixture(),
+        edges: [
+          ...gateFixture().edges,
+          { id: "errored", from: "c", to: "g", cond: { kind: "pr-merged" }, action: "ask",
+            performed: true, error: "ask was not performed" },
+        ],
+      }];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "errored", answer: "approved" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      // A valid answer on the real performer, same fixture, does land — proof
+      // this is a targeted refusal (no firedAt) and not a handler that never
+      // writes at all.
       await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
       expect(h.writeFlow).toHaveBeenCalledTimes(1);
       expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges.find((e) => e.id === "ask1")!.gateAnswer)
