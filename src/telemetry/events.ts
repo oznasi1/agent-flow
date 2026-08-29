@@ -127,7 +127,7 @@ export type DeckAction =
  * and receipt messages are user strings and never appear here either. */
 export type FlowActionKind =
   | "create" | "rename" | "save" | "delete" | "add_planned" | "reset_edge"
-  | "resume_approve" | "resume_disarm" | "save_command" | "dry_run";
+  | "resume_approve" | "resume_disarm" | "save_command" | "dry_run" | "answer_gate";
 
 export type WorkspaceModeProp = "multiroot" | "per-window";
 export type RepoSource = "preselected" | "destination" | "quickpick";

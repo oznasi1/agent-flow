@@ -4205,10 +4205,40 @@ export class DeckPanel {
             delete kept.performed;
             delete kept.error;
             delete kept.action;
+            delete kept.gateAnswer;
             return kept;
           }),
         });
         trackEvent({ name: "flow_action", action: "reset_edge" });
+        this.postFlows();
+        return;
+      }
+      case "flow:answerGate": {
+        if (!getConfig().orchestrator) return;
+        // Re-read immediately before writing, the discipline every other flow:*
+        // handler in this file follows: another window may have disarmed,
+        // renamed, Reset or already answered this flow since the webview
+        // rendered the button.
+        const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
+        if (!flow) return;
+        const target = flow.edges.find((e) => e.id === m.edgeId);
+        // Four refusals, all silent, because each one means the button the user
+        // clicked no longer describes anything real:
+        //  - the edge is gone;
+        //  - it is not the performer, so `gateAnswer` there would be read by
+        //    nothing (see `gateAnswer` in evaluate.ts);
+        //  - it never actually asked (errored, or not yet fired);
+        //  - it is already answered. FIRST ANSWER WINS: a downstream rule may
+        //    have fired and latched on it already, and flipping the stamp would
+        //    leave the flow contradicting its own record. Changing your mind is
+        //    Reset, which re-poses the question.
+        if (!target || target.performed !== true || target.firedAt === undefined) return;
+        if (target.gateAnswer !== undefined) return;
+        writeFlow(this.flowIo, this.flowsDir, {
+          ...flow,
+          edges: flow.edges.map((e) => (e.id === m.edgeId ? { ...e, gateAnswer: m.answer } : e)),
+        });
+        trackEvent({ name: "flow_action", action: "answer_gate" });
         this.postFlows();
         return;
       }
