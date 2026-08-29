@@ -6,10 +6,12 @@
 // These are the paths a hand-edited flow file produces too.
 import { describe, expect, it } from "vitest";
 import type { Flow } from "../../src/engine/orchestrator/model";
+import type { RunStatus } from "../../src/types";
 import {
   condOffered,
   CWD_REPO_DEFAULT,
   DEFAULT_IDLE_MINUTES,
+  observationOf,
   offeredConds,
   OFFERED_CONDS,
   repoOptions,
@@ -63,6 +65,38 @@ describe("the condition picker's offer", () => {
     const f = wired();
     f.edges[0].cond = { kind: "branch-ci-passed", repo: "agent-flow", branch: "main" };
     expect(condOffered(f, f.edges[0])).toBe(true);
+  });
+});
+
+describe("observationOf", () => {
+  // Same minimal RunStatus shape OrchestratorDrawer.test.tsx's own `runStatus`
+  // fixture uses for its "survives a command-succeeded rule wired off a PLACE"
+  // case — a REAL, matched run, not an empty `runs: []`. An empty array would
+  // make this test pass for the wrong reason: `!status` already returns `null`
+  // on its own, before the guard this test exists to pin ever runs, so the
+  // guard's removal would go uncaught.
+  const runStatus = (key: string, repo: string): RunStatus => ({
+    run: { key, summary: "s", url: `https://j/browse/${key}`, createdAt: 1, mode: "multiroot",
+      repos: [{ name: repo, path: `/r/${repo}`, isGit: true }], briefPaths: [] },
+    column: "progress", ticketStatus: "In Progress", ticketCategory: "indeterminate",
+    repos: [{ name: repo, path: `/r/${repo}`, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
+    agent: { state: "working", lastActivityMs: 1, slug: null },
+    windowOpen: true, prs: {}, agents: [], shelf: "board",
+  });
+
+  it("refuses gate-approved and gate-rejected, the same way it already refuses command-succeeded", () => {
+    // Neither kind has a place-shaped observation to make: a gate's verdict
+    // lives on its own incoming edge (`gateAnswer`, model.ts), never in the
+    // CondContext this function would otherwise build from `e.from`'s
+    // RunStatus. `describeCond`'s matching arms throw; this guard is what
+    // keeps them unreachable, the same way it already keeps
+    // `command-succeeded`'s throw unreachable.
+    const f = wired();
+    const approved = { ...f.edges[0], cond: { kind: "gate-approved" as const } };
+    const rejected = { ...f.edges[0], cond: { kind: "gate-rejected" as const } };
+    const runs = [runStatus("PROJ-1", "agent-flow")];
+    expect(observationOf(f, approved, runs)).toBeNull();
+    expect(observationOf(f, rejected, runs)).toBeNull();
   });
 });
 

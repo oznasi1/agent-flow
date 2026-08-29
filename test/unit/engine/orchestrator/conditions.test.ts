@@ -539,6 +539,23 @@ describe("evalCond and describeCond — command-succeeded is unreachable here, l
   });
 });
 
+describe("describeCond — gate-approved and gate-rejected are unreachable here too, loudly", () => {
+  // Same reasoning as command-succeeded above, and for the same reason model.ts's
+  // own doc comments give: a gate's verdict lives on the gate node's INCOMING
+  // edge (`gateAnswer`), never in a CondContext built from one place's
+  // RunStatus, so describeCond has nothing it could read to answer from.
+  // observationOf (orchestratorRule.ts) is what keeps these two arms
+  // unreachable in practice, the same way it already does for
+  // command-succeeded.
+  it("describeCond throws for gate-approved", () => {
+    expect(() => describeCond({ kind: "gate-approved" }, ctx())).toThrow();
+  });
+
+  it("describeCond throws for gate-rejected", () => {
+    expect(() => describeCond({ kind: "gate-rejected" }, ctx())).toThrow();
+  });
+});
+
 describe("evalCond — a condition kind this build does not know", () => {
   it("answers not-met, never a throw — the forward-compat contract the store already keeps", () => {
     // `store.ts`'s `validEdge` deliberately keeps an edge whose `cond.kind` it
