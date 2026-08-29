@@ -342,3 +342,40 @@ describe("notifyLines", () => {
     expect(notifyLines(flow, fired)).toEqual([]);
   });
 });
+
+describe("applyFired — an ask edge", () => {
+  const gateFlow = (): Flow => ({
+    ...emptyFlow("f1", "f", 0),
+    nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?" }],
+    edges: [{ id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" } }],
+  });
+
+  it("stamps a receipt naming the question, and needs no outcome", () => {
+    const flow = gateFlow();
+    const next = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }], 99);
+    expect(next.edges[0].firedAt).toBe(99);
+    expect(next.edges[0].firedNote).toBe("asked you: deploy to prod?");
+    expect(next.edges[0].performed).toBe(true);
+    expect(next.edges[0].error).toBeUndefined();
+  });
+
+  it("does not demand an outcome the way a spending verb does", () => {
+    // `run`, `launch` and `seed` all fail closed with "was not performed" when
+    // the caller reports nothing. An ask is never dispatched, so demanding one
+    // would latch a rule nobody was asked to perform.
+    const flow = gateFlow();
+    const next = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }], 99);
+    expect(next.edges[0].error).toBeUndefined();
+  });
+
+  it("falls back to a neutral receipt when the target is no longer a gate", () => {
+    const flow = { ...gateFlow(), nodes: [] };
+    const next = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }], 99);
+    expect(next.edges[0].firedNote).toBe("asked you");
+  });
+
+  it("says nothing in a toast — a gate is not a notify", () => {
+    const flow = gateFlow();
+    expect(notifyLines(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }])).toEqual([]);
+  });
+});
