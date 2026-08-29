@@ -1,7 +1,7 @@
 import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
-import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
+import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { CondParams, RepoOptions } from "./CondParams";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
@@ -643,7 +643,14 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * the day a terminal gains an out-port. */
   const boxOf = (n: { id: string; x: number; y: number; kind: string }) => {
     const pos = posOf(n);
-    return { x: pos.x, y: pos.y, w: n.kind === "notify" ? NOTIFY_W : NODE_W, h: NODE_H };
+    return {
+      x: pos.x, y: pos.y,
+      w: n.kind === "notify" ? NOTIFY_W : NODE_W,
+      // Height switches per kind for the same reason width already does. This one
+      // line covers edge anchoring, the obstacle list `tidy` routes around, and
+      // the clipped-right check — every consumer goes through this function.
+      h: n.kind === "gate" ? GATE_H : NODE_H,
+    };
   };
 
   /** A new rule carries NO stored action at all — not even the one its target

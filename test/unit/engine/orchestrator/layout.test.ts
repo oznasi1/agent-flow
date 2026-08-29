@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  anchor, edgePath, labelPoint, snap, tidy, NODE_W, NODE_H, COL_GAP, ROW_GAP, GRID, Box,
+  anchor, edgePath, labelPoint, snap, tidy, NODE_W, NODE_H, GATE_H, COL_GAP, ROW_GAP, GRID, Box,
 } from "../../../../src/engine/orchestrator/layout";
 import { Flow, FlowEdge, FlowNode, emptyFlow, isPlanned } from "../../../../src/engine/orchestrator/model";
 
@@ -280,5 +280,21 @@ describe("tidy", () => {
       expect(Number.isFinite(n.x)).toBe(true);
       expect(Number.isFinite(n.y)).toBe(true);
     }
+  });
+});
+
+describe("GATE_H", () => {
+  it("is taller than an ordinary node, because a gate carries a button row", () => {
+    expect(GATE_H).toBeGreaterThan(NODE_H);
+  });
+
+  it("anchors an edge at the gate's own vertical midpoint, not an ordinary node's", () => {
+    // The defect this guards: anchoring at NODE_H/2 puts the wire 13px above the
+    // port, which the CSS positions at 50% of the node's REAL height.
+    expect(GATE_H).toBe(70);
+    expect(anchor({ x: 0, y: 100, w: 168, h: 70 }, "in")).toEqual({ x: 0, y: 135 });
+    // And the ordinary node's midpoint is a different number, so a boxOf that
+    // forgot the gate would land here instead.
+    expect(anchor({ x: 0, y: 100, w: 168, h: 44 }, "in")).toEqual({ x: 0, y: 122 });
   });
 });
