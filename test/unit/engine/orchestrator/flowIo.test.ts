@@ -177,12 +177,28 @@ describe("nodeJournalIo", () => {
   });
 
   it("appends rather than overwriting — a second writer cannot lose the first's lines", () => {
-    const io = nodeJournalIo();
-    appendEvent(io, dir, "f1", { kind: "reset", edge: "e1" }, 1_000);
-    // A SECOND JournalIo, as another window would have.
-    appendEvent(nodeJournalIo(), dir, "f1", { kind: "reset", edge: "e2" }, 1_001);
+    // Root ignores permission bits, which would make this assertion vacuous
+    // rather than failing — skip loudly instead of passing quietly.
+    if (process.getuid?.() === 0) return;
 
-    expect(readJournal(io, dir, "f1")).toHaveLength(2);
+    const io = nodeJournalIo();
+    const p = journalPath(dir, "f1");
+    appendEvent(io, dir, "f1", { kind: "reset", edge: "e1" }, 1_000);
+
+    // Write-only, unreadable. A real appendFileSync opens O_WRONLY|O_APPEND and
+    // succeeds; a read-modify-write implementation must read first and throws
+    // EACCES. This is what actually distinguishes the two — sequentially they
+    // are otherwise indistinguishable.
+    fs.chmodSync(p, 0o222);
+    try {
+      // A SECOND JournalIo, as another window would have.
+      appendEvent(nodeJournalIo(), dir, "f1", { kind: "reset", edge: "e2" }, 1_001);
+    } finally {
+      fs.chmodSync(p, 0o644);
+    }
+
+    const events = readJournal(io, dir, "f1");
+    expect(events).toHaveLength(2);
   });
 
   it("reads a missing journal as empty rather than throwing", () => {
@@ -200,10 +216,24 @@ describe("nodeJournalIo", () => {
   });
 
   it("replaces atomically and leaves no temp file behind", () => {
+    // Root ignores permission bits, which would make this assertion vacuous
+    // rather than failing — skip loudly instead of passing quietly.
+    if (process.getuid?.() === 0) return;
+
     const io = nodeJournalIo();
     const p = journalPath(dir, "f1");
     appendEvent(io, dir, "f1", { kind: "reset", edge: "e1" }, 1_000);
-    io.replace(p, "replaced\n");
+
+    // Read-only file, writable directory. A write-then-rename succeeds because
+    // rename needs write permission on the containing directory, not on the
+    // target path; a plain truncating writeFileSync opens the target directly
+    // and throws EACCES. This is what actually distinguishes the two.
+    fs.chmodSync(p, 0o444);
+    try {
+      io.replace(p, "replaced\n");
+    } finally {
+      fs.chmodSync(p, 0o644);
+    }
 
     expect(fs.readFileSync(p, "utf8")).toBe("replaced\n");
     expect(fs.readdirSync(dir).filter((n) => n.endsWith(".tmp"))).toEqual([]);
