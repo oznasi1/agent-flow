@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { evaluateFlow, MAX_LAUNCHES_PER_PASS } from "../../../../src/engine/orchestrator/evaluate";
 import { BranchCiStatus } from "../../../../src/engine/orchestrator/branchCi";
 import {
-  CommandNode, Flow, FlowEdge, FlowNode, JoinMode, NotifyNode, PlaceNode, PlannedNode, emptyFlow,
+  CommandNode, Flow, FlowEdge, FlowNode, GateNode, JoinMode, NotifyNode, PlaceNode, PlannedNode, emptyFlow,
 } from "../../../../src/engine/orchestrator/model";
 import { CardAgent, PrEntryMap, PrFacts, RepoGit, Run, RunStatus } from "../../../../src/types";
 
@@ -533,5 +533,107 @@ describe("evaluateFlow — branch-CI verdicts arrive from outside the status", (
       branchCi: { "bite-me#master": "passed" },
     });
     expect(out.fired.map((f) => f.edge.id)).toEqual(["e1", "e2"]);
+  });
+});
+
+const gate = (id: string, join: JoinMode = "any"): GateNode =>
+  ({ id, kind: "gate", x: 0, y: 0, join, question: "deploy to prod?" });
+
+/** A gate that has been ASKED: the ask edge fired and is the performer. */
+const asked = (over: Partial<FlowEdge> = {}): FlowEdge =>
+  edge("ask1", "a", "g", { cond: { kind: "pr-merged" }, action: "ask",
+    firedAt: NOW - 1000, performed: true, ...over });
+
+describe("evaluateFlow — a gate", () => {
+  it("does not fire a gate-approved rule while the gate is unanswered", () => {
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
+      [asked(), edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
+    expect(run(flow, [status("PROJ-1")]).fired).toEqual([]);
+  });
+
+  it("fires a gate-approved rule once the gate is approved", () => {
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
+      [asked({ gateAnswer: "approved" }), edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
+    expect(run(flow, [status("PROJ-1")]).fired.map((f) => f.edge.id)).toEqual(["e2"]);
+  });
+
+  it("fires a gate-rejected rule once the gate is rejected, and not the approved one", () => {
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("y"), notify("z")],
+      [asked({ gateAnswer: "rejected" }),
+       edge("ok", "g", "y", { cond: { kind: "gate-approved" } }),
+       edge("no", "g", "z", { cond: { kind: "gate-rejected" } })]);
+    expect(run(flow, [status("PROJ-1")]).fired.map((f) => f.edge.id)).toEqual(["no"]);
+  });
+
+  it("refuses a gate condition whose source is not a gate node", () => {
+    // A hand-edited flow file, or one written by another build: it never went
+    // through a picker. Without the kind guard, `incomingEdges` would read the
+    // COMMAND node's already-fired edges and report an approval nobody gave.
+    const flow = flowWith([place("a", "PROJ-1"), command("c"), notify("z")],
+      [edge("ask1", "a", "c", { action: "run", firedAt: NOW - 1000, performed: true, gateAnswer: "approved" }),
+       edge("e2", "c", "z", { cond: { kind: "gate-approved" } })]);
+    expect(run(flow, [status("PROJ-1")]).fired).toEqual([]);
+  });
+
+  it("reads no answer off a sibling that did not perform", () => {
+    // The demoted per-target-dedupe sibling carries `firedAt` and no error, and
+    // reads exactly like a performer unless `performed` is what names one.
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
+      [edge("sib", "a", "g", { action: "ask", firedAt: NOW - 1000, gateAnswer: "approved" }),
+       edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
+    expect(run(flow, [status("PROJ-1")]).fired).toEqual([]);
+  });
+
+  it("reads no answer off a performer that errored instead of asking", () => {
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
+      [edge("ask1", "a", "g", { action: "ask", performed: true, error: "boom", gateAnswer: "approved" }),
+       edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
+    expect(run(flow, [status("PROJ-1")]).fired).toEqual([]);
+  });
+
+  it("notes that it is waiting on you once the question has been asked", () => {
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
+      [asked(), edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
+    expect(run(flow, [status("PROJ-1")]).blocked).toEqual([{ nodeId: "g", reason: "awaiting-answer" }]);
+  });
+
+  it("says nothing while no rule has reached the gate yet", () => {
+    // Not-there-yet is ordinary, and already reads correctly as silence. A note
+    // here would tell you to answer a question nobody has asked.
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
+      [edge("ask1", "a", "g", { action: "ask" }), edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
+    expect(run(flow, [status("PROJ-1")]).blocked).toEqual([]);
+  });
+
+  it("says nothing once the gate is answered", () => {
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
+      [asked({ gateAnswer: "rejected" }), edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
+    expect(run(flow, [status("PROJ-1")]).blocked).toEqual([]);
+  });
+
+  it("notes an unanswered gate once, not once per waiting rule", () => {
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("y"), notify("z")],
+      [asked(), edge("e2", "g", "y", { cond: { kind: "gate-approved" } }),
+       edge("e3", "g", "z", { cond: { kind: "gate-rejected" } })]);
+    expect(run(flow, [status("PROJ-1")]).blocked).toEqual([{ nodeId: "g", reason: "awaiting-answer" }]);
+  });
+
+  it("never reports a gate source as gone", () => {
+    // The interception must happen BEFORE the place/status lookup, or a gate
+    // source — which has no runKey to find — is reported as a missing card.
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
+      [asked({ gateAnswer: "approved" }), edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
+    expect(run(flow, [status("PROJ-1")]).blocked.some((b) => b.reason === "gone")).toBe(false);
+  });
+
+  it("never spends a launch slot on an ask", () => {
+    // Three planned launches plus a gate: the gate must not be the one deferred.
+    const flow = flowWith(
+      [place("a", "PROJ-1"), gate("g"), planned("p1"), planned("p2"), planned("p3")],
+      [edge("ask1", "a", "g", { action: "ask" }),
+       edge("l1", "a", "p1"), edge("l2", "a", "p2"), edge("l3", "a", "p3")]);
+    const r = run(flow, [status("PROJ-1", { merged: true })]);
+    expect(r.fired.map((f) => f.edge.id).sort()).toEqual(["ask1", "l1", "l2", "l3"]);
+    expect(r.deferred).toBe(0);
   });
 });

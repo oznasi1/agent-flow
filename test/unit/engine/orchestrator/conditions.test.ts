@@ -567,3 +567,11 @@ describe("evalCond — a condition kind this build does not know", () => {
     expect(evalCond({ kind: "moon-is-full" } as unknown as Condition, ctx())).toBe(false);
   });
 });
+
+describe("evalCond and the gate kinds", () => {
+  it("refuses to guess at a gate condition rather than answering false", () => {
+    const c = { status: {} as never, repo: "r", nowMs: 0 };
+    expect(() => evalCond({ kind: "gate-approved" }, c as never)).toThrow(/gate-approved/);
+    expect(() => evalCond({ kind: "gate-rejected" }, c as never)).toThrow(/gate-rejected/);
+  });
+});

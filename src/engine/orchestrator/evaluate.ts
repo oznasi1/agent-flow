@@ -69,6 +69,27 @@ function commandSucceeded(flow: Flow, commandNodeId: string): boolean {
   return performer !== undefined && performer.firedAt !== undefined;
 }
 
+/** Your answer to a gate, or `undefined` when it has not been given. The exact
+ * shape of `commandSucceeded` above, and it carries the same two guards for the
+ * same two documented reasons — read that function's comment first.
+ *
+ * The one difference is what the stamp means. `commandSucceeded` can read the
+ * performer's `firedAt` AS the verdict, because "it ran and did not error" is
+ * the whole answer. An ask edge's `firedAt` means the question was POSED, which
+ * is not an approval, so the answer needs its own field: `gateAnswer`, written
+ * by `flow:answerGate` (deckView.ts) and cleared by `flow:resetEdge` alongside
+ * the rest of the performer's stamps.
+ *
+ * `firedAt !== undefined` is still required. A performer that ERRORED carries
+ * `performed` with no `firedAt`, and a hand-written `gateAnswer` sitting on such
+ * an edge must not read back as an answer to a question that was never asked. */
+function gateAnswer(flow: Flow, gateNodeId: string): "approved" | "rejected" | undefined {
+  if (findNode(flow, gateNodeId)?.kind !== "gate") return undefined;
+  const performer = incomingEdges(flow, gateNodeId).find((e) => e.performed === true);
+  if (!performer || performer.firedAt === undefined) return undefined;
+  return performer.gateAnswer;
+}
+
 export interface EvalInput {
   flow: Flow;
   /** Every status the Deck built this pass, in any order. */
@@ -124,7 +145,7 @@ export interface FiredEdge {
  * a flow that silently waits on something impossible looks like patience. */
 export interface BlockedNote {
   nodeId: string;
-  reason: "gone" | "agent-state-unknown";
+  reason: "gone" | "agent-state-unknown" | "awaiting-answer";
 }
 
 export interface EvalResult {
@@ -157,6 +178,20 @@ export function evaluateFlow(i: EvalInput): EvalResult {
     // lookup below, which a command node's incoming edges have no use for and
     // would otherwise report as an unhelpful "gone" or a silent never-fires.
     if (e.cond.kind === "command-succeeded") return commandSucceeded(i.flow, e.from);
+    // Intercepted here, beside `command-succeeded` and before the place/status
+    // lookup, for the same reason: a gate has no `runKey`, so falling through
+    // would report the node as "gone" every pass instead of as waiting on you.
+    if (e.cond.kind === "gate-approved" || e.cond.kind === "gate-rejected") {
+      const answer = gateAnswer(i.flow, e.from);
+      // Only once the question has actually been ASKED. An unasked gate is
+      // ordinary not-there-yet — the same silence a planned source gets — and a
+      // note for it would tell you to answer a question nobody posed.
+      if (answer === undefined && findNode(i.flow, e.from)?.kind === "gate"
+        && incomingEdges(i.flow, e.from).some((a) => a.performed === true && a.firedAt !== undefined)) {
+        note(e.from, "awaiting-answer");
+      }
+      return answer === (e.cond.kind === "gate-approved" ? "approved" : "rejected");
+    }
     const from = findNode(i.flow, e.from);
     // A planned source has no run to observe yet. Not a problem — just not ready.
     if (!from || !isPlace(from)) return undefined;
