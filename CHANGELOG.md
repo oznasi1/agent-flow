@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.60.0] — 2026-08-30
+
 ### Added
 
 - Orchestrator: a **gate** node. A flow can now stop and ask you Approve or
