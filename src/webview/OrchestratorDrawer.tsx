@@ -1043,7 +1043,12 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             </span>
             {(() => {
               const st = gateStateOf(n);
-              if (n.kind !== "gate" || !st?.asked || st.answer || !st.edgeId) return null;
+              // List-only: the canvas node itself carries its own Approve/Reject
+              // (see the `.gbtns` block in the node render below), so the tray
+              // must not offer a second, simultaneous pair for the same gate in
+              // canvas view. List has no graph node to click, so the tray chip
+              // is its only route to answering at all.
+              if (n.kind !== "gate" || view !== "list" || !st?.asked || st.answer || !st.edgeId) return null;
               const edgeId = st.edgeId;
               return (
                 <>

@@ -3996,14 +3996,40 @@ describe("a gate node on the canvas", () => {
     });
 
   it("offers Approve and Reject once the question has been asked", async () => {
-    // Scoped to the canvas node itself: the shared "Actions" tray (actionsSection)
-    // renders alongside the graph in canvas view too and now offers the identical
-    // pair of buttons — by design, since it is the List's own route to them — so
-    // an unscoped query here would find two matching buttons, not one.
+    // The canvas node carries its own pair; the shared "Actions" tray
+    // (actionsSection) is gated to List view only (see the fix-round note in
+    // the report) so it does not ALSO offer them here. Scoped to the node
+    // anyway, so this test still pins WHERE the buttons live, not merely that
+    // one of them exists somewhere on the page.
     render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true })] })} />);
     const node = within(screen.getByTestId("orch-node-g"));
     await waitFor(() => expect(node.getByRole("button", { name: /Approve deploy to prod\?/ })).toBeTruthy());
     expect(node.getByRole("button", { name: /Reject deploy to prod\?/ })).toBeTruthy();
+  });
+
+  // The defect a fix round found: `actionsSection` (the "Actions" tray) is
+  // rendered in BOTH canvas and List view, so before the `view === "list"`
+  // guard an asked-and-unanswered gate showed Approve on the graph node AND
+  // on the tray chip at once — two live controls for one production-deploy
+  // decision. Counting, not merely finding one, is what would have caught it:
+  // `getByRole` throws on ambiguity, but the ORIGINAL brief's tests were all
+  // scoped with `within(node)` before this fix and so never saw the second
+  // button that was sitting right beside it in the same document.
+  it("shows exactly one Approve button in canvas view — the node's own, not a second one from the tray", async () => {
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true })] })} />);
+    await waitFor(() => expect(screen.getAllByRole("button", { name: /Approve deploy to prod\?/ })).toHaveLength(1));
+    expect(screen.getAllByRole("button", { name: /Reject deploy to prod\?/ })).toHaveLength(1);
+  });
+
+  it("shows exactly one Approve button in List view, and it answers through it", async () => {
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true })] })} />);
+    fireEvent.click(screen.getByRole("tab", { name: "List" }));
+    const approve = await screen.findAllByRole("button", { name: /Approve deploy to prod\?/ });
+    expect(approve).toHaveLength(1);
+    expect(screen.getAllByRole("button", { name: /Reject deploy to prod\?/ })).toHaveLength(1);
+    fireEvent.click(approve[0]);
+    await waitFor(() => expect(send).toHaveBeenCalledWith(
+      { type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" }));
   });
 
   it("offers neither before the question has been asked", () => {
