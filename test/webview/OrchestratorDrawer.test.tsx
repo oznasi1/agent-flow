@@ -726,6 +726,21 @@ describe("the canvas", () => {
     expect(saved.nodes.filter((n) => n.kind === "notify")).toHaveLength(1);
   });
 
+  // Every existing drawer test that touches a gate hand-builds one straight
+  // into a fixture, so the control a user actually presses first — `+ Gate` —
+  // had no test at all. Had it minted `kind: "notify"` (an easy slip: the two
+  // builders sit right next to each other and share every field but the last
+  // one), every OTHER gate test in this file would have stayed green, because
+  // none of them go through `addGate` itself.
+  it("adds a gate node, not a notify one", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Gate" }));
+    const saved = onSave.mock.calls[0][0] as Flow;
+    const added = saved.nodes.find((n) => n.kind === "gate" || n.kind === "notify");
+    expect(added).toMatchObject({ kind: "gate", question: "ok to continue?" });
+  });
+
   // The missing ticket picker (Task 4b). Unlike every node above, a `planned`
   // node needs a task connector this webview cannot reach — nothing reachable
   // from src/webview/ may import fs/os/path/child_process, even transitively —
@@ -2119,6 +2134,9 @@ describe("a selected node's own configuration", () => {
   const loneNotify = () =>
     flow({ nodes: [{ id: "n1", kind: "notify", x: 320, y: 24, join: "any", message: "say something" }] });
 
+  const loneGate = () =>
+    flow({ nodes: [{ id: "n1", kind: "gate", x: 320, y: 24, join: "any", question: "ok to continue?" }] });
+
   /** The shape every existing test in this file starts from, by contrast: the
    * edge already wired. Needed here for the two tests that compare the two edit
    * paths against each other. */
@@ -2408,6 +2426,25 @@ describe("a selected node's own configuration", () => {
     fireEvent.blur(box);
     const saved = onSave.mock.calls.at(-1)![0] as Flow;
     expect(saved.nodes[0]).toMatchObject({ kind: "notify", message: "the migration landed" });
+    expect(saved.edges).toEqual([]);
+  });
+
+  // The gate's ASKS field goes through `withNodeGateQuestion`, which must write
+  // `question` — the field `GateNode` actually carries — and not `message`, the
+  // field its `NotifyNode` sibling carries. The two builders sit side by side
+  // and share every field but that last one, so this pins the one field name
+  // that tells them apart, not just that SOME field got written.
+  it("edits a gate node's question in a flow with no edges at all", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [loneGate()] })} />);
+    selectChip("gate");
+    const box = screen.getByLabelText("Question for gate");
+    fireEvent.change(box, { target: { value: "ok to deploy to prod?" } });
+    fireEvent.blur(box);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes[0]).toEqual({
+      id: "n1", kind: "gate", x: 320, y: 24, join: "any", question: "ok to deploy to prod?",
+    });
     expect(saved.edges).toEqual([]);
   });
 
@@ -4112,6 +4149,73 @@ describe("a gate node on the canvas", () => {
     const path = container.querySelector("svg path");
     expect(path?.getAttribute("d")).toBe(expectedGatePath);
     expect(path?.getAttribute("d")).not.toBe(revertedPath);
+  });
+
+  const selectGateNode = () => {
+    fireEvent.pointerDown(screen.getByTestId("orch-node-g"), { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+  };
+
+  it("shows the ANSWERED block and its Reset button only once the gate is answered", () => {
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true, gateAnswer: "approved" })] })} />);
+    selectGateNode();
+    expect(screen.getByText("ANSWERED")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Reset to ask again" })).toBeTruthy();
+  });
+
+  it("has no ANSWERED block while the gate is unanswered", () => {
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true })] })} />);
+    selectGateNode();
+    expect(screen.queryByText("ANSWERED")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reset to ask again" })).toBeNull();
+  });
+
+  it("has no ANSWERED block before the question has even been asked", () => {
+    render(<OrchestratorDrawer {...props({ flows: [gateFlow()] })} />);
+    selectGateNode();
+    expect(screen.queryByText("ANSWERED")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reset to ask again" })).toBeNull();
+  });
+
+  it("Reset to ask again sends flow:resetEdge for the performer edge that actually asked", () => {
+    const onResetEdge = vi.fn();
+    render(<OrchestratorDrawer {...props({ onResetEdge, flows: [gateFlow({ firedAt: 1, performed: true, gateAnswer: "rejected" })] })} />);
+    selectGateNode();
+    fireEvent.click(screen.getByRole("button", { name: "Reset to ask again" }));
+    expect(onResetEdge).toHaveBeenCalledWith("f1", "ask1");
+  });
+
+  // The spec's four-state dot: `--c-done` approved, `--c-attn` asked-and-
+  // unanswered, `--dim` for both unasked and rejected. Reuses the exact
+  // `dotOf` idiom the "a node's state dot" describe block above pins for
+  // ordinary nodes, rather than inventing a second way to read the same style.
+  describe("gateHue — the gate's state dot", () => {
+    const dotOf = (id: string) =>
+      (screen.getByTestId(`orch-node-${id}`).querySelector(".d") as HTMLElement).style.background;
+
+    it("is dim before the question has been asked", () => {
+      render(<OrchestratorDrawer {...props({ flows: [gateFlow()] })} />);
+      expect(dotOf("g")).toBe("var(--dim)");
+    });
+
+    it("is attn — the same amber needs-you hue — once asked and unanswered", () => {
+      render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true })] })} />);
+      expect(dotOf("g")).toBe("var(--c-attn)");
+    });
+
+    it("is done once approved", () => {
+      render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true, gateAnswer: "approved" })] })} />);
+      expect(dotOf("g")).toBe("var(--c-done)");
+    });
+
+    // The one state the spec calls out by name: a rejection is YOUR decision,
+    // not a failure, so it must never borrow the red the drawer reserves for
+    // something actually broken.
+    it("is dim once rejected, never the danger red", () => {
+      render(<OrchestratorDrawer {...props({ flows: [gateFlow({ firedAt: 1, performed: true, gateAnswer: "rejected" })] })} />);
+      expect(dotOf("g")).toBe("var(--dim)");
+      expect(dotOf("g")).not.toBe("var(--c-danger)");
+    });
   });
 });
 
