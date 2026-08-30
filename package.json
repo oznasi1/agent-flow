@@ -663,6 +663,14 @@
             "default": false,
             "markdownDescription": "Show the **Orchestrator** on the Deck: a drawer where you wire the sessions already on your board into a flow and put a condition on each connection. Off by default — an armed flow eventually starts sessions on a timer, so nothing about it appears until you turn it on."
           },
+          "agentFlow.neverAutoRun": {
+            "type": "array",
+            "default": [],
+            "markdownDescription": "Command text an Orchestrator rule may **never** run unattended, whatever you have already approved. Each entry is a pattern matched against the command *after* a rule's `{note}` has been spliced in \u2014 `*` matches any run of characters, `?` matches exactly one, and everything else is literal (a `.` means a dot, not \"any character\"). Matching ignores case.\n\nThis outranks every approval: a flow whose commands you already confirmed still refuses a matching one, and there is no button that overrides it \u2014 the rule stops with an error naming the pattern, and the only way past it is editing this list. That is the point. Because `{note}` is spliced in **unquoted** (see `agentFlow.commands`), a rule's free text can extend the command it lands in, and a per-flow approval given once cannot know what a note added later will say.\n\nEmpty by default, so nothing changes until you add a pattern. Useful starting points: `*rm -rf*`, `*| sh*`, `*| bash*`, `*curl*|*`, `*--force*`.",
+            "items": {
+              "type": "string"
+            }
+          },
           "agentFlow.commands": {
             "type": "array",
             "default": [
@@ -673,7 +681,7 @@
                 "run": "echo verify the feature on {note}"
               }
             ],
-            "markdownDescription": "Commands an Orchestrator rule can run when its condition is met — a deploy, a webhook call, a smoke test. Each has an `id`, a `label` shown in the picker, the `run` command itself, and an optional `detail` line. The Orchestrator drawer can append to this list for you: type a one-off command on a node, then name it under **Save to settings**. `run` may contain `{note}`, replaced with the rule's own free text — **spliced in unquoted**, exactly as typed, so the note can extend the command (`--env={note}` plus a note of `prod; rm -rf ~` runs both); quoting it yourself (`--env=\"{note}\"`) does not fully neutralise it either, since a `\"` inside the note still breaks out. Only use `{note}` where you trust whoever fills in a rule's note. **These run unattended on your machine**, so a flow asks before its FIRST command and then runs commands on its own. That question is separate from the one a launch asks: approving a flow's launches never approves its commands, so a flow you already armed and confirmed still asks before it runs anything in a shell. The one default here is an inert example (`echo`, cannot fail or mutate anything) so the picker has something to show; replace or remove it, or clear the list entirely, to run your own.",
+            "markdownDescription": "Commands an Orchestrator rule can run when its condition is met — a deploy, a webhook call, a smoke test. Each has an `id`, a `label` shown in the picker, the `run` command itself, and an optional `detail` line. The Orchestrator drawer can append to this list for you: type a one-off command on a node, then name it under **Save to settings**. `run` may contain `{note}`, replaced with the rule's own free text — **spliced in unquoted**, exactly as typed, so the note can extend the command (`--env={note}` plus a note of `prod; rm -rf ~` runs both); quoting it yourself (`--env=\"{note}\"`) does not fully neutralise it either, since a `\"` inside the note still breaks out. Only use `{note}` where you trust whoever fills in a rule's note. **These run unattended on your machine**, so a flow asks before its FIRST command and then runs commands on its own. That question is separate from the one a launch asks: approving a flow's launches never approves its commands, so a flow you already armed and confirmed still asks before it runs anything in a shell. The one default here is an inert example (`echo`, cannot fail or mutate anything) so the picker has something to show; replace or remove it, or clear the list entirely, to run your own.\n\nSee `agentFlow.neverAutoRun` for the brake: command text listed there is refused whatever you have approved.",
             "items": {
               "type": "object",
               "required": [

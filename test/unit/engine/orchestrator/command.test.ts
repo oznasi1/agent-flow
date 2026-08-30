@@ -435,3 +435,74 @@ describe("withSavedCommand", () => {
     expect(out).toMatchObject({ kind: "added", command: { id: "deploy-2" } });
   });
 });
+
+// `agentFlow.neverAutoRun` outranks every stored consent, so the check that
+// enforces it belongs at the LAST point before the shell — here, where the text
+// is already resolved — not only at the gate that decides whether to ask. The
+// gate can be routed around by a future caller; this cannot.
+describe("runCommand and agentFlow.neverAutoRun", () => {
+  it("refuses a matching command without ever calling the runner", async () => {
+    const run = vi.fn();
+    const out = await runCommand(
+      { node: node({ run: "rm -rf ~" }), commands: COMMANDS, cwd: "/repo", neverAutoRun: ["*rm -rf*"] },
+      { run, log: () => {} },
+    );
+    expect(out.ok).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  // The user's next move is editing one line of settings.json, so the refusal has
+  // to say WHICH line. "blocked by a rule you configured somewhere" is not a
+  // diagnosis.
+  it("names the pattern that blocked it", async () => {
+    const out = await runCommand(
+      { node: node({ run: "rm -rf ~" }), commands: COMMANDS, cwd: "/repo", neverAutoRun: ["*nope*", "*rm -rf*"] },
+      { run: vi.fn(), log: () => {} },
+    );
+    expect((out as { message: string }).message).toContain("*rm -rf*");
+    expect((out as { message: string }).message).toContain("agentFlow.neverAutoRun");
+  });
+
+  // The whole reason this setting exists. `withNote` splices a rule's free text in
+  // UNQUOTED and by design, so the template is exactly the string that is not
+  // dangerous — matching it instead of the resolved text would inspect the one
+  // version of the command that cannot hurt anyone.
+  it("matches the note-spliced text, not the template", async () => {
+    const run = vi.fn();
+    const out = await runCommand(
+      {
+        node: node({ run: "deploy.sh --env={note}" }),
+        commands: COMMANDS,
+        note: "prod; rm -rf ~",
+        cwd: "/repo",
+        neverAutoRun: ["*rm -rf*"],
+      },
+      { run, log: () => {} },
+    );
+    expect(out.ok).toBe(false);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("runs a command no pattern matches", async () => {
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" });
+    const out = await runCommand(
+      { node: node({ commandId: "plain" }), commands: COMMANDS, cwd: "/repo", neverAutoRun: ["*rm -rf*"] },
+      { run, log: () => {} },
+    );
+    expect(out.ok).toBe(true);
+    expect(run).toHaveBeenCalledWith("echo hi", { cwd: "/repo", timeoutMs: COMMAND_TIMEOUT_MS });
+  });
+
+  // Absent on every call site that predates this setting, and on every user whose
+  // settings.json has never mentioned it. Absent must mean "block nothing" — the
+  // feature ships inert.
+  it("blocks nothing when no list is supplied at all", async () => {
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" });
+    const out = await runCommand(
+      { node: node({ run: "rm -rf ~" }), commands: COMMANDS, cwd: "/repo" },
+      { run, log: () => {} },
+    );
+    expect(out.ok).toBe(true);
+    expect(run).toHaveBeenCalled();
+  });
+});

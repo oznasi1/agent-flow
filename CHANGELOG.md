@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Orchestrator: **`agentFlow.neverAutoRun`** — a list of glob patterns for shell
+  commands a flow may never run unattended, matched against the command *after*
+  a rule's `{note}` has been spliced in. A match is refused outright: the rule
+  never reaches the consent modal, is refused again immediately before the
+  shell, and latches with an error naming the pattern that stopped it. No
+  approval overrides it — the only way past is editing the list.
+
+  This is the brake for the documented `{note}` injection. A flow's two stored
+  approvals are per flow and permanent, so approving one `deploy.sh` authorises
+  every command node in that flow, including ones added later; a pattern list is
+  checked against the text that is actually about to run, every time.
+
+  Empty by default, so nothing changes until you add a pattern. `*` matches any
+  run of characters, `?` exactly one, everything else is literal, and matching
+  ignores case.
+
 ## [0.60.0] — 2026-08-30
 
 ### Added

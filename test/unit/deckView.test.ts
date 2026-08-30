@@ -533,6 +533,12 @@ vi.mock("../../src/config", async (importActual) => {
       // now DEFAULT_COMMANDS' single inert example, which would make "the runner got
       // the CONFIGURED command's text, not its label" untestable against a fixed id.
       commands: h.commands,
+      // Sourced from the real getConfig(), like `forge` below and for the same
+      // reason: a test steers the denylist with setConfig({ neverAutoRun }), and
+      // hardcoding it here would make the setting unreachable from a test. Every
+      // test that never sets it gets the shipped default — an empty list, which
+      // blocks nothing.
+      neverAutoRun: actual.getConfig().neverAutoRun,
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
@@ -8566,6 +8572,77 @@ describe("a met run rule acts", () => {
     const { send } = await warmed([withCommandNode({ run: "deploy.sh", cwdRepo: "   " })]);
     await send({ type: "deck:refresh" });
     expect(ran()[1].cwd).toBe("/r/aws-ops");
+  });
+
+  describe("neverAutoRun", () => {
+    // `agentFlow.neverAutoRun` outranks `commandConfirmedAt`. Every fixture here is
+    // a FULLY CONSENTED flow (`cmdFlow` stamps both gates), which is the whole
+    // point: these cases would all run without the setting.
+    it("refuses a command matching neverAutoRun even though the flow is confirmed", async () => {
+      setConfig({ orchestrator: true, neverAutoRun: ["*rm -rf*"] });
+      const { p, send } = await warmed([withCommandNode({ run: "deploy.sh && rm -rf /tmp/x" })]);
+      await send({ type: "deck:refresh" });
+      expect(h.exec).not.toHaveBeenCalled();
+      const w = lastWrite();
+      // The same latch a failed command gets: an `error`, no `firedAt`. A refused
+      // rule that kept re-deciding every six seconds would ask the same question
+      // forever, and one stamped as fired would show in the drawer as a deploy
+      // that happened.
+      expect(w.edges[0].error).toContain("neverAutoRun");
+      expect(w.edges[0].firedAt).toBeUndefined();
+      expect(posts(p).some((m) => m.type === "toast" && m.level === "error")).toBe(true);
+    });
+
+    it("names the blocking pattern on the edge, so the user knows which line to edit", async () => {
+      setConfig({ orchestrator: true, neverAutoRun: ["*nope*", "*rm -rf*"] });
+      const { send } = await warmed([withCommandNode({ run: "rm -rf /tmp/x" })]);
+      await send({ type: "deck:refresh" });
+      expect(lastWrite().edges[0].error).toContain("*rm -rf*");
+    });
+
+    it("never retries a refused command", async () => {
+      setConfig({ orchestrator: true, neverAutoRun: ["*rm -rf*"] });
+      const { send } = await warmed([withCommandNode({ run: "rm -rf /tmp/x" })]);
+      await send({ type: "deck:refresh" });
+      await send({ type: "deck:refresh" });
+      await send({ type: "deck:refresh" });
+      expect(h.exec).not.toHaveBeenCalled();
+    });
+
+    // The reason this setting exists at all. The TEMPLATE is harmless; the note a
+    // rule carries is spliced in unquoted (see `withNote`), and a per-flow approval
+    // given months ago cannot have known what that note would say.
+    it("blocks on the note-spliced text, not the template", async () => {
+      setConfig({ orchestrator: true, neverAutoRun: ["*rm -rf*"] });
+      const flow = withCommandNode({ run: "deploy.sh --env={note}" });
+      flow.edges[0].note = "prod; rm -rf ~";
+      const { send } = await warmed([flow]);
+      await send({ type: "deck:refresh" });
+      expect(h.exec).not.toHaveBeenCalled();
+      expect(lastWrite().edges[0].error).toContain("neverAutoRun");
+    });
+
+    it("still runs a command no pattern matches", async () => {
+      setConfig({ orchestrator: true, neverAutoRun: ["*rm -rf*"] });
+      const { send } = await warmed([cmdFlow()]);
+      await send({ type: "deck:refresh" });
+      expect(h.exec).toHaveBeenCalledTimes(1);
+      expect(ran()[0]).toBe("deploy.sh staging");
+    });
+
+    // A blocked command must never reach the consent modal. Asking someone to
+    // approve a thing that cannot happen either teaches them the approval is
+    // meaningless or — worse — reads as "approve this and it will run".
+    it("never asks for consent about a command it will refuse", async () => {
+      setConfig({ orchestrator: true, neverAutoRun: ["*rm -rf*"] });
+      const { send } = await warmed([
+        withCommandNode({ run: "rm -rf /tmp/x" }, { commandConfirmedAt: undefined }),
+      ]);
+      await send({ type: "deck:refresh" });
+      expect(window.showWarningMessage).not.toHaveBeenCalled();
+      expect(lastWrite().commandConfirmedAt).toBeUndefined();
+      expect(h.exec).not.toHaveBeenCalled();
+    });
   });
 
   it("latches a failed command and never retries it", async () => {

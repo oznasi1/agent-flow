@@ -207,6 +207,7 @@ const CFG = {
   provenanceLabel: "claude-code",
   filters: { size: true, status: true, repo: true, search: true },
   marketplaces: [] as string[],
+  neverAutoRun: [] as string[],
 };
 
 let clientStub: Record<string, ReturnType<typeof vi.fn>>;
