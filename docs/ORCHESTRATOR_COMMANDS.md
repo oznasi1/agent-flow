@@ -137,6 +137,9 @@ full stop, and the drawer shows it in red with the exit code. Reset clears
 the stamps and keeps your configuration — the note and the mode survive,
 because they are what the rule *is*, not a record of what it did.
 
+Every armed flow also keeps an append-only record of what it did — see
+[the flow journal](FLOW_JOURNAL.md).
+
 > **One gap, known and accepted.** The act and the record are not atomic. If
 > the write after a successful command fails, the command really ran but
 > nothing was stamped — and the next pass will run it again. This is the

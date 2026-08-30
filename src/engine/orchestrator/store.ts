@@ -22,8 +22,13 @@ export function defaultFlowsDir(): string {
 /** An id is turned straight into a path below, and `readFlows` is documented to
  * tolerate a hand-edited file — so an id read back off disk is not safe until it
  * is checked against this charset. Without it, an id like "../../../../.zshrc"
- * resolves outside `dir` entirely. */
-const VALID_FLOW_ID = /^[A-Za-z0-9_-]+$/;
+ * resolves outside `dir` entirely.
+ *
+ * Exported so `journal.ts` builds its path from the SAME charset this store
+ * builds `<id>.json` from. A second copy of this regex is a second place for a
+ * traversal hole to open: the journal turns an id straight into a path too, and
+ * two regexes that are equal today drift the moment either is widened. */
+export const VALID_FLOW_ID = /^[A-Za-z0-9_-]+$/;
 
 function fileFor(dir: string, id: string): string {
   // A Flow built by a caller directly (bypassing `readFlows`, the only path that

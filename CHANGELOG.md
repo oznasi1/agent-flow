@@ -14,6 +14,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   deploy to prod" is expressible without leaving the flow disarmed. The question
   waits on the node in the drawer; Reset asks it again.
 
+## [0.59.0] — 2026-08-30
+
+### Added
+
+- Flows now keep an append-only journal beside each flow file
+  (`~/.agentflow/flows/<id>.log.jsonl`), one line per event. Reset no longer
+  destroys the only record that a rule ran, a failed command's output outlives the
+  window that ran it, and a rule that quietly did nothing says why — deferred,
+  disarmed mid-pass, lock lost, or waiting on approval. The journal survives
+  deleting the flow, is capped at 1 MB, and never blocks a flow when it cannot be
+  written. See [docs/FLOW_JOURNAL.md](docs/FLOW_JOURNAL.md).
+
 ### Security
 
 - **All open Dependabot alerts cleared** (9 alerts: 1 critical, 4 high, 4 medium).
@@ -25,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@playwright/experimental-ct-react` 1.49.1 → 1.55.1; and `js-yaml`,
   `fast-uri`, `postcss` and `brace-expansion` move to their patched versions.
   `npm audit` now reports zero vulnerabilities.
+
+## [0.58.0] — 2026-08-29
 
 ### Changed
 
