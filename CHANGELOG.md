@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Flows now keep an append-only journal beside each flow file
+  (`~/.agentflow/flows/<id>.log.jsonl`), one line per event. Reset no longer
+  destroys the only record that a rule ran, a failed command's output outlives the
+  window that ran it, and a rule that quietly did nothing says why — deferred,
+  disarmed mid-pass, lock lost, or waiting on approval. The journal survives
+  deleting the flow, is capped at 1 MB, and never blocks a flow when it cannot be
+  written. See [docs/FLOW_JOURNAL.md](docs/FLOW_JOURNAL.md).
+
 ### Security
 
 - **All open Dependabot alerts cleared** (9 alerts: 1 critical, 4 high, 4 medium).

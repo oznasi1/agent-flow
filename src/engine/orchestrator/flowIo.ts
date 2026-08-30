@@ -6,6 +6,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { FlowIo } from "./store";
 import { LockIo } from "./lock";
+import { JournalIo } from "./journal";
 
 /** Mint a flow id. The charset is not cosmetic: `store.ts` builds a filename from
  * an id and rejects anything outside `[A-Za-z0-9_-]`, so a slug-from-name scheme
@@ -75,5 +76,48 @@ export function nodeLockIo(log?: (m: string) => void): LockIo {
       }
     },
     remove: (p) => fs.rmSync(p, { force: true }),
+  };
+}
+
+/** The journal's real IO. `appendFileSync` is the whole point: it opens with
+ * `O_APPEND`, so two windows writing at once cannot land on the same offset and
+ * silently overwrite each other's events. It is not a full concurrency guarantee
+ * — a payload larger than the pipe buffer can still interleave, which is why
+ * every line carries a checksum and `readJournal` skips the ones that fail it.
+ *
+ * `replace` is write-then-rename rather than a truncating write, because a crash
+ * between the two would otherwise leave an empty journal where a full one was.
+ * `rename` over an existing path is atomic within a filesystem, and the temp file
+ * is a sibling so it never crosses one.
+ *
+ * Both reads degrade to `null` rather than throwing, exactly as `nodeFlowIo`'s
+ * do: a journal that cannot be read must cost the history, never the pass that
+ * was trying to record into it. */
+export function nodeJournalIo(): JournalIo {
+  return {
+    append: (p, text) => {
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.appendFileSync(p, text);
+    },
+    size: (p) => {
+      try {
+        return fs.statSync(p).size;
+      } catch {
+        return null;
+      }
+    },
+    readFile: (p) => {
+      try {
+        return fs.readFileSync(p, "utf8");
+      } catch {
+        return null;
+      }
+    },
+    replace: (p, text) => {
+      const tmp = `${p}.tmp`;
+      fs.mkdirSync(path.dirname(p), { recursive: true });
+      fs.writeFileSync(tmp, text);
+      fs.renameSync(tmp, p);
+    },
   };
 }

@@ -2,9 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { nodeFlowIo, newFlowId, nodeLockIo } from "../../../../src/engine/orchestrator/flowIo";
+import { nodeFlowIo, newFlowId, nodeLockIo, nodeJournalIo } from "../../../../src/engine/orchestrator/flowIo";
 import { readFlows, writeFlow, removeFlow } from "../../../../src/engine/orchestrator/store";
 import { emptyFlow } from "../../../../src/engine/orchestrator/model";
+import {
+  appendEvent, readJournal, journalPath, JOURNAL_CAP_BYTES,
+} from "../../../../src/engine/orchestrator/journal";
 
 describe("newFlowId", () => {
   it("only ever produces characters the store accepts", () => {
@@ -142,5 +145,129 @@ describe("nodeLockIo", () => {
     expect(io.tryCreate(p, "1")).toBe(true);
     expect(io.tryCreate(p, "2")).toBe(false);
     expect(lines).toEqual([]);
+  });
+});
+
+describe("nodeJournalIo", () => {
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "af-journal-"));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("round-trips events through the real filesystem", () => {
+    const io = nodeJournalIo();
+    appendEvent(io, dir, "f1", { kind: "armed", armed: true, source: "toggle" }, 1_000);
+    appendEvent(io, dir, "f1", { kind: "reset", edge: "e7" }, 1_001);
+
+    const events = readJournal(io, dir, "f1");
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({ kind: "armed", armed: true });
+    expect(events[1]).toMatchObject({ kind: "reset", edge: "e7" });
+  });
+
+  it("creates the flows directory if it is not there yet", () => {
+    const io = nodeJournalIo();
+    const nested = path.join(dir, "not", "made", "yet");
+    appendEvent(io, nested, "f1", { kind: "reset", edge: "e1" }, 1_000);
+    expect(fs.existsSync(journalPath(nested, "f1"))).toBe(true);
+  });
+
+  it("appends rather than overwriting — a second writer cannot lose the first's lines", () => {
+    // Root ignores permission bits, which would make this assertion vacuous
+    // rather than failing — skip loudly instead of passing quietly.
+    if (process.getuid?.() === 0) return;
+
+    const io = nodeJournalIo();
+    const p = journalPath(dir, "f1");
+    appendEvent(io, dir, "f1", { kind: "reset", edge: "e1" }, 1_000);
+
+    // Write-only, unreadable. A real appendFileSync opens O_WRONLY|O_APPEND and
+    // succeeds; a read-modify-write implementation must read first and throws
+    // EACCES. This is what actually distinguishes the two — sequentially they
+    // are otherwise indistinguishable.
+    fs.chmodSync(p, 0o222);
+    try {
+      // A SECOND JournalIo, as another window would have.
+      appendEvent(nodeJournalIo(), dir, "f1", { kind: "reset", edge: "e2" }, 1_001);
+    } finally {
+      fs.chmodSync(p, 0o644);
+    }
+
+    const events = readJournal(io, dir, "f1");
+    expect(events).toHaveLength(2);
+  });
+
+  it("reads a missing journal as empty rather than throwing", () => {
+    const io = nodeJournalIo();
+    expect(io.size(journalPath(dir, "nope"))).toBeNull();
+    expect(io.readFile(journalPath(dir, "nope"))).toBeNull();
+    expect(readJournal(io, dir, "nope")).toEqual([]);
+  });
+
+  it("reports the real byte size, so the cap is measured against the file and not a guess", () => {
+    const io = nodeJournalIo();
+    appendEvent(io, dir, "f1", { kind: "reset", edge: "e1" }, 1_000);
+    const p = journalPath(dir, "f1");
+    expect(io.size(p)).toBe(fs.readFileSync(p, "utf8").length);
+  });
+
+  it("replaces atomically and leaves no temp file behind", () => {
+    // Root ignores permission bits, which would make this assertion vacuous
+    // rather than failing — skip loudly instead of passing quietly.
+    if (process.getuid?.() === 0) return;
+
+    const io = nodeJournalIo();
+    const p = journalPath(dir, "f1");
+    appendEvent(io, dir, "f1", { kind: "reset", edge: "e1" }, 1_000);
+
+    // Read-only file, writable directory. A write-then-rename succeeds because
+    // rename needs write permission on the containing directory, not on the
+    // target path; a plain truncating writeFileSync opens the target directly
+    // and throws EACCES. This is what actually distinguishes the two.
+    fs.chmodSync(p, 0o444);
+    try {
+      io.replace(p, "replaced\n");
+    } finally {
+      fs.chmodSync(p, 0o644);
+    }
+
+    expect(fs.readFileSync(p, "utf8")).toBe("replaced\n");
+    expect(fs.readdirSync(dir).filter((n) => n.endsWith(".tmp"))).toEqual([]);
+  });
+
+  it("trims a real file that grows past the cap, and it still reads", () => {
+    const io = nodeJournalIo();
+    for (let i = 0; i < 200; i++) {
+      appendEvent(io, dir, "f1", { kind: "reset", edge: `e${i}` + "p".repeat(10_000) }, 1_000 + i);
+    }
+    const p = journalPath(dir, "f1");
+    expect(fs.statSync(p).size).toBeLessThanOrEqual(JOURNAL_CAP_BYTES);
+    const events = readJournal(io, dir, "f1") as unknown as { edge: string }[];
+    expect(events.length).toBeGreaterThan(0);
+    expect(events[events.length - 1].edge).toContain("e199");
+  });
+
+  it("keeps the journal out of the flow store's sight", () => {
+    const io = nodeJournalIo();
+    appendEvent(io, dir, "f1", { kind: "reset", edge: "e1" }, 1_000);
+    writeFlow(nodeFlowIo(), dir, emptyFlow("f1", "Ship it", 1_000));
+
+    // The journal file is in the same directory and readFlows must not try to
+    // parse it as a flow.
+    expect(readFlows(nodeFlowIo(), dir).map((f) => f.id)).toEqual(["f1"]);
+  });
+
+  it("survives removeFlow — the record outlives the flow it describes", () => {
+    const io = nodeJournalIo();
+    appendEvent(io, dir, "f1", { kind: "reset", edge: "e1" }, 1_000);
+    writeFlow(nodeFlowIo(), dir, emptyFlow("f1", "Ship it", 1_000));
+    removeFlow(nodeFlowIo(), dir, "f1");
+
+    expect(readFlows(nodeFlowIo(), dir)).toEqual([]);
+    expect(readJournal(io, dir, "f1")).toHaveLength(1);
   });
 });

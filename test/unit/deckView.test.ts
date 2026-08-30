@@ -205,6 +205,11 @@ const h = vi.hoisted(() => ({
   // Whatever logger the panel handed nodeLockIo, so a test can prove it passed one
   // and that it reaches the output channel.
   lockIoLog: undefined as ((m: string) => void) | undefined,
+  // Every journal line this pass wrote, in order. A recording fake rather than a
+  // spy on the module: the panel is meant to survive a journal that throws, and
+  // that is only testable if the IO itself is the thing under the test's control.
+  journalLines: [] as string[],
+  journalThrows: false,
   discoverRepos: vi.fn((_root: string, _blocklist: string[]) => [] as ServiceRef[]),
   release: vi.fn(),
   // The launcher (Task 4), stubbed so no test opens a window or a worktree. The
@@ -416,12 +421,21 @@ vi.mock("../../src/engine/review/store", () => ({
 vi.mock("../../src/engine/repos", () => ({
   discoverRepos: (root: string, blocklist: string[]) => h.discoverRepos(root, blocklist),
 }));
-vi.mock("../../src/engine/orchestrator/store", () => ({
-  defaultFlowsDir: () => "/flows",
-  readFlows: () => h.readFlows(),
-  writeFlow: h.writeFlow,
-  removeFlow: h.removeFlow,
-}));
+vi.mock("../../src/engine/orchestrator/store", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/engine/orchestrator/store")>();
+  return {
+    defaultFlowsDir: () => "/flows",
+    readFlows: () => h.readFlows(),
+    writeFlow: h.writeFlow,
+    removeFlow: h.removeFlow,
+    // `journal.ts` turns a flow id straight into a path and checks it against the
+    // SAME charset regex `fileFor` uses, from this module. It is re-exported real
+    // rather than restated, because a second copy of that rule here could drift
+    // from the one the store enforces — and it is not stubbed at all, since a
+    // journal path is derived, never read back through `h`.
+    VALID_FLOW_ID: actual.VALID_FLOW_ID,
+  };
+});
 // Partial mock: LOCK_TTL_MS and lockPath stay real (the panel passes the real TTL,
 // and a test asserting on it should not be asserting on a number this file made
 // up) — only the two side-effecting calls are replaced.
@@ -451,6 +465,15 @@ vi.mock("../../src/engine/orchestrator/flowIo", () => ({
   // the re-mint-on-collision path is reachable. A constant would make the retry
   // loop indistinguishable from a refusal.
   newFlowId: () => `fTEST-${++h.idSeq}`,
+  nodeJournalIo: () => ({
+    append: (_p: string, text: string) => {
+      if (h.journalThrows) throw new Error("ENOSPC");
+      h.journalLines.push(text.trimEnd());
+    },
+    size: () => null,
+    readFile: () => null,
+    replace: () => {},
+  }),
 }));
 // Partial mock: deckView.ts and everything it pulls in (engine/worktree,
 // engine/gitExclude, jsonc-parser's consumers, etc.) use far more of `fs` than
@@ -565,6 +588,9 @@ import {
 import { COMMAND_TIMEOUT_MS } from "../../src/engine/orchestrator/command";
 // The real constant, through the partial mock above (which spreads the actual module):
 // a test that restated the number could not catch the call site passing a literal.
+// The real thresholds `truncateOutput` elides at — restating them here could not
+// catch the call site dropping the call.
+import { OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES } from "../../src/engine/orchestrator/journal";
 import { LOCK_TTL_MS } from "../../src/engine/orchestrator/lock";
 import { ACTION_MISMATCH_PREFIX } from "../../src/engine/orchestrator/model";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
@@ -649,6 +675,9 @@ const lastPanel = () => window.createWebviewPanel.mock.results.at(-1)!.value as 
 const posts = (p: ReturnType<typeof lastPanel>) => p.webview.postMessage.mock.calls.map((c) => c[0] as any);
 const show = (authed = false, label = "Jira") => DeckPanel.show(fakeContext().context as any, fakeConnector(authed, label), () => {});
 const settled = () => new Promise<void>((r) => setTimeout(r, 0));
+
+/** The journal events this pass recorded, parsed. Order is write order. */
+const journal = () => h.journalLines.map((l) => JSON.parse(l) as Record<string, unknown>);
 
 /** The gh probe is kicked off inside the very tick that reads it, so it can
  * never be resolved by the time that same tick's `ghReady()` call returns —
@@ -783,6 +812,8 @@ beforeEach(() => {
   h.acquire.mockClear().mockReturnValue(true);
   h.renew.mockClear().mockReturnValue(true);
   h.lockIoLog = undefined;
+  h.journalLines = [];
+  h.journalThrows = false;
   h.discoverRepos.mockClear().mockImplementation(() => h.repos);
   h.release.mockClear();
   h.launchPlanned.mockClear().mockImplementation(
@@ -6776,6 +6807,27 @@ describe("a met launch rule acts", () => {
     expect(window.showWarningMessage).toHaveBeenCalledTimes(1);
   });
 
+  it("journals the question a pass asked instead of spending", async () => {
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const asked = journal().filter((e) => e.kind === "consent-asked");
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatchObject({ kind: "consent-asked", action: "launch", target: "n2" });
+    // A pass that asks performs nothing, so it must claim nothing.
+    expect(journal().some((e) => e.kind === "fired")).toBe(false);
+  });
+
+  it("journals the answer to a first-spend question", async () => {
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    // The second pass acts on the stored approval and asks nothing, so the answer
+    // is recorded once per question rather than once per pass.
+    await send({ type: "deck:refresh" });
+    const consented = journal().filter((e) => e.kind === "consented");
+    expect(consented).toHaveLength(1);
+    expect(consented[0]).toMatchObject({ kind: "consented", answer: "act", flow: "f1" });
+  });
+
   it("includes the edge's note in the spend confirmation when one is set", async () => {
     const note = "Careful: this repo has a flaky test suite.";
     const { send } = await warmed([launchFlow({
@@ -6837,6 +6889,19 @@ describe("a met launch rule acts", () => {
     expect(h.launchPlanned).not.toHaveBeenCalled();
   });
 
+  it("journals a Disarm answer to a first-spend question", async () => {
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockImplementation(
+      async (_m: string, _o: unknown, ...items: string[]) => items[1], // "Disarm"
+    );
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    // Disarmed by that answer, so no later pass can ask — or answer — again.
+    await send({ type: "deck:refresh" });
+    const consented = journal().filter((e) => e.kind === "consented");
+    expect(consented).toHaveLength(1);
+    expect(consented[0]).toMatchObject({ kind: "consented", answer: "disarm", flow: "f1" });
+  });
+
   it("writes nothing and launches nothing when the question is dismissed", async () => {
     // Escape, or the modal being closed. Neither approval nor disarm: the flow
     // stays armed and is asked again on a later pass.
@@ -6845,6 +6910,18 @@ describe("a met launch rule acts", () => {
     await send({ type: "deck:refresh" });
     expect(h.writeFlow).not.toHaveBeenCalled();
     expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("journals a dismissed first-spend question as neither act nor disarm", async () => {
+    // A dismissal writes no flow file at all, so this line is the ONLY evidence
+    // the question was seen and waved away rather than never shown.
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+    const { send } = await warmed([launchFlow({ launchConfirmedAt: undefined })]);
+    await send({ type: "deck:refresh" });
+    const consented = journal().filter((e) => e.kind === "consented");
+    expect(consented).toHaveLength(1);
+    expect(consented[0]).toMatchObject({ kind: "consented", answer: "dismissed", flow: "f1" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
   });
 
   it("does not ask a second time while its own question is still on screen", async () => {
@@ -6896,6 +6973,119 @@ describe("a met launch rule acts", () => {
     expect(w.edges[0].error).toBeUndefined();
     expect(w.edges[0].firedNote).toContain("PROJ-12");
     expect(posts(p).some((m) => m.type === "toast" && /PROJ-12/.test(m.message ?? ""))).toBe(true);
+  });
+
+  it("journals a fired rule with the verb evaluation decided, after the flow is written", async () => {
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const fired = journal().filter((e) => e.kind === "fired");
+    expect(fired).toHaveLength(1);
+    expect(fired[0]).toMatchObject({ kind: "fired", action: "launch", edge: "e1", from: "n1", to: "n2" });
+    expect(fired[0].note).toEqual(expect.stringContaining("launched"));
+  });
+
+  it("journals the promotion alongside the rule that caused it", async () => {
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const promoted = journal().filter((e) => e.kind === "promoted");
+    expect(promoted).toHaveLength(1);
+    expect(promoted[0]).toMatchObject({ kind: "promoted", node: "n2" });
+  });
+
+  it("journals a failed launch as errored, carrying the reason the edge was latched with", async () => {
+    h.launchPlanned.mockResolvedValue({ ok: false, message: "Couldn't create a git worktree in aws-ops" });
+    const { send } = await warmed([launchFlow()]);
+    await send({ type: "deck:refresh" });
+    const errored = journal().filter((e) => e.kind === "errored");
+    expect(errored).toHaveLength(1);
+    expect(errored[0]).toMatchObject({ kind: "errored", action: "launch", edge: "e1" });
+    expect(errored[0].error).toBeTruthy();
+    expect(journal().some((e) => e.kind === "fired")).toBe(false);
+  });
+
+  it("journals nothing at all for a pass in which no rule was decided", async () => {
+    h.getDetail.mockRejectedValue(new Error("Jira said 503"));
+    const { send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        {
+          id: "n3", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-13", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    expect(h.getDetail).toHaveBeenCalledTimes(2); // both rules really were attempted
+    expect(journal().filter((e) => ["fired", "errored", "promoted"].includes(e.kind as string))).toEqual([]);
+  });
+
+  it("keeps firing when the journal itself is broken — a lost record is not a lost deploy", async () => {
+    h.journalThrows = true;
+    const log = vi.fn();
+    const { send } = await warmed([launchFlow()], log);
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalled();
+    expect(lastWrite().edges[0].firedAt).toBeTypeOf("number");
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("flow journal unavailable"));
+    // The IO's OWN message, not merely that something complained: a journal never
+    // called at all would satisfy the line above.
+    expect(log).toHaveBeenCalledWith(expect.stringContaining("ENOSPC"));
+  });
+
+  it("says the journal is unavailable ONCE, not once per rule", async () => {
+    h.journalThrows = true;
+    const log = vi.fn();
+    const { send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        {
+          id: "n3", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-13", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch" },
+      ],
+    })], log);
+    await send({ type: "deck:refresh" });
+    // Both rules really did fire — otherwise "once" would be trivially true.
+    expect(h.launchPlanned).toHaveBeenCalledTimes(2);
+    const complaints = log.mock.calls.flat().filter((m) => String(m).includes("flow journal unavailable"));
+    expect(complaints).toHaveLength(1);
+    // And it carries what actually failed, not a generic apology.
+    expect(complaints[0]).toEqual(expect.stringContaining("ENOSPC"));
+  });
+
+  it("writes the flow BEFORE it journals, so a crash cannot invent an event", async () => {
+    // The harness has no `writeFlow` hook, so the ordering is recorded from the
+    // store mock itself. `h.journalLines` IS the journal fake's record, so how
+    // many lines it holds AT THE MOMENT OF THE WRITE is exactly how many events
+    // were journaled first — zero, or this pass invented an event the flow file
+    // has no stamp for. Moving the journal block above `writeFlow` makes this
+    // read "write after 3 journal lines".
+    const { send } = await warmed([launchFlow()]);
+    const order: string[] = [];
+    h.writeFlow.mockImplementation((_io: unknown, _dir: string, flow: Flow) => {
+      order.push(`write after ${h.journalLines.length} journal lines`);
+      const i = h.flows.findIndex((f) => f.id === flow.id);
+      h.flows = i >= 0 ? h.flows.map((f, idx) => (idx === i ? flow : f)) : [...h.flows, flow];
+    });
+    await send({ type: "deck:refresh" });
+    expect(order).toEqual(["write after 0 journal lines"]);
+    expect(h.journalLines.length).toBeGreaterThan(0); // and it did journal, after
   });
 
   it("does not notify for a successful launch — the opened window already announces it", async () => {
@@ -7081,6 +7271,31 @@ describe("a met launch rule acts", () => {
     expect(deferredEdge.firedAt).toBeUndefined();
     expect(deferredEdge.error).toBeUndefined();
     expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/the migration has landed/));
+  });
+
+  it("journals a deferred rule with the reason, so a silently-stalled flow is diagnosable", async () => {
+    // Same fixture as the case above: e1's Jira read fails, so it defers, while the
+    // notify beside it decides normally.
+    h.getDetail.mockRejectedValue(new Error("Jira said 503"));
+    const { send } = await warmed([launchFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        {
+          id: "n2", kind: "planned", x: 0, y: 0, join: "any",
+          ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree",
+        },
+        { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "notify" },
+      ],
+    })]);
+    await send({ type: "deck:refresh" });
+    const deferred = journal().filter((e) => e.kind === "deferred");
+    expect(deferred).toHaveLength(1);
+    expect(deferred[0]).toMatchObject({ kind: "deferred", edge: "e1" });
+    expect(deferred[0].reason).toBeTruthy();
   });
 
   it("never routes a seed rule through the launcher — see \"a met seed rule acts\" below for its own path", async () => {
@@ -7372,6 +7587,37 @@ describe("a met launch rule acts", () => {
     h.launchPlanned.mockClear();
     await send({ type: "deck:refresh" });
     expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("journals a rule skipped because the flow was disarmed mid-pass", async () => {
+    // The fixture above, exactly: three acting rules, and the first launch disarms
+    // the flow from under the pass.
+    const many = (): Flow => ({
+      ...launchFlow(),
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        ...[1, 2, 3].map((i) => ({
+          id: `p${i}`, kind: "planned" as const, x: 0, y: 0, join: "any" as const,
+          ticketKey: `PROJ-2${i}`, repos: ["aws-ops"], mode: "implementation", dest: "worktree" as const,
+        })),
+      ],
+      edges: [1, 2, 3].map((i) => ({
+        id: `e${i}`, from: "n1", to: `p${i}`, cond: { kind: "pr-merged" as const }, action: "launch" as const,
+      })),
+    });
+    const { send } = await warmed([many()]);
+    h.launchPlanned.mockClear().mockImplementation(async (req: { node: { ticketKey: string; repos: string[] } }) => {
+      h.flows = h.flows.map((f) => ({ ...f, armed: false }));
+      return { ok: true, runKey: req.node.ticketKey, repo: req.node.repos[0] };
+    });
+    await send({ type: "deck:refresh" });
+    // BOTH rules the single Disarm left pending, not one: the log line and the
+    // telemetry event are per flow (one disarm happened), but a skip is per rule,
+    // and which rules were left pending is the fact only the journal carries.
+    const skipped = journal().filter((e) => e.kind === "skipped");
+    expect(skipped).toHaveLength(2);
+    expect(skipped.every((e) => e.kind === "skipped" && e.reason === "disarmed-mid-pass")).toBe(true);
+    expect(skipped.map((e) => e.edge)).toEqual(["e2", "e3"]);
   });
 
   it("a concurrent flow:resetEdge on another edge survives this pass's write", async () => {
@@ -8187,6 +8433,46 @@ describe("a met run rule acts", () => {
     expect(window.showErrorMessage).not.toHaveBeenCalled();
   });
 
+  it("journals a run rule's command output, which the flow file has never carried", async () => {
+    const { send } = await warmed([cmdFlow()]);
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) => cb(null, "deploying to staging", ""));
+    await send({ type: "deck:refresh" });
+    // The edge itself carries only the one-sentence receipt — the output reached
+    // the output channel and nowhere else before the journal existed.
+    expect(lastWrite().edges[0].firedNote).not.toContain("deploying to staging");
+    const fired = journal().filter((e) => e.kind === "fired");
+    expect(fired).toHaveLength(1);
+    expect(fired[0].output).toEqual(expect.stringContaining("deploying to staging"));
+  });
+
+  it("journals a FAILED command's output — the whole reason this record exists", async () => {
+    // The headline case: a 2am deploy that failed, Reset the next morning, and the
+    // only evidence of what went wrong was a line in an output channel nobody kept.
+    // The edge's own stamp carries a one-sentence receipt and nothing else.
+    failsWith(2, 'psql: FATAL: role "deployer" does not exist');
+    const { send } = await warmed([cmdFlow()]);
+    await send({ type: "deck:refresh" });
+    expect(lastWrite().edges[0].error).not.toContain("deployer");
+    const errored = journal().filter((e) => e.kind === "errored");
+    expect(errored).toHaveLength(1);
+    expect(errored[0].output).toEqual(expect.stringContaining('role "deployer" does not exist'));
+  });
+
+  it("elides the middle of an enormous command output rather than journalling all of it", async () => {
+    // Over the head+tail budget, so `truncateOutput` actually has something to do —
+    // an ordinary deploy's output is far under it, which is why every other case
+    // here passes with the call removed.
+    const huge = "x".repeat(OUTPUT_HEAD_BYTES + OUTPUT_TAIL_BYTES + 5_000);
+    const { send } = await warmed([cmdFlow()]);
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) => cb(null, huge, ""));
+    await send({ type: "deck:refresh" });
+    const fired = journal().filter((e) => e.kind === "fired");
+    expect(fired).toHaveLength(1);
+    const output = fired[0].output as string;
+    expect(output).toContain("bytes elided");
+    expect(output.length).toBeLessThan(huge.length);
+  });
+
   it("stamps a rule pointing at an unknown node kind with what is wrong, not with 'undefined'", async () => {
     // End to end for the arm `applyFired` now owns: `validNode` admits an unknown
     // kind on purpose (a newer build's flow must still render), nothing derives a
@@ -8677,6 +8963,32 @@ describe("a met run rule acts", () => {
     // which would latch a rule that never executed.
     expect(w.edges[1].firedAt).toBeUndefined();
     expect(w.edges[1].error).toBeUndefined();
+  });
+
+  it("journals a rule skipped because this window lost the flows lock", async () => {
+    // The fixture above: two met run rules, and `renew` answers false after the
+    // first command.
+    //
+    // ONE site emits lock-lost — the `if (lostLock)` guard at the top of the
+    // acting loop, which covers every rule that never got its turn. The rule that
+    // WAS the last step is NOT journalled as skipped: it ran, and its outcome is
+    // recorded as `fired`/`errored`.
+    h.renew.mockReturnValue(false);
+    const { send } = await warmed([twoCommandFlow()]);
+    await send({ type: "deck:refresh" });
+    const events = journal();
+    const skipped = events.filter((e) => e.kind === "skipped");
+    expect(skipped.length).toBeGreaterThan(0);
+    expect(skipped.every((e) => e.reason === "lock-lost")).toBe(true);
+    // The rule that never got its turn is recorded, which is the point.
+    expect(skipped.map((e) => e.edge)).toContain("e2");
+    // e1 DID run: it must appear as an outcome and never as a skip. An edge
+    // journalled both ways would make the documented "why did nothing fire?"
+    // query (`kind == "deferred" or "skipped"`) name a rule that acted.
+    const acted = events.filter((e) => e.kind === "fired" || e.kind === "errored").map((e) => e.edge);
+    expect(acted).toContain("e1");
+    expect(skipped.map((e) => e.edge)).not.toContain("e1");
+    for (const edge of acted) expect(skipped.map((e) => e.edge)).not.toContain(edge);
   });
 
   it("leaves the un-run command for the next pass, once the lock is held again", async () => {
@@ -9417,6 +9729,52 @@ describe("arm, disarm and reset", () => {
     expect(again.pendingResume).toHaveLength(1);
   });
 
+  it("journals arming and disarming, naming which gesture it was", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    await send({ type: "flow:arm", id: "f1", armed: false });
+    const armed = journal().filter((e) => e.kind === "armed");
+    expect(armed).toHaveLength(2);
+    expect(armed[0]).toMatchObject({ kind: "armed", armed: true, source: "toggle", flow: "f1" });
+    expect(armed[1]).toMatchObject({ kind: "armed", armed: false, source: "toggle", flow: "f1" });
+  });
+
+  it("journals the resume banner's disarm, naming that gesture rather than the toggle", async () => {
+    // The banner's Disarm switches the flow off exactly as the toggle does, and a
+    // journal that recorded only one of the two ways would leave a flow reading
+    // as armed when it is not. `source` matches the `flow_armed` telemetry the
+    // same handler emits, so the two records of one gesture agree.
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      armed: true,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "done" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "notify" }],
+    }];
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    const { p, send } = await openPanel();
+    await settle();
+    const held = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { pendingResume: unknown[] };
+    expect(held.pendingResume).toHaveLength(1);
+    await send({ type: "flow:resumeDisarm", id: "f1" });
+    const armed = journal().filter((e) => e.kind === "armed");
+    expect(armed).toHaveLength(1);
+    expect(armed[0]).toMatchObject({ kind: "armed", armed: false, source: "resume-banner", flow: "f1" });
+  });
+
+  it("does not journal an arm for a flow id that is not on disk", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    await send({ type: "flow:arm", id: "nope", armed: true });
+    expect(journal().filter((e) => e.kind === "armed")).toEqual([]);
+  });
+
   it("flow:resetEdge clears firedAt, firedNote and error for one edge only", async () => {
     setConfig({ orchestrator: true });
     h.flows = [{
@@ -9541,6 +9899,22 @@ describe("arm, disarm and reset", () => {
     // The user's own configuration is not dropped along with the mirror — a seed's
     // prompt mode lives on the edge and has nowhere else to go.
     expect(e.mode).toBe("implementation");
+  });
+
+  it("journals a Reset, which is the gesture that destroys the edge's receipt", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      edges: [
+        { id: "e1", from: "a", to: "z", cond: { kind: "pr-merged" }, action: "notify", firedAt: 5, firedNote: "told you", error: "boom" },
+        { id: "e2", from: "a", to: "y", cond: { kind: "pr-merged" }, action: "notify", firedAt: 7 },
+      ],
+    }];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    const reset = journal().filter((e) => e.kind === "reset");
+    expect(reset).toHaveLength(1);
+    expect(reset[0]).toMatchObject({ kind: "reset", edge: "e1", flow: "f1" });
   });
 
   it("flow:resetEdge ignores an unknown flow id", async () => {

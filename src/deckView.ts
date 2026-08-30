@@ -8,7 +8,8 @@ import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
-import { nodeFlowIo, nodeLockIo, newFlowId } from "./engine/orchestrator/flowIo";
+import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
+import { appendEvent, truncateOutput, JournalEventInput } from "./engine/orchestrator/journal";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
 import { unfirableRules } from "./engine/orchestrator/armability";
@@ -338,6 +339,12 @@ interface EdgeDone {
   outcome: ActOutcome;
   promote?: { nodeId: string; runKey: string; repo: string };
   receipt?: { level: "success" | "error"; message: string };
+  /** A command's stdout+stderr, for the journal. `ActOutcome` cannot carry it:
+   * that type is what `applyFired` stamps onto the edge, and an edge receipt is
+   * one sentence by design. Before this field existed the output reached the
+   * output channel and nowhere else, so it died with the window — which is the
+   * whole reason the journal exists. Only a `run` sets it. */
+  output?: string;
 }
 
 /** What acting on one edge can answer: it happened (or deterministically cannot), or
@@ -521,6 +528,12 @@ export class DeckPanel {
    * directly so this initializer cannot depend on whether TypeScript assigns
    * constructor parameter properties before or after field initializers. */
   private readonly lockIo = nodeLockIo((m) => this.log(m));
+  private readonly journalIo = nodeJournalIo();
+  /** Whether the journal has already failed once this session. The complaint is
+   * worth making, but a broken journal fails on every event of every pass — six
+   * seconds apart, forever — and an output channel full of one repeated line is
+   * how the useful lines get lost. */
+  private journalFailed = false;
   /** Is a flows pass running right now? One at a time per panel: a pass releases the
    * flows-directory lock BEFORE it ever asks a spend-confirmation modal (asking
    * performs nothing, so there is nothing left to hold the lock for), which means the
@@ -783,6 +796,23 @@ export class DeckPanel {
     }
   }
 
+  /** Record one event, and NEVER throw. The journal observes a pass; it does not
+   * participate in one. A full disk, a permissions error or a bug in the trim
+   * must not stop a deploy rule from firing — a missing line is a lost record, an
+   * aborted pass is a lost deploy, and only one of those is recoverable by
+   * looking again in six seconds. */
+  private journal(flowId: string, ev: JournalEventInput, nowMs: number): void {
+    try {
+      appendEvent(this.journalIo, this.flowsDir, flowId, ev, nowMs);
+    } catch (e) {
+      if (this.journalFailed) return;
+      this.journalFailed = true;
+      this.log(
+        `deck: flow journal unavailable — ${(e as Error).message}. Flows keep running; their history is not being recorded.`,
+      );
+    }
+  }
+
   /** The body of a pass, with the lock held. Returns the flows that need the user's
    * consent before they can ever spend anything — the caller asks once the lock is
    * released. Split out so the lock's `try`/`finally` above stays readable, and so
@@ -975,6 +1005,16 @@ export class DeckPanel {
           // is answered. A pass that asked performs nothing anyway, so nothing is
           // delayed by more than a poll — and two modals stacked from one pass would
           // be a worse way to meet a flow.
+          // The question is the only thing that happened this pass, and it is the
+          // one event the flow file cannot record: consent lands on a flow-level
+          // field only if the user says yes, so an unanswered ask leaves no trace
+          // at all. "It never fired and never asked" and "it asked and nobody
+          // answered" are different problems.
+          this.journal(fresh.id, {
+            kind: "consent-asked",
+            action: wantsSpend.action,
+            target: wantsSpend.node.id,
+          }, nowMs);
           asks.push({ flow: fresh, target: wantsSpend });
           continue;
         }
@@ -989,6 +1029,10 @@ export class DeckPanel {
         // spec's Known limitations, alongside `openWorkspace`'s equally-unrecorded
         // `writeRun` failure.
         const outcomes = new Map<string, ActOutcome>();
+        // Kept separate from `outcomes` rather than folded into it: `outcomes` is
+        // what `applyFired` stamps onto the edge, and an edge receipt is one
+        // sentence. The output is for the journal alone.
+        const outputs = new Map<string, string>();
         const promotions: { nodeId: string; runKey: string; repo: string }[] = [];
         const receipts: { level: "success" | "error"; message: string }[] = [];
         // The junction targets of rules that could not even be DECIDED this pass.
@@ -1010,6 +1054,7 @@ export class DeckPanel {
           // out of existence.
           if (lostLock) {
             deferredTargets.add(f.edge.to);
+            this.journal(flow.id, { kind: "skipped", edge: f.edge.id, reason: "lock-lost" }, nowMs);
             continue;
           }
           // A stamped-only sibling performs nothing, and a notify's whole action is
@@ -1026,6 +1071,10 @@ export class DeckPanel {
           const stillArmed = readFlows(this.flowIo, this.flowsDir).find((fl) => fl.id === flow.id)?.armed;
           if (!stillArmed) {
             this.log(`deck: flow ${flow.id} rule ${f.edge.id} skipped — disarmed mid-pass`);
+            // OUTSIDE the `skipReported` guard below: the log line and the
+            // telemetry event are per flow, but a skip is per rule, and the
+            // journal is the only record of WHICH rules were left pending.
+            this.journal(flow.id, { kind: "skipped", edge: f.edge.id, reason: "disarmed-mid-pass" }, nowMs);
             if (!skipReported) {
               skipReported = true;
               // Not a gesture in this window: something else — the other window's
@@ -1091,16 +1140,26 @@ export class DeckPanel {
               `deck: flow ${flow.id} rule ${f.edge.id} was the last step of this pass — the flows lock was lost (reaped past its ${LOCK_TTL_MS} ms TTL); another window may be advancing now, so nothing further is performed`,
             );
             lostLock = true;
+            // No `skipped` line for THIS edge: it acted, and its outcome is
+            // recorded below as `fired` or `errored`. Journalling it as skipped
+            // too would make the "why did nothing fire?" query
+            // (`kind == "deferred" or "skipped"`) name a rule that ran. Every
+            // edge AFTER it is skipped by the `if (lostLock)` guard at the top of
+            // the loop, which journals its own line.
           }
           if (done.kind === "defer") {
             // The log, and nothing else: a transient read failure on an unattended
             // flow is not worth a notification, but a rule quietly not advancing is
             // invisible without this.
             this.log(`deck: flow ${flow.id} rule ${f.edge.id} deferred — ${done.reason}`);
+            this.journal(flow.id, { kind: "deferred", edge: f.edge.id, reason: done.reason }, nowMs);
             deferredTargets.add(f.edge.to);
             continue;
           }
           outcomes.set(f.edge.id, done.outcome);
+          if (done.output !== undefined && done.output.length > 0) {
+            outputs.set(f.edge.id, truncateOutput(done.output));
+          }
           if (done.promote) promotions.push(done.promote);
           if (done.receipt) receipts.push(done.receipt);
         }
@@ -1162,6 +1221,35 @@ export class DeckPanel {
         // planned work, and those stamps belong to this pass, not to a later read.
         for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo, nowMs);
         writeFlow(this.flowIo, this.flowsDir, next);
+        // AFTER the write, never before. A crash in between loses a line rather
+        // than inventing an event the flow file has no stamp for — the same
+        // direction as this loop's act-then-record trade-off above. A missing
+        // line is visibly missing; a false one is not.
+        //
+        // Read off `next` (what was actually written) but keyed by `stamping`,
+        // and the verb comes from `f.action` — the action EVALUATION decided —
+        // never from `e.action`, for the reason `applyFired` gives: a concurrent
+        // edit can make the two disagree, and the journal must say what ran.
+        for (const f of stamping) {
+          const e = next.edges.find((x) => x.id === f.edge.id);
+          if (!e) continue;
+          const output = outputs.get(f.edge.id);
+          const action = f.action ?? "unknown";
+          if (e.error !== undefined) {
+            this.journal(flow.id, {
+              kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error,
+              ...(output === undefined ? {} : { output }),
+            }, nowMs);
+          } else if (e.firedAt !== undefined) {
+            this.journal(flow.id, {
+              kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "",
+              ...(output === undefined ? {} : { output }),
+            }, nowMs);
+          }
+        }
+        for (const p of promotions) {
+          this.journal(flow.id, { kind: "promoted", node: p.nodeId, runKey: p.runKey, repo: p.repo }, nowMs);
+        }
         // After the write, and computed from `next` AFTER the promotions: a
         // promotion settles the rules that pointed at the node as planned work,
         // so a flow can reach its end through one. The model has no terminal
@@ -1396,6 +1484,16 @@ export class DeckPanel {
         : { launchConfirmedAt: Date.now() };
       writeFlow(this.flowIo, this.flowsDir, { ...latest, ...stamp });
     } else if (answer === DISARM) writeFlow(this.flowIo, this.flowsDir, { ...latest, armed: false });
+    // Journalled on ALL THREE answers, dismissal included. A dismissed question
+    // writes nothing at all, so without this the flow's history shows a pass that
+    // asked and then simply nothing — indistinguishable from a window that was
+    // closed before the modal was ever seen. After the write, like every other
+    // journal call, so a line is never ahead of the fact it describes.
+    this.journal(
+      latest.id,
+      { kind: "consented", answer: answer === ACT ? "act" : answer === DISARM ? "disarm" : "dismissed" },
+      Date.now(),
+    );
   }
 
   /** The configured PromptMode for an id, or a `done` refusal naming what will not
@@ -1687,6 +1785,7 @@ export class DeckPanel {
         kind: "done",
         outcome: { ok: false, error: outcome.message },
         receipt: { level: "error", message },
+        output: outcome.output,
       };
     }
     return {
@@ -1696,6 +1795,7 @@ export class DeckPanel {
       // place, so there is nothing to promote — the same as a seed.
       outcome: { ok: true, note: `ran ${outcome.label} in ${where.repo}` },
       receipt: { level: "success", message: `${flow.name}: ran ${outcome.label} in ${where.repo}.` },
+      output: outcome.output,
     };
   }
 
@@ -4077,6 +4177,11 @@ export class DeckPanel {
         const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
         if (!flow) return;
         writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed });
+        // `source: "toggle"` matches the `flow_armed` telemetry this handler
+        // already emits below, so the two records of one gesture agree. The
+        // pass's own auto-skip records its disarm as its own `skipped` events
+        // rather than as an `armed` — nothing was toggled there.
+        this.journal(m.id, { kind: "armed", armed: m.armed, source: "toggle" }, Date.now());
         // The armability split the toast below is built from, lifted so the event
         // reports the same numbers the user was just shown rather than a second
         // count of its own. Zero on a disarm, which computes no armability at all
@@ -4208,6 +4313,14 @@ export class DeckPanel {
             return kept;
           }),
         });
+        // The event this whole journal exists for. Reset's job is to DELETE the
+        // edge's receipt — `firedAt`, `firedNote`, `error`, `performed` — so that
+        // the rule can run again, which until now meant a failed 2am deploy left
+        // no evidence it had ever happened. This records that the reset HAPPENED;
+        // the receipt it cleared is not copied here, and survives only as the
+        // earlier `fired`/`errored` line for that edge — which exists just when
+        // the journal was already running at the moment the rule fired.
+        this.journal(m.id, { kind: "reset", edge: m.edgeId }, Date.now());
         trackEvent({ name: "flow_action", action: "reset_edge" });
         this.postFlows();
         return;
@@ -4238,6 +4351,12 @@ export class DeckPanel {
         this.pendingResume.delete(m.id);
         this.resumeCleared.add(m.id);
         writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: false });
+        // `source: "resume-banner"` matches the `flow_armed` telemetry below, so
+        // the two records of one gesture agree — the same rule the `flow:arm`
+        // site follows. A disarm from the banner switches the flow off exactly as
+        // the toggle does, and a journal that recorded only one of the two ways
+        // would make a flow look armed when it was not.
+        this.journal(m.id, { kind: "armed", armed: false, source: "resume-banner" }, Date.now());
         // Two events for one click, and deliberately: it is a gesture on the
         // resume banner (`flow_action`) AND a disarm (`flow_armed`), and the arm
         // question — how often does a held flow get switched off rather than
