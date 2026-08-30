@@ -4351,6 +4351,11 @@ export class DeckPanel {
           ...flow,
           edges: flow.edges.map((e) => (e.id === m.edgeId ? { ...e, gateAnswer: m.answer } : e)),
         });
+        // The gate's answer is a user decision exactly like a first-spend
+        // consent, and `flow:resetEdge` deletes `gateAnswer` from the flow file
+        // the same way it deletes a receipt — so the journal is the only place
+        // an approval survives a later Reset.
+        this.journal(m.id, { kind: "answered", edge: m.edgeId, answer: m.answer }, Date.now());
         trackEvent({ name: "flow_action", action: "answer_gate" });
         this.postFlows();
         return;

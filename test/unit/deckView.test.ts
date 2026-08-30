@@ -9979,6 +9979,29 @@ describe("arm, disarm and reset", () => {
       expect(h.flows[0].edges.find((e) => e.id === "ask1")!.gateAnswer).toBe("approved");
     });
 
+    it("journals the answer, naming the edge and what was answered", async () => {
+      h.flows = [gateFixture()];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      const answered = journal().filter((e) => e.kind === "answered");
+      expect(answered).toHaveLength(1);
+      expect(answered[0]).toMatchObject({ kind: "answered", edge: "ask1", answer: "approved", flow: "f1" });
+    });
+
+    it("journals nothing for a second answer, which the handler refuses", async () => {
+      // First-answer-wins means the second call never reaches writeFlow (see
+      // "keeps the first answer and ignores a second" above). A journal entry
+      // for that refused call would record a decision the flow file itself does
+      // not reflect — approve, then a "rejected" line nobody's edge carries.
+      h.flows = [gateFixture()];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "rejected" });
+      const answered = journal().filter((e) => e.kind === "answered");
+      expect(answered).toHaveLength(1);
+      expect(answered[0]).toMatchObject({ kind: "answered", edge: "ask1", answer: "approved" });
+    });
+
     it("ignores an answer for an edge that is not the performer", async () => {
       h.flows = [gateFixture()];
       const { send } = await openPanel();
