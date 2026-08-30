@@ -206,8 +206,11 @@ question; the node shows **Approve** and **Reject**; and a later rule fires on
 *you approved* or *you rejected*. That is what makes "deploy to staging → ask me
 → deploy to prod" expressible without leaving the flow disarmed. A gate asks
 once and latches, so Reset on the rule that asked is what poses the question
-again. There is no notification: the question waits in the drawer, and the
-drawer's footer says which flow is waiting on you.
+again. There is no notification: the gate node itself is the signal — it sits in
+the drawer with its question, an amber state dot, and the two buttons, for as
+long as it is unanswered. A **dry run** reports waiting gates in words: a rule
+waiting on a gate reads "it is waiting on your answer" there. Nothing outside
+the drawer will tell you a flow is stalled at a gate.
 
 The drawer says what each condition is waiting on right now. **Arm** a flow and it is checked
 on every Deck refresh; a rule that is met fires exactly once and tells you, rather than firing
