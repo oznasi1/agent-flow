@@ -69,25 +69,51 @@ function commandSucceeded(flow: Flow, commandNodeId: string): boolean {
   return performer !== undefined && performer.firedAt !== undefined;
 }
 
-/** Your answer to a gate, or `undefined` when it has not been given. The exact
- * shape of `commandSucceeded` above, and it carries the same two guards for the
- * same two documented reasons — read that function's comment first.
+/** Your answer to a gate, or `undefined` when it has not been given. Carries
+ * the same two GUARDS `commandSucceeded` above documents — read that
+ * function's comment first — but its `find` predicate is deliberately NOT
+ * the same, and the two must stay different.
  *
- * The one difference is what the stamp means. `commandSucceeded` can read the
+ * The one difference in what the stamp means: `commandSucceeded` can read the
  * performer's `firedAt` AS the verdict, because "it ran and did not error" is
  * the whole answer. An ask edge's `firedAt` means the question was POSED, which
  * is not an approval, so the answer needs its own field: `gateAnswer`, written
  * by `flow:answerGate` (deckView.ts) and cleared by `flow:resetEdge` alongside
  * the rest of the performer's stamps.
  *
- * `firedAt !== undefined` is still required. A performer that ERRORED carries
- * `performed` with no `firedAt`, and a hand-written `gateAnswer` sitting on such
- * an edge must not read back as an answer to a question that was never asked. */
+ * That is what lets `e.firedAt !== undefined` live INSIDE this `find`, instead
+ * of being checked after it the way `commandSucceeded` checks it. Picture a
+ * gate with two incoming rules, one wired under an older build where
+ * `actionFor("gate")` was `undefined`: `applyFired` stamped that rule's edge
+ * `performed: true` with an `error` and no `firedAt`, and it sits first in
+ * flow order. Reset the OTHER rule later and it fires properly — `performed:
+ * true` plus a real `firedAt` and `gateAnswer` — and a `find` that stops at
+ * `performed === true` alone still lands on the errored edge, sees no
+ * `firedAt`, and returns `undefined` forever: a silent, permanent stall,
+ * `awaiting-answer` every pass while the node shows nothing. Folding the
+ * `firedAt` check into the predicate lets the search continue past that
+ * errored sibling to the edge that actually asked.
+ *
+ * `commandSucceeded` cannot make the same move: skipping an errored performer
+ * to read a sibling's bare `firedAt` is exactly the sibling-inference bug its
+ * own comment describes, because for a command `firedAt` with no error
+ * already IS "succeeded". A gate's `firedAt` is never read as the answer by
+ * itself — only `gateAnswer` is — so letting the search continue past one
+ * candidate cannot manufacture an approval nobody gave; it can only recover
+ * the one the user actually gave on a different edge. Do not "align" this
+ * predicate with `commandSucceeded`'s — that reintroduces the bug the older
+ * function's comment warns about, on the one node kind it cannot happen to.
+ *
+ * `firedAt !== undefined` is still required on whichever edge survives the
+ * search: a performer that ERRORED carries `performed` with no `firedAt`, and
+ * a hand-written `gateAnswer` sitting on such an edge must not read back as an
+ * answer to a question that was never asked. */
 function gateAnswer(flow: Flow, gateNodeId: string): "approved" | "rejected" | undefined {
   if (findNode(flow, gateNodeId)?.kind !== "gate") return undefined;
-  const performer = incomingEdges(flow, gateNodeId).find((e) => e.performed === true);
-  if (!performer || performer.firedAt === undefined) return undefined;
-  return performer.gateAnswer;
+  const performer = incomingEdges(flow, gateNodeId).find(
+    (e) => e.performed === true && e.firedAt !== undefined,
+  );
+  return performer?.gateAnswer;
 }
 
 export interface EvalInput {

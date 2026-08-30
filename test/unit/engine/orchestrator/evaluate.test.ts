@@ -599,6 +599,24 @@ describe("evaluateFlow — a gate", () => {
     expect(run(flow, [status("PROJ-1")]).fired).toEqual([]);
   });
 
+  it("finds the real answer past an older-build errored performer that sits first in flow order", () => {
+    // The exact downgrade scenario the fix in `gateAnswer` (evaluate.ts) exists
+    // for: an older build with no gate support stamped rule A's edge
+    // `performed: true` plus an `error` and no `firedAt` — the fail-closed shape
+    // `applyFired` gives an unknown action. A stays first in flow order. The
+    // user upgrades, Resets only rule B, and B re-fires properly with a real
+    // `firedAt` and `gateAnswer`. A `find` that stops at `performed === true`
+    // alone would land on A, see no `firedAt`, and return `undefined` forever —
+    // the node reads "answered" with no downstream rule ever firing. Folding
+    // `firedAt !== undefined` into the `find` predicate is what lets the search
+    // continue past A to B.
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
+      [edge("A", "a", "g", { action: "ask", performed: true, error: "unknown action \"gate\"" }),
+       asked({ id: "B", gateAnswer: "approved" }),
+       edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
+    expect(run(flow, [status("PROJ-1")]).fired.map((f) => f.edge.id)).toEqual(["e2"]);
+  });
+
   it("notes that it is waiting on you once the question has been asked", () => {
     const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
       [asked(), edge("e2", "g", "z", { cond: { kind: "gate-approved" } })]);
