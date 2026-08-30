@@ -138,9 +138,20 @@ export function applyFired(
  * inherit that sentence — nothing here notified anybody — so it gets the drawer's
  * own neutral default instead of a claim about what happened. */
 function performedNote(flow: Flow, hit: FiredEdge): string {
-  if (hit.action !== "notify") return "fired";
   const target = findNode(flow, hit.edge.to);
-  return target && target.kind === "notify" ? `told you: ${target.message}` : "told you";
+  if (hit.action === "notify") {
+    return target && target.kind === "notify" ? `told you: ${target.message}` : "told you";
+  }
+  // The second non-spending verb, and it gets its own sentence for the same
+  // reason `notify` does: "fired" tells the drawer nothing about WHAT was asked,
+  // and a gate's whole receipt is the question. Keyed on the carried ACTION, not
+  // the target's current kind — a pass that decided `ask` stands by that decision
+  // even if the node changed under it, which is why the fallback below still says
+  // "asked you" rather than reaching for the neutral default.
+  if (hit.action === "ask") {
+    return target && target.kind === "gate" ? `asked you: ${target.question}` : "asked you";
+  }
+  return "fired";
 }
 
 /** One sentence per PERFORMED notify edge, for a toast. A stamped-only edge did

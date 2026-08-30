@@ -7,6 +7,7 @@ import { runSetup, SETUP_COMPLETE_KEY } from "../../src/setup";
 import { ticketKeyFor, Run, WorkspaceMode } from "../../src/types";
 import { fakeContext, fakeSecrets } from "../_helpers/factories";
 import { window, workspace } from "../_mocks/vscode";
+import { FlowIo, readFlows } from "../../src/engine/orchestrator/store";
 
 /** Helper to build a Run object with sensible defaults for testing. */
 function makeRun(overrides: Partial<Run> = {}): Run {
@@ -252,5 +253,33 @@ describe("compatibility surface (frozen)", () => {
     for (const wire of ['"jira_fetch"', '"jira_write"', '"jira_auth"', "has_jira_auth:"]) {
       expect(src).toContain(wire);
     }
+  });
+
+  it("freezes the gate flow's on-disk shape", () => {
+    // Nothing else in this file guards the flow store's format. A gate node and
+    // the answer stamped on its performer edge are read by every window and by
+    // older builds, so their spelling is frozen here too — a frozen JSON STRING
+    // run through the real read path (`readFlows`), not an object literal
+    // asserted against itself, which would pass whether or not the store could
+    // actually parse it.
+    const files: Record<string, string> = {
+      "/store/flows/f1.json": `${JSON.stringify({
+        id: "f1", name: "f", armed: true, createdAt: 1,
+        nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?" }],
+        edges: [{
+          id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" },
+          action: "ask", firedAt: 2, performed: true, gateAnswer: "approved",
+        }],
+      }, null, 2)}\n`,
+    };
+    const io: FlowIo = {
+      readDir: (dir) => Object.keys(files).filter((p) => p.startsWith(dir + "/")).map((p) => path.basename(p)),
+      readFile: (p) => files[p] ?? null,
+      writeFile: (p, text) => { files[p] = text; },
+      remove: (p) => { delete files[p]; },
+    };
+    const back = readFlows(io, "/store/flows")[0];
+    expect(back.nodes[0]).toMatchObject({ kind: "gate", question: "deploy to prod?" });
+    expect(back.edges[0]).toMatchObject({ action: "ask", gateAnswer: "approved" });
   });
 });

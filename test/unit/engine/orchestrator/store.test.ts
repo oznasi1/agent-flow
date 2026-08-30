@@ -425,3 +425,74 @@ describe("readFlows — a filename that does not match the record's own id", () 
     expect(readFlows(io, DIR)).toEqual([]);
   });
 });
+
+describe("a gate flow on disk", () => {
+  it("round-trips the node, the ask edge and the answer", () => {
+    const { io } = fakeIo();
+    const gateFlow: Flow = {
+      ...flow({ id: "f1" }),
+      nodes: [{ id: "g", kind: "gate", x: 8, y: 8, join: "any", question: "deploy to prod?" }],
+      edges: [{
+        id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" },
+        firedAt: 1, performed: true, gateAnswer: "approved",
+      }],
+    };
+    writeFlow(io, DIR, gateFlow);
+    const back = readFlows(io, DIR)[0];
+    expect(back.nodes[0]).toMatchObject({ kind: "gate", question: "deploy to prod?" });
+    expect(back.edges[0].gateAnswer).toBe("approved");
+  });
+
+  it("derives ask onto an edge into a gate that has no stored action", () => {
+    const { io } = fakeIo();
+    const gateFlow: Flow = {
+      ...flow({ id: "f2" }),
+      nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "q" }],
+      edges: [{ id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" } }],
+    };
+    writeFlow(io, DIR, gateFlow);
+    expect(readFlows(io, DIR)[0].edges[0].action).toBe("ask");
+  });
+
+  // The original version of this test stored `action: "ask"` on an UNSETTLED
+  // edge — the very value `actionFor("gate")` derives — so `derived ===
+  // e.action` and the mismatch branch was never reached at all; the assertion
+  // ("no error") held even with `actionFor`'s `"gate"` arm deleted entirely,
+  // because `derived === undefined` takes the exact same "return e unchanged"
+  // exit `latchActionMismatches` uses for a genuine match. Neither the name
+  // ("settled") nor the mismatch this test claims to guard was actually
+  // exercised. A stored action that genuinely disagrees with "ask" is what
+  // makes the outcome depend on `actionFor`'s gate arm.
+  it("latches an action mismatch on an unsettled gate edge whose stored action disagrees with actionFor(\"gate\")", () => {
+    const { io } = fakeIo();
+    const gateFlow: Flow = {
+      ...flow({ id: "f3" }),
+      nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "q" }],
+      edges: [{ id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" }, action: "notify" }],
+    };
+    writeFlow(io, DIR, gateFlow);
+    expect(readFlows(io, DIR)[0].edges[0].error).toContain(
+      'it was saved as "notify" but where it points now means "ask"',
+    );
+  });
+
+  // The other half of the same rule: a SETTLED edge is history, and must not be
+  // rewritten even when its stored action genuinely disagrees with what its
+  // target now implies (`latchActionMismatches`'s own "only unsettled edges are
+  // touched" comment). Paired with the test above so a future edit to the
+  // `isSettled` guard shows up as a REGRESSION (an error where none belongs)
+  // rather than the previous test's silent no-op.
+  it("does not latch a mismatch on a settled gate edge, even when the stored action disagrees", () => {
+    const { io } = fakeIo();
+    const gateFlow: Flow = {
+      ...flow({ id: "f4" }),
+      nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "q" }],
+      edges: [{
+        id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" }, action: "notify",
+        firedAt: 1, performed: true, gateAnswer: "approved",
+      }],
+    };
+    writeFlow(io, DIR, gateFlow);
+    expect(readFlows(io, DIR)[0].edges[0].error).toBeUndefined();
+  });
+});

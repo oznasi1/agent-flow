@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Orchestrator: a **gate** node. A flow can now stop and ask you Approve or
+  Reject, and later rules fire on your answer — so "deploy to staging → ask me →
+  deploy to prod" is expressible without leaving the flow disarmed. The question
+  waits on the node in the drawer; Reset asks it again.
+
 ## [0.59.0] — 2026-08-30
 
 ### Added

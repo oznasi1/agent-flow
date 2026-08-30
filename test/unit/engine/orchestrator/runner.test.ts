@@ -342,3 +342,50 @@ describe("notifyLines", () => {
     expect(notifyLines(flow, fired)).toEqual([]);
   });
 });
+
+describe("applyFired — an ask edge", () => {
+  const gateFlow = (): Flow => ({
+    ...emptyFlow("f1", "f", 0),
+    nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?" }],
+    edges: [{ id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" } }],
+  });
+
+  it("stamps a receipt naming the question, and needs no outcome", () => {
+    const flow = gateFlow();
+    const next = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }], 99);
+    expect(next.edges[0].firedAt).toBe(99);
+    expect(next.edges[0].firedNote).toBe("asked you: deploy to prod?");
+    expect(next.edges[0].performed).toBe(true);
+    expect(next.edges[0].error).toBeUndefined();
+  });
+
+  it("isSpendAction must not admit ask — it is never dispatched or subjected to spending constraints", () => {
+    // Architectural guard: this guards the most consequential single line in the whole feature.
+    // `isSpendAction` (model.ts) must never admit "ask", because a gate is not a spending action.
+    // If it did, a gate would compete for the three-per-pass launch cap and, worse, fall under
+    // the spend-consent modal — a question costs nothing and must never trigger paid-session guards.
+    // This test does NOT exercise performedNote (Task 3's code); it enforces isSpendAction's
+    // allowlist in model.ts. `run`, `launch` and `seed` all fail closed with "was not performed"
+    // when the caller reports nothing. An ask is never dispatched, so it never goes through
+    // that branch — and if isSpendAction ever admitted it, this test would fail.
+    const flow = gateFlow();
+    const next = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }], 99);
+    expect(next.edges[0].error).toBeUndefined();
+  });
+
+  it("falls back to a neutral receipt when the target is no longer a gate", () => {
+    const flow = { ...gateFlow(), nodes: [] };
+    const next = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }], 99);
+    expect(next.edges[0].firedNote).toBe("asked you");
+  });
+
+  it("says nothing in a toast — a gate is not a notify", () => {
+    // Architectural guard: the spec rejected posting an unawaited toast for a gate. A promise
+    // can resolve an hour later into a flow that has since been disarmed, deleted, renamed or
+    // Reset, and every one of those needs a guard. The drawer is the only answering surface.
+    // This does NOT exercise `performedNote` (Task 3's code); it exercises `notifyLines`'s
+    // action guard that prevents non-notify actions from producing toast lines.
+    const flow = gateFlow();
+    expect(notifyLines(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }])).toEqual([]);
+  });
+});

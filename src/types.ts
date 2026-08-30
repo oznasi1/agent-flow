@@ -691,6 +691,11 @@ export type InboundMessage =
   | { type: "flow:arm"; id: string; armed: boolean }
   // Clears one edge's latch (firedAt/firedNote/error) so it can fire again.
   | { type: "flow:resetEdge"; id: string; edgeId: string }
+  /** Your answer to a gate node, from the node's own Approve / Reject buttons.
+   * `edgeId` is the gate's PERFORMER edge — the one that posed the question —
+   * because that is where `gateAnswer` lives. First answer wins; see the
+   * handler in deckView.ts. */
+  | { type: "flow:answerGate"; id: string; edgeId: string; answer: "approved" | "rejected" }
   // The resume gate (Task 4): approving clears the gate so the next pass fires
   // normally; disarming turns the flow off instead. Neither message performs
   // anything itself — see DeckPanel.advanceArmedFlows.

@@ -1,8 +1,8 @@
 import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
-import { anchor, edgePath, labelPoint, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, edgeAction, Flow, FlowEdge, FlowNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
+import { Condition, edgeAction, Flow, FlowEdge, FlowNode, GateNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { CondParams, RepoOptions } from "./CondParams";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
 import { MultiCombo } from "./combo";
@@ -55,6 +55,7 @@ import {
   withNodeCommandId,
   withNodeCommandRun,
   withNodeCwdRepo,
+  withNodeGateQuestion,
   withNodeJoin,
   withNodeNotifyMessage,
   withNote,
@@ -508,7 +509,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * node. Named by the two kinds it admits rather than as "not an agent node", the
    * same lesson `isAgentNode`'s own doc comment records: a `!==` filter is what let
    * a command node into a list that then read `.runKey` off it. */
-  const actionNodes = flow.nodes.filter((n) => n.kind === "notify" || n.kind === "command");
+  const actionNodes = flow.nodes.filter((n) => n.kind === "notify" || n.kind === "command" || n.kind === "gate");
   /** How many rules cannot advance. Driven by the edges' own `error` — the half of
    * `isSettled` that means "tried and failed" rather than "ran". An armed flow with
    * one of these is not simply watching, and the footer must not say it is. */
@@ -643,7 +644,14 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * the day a terminal gains an out-port. */
   const boxOf = (n: { id: string; x: number; y: number; kind: string }) => {
     const pos = posOf(n);
-    return { x: pos.x, y: pos.y, w: n.kind === "notify" ? NOTIFY_W : NODE_W, h: NODE_H };
+    return {
+      x: pos.x, y: pos.y,
+      w: n.kind === "notify" ? NOTIFY_W : NODE_W,
+      // Height switches per kind for the same reason width already does. This one
+      // line covers edge anchoring, the obstacle list `tidy` routes around, and
+      // the clipped-right check — every consumer goes through this function.
+      h: n.kind === "gate" ? GATE_H : NODE_H,
+    };
   };
 
   /** A new rule carries NO stored action at all — not even the one its target
@@ -708,6 +716,12 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     addAndSelect({
       ...flow,
       nodes: [...flow.nodes, { id: nextNodeId(flow), kind: "notify", x: 320, y: 24, join: "any", message: "say something" }],
+    });
+
+  const addGate = () =>
+    addAndSelect({
+      ...flow,
+      nodes: [...flow.nodes, { id: nextNodeId(flow), kind: "gate", x: 320, y: 24, join: "any", question: "ok to continue?" }],
     });
 
   // Unlike every other node this drawer builds, a `planned` node cannot be
@@ -846,7 +860,8 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * already spends four paragraphs on for the action `<select>` it deleted. */
   const nodeJoins = inspNode !== undefined && incomingEdges(flow, inspNode.id).length > 1;
   const nodeInsp =
-    inspNode && (inspNode.kind === "command" || inspNode.kind === "notify" || nodeJoins) ? inspNode : undefined;
+    inspNode && (inspNode.kind === "command" || inspNode.kind === "notify"
+      || inspNode.kind === "gate" || nodeJoins) ? inspNode : undefined;
   /** How the node inspector names the node it is about — the same `endLabel`
    * every other surface names it with. Also what its controls' aria-labels are
    * scoped by: "Command", bare, is the edge inspector's and an open list row's
@@ -957,6 +972,35 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * cue at all that anything is hidden. */
   const clippedRight = flow.nodes.some((n) => posOf(n).x + boxOf(n).w > renderWidth - GRAPH_H_INSET);
 
+  /** What a gate node currently is, from the flow alone. `undefined` for every
+   * other kind. The performer is found the same way `gateAnswer` (evaluate.ts)
+   * finds it — by `performed`, never by `firedAt` alone — so the canvas and the
+   * engine can never disagree about which edge posed the question. */
+  const gateStateOf = (n: FlowNode): { asked: boolean; answer?: "approved" | "rejected"; edgeId?: string } | undefined => {
+    if (n.kind !== "gate") return undefined;
+    const performer = flow.edges.find((e) => e.to === n.id && e.performed === true && e.firedAt !== undefined);
+    if (!performer) return { asked: false };
+    return { asked: true, answer: performer.gateAnswer, edgeId: performer.id };
+  };
+
+  const answerGate = (edgeId: string, answer: "approved" | "rejected") =>
+    send({ type: "flow:answerGate", id: flow.id, edgeId, answer });
+
+  /** The question, prefixed by the verdict once there is one. The question stays
+   * visible in every state on purpose: a node that showed only "approved" would
+   * make you select it to find out what you had approved. */
+  const gateBody = (n: GateNode, st: ReturnType<typeof gateStateOf>): string =>
+    st?.answer ? `${st.answer} — ${n.question}` : n.question;
+
+  /** Rejected is `--dim`, NOT `--c-danger`. Red on a card means something is
+   * broken; a rejection is a decision you made. `--c-attn` is the same amber
+   * `STATE_HUE` already spends on "needs-you", which is exactly what an
+   * unanswered gate is. */
+  const gateHue = (st: ReturnType<typeof gateStateOf>): string =>
+    st?.answer === "approved" ? "var(--c-done)"
+      : st?.asked && !st.answer ? "var(--c-attn)"
+      : "var(--dim)";
+
   /** The nodes a rule ACTS on, and — new here — the way to SELECT one. Written
    * once and rendered by BOTH views, rather than left in the canvas branch where
    * it was: the list view is the keyboard path, its rows are one per RULE, and a
@@ -992,7 +1036,31 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             >
               {endLabel(flow, n.id)}
             </button>
-            <span className="sub">{n.kind === "notify" ? n.message : "runs a command"}</span>
+            <span className="sub">
+              {n.kind === "notify" ? n.message
+                : n.kind === "gate" ? gateBody(n, gateStateOf(n))
+                : "runs a command"}
+            </span>
+            {(() => {
+              const st = gateStateOf(n);
+              // List-only: the canvas node itself carries its own Approve/Reject
+              // (see the `.gbtns` block in the node render below), so the tray
+              // must not offer a second, simultaneous pair for the same gate in
+              // canvas view. List has no graph node to click, so the tray chip
+              // is its only route to answering at all.
+              if (n.kind !== "gate" || view !== "list" || !st?.asked || st.answer || !st.edgeId) return null;
+              const edgeId = st.edgeId;
+              return (
+                <>
+                  <button type="button" className="gbtn ok"
+                    aria-label={`Approve ${n.question}`}
+                    onClick={() => answerGate(edgeId, "approved")}>Approve</button>
+                  <button type="button" className="gbtn"
+                    aria-label={`Reject ${n.question}`}
+                    onClick={() => answerGate(edgeId, "rejected")}>Reject</button>
+                </>
+              );
+            })()}
             <button
               type="button"
               className="rm"
@@ -1136,6 +1204,34 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             onBlur={(ev) => p.onSave(withNodeNotifyMessage(flow, nodeInsp.id, ev.currentTarget.value))}
           />
         </div>
+      ) : nodeInsp.kind === "gate" ? (
+        <>
+          <div className="orch-clause">
+            <span className="orch-kw">ASKS</span>
+            <input
+              className="orch-msg"
+              aria-label={`Question for ${nodeInspName}`}
+              key={nodeInsp.id}
+              defaultValue={nodeInsp.question}
+              onBlur={(ev) => p.onSave(withNodeGateQuestion(flow, nodeInsp.id, ev.currentTarget.value))}
+            />
+          </div>
+          {(() => {
+            const st = gateStateOf(nodeInsp);
+            if (!st?.answer || !st.edgeId) return null;
+            const edgeId = st.edgeId;
+            return (
+              <div className="orch-clause">
+                <span className="orch-kw">ANSWERED</span>
+                <span>{st.answer}</span>
+                <button type="button" className="orch-mini"
+                  onClick={() => p.onResetEdge(flow.id, edgeId)}>
+                  Reset to ask again
+                </button>
+              </div>
+            );
+          })()}
+        </>
       ) : null}
       {/* What several incoming rules mean where they meet. Last, after whatever
           the node's own kind had to say, because it is a fact about the WIRING
@@ -1436,6 +1532,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               </span>
               <div className="sp" />
               <button type="button" className="orch-mini" onClick={addNotify}>+ Notify</button>
+              <button type="button" className="orch-mini" onClick={addGate}>+ Gate</button>
               <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
               {addCommandPicker}
               <MultiCombo
@@ -1547,6 +1644,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           <div className="sp" />
           <button type="button" className="orch-mini" onClick={onTidy}>Tidy</button>
           <button type="button" className="orch-mini" onClick={addNotify}>+ Notify</button>
+          <button type="button" className="orch-mini" onClick={addGate}>+ Gate</button>
           <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
           {addCommandPicker}
         </div>
@@ -1602,13 +1700,16 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <div
                 key={n.id}
                 data-testid={`orch-node-${n.id}`}
-                className={`orch-node${n.kind === "planned" ? " plan" : ""}${n.kind === "notify" ? " notify" : ""}${sel === n.id ? " sel" : ""}${wiring === n.id ? " src" : ""}`}
+                className={`orch-node${n.kind === "planned" ? " plan" : ""}${n.kind === "notify" ? " notify" : ""}${n.kind === "gate" ? " gate" : ""}${sel === n.id ? " sel" : ""}${wiring === n.id ? " src" : ""}`}
                 style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
                 onPointerDown={(e) => startDrag(n.id, e)}
                 onPointerUp={() => wiring && finishWire(n.id)}
               >
                 <div className="l1">
-                  <span className="d" style={{ background: st ? STATE_HUE[st] : "var(--dim)" }} />
+                  <span className="d" style={{
+                    background: n.kind === "gate" ? gateHue(gateStateOf(n))
+                      : st ? STATE_HUE[st] : "var(--dim)",
+                  }} />
                   {/* `endLabel` (orchestratorRule.ts), not a second hand-typed
                       ternary: this exact fallthrough used to give a command
                       node the literal word "notify" — a canvas chip lying
@@ -1617,8 +1718,34 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   <span className="k">{endLabel(flow, n.id)}</span>
                 </div>
                 <div className="st">
-                  {n.kind === "place" ? n.repo : n.kind === "planned" ? "not taken" : n.kind === "notify" ? n.message : n.kind === "command" ? "runs a command" : ""}
+                  {n.kind === "place" ? n.repo
+                    : n.kind === "planned" ? "not taken"
+                    : n.kind === "notify" ? n.message
+                    : n.kind === "command" ? "runs a command"
+                    : n.kind === "gate" ? gateBody(n, gateStateOf(n))
+                    : ""}
                 </div>
+                {n.kind === "gate" && (() => {
+                  const st2 = gateStateOf(n);
+                  if (!st2?.asked || st2.answer || !st2.edgeId) return null;
+                  const edgeId = st2.edgeId;
+                  const question = n.question;
+                  return (
+                    // stopPropagation on pointerDown is what keeps `startDrag`
+                    // from ever seeing this pointer — the same idiom `.orch-port`
+                    // uses below, and the reason a press-then-move on a button
+                    // can never become an approve. `.orch-node` is a
+                    // `cursor: grab` surface built to swallow pointer events.
+                    <div className="gbtns" onPointerDown={(e) => e.stopPropagation()}>
+                      <button type="button" className="gbtn ok"
+                        aria-label={`Approve ${question}`}
+                        onClick={() => answerGate(edgeId, "approved")}>Approve</button>
+                      <button type="button" className="gbtn"
+                        aria-label={`Reject ${question}`}
+                        onClick={() => answerGate(edgeId, "rejected")}>Reject</button>
+                    </div>
+                  );
+                })()}
                 <span
                   className="orch-port in"
                   data-testid={`orch-port-in-${n.id}`}

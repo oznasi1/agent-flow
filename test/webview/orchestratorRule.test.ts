@@ -5,16 +5,23 @@
 // `fireEvent` that could only exercise the paths a control happens to produce.
 // These are the paths a hand-edited flow file produces too.
 import { describe, expect, it } from "vitest";
-import type { Flow } from "../../src/engine/orchestrator/model";
+import { emptyFlow, type Flow } from "../../src/engine/orchestrator/model";
+import type { RulePreview } from "../../src/engine/orchestrator/preview";
+import type { RunStatus } from "../../src/types";
 import {
+  COND_LABEL,
   condOffered,
   CWD_REPO_DEFAULT,
+  defaultCondFor,
   DEFAULT_IDLE_MINUTES,
+  endLabel,
+  observationOf,
   offeredConds,
   OFFERED_CONDS,
   repoOptions,
   seedCond,
   sourceRepoOfNode,
+  verdictWhy,
   withCond,
   withCondParams,
   withNodeCwdRepo,
@@ -63,6 +70,38 @@ describe("the condition picker's offer", () => {
     const f = wired();
     f.edges[0].cond = { kind: "branch-ci-passed", repo: "agent-flow", branch: "main" };
     expect(condOffered(f, f.edges[0])).toBe(true);
+  });
+});
+
+describe("observationOf", () => {
+  // Same minimal RunStatus shape OrchestratorDrawer.test.tsx's own `runStatus`
+  // fixture uses for its "survives a command-succeeded rule wired off a PLACE"
+  // case — a REAL, matched run, not an empty `runs: []`. An empty array would
+  // make this test pass for the wrong reason: `!status` already returns `null`
+  // on its own, before the guard this test exists to pin ever runs, so the
+  // guard's removal would go uncaught.
+  const runStatus = (key: string, repo: string): RunStatus => ({
+    run: { key, summary: "s", url: `https://j/browse/${key}`, createdAt: 1, mode: "multiroot",
+      repos: [{ name: repo, path: `/r/${repo}`, isGit: true }], briefPaths: [] },
+    column: "progress", ticketStatus: "In Progress", ticketCategory: "indeterminate",
+    repos: [{ name: repo, path: `/r/${repo}`, branch: "b", dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }],
+    agent: { state: "working", lastActivityMs: 1, slug: null },
+    windowOpen: true, prs: {}, agents: [], shelf: "board",
+  });
+
+  it("refuses gate-approved and gate-rejected, the same way it already refuses command-succeeded", () => {
+    // Neither kind has a place-shaped observation to make: a gate's verdict
+    // lives on its own incoming edge (`gateAnswer`, model.ts), never in the
+    // CondContext this function would otherwise build from `e.from`'s
+    // RunStatus. `describeCond`'s matching arms throw; this guard is what
+    // keeps them unreachable, the same way it already keeps
+    // `command-succeeded`'s throw unreachable.
+    const f = wired();
+    const approved = { ...f.edges[0], cond: { kind: "gate-approved" as const } };
+    const rejected = { ...f.edges[0], cond: { kind: "gate-rejected" as const } };
+    const runs = [runStatus("PROJ-1", "agent-flow")];
+    expect(observationOf(f, approved, runs)).toBeNull();
+    expect(observationOf(f, rejected, runs)).toBeNull();
   });
 });
 
@@ -229,5 +268,62 @@ describe("CWD_REPO_DEFAULT", () => {
     // "(default)" would say only that somebody else decided. The whole reason
     // this option exists is that absent `cwdRepo` has a meaning worth naming.
     expect(CWD_REPO_DEFAULT).toMatch(/rule came from/);
+  });
+});
+
+describe("gate nodes in the pickers", () => {
+  const gateFlow = (): Flow => ({ ...emptyFlow("f1", "f", 0),
+    nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?" },
+            { id: "c", kind: "command", x: 0, y: 0, join: "any", run: "d.sh" },
+            { id: "p", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r" }],
+    edges: [] });
+
+  it("names a gate 'gate' rather than falling through to '?'", () => {
+    expect(endLabel(gateFlow(), "g")).toBe("gate");
+  });
+
+  it("offers exactly the two gate conditions off a gate source", () => {
+    expect(offeredConds(gateFlow(), "g")).toEqual(["gate-approved", "gate-rejected"]);
+  });
+
+  it("offers neither gate condition off a place, and still offers the place-shaped list", () => {
+    const off = offeredConds(gateFlow(), "p");
+    expect(off).not.toContain("gate-approved");
+    expect(off).not.toContain("gate-rejected");
+    // The two negative assertions above would also pass today, before the
+    // gate arm exists, because the OLD two-way filter already drops anything
+    // that is not `command-succeeded` into this same bucket. What actually
+    // distinguishes "correctly split into three" from "collapsed back to
+    // two" is that the place bucket is neither empty nor the full set: it
+    // still carries every place-shaped kind and nothing else.
+    expect(off).toContain("pr-merged");
+    expect(off).toContain("ci-passed");
+    expect(off).not.toContain("command-succeeded");
+    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 3);
+  });
+
+  it("still offers command-succeeded off a command, and no gate condition", () => {
+    expect(offeredConds(gateFlow(), "c")).toEqual(["command-succeeded"]);
+  });
+
+  it("seeds a new wire out of a gate with gate-approved", () => {
+    expect(defaultCondFor(gateFlow(), "g")).toEqual({ kind: "gate-approved" });
+  });
+
+  it("labels both gate conditions without a parameter ellipsis", () => {
+    expect(COND_LABEL["gate-approved"]).toBe("you approved");
+    expect(COND_LABEL["gate-rejected"]).toBe("you rejected");
+  });
+
+  it("says a gate is waiting on you rather than borrowing a session's wording", () => {
+    expect(verdictWhy({ verdict: "blocked", reason: "awaiting-answer" } as RulePreview))
+      .toBe("it is waiting on your answer");
+  });
+
+  it("still says the two things it always said", () => {
+    expect(verdictWhy({ verdict: "blocked", reason: "gone" } as RulePreview))
+      .toBe("its card is not on the board right now");
+    expect(verdictWhy({ verdict: "blocked", reason: "agent-state-unknown" } as RulePreview))
+      .toBe("its session activity cannot be read");
   });
 });

@@ -11,6 +11,15 @@ export const NODE_W = 168;
 /** The two-line default. `anchor` reads the measured box instead wherever a real
  * element is available, so a taller node still ports from its own middle. */
 export const NODE_H = 44;
+/** A gate node's height. Taller than `NODE_H` because it carries a row of
+ * Approve / Reject buttons under the question.
+ *
+ * Constant for the KIND, not for the state. An answered gate keeps this height,
+ * with its verdict line occupying the row the buttons had — a height that changed
+ * with the answer would make every wire into and out of the gate jump the moment
+ * it was answered. `boxOf` (OrchestratorDrawer.tsx) is the one place it is applied,
+ * beside the width ternary that already switches on `notify`. */
+export const GATE_H = 70;
 /** Column pitch. Wider than NODE_W by enough that a condition label sitting over
  * the connector does not span the whole gap. */
 export const COL_GAP = 296;

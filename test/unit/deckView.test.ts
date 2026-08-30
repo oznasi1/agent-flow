@@ -9928,6 +9928,163 @@ describe("arm, disarm and reset", () => {
     expect(h.writeFlow).not.toHaveBeenCalled();
   });
 
+  describe("flow:answerGate", () => {
+    beforeEach(() => setConfig({ orchestrator: true }));
+
+    // A gate `g` with two incoming edges: `ask1` already fired and is the
+    // PERFORMER (it posed the question, hence `performed: true`). `sibling`
+    // is the shape `FlowEdge.performed`'s own doc comment names — a
+    // per-target-dedupe or "all"-junction sibling that `applyFired`
+    // (runner.ts) stamps with the identical `firedAt`-set, `error`-absent
+    // shape without ever running anything, so it carries `firedAt` but never
+    // `performed`. Giving it `firedAt` here (rather than leaving the edge
+    // unfired) is what makes "ignores an answer for an edge that is not the
+    // performer" a real test of the guard's `performed` half: an unfired
+    // sibling would also be refused by the guard's separate `firedAt` half,
+    // masking a deleted `performed` check. Mirrors the shape
+    // `flow:resetEdge`'s own fixtures use above, plus the gate node and the
+    // second edge this handler has to tell apart from the performer.
+    const gateFixture = (): Flow => ({
+      ...mkFlow("f1", "n"),
+      nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?" }],
+      edges: [
+        { id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" }, action: "ask", firedAt: 5, performed: true },
+        { id: "sibling", from: "b", to: "g", cond: { kind: "pr-merged" }, action: "ask", firedAt: 5 },
+      ],
+    });
+
+    it("stamps the answer on the performer edge", async () => {
+      h.flows = [gateFixture()];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      expect(written.edges.find((e) => e.id === "ask1")!.gateAnswer).toBe("approved");
+      // The sibling edge is untouched — proof the write targeted one edge, not a
+      // blanket stamp across the flow.
+      expect(written.edges.find((e) => e.id === "sibling")!.gateAnswer).toBeUndefined();
+    });
+
+    it("keeps the first answer and ignores a second", async () => {
+      h.flows = [gateFixture()];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      // h.writeFlow's default mockImplementation (beforeEach) folds the write
+      // back into h.flows, so the second send's own re-read under the lock sees
+      // the first answer already stamped — exactly the on-disk state a second
+      // click would actually find.
+      const beforeSecond = h.writeFlow.mock.calls.length;
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "rejected" });
+      // No second write at all: the handler refuses before it ever calls writeFlow.
+      expect(h.writeFlow.mock.calls.length).toBe(beforeSecond);
+      expect(h.flows[0].edges.find((e) => e.id === "ask1")!.gateAnswer).toBe("approved");
+    });
+
+    it("journals the answer, naming the edge and what was answered", async () => {
+      h.flows = [gateFixture()];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      const answered = journal().filter((e) => e.kind === "answered");
+      expect(answered).toHaveLength(1);
+      expect(answered[0]).toMatchObject({ kind: "answered", edge: "ask1", answer: "approved", flow: "f1" });
+    });
+
+    it("journals nothing for a second answer, which the handler refuses", async () => {
+      // First-answer-wins means the second call never reaches writeFlow (see
+      // "keeps the first answer and ignores a second" above). A journal entry
+      // for that refused call would record a decision the flow file itself does
+      // not reflect — approve, then a "rejected" line nobody's edge carries.
+      h.flows = [gateFixture()];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "rejected" });
+      const answered = journal().filter((e) => e.kind === "answered");
+      expect(answered).toHaveLength(1);
+      expect(answered[0]).toMatchObject({ kind: "answered", edge: "ask1", answer: "approved" });
+    });
+
+    it("ignores an answer for an edge that is not the performer", async () => {
+      h.flows = [gateFixture()];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "sibling", answer: "approved" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      // A valid answer on the SAME fixture does land — proof this is a targeted
+      // refusal (not-the-performer) and not a handler that never writes at all.
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges.find((e) => e.id === "ask1")!.gateAnswer)
+        .toBe("approved");
+    });
+
+    it("ignores an answer for an edge that errored before it ever asked", async () => {
+      // The other half of the guard's shape: `performed: true` names it as the
+      // one that ran, but no `firedAt` — exactly what a FAILED action gets (see
+      // `applyFired`, runner.ts: a failure takes `error` and NO `firedAt`, so a
+      // failed launch can't look done). If the guard's `firedAt === undefined`
+      // clause were removed, this edge would read as "already asked" and take
+      // an answer to a question it never actually posed.
+      h.flows = [{
+        ...gateFixture(),
+        edges: [
+          ...gateFixture().edges,
+          { id: "errored", from: "c", to: "g", cond: { kind: "pr-merged" }, action: "ask",
+            performed: true, error: "ask was not performed" },
+        ],
+      }];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "errored", answer: "approved" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      // A valid answer on the real performer, same fixture, does land — proof
+      // this is a targeted refusal (no firedAt) and not a handler that never
+      // writes at all.
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges.find((e) => e.id === "ask1")!.gateAnswer)
+        .toBe("approved");
+    });
+
+    it("ignores an answer for a flow that is gone", async () => {
+      h.flows = [gateFixture()];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "nope", edgeId: "ask1", answer: "approved" });
+      // Not just "did not throw": the real flow on disk is untouched, and the
+      // SAME message with the right id still lands — proof the id is what was
+      // refused, not that the handler is a no-op for every call.
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges.find((e) => e.id === "ask1")!.gateAnswer)
+        .toBe("approved");
+    });
+
+    it("ignores an answer for an edge that is gone", async () => {
+      h.flows = [gateFixture()];
+      const { send } = await openPanel();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "nope", answer: "approved" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+      expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).edges.find((e) => e.id === "ask1")!.gateAnswer)
+        .toBe("approved");
+    });
+  });
+
+  it("flow:resetEdge clears the gate answer along with the other stamps", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{
+      ...mkFlow("f1", "n"),
+      nodes: [{ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?" }],
+      edges: [
+        { id: "ask1", from: "a", to: "g", cond: { kind: "pr-merged" }, action: "ask", firedAt: 5, performed: true },
+      ],
+    }];
+    const { send } = await openPanel();
+    await send({ type: "flow:answerGate", id: "f1", edgeId: "ask1", answer: "approved" });
+    expect(h.flows[0].edges.find((e) => e.id === "ask1")!.gateAnswer).toBe("approved");
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "ask1" });
+    const e = (h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0];
+    expect(e.gateAnswer).toBeUndefined();
+    expect(e.firedAt).toBeUndefined();
+    expect(e.performed).toBeUndefined();
+  });
+
   it("flow:save preserves the host's own firedAt when the drawer's copy is stale", async () => {
     // The hazard: the host stamped e1 during a poll; the drawer still holds the
     // pre-stamp flow and saves a node move. Writing its copy verbatim would clear

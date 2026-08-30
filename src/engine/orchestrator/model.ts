@@ -57,7 +57,18 @@ export type CommandNode = NodeBase & {
   cwdRepo?: string;
 };
 
-export type FlowNode = PlaceNode | PlannedNode | NotifyNode | CommandNode;
+/** A question the flow stops and asks you. A rule into it poses the question;
+ * you answer Approve or Reject on the node; a LATER rule reads that answer as
+ * `gate-approved` or `gate-rejected`.
+ *
+ * The same shape as `NotifyNode` with `question` where `message` is — but not
+ * the same thing at all. A notify terminal is not observed by anything; a gate
+ * is, which is why it keeps an out port and why the two conditions below read
+ * off its incoming edge. It is the only node whose state a PERSON, rather than
+ * the world, decides. */
+export type GateNode = NodeBase & { kind: "gate"; question: string };
+
+export type FlowNode = PlaceNode | PlannedNode | NotifyNode | CommandNode | GateNode;
 
 /** Every condition kind that needs no parameter. */
 export type CondKind =
@@ -81,7 +92,20 @@ export type CondKind =
    * because the verdict lives on the command node's INCOMING edge, not on any
    * `RunStatus` `evalCond` could be handed. `conditions.ts` still carries a
    * documented arm for it, so it stays a total function over every kind. */
-  | "command-succeeded";
+  | "command-succeeded"
+  /** Did you approve — or reject — the gate this rule points back at? Bare, like
+   * `command-succeeded` above, and answered in the same unusual place and for the
+   * same reason: `evaluate.ts`'s `isMet` intercepts both before `conditions.ts`'s
+   * `evalCond` ever sees them, because the verdict lives on the gate node's
+   * INCOMING edge (`gateAnswer`, below) rather than on any `RunStatus`.
+   *
+   * Two kinds rather than one is not symmetry for its own sake. The stamp must
+   * distinguish "rejected" from "unanswered" regardless — otherwise the drawer
+   * cannot stop asking, and cannot show you what you decided — so the fact is on
+   * disk either way. Reading only half of it would leave a rejected gate
+   * indistinguishable from an unanswered one to every downstream rule. */
+  | "gate-approved"
+  | "gate-rejected";
 
 /** The `kind` strings below are serialized into flow files under
  * ~/.agentflow/flows and shared across windows, so they keep their released
@@ -117,7 +141,7 @@ export type Condition =
  *
  * Nothing here instructs a RUNNING agent; that remains impossible (see the
  * spec's out-of-scope note on `tell`). */
-export type FlowAction = "launch" | "seed" | "notify" | "run";
+export type FlowAction = "launch" | "seed" | "notify" | "run" | "ask";
 
 export interface FlowEdge {
   id: string;
@@ -184,6 +208,25 @@ export interface FlowEdge {
    * configuration, so it is a deny-list now: a HOST-OWNED field added here
    * needs a matching edit there, or Reset will leave it behind. */
   performed?: true;
+  /** Your answer to the gate this edge points at, stamped on the PERFORMER edge
+   * — the one carrying `performed: true` — for the same reason `commandSucceeded`
+   * names its performer that way: `firedAt`/`error` alone cannot tell a real
+   * performer from an "all"-junction or per-target-dedupe sibling that
+   * `applyFired` stamps with an identical shape.
+   *
+   * It cannot be inferred from `firedAt`. An ask edge fires the moment the
+   * question is POSED, which means "asked", never "approved" — the one place a
+   * gate differs from the `command-succeeded` shape it otherwise copies.
+   *
+   * On the EDGE and not on the node, because Reset is per edge: clearing the ask
+   * edge clears the answer and the next pass re-poses the question, which is the
+   * whole Reset affordance inherited for nothing. `flow:resetEdge` (deckView.ts)
+   * names it in the explicit deny-list of stamps it deletes — a host-owned field
+   * added here needs a matching edit there or Reset leaves it behind.
+   *
+   * Optional, and absent on every flow written before this build: absent means
+   * "not answered", which is what keeps an old file reading unchanged. */
+  gateAnswer?: "approved" | "rejected";
   /** Extra, once-off text for the agent this rule starts — appended to the prompt
    * mode's template, or substituted at `{note}` if the template has one. For
    * `launch` and `seed` only; a `notify` rule's words live on its notify node.
@@ -248,13 +291,16 @@ export function isSettled(e: FlowEdge): boolean {
  * `advanceUnderLock`, and (indirectly) whether `spendTarget()` resolves to
  * something. A fourth action added here without updating every call site by
  * hand would otherwise be silently treated as free by whichever site got
- * missed. `notify` is the only non-spending action today, but this is written
- * as an allowlist, not a `!== "notify"` negation, so a NEW action defaults to
- * "does not spend" until someone deliberately adds it here. `run` was added
- * deliberately: it executes a shell command on the user's machine, unattended,
- * which is exactly the kind of consequence the once-per-flow consent gate
- * exists to catch before the first one fires — an action that reads as "free"
- * here skips that gate entirely.
+ * missed. `notify` and `ask` are the only non-spending actions today, but this
+ * is written as an allowlist, not a `!== "notify"` negation, so a NEW action
+ * defaults to "does not spend" until someone deliberately adds it here. `run`
+ * was added deliberately: it executes a shell command on the user's machine,
+ * unattended, which is exactly the kind of consequence the once-per-flow
+ * consent gate exists to catch before the first one fires — an action that
+ * reads as "free" here skips that gate entirely. `ask` earns its place in the
+ * exclusion the same way `notify` does: it opens no window and starts nothing
+ * paid, it only poses a question, so it must stay off the consent gate and out
+ * of the once-per-pass launch cap the way `notify` already is.
  *
  * Takes `FlowAction | undefined` — `FlowEdge.action` is optional now (see its
  * own doc comment) — and answers `false` for `undefined`: an edge with no
@@ -267,8 +313,13 @@ export function isSettled(e: FlowEdge): boolean {
  * to spend also narrows the verb for the code that then spends it:
  * `deckView.ts`'s dispatch hands `performEdge` an action this has already
  * admitted, and `performEdge` therefore has no `undefined` case to write a
- * refusal for that nothing could reach (it had one, and it was dead). */
-export function isSpendAction(action: FlowAction | undefined): action is Exclude<FlowAction, "notify"> {
+ * refusal for that nothing could reach (it had one, and it was dead). The
+ * excluded set in the return type has to name `ask` alongside `notify`
+ * explicitly for that same reason: leaving it as `Exclude<FlowAction,
+ * "notify">` would let the type system believe an edge past this guard could
+ * still be `ask`, which is exactly the false belief `deckView.ts`'s dispatch
+ * would otherwise be handed. */
+export function isSpendAction(action: FlowAction | undefined): action is Exclude<FlowAction, "notify" | "ask"> {
   return action === "launch" || action === "seed" || action === "run";
 }
 
@@ -286,6 +337,10 @@ export function isNotify(n: FlowNode): n is NotifyNode {
 
 export function isCommand(n: FlowNode): n is CommandNode {
   return n.kind === "command";
+}
+
+export function isGate(n: FlowNode): n is GateNode {
+  return n.kind === "gate";
 }
 
 export function findNode(flow: Flow, id: string): FlowNode | undefined {
@@ -313,6 +368,7 @@ export function actionFor(kind: string): FlowAction | undefined {
     case "place": return "seed";
     case "notify": return "notify";
     case "command": return "run";
+    case "gate": return "ask";
     default: return undefined;
   }
 }

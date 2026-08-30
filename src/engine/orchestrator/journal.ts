@@ -59,7 +59,13 @@ export type JournalEventInput =
   | { kind: "deferred"; edge: string; reason: string }
   | { kind: "skipped"; edge: string; reason: "disarmed-mid-pass" | "lock-lost" }
   | { kind: "promoted"; node: string; runKey: string; repo: string }
-  | { kind: "reset"; edge: string };
+  | { kind: "reset"; edge: string }
+  /** A gate's Approve/Reject, stamped as `gateAnswer` on the performer edge.
+   * `answer` is a user decision exactly like `consented`'s, so it types the same
+   * way: `string`, not the literal union the webview sends, because this module
+   * outlives whatever answers a future build adds. Reset deletes `gateAnswer`
+   * from the flow file — the journal is the only place the answer survives it. */
+  | { kind: "answered"; edge: string; answer: string };
 
 /** An event as it sits on disk, minus `sum` — which is a property of the LINE,
  * not of the event, and is consumed by `readJournal` rather than handed on. */

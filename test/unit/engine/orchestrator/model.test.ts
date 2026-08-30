@@ -1,8 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
-  emptyFlow, isPlace, isPlanned, isNotify, isCommand, isSettled, isSpendAction, findNode, incomingEdges,
+  emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, incomingEdges,
   actionFor, edgeAction, condIncomplete,
-  Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode,
+  Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
 const place = (id: string, over: Partial<PlaceNode> = {}): PlaceNode => ({
@@ -200,5 +200,35 @@ describe("condIncomplete", () => {
     expect(condIncomplete({ kind: "ticket-status-is" } as never)).toBe("no status set");
     expect(condIncomplete({ kind: "branch-ci-passed" } as never)).toBe("no repo set");
     expect(condIncomplete({ kind: "branch-ci-passed", repo: "api" } as never)).toBe("no branch set");
+  });
+});
+
+describe("a gate node", () => {
+  const gate = (id: string): GateNode =>
+    ({ id, kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?" });
+
+  it("implies the ask verb", () => {
+    expect(actionFor("gate")).toBe("ask");
+  });
+
+  it("does not spend, so it never competes for a launch slot", () => {
+    expect(isSpendAction("ask")).toBe(false);
+  });
+
+  it("still admits the three verbs that do spend", () => {
+    expect(isSpendAction("launch")).toBe(true);
+    expect(isSpendAction("seed")).toBe(true);
+    expect(isSpendAction("run")).toBe(true);
+  });
+
+  it("derives ask for an edge pointing at one", () => {
+    const flow: Flow = { ...emptyFlow("f1", "f", 0), nodes: [gate("g")],
+      edges: [{ id: "e1", from: "a", to: "g", cond: { kind: "pr-merged" } }] };
+    expect(edgeAction(flow, flow.edges[0])).toBe("ask");
+  });
+
+  it("is recognised by isGate and by nothing else", () => {
+    expect(isGate(gate("g"))).toBe(true);
+    expect(isGate({ id: "n", kind: "notify", x: 0, y: 0, join: "any", message: "m" })).toBe(false);
   });
 });

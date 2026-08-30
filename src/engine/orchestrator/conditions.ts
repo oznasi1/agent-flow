@@ -173,6 +173,21 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
         "evalCond cannot answer command-succeeded: it is decided in evaluate.ts's " +
           "commandSucceeded from the whole Flow, never from one place's CondContext.",
       );
+    case "gate-approved":
+    case "gate-rejected":
+      // Not answerable here, and — as with `command-succeeded` above — not
+      // answered with a silent wrong guess either. A gate is not a place: no
+      // `CondContext` carries what a person decided. The verdict lives on the
+      // gate node's INCOMING edge (`gateAnswer`), which needs the whole `Flow`,
+      // which only `evaluate.ts` has. Its `isMet` intercepts both kinds before
+      // this switch, and `orchestratorRule.ts`'s `observationOf` refuses them
+      // before `describeCond`, so this arm has no live caller. Throwing keeps it
+      // that way; a `false` here would be a confidently wrong answer the moment
+      // a second caller appears.
+      throw new Error(
+        `evalCond cannot answer ${cond.kind}: a gate's verdict is decided in ` +
+          "evaluate.ts's gateAnswer from the whole Flow, never from one place's CondContext.",
+      );
     default:
       // A kind this build does not know — a flow file written by a NEWER build.
       // `store.ts`'s `validEdge` deliberately KEEPS such an edge so the rule
@@ -327,6 +342,20 @@ export function describeCond(cond: Condition, c: CondContext): string {
       throw new Error(
         "describeCond cannot describe command-succeeded: there is no place-shaped " +
           "observation for it. observationOf (orchestratorRule.ts) must keep refusing this kind.",
+      );
+    case "gate-approved":
+    case "gate-rejected":
+      // Unreachable, deliberately, and for the same reason the arm above is: the
+      // verdict for a gate lives on the gate node's INCOMING edge (`gateAnswer`,
+      // model.ts), never in a `CondContext` built from one place's `RunStatus` —
+      // so this function has nothing it could read to answer from, regardless of
+      // what `c` holds. `observationOf` (orchestratorRule.ts) must refuse this
+      // kind before ever calling here, the same way it already refuses
+      // `command-succeeded`.
+      throw new Error(
+        "describeCond cannot describe gate-approved/gate-rejected: there is no " +
+          "CondContext-shaped observation for a gate. observationOf (orchestratorRule.ts) " +
+          "must refuse this kind the same way it refuses command-succeeded.",
       );
   }
 }

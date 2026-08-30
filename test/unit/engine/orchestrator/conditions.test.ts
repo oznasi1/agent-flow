@@ -539,6 +539,23 @@ describe("evalCond and describeCond — command-succeeded is unreachable here, l
   });
 });
 
+describe("describeCond — gate-approved and gate-rejected are unreachable here too, loudly", () => {
+  // Same reasoning as command-succeeded above, and for the same reason model.ts's
+  // own doc comments give: a gate's verdict lives on the gate node's INCOMING
+  // edge (`gateAnswer`), never in a CondContext built from one place's
+  // RunStatus, so describeCond has nothing it could read to answer from.
+  // observationOf (orchestratorRule.ts) is what keeps these two arms
+  // unreachable in practice, the same way it already does for
+  // command-succeeded.
+  it("describeCond throws for gate-approved", () => {
+    expect(() => describeCond({ kind: "gate-approved" }, ctx())).toThrow();
+  });
+
+  it("describeCond throws for gate-rejected", () => {
+    expect(() => describeCond({ kind: "gate-rejected" }, ctx())).toThrow();
+  });
+});
+
 describe("evalCond — a condition kind this build does not know", () => {
   it("answers not-met, never a throw — the forward-compat contract the store already keeps", () => {
     // `store.ts`'s `validEdge` deliberately keeps an edge whose `cond.kind` it
@@ -548,5 +565,13 @@ describe("evalCond — a condition kind this build does not know", () => {
     // away from crashing every pass in every window over one newer-build rule.
     // Not-met is the explicit answer: the rule renders, waits, and costs nothing.
     expect(evalCond({ kind: "moon-is-full" } as unknown as Condition, ctx())).toBe(false);
+  });
+});
+
+describe("evalCond and the gate kinds", () => {
+  it("refuses to guess at a gate condition rather than answering false", () => {
+    const c = { status: {} as never, repo: "r", nowMs: 0 };
+    expect(() => evalCond({ kind: "gate-approved" }, c as never)).toThrow(/gate-approved/);
+    expect(() => evalCond({ kind: "gate-rejected" }, c as never)).toThrow(/gate-rejected/);
   });
 });
