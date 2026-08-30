@@ -167,8 +167,11 @@ export interface FiredEdge {
   action: FlowAction | undefined;
 }
 
-/** Why an armed flow is not advancing — surfaced in the drawer's footer, because
- * a flow that silently waits on something impossible looks like patience. */
+/** Why an armed flow is not advancing. Computed on every armed pass and read
+ * by the dry run via `previewFlow` → `RulePreview.reason` → `verdictWhy`
+ * (orchestratorRule.ts), which produces user-facing wording for each reason.
+ * An unadvancing node needs explanation so it does not silently look like
+ * patience. */
 export interface BlockedNote {
   nodeId: string;
   reason: "gone" | "agent-state-unknown" | "awaiting-answer";
