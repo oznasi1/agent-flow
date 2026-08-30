@@ -25,11 +25,14 @@ npx vitest run test/unit/engine/worktree.test.ts     # one file
 npx vitest run test/webview -t "retires a run"       # one test by name
 ```
 
-**`npm test` is ~4,500 tests across 122 files and takes 2+ minutes** — much longer under CPU
-contention from parallel sessions. It exceeds the default Bash tool timeout and will
-auto-background at 120s, so pass `timeout: 600000` when running it through a tool. Never pipe
-vitest through `tail`/`head`: it loses the failure list you need. A single failure under heavy
-contention is usually flake, not a regression — re-run that file alone before believing it.
+**`npm test` is ~6,000 tests across 161 files and takes about a minute.** It was 11x slower
+until `deckView.test.ts`'s config mock stopped rebuilding the whole config seventeen times per
+call — if it ever creeps back toward ten minutes, suspect a mock that calls a real builder in a
+hot path rather than the number of tests. Still pass `timeout: 600000` when running it through a
+tool: under CPU contention from parallel sessions it can exceed the 120s default and
+auto-background. Never pipe vitest through `tail`/`head`: it loses the failure list you need. A
+single failure under heavy contention is usually flake, not a regression — re-run that file alone
+before believing it.
 
 The CI gate (`.github/workflows/ci.yml`) is exactly: `npm ci`, `npm run typecheck`,
 `npm test`, `npm run build`. All four must pass. `npm run build` is a real gate, not a
