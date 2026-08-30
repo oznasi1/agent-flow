@@ -511,7 +511,16 @@ vi.mock("../../src/config", async (importActual) => {
   const actual = await importActual<typeof import("../../src/config")>();
   return {
     ...actual,
-    getConfig: () => ({
+    // ONE real getConfig() per call, not one per field. Seventeen fields below are
+    // forwarded from the real, vscode-configStore-backed config so a test can steer
+    // them with setConfig — but `actual.getConfig()` rebuilds prompt modes, commands,
+    // environments and the legacy-prompt migrations every time, and this mock is
+    // invoked constantly by the poll loop. Reading it seventeen times per call was
+    // pure waste in the slowest file in the suite. One snapshot is also strictly
+    // more correct: every field now comes from the same read.
+    getConfig: () => {
+      const real = actual.getConfig();
+      return {
       baseUrl: "https://jira", project: "PROJ", prFacts: h.prFacts, prFactsTtlSeconds: h.ttlSeconds,
       openAgents: h.openAgents,
       reviewRequests: h.reviewRequests, reviewRequestsTtlSeconds: 300, reposRoot: "/repos", repoBlocklist: ["vendored"],
@@ -538,52 +547,53 @@ vi.mock("../../src/config", async (importActual) => {
       // hardcoding it here would make the setting unreachable from a test. Every
       // test that never sets it gets the shipped default — an empty list, which
       // blocks nothing.
-      neverAutoRun: actual.getConfig().neverAutoRun,
+      neverAutoRun: real.neverAutoRun,
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
-      reviewRequestModes: actual.getConfig().reviewRequestModes,
-      reviewRequestMode: actual.getConfig().reviewRequestMode,
+      reviewRequestModes: real.reviewRequestModes,
+      reviewRequestMode: real.reviewRequestMode,
       // Same reason: a test steers which forge the panel resolves through
       // setConfig({ forge }) — the real getConfig() applies the same "" → default
       // fallback the shipped setting does, so a test that never sets it keeps
       // exercising the GitHub path every other fixture in this file assumes.
-      forge: actual.getConfig().forge,
+      forge: real.forge,
       // Same reason: the retire sweep reads both windows, and the grouping is a
       // persisted setting — a test steers all three through setConfig, so they
       // must come from the real getConfig() rather than being frozen here.
-      deckGrouping: actual.getConfig().deckGrouping,
-      retireFinishedAfterHours: actual.getConfig().retireFinishedAfterHours,
-      retireAbandonedAfterDays: actual.getConfig().retireAbandonedAfterDays,
-      retireClosedAfterHours: actual.getConfig().retireClosedAfterHours,
-      retireInPlaceAfterHours: actual.getConfig().retireInPlaceAfterHours,
+      deckGrouping: real.deckGrouping,
+      retireFinishedAfterHours: real.retireFinishedAfterHours,
+      retireAbandonedAfterDays: real.retireAbandonedAfterDays,
+      retireClosedAfterHours: real.retireClosedAfterHours,
+      retireInPlaceAfterHours: real.retireInPlaceAfterHours,
       // Steered per test the way openAgents is: the shelf rule's escape hatch has
       // to be flippable without going through the real config store.
       inflightShowAll: h.inflightShowAll,
       // Same reason: a test steers this through setConfig({ orchestrator }),
       // which only reaches deckView.ts if this mock forwards the real,
       // vscode-configStore-backed value rather than a field frozen here.
-      orchestrator: actual.getConfig().orchestrator,
+      orchestrator: real.orchestrator,
       // The three settings an armed launch resolves for itself. Sourced from the
       // real getConfig() for the same reason as the block above: `promptModes` in
       // particular is what a flow node's `mode` id is matched against, so a test
       // about a mode that is no longer configured has to be able to steer it.
-      promptModes: actual.getConfig().promptModes,
-      workspaceMode: actual.getConfig().workspaceMode,
-      workspaceDir: actual.getConfig().workspaceDir,
+      promptModes: real.promptModes,
+      workspaceMode: real.workspaceMode,
+      workspaceDir: real.workspaceDir,
       // Where Review with agent opens, and whether the picker lists open windows.
       // Both from the real getConfig() so a test steers them with setConfig — and so
       // the shipped default (`new-window`: no picker at all) is what a test that never
       // mentions them exercises.
-      reviewOpenIn: actual.getConfig().reviewOpenIn,
+      reviewOpenIn: real.reviewOpenIn,
       // Where a card's PR work opens. From the real getConfig() for the same reason
       // reviewOpenIn is: a test steers it with setConfig, and the shipped default
       // (`ask`: the destination picker) is what a test that never mentions it gets.
-      prWorkOpenIn: actual.getConfig().prWorkOpenIn,
+      prWorkOpenIn: real.prWorkOpenIn,
       // What a review BATCH reads on top: how big a batch confirms first.
-      batchLaunchConfirmThreshold: actual.getConfig().batchLaunchConfirmThreshold,
-      trackOpenWindows: actual.getConfig().trackOpenWindows,
-    }),
+      batchLaunchConfirmThreshold: real.batchLaunchConfirmThreshold,
+      trackOpenWindows: real.trackOpenWindows,
+      };
+    },
   };
 });
 import {
