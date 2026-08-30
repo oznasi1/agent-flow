@@ -1,0 +1,100 @@
+name: Release
+
+# Publishing is driven by the repo's release convention: a `chore(release): X.Y.Z`
+# commit lands on main with a bumped `version` in package.json. That bump — not a
+# tag, of which this repo has none — is the signal to publish.
+#
+# The trigger is CI's completion rather than the push itself, so a version bump can
+# never reach a registry ahead of a green gate. `workflow_run` fires on the CI run
+# for main; everything below is guarded on that run having succeeded.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  # Manual re-publish, for the case where a registry rejected or the run was lost.
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Publish even if this commit did not bump the version"
+        type: boolean
+        default: false
+
+# A registry rejects a version it already has, so two overlapping runs would make
+# the second one fail rather than duplicate — but serializing keeps the log honest.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+    # Job level, not step level: a step's `if` cannot see env declared on that
+    # same step, and the `secrets` context is out of scope in `if` entirely.
+    env:
+      VSCE_PAT: ${{ secrets.VSCE_PAT }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # The exact commit CI proved green, not whatever main has drifted to
+          # since. Depth 2 is what the version-diff below needs.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+          fetch-depth: 2
+
+      # The whole workflow is a no-op unless this commit changed the version.
+      # Every other push to main — docs, refactors, a merge — lands here and stops.
+      - id: version
+        name: Did the version move?
+        run: |
+          new=$(node -p "require('./package.json').version")
+          old=$(git show HEAD~1:package.json 2>/dev/null | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" 2>/dev/null || echo none)
+          echo "version=$new" >> "$GITHUB_OUTPUT"
+          if [ "$new" != "$old" ] || [ "${{ inputs.force }}" = "true" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "release: $old -> $new" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "release: version unchanged at $new, nothing to publish" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - if: steps.version.outputs.changed == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - if: steps.version.outputs.changed == 'true'
+        run: npm ci
+
+      # `npm run package` is the same command a hand-release runs: it removes the
+      # stale .vsix first, so exactly one file matches the glob below.
+      - if: steps.version.outputs.changed == 'true'
+        run: npm run build && npm run package
+
+      - name: Publish to Open VSX
+        if: steps.version.outputs.changed == 'true'
+        env:
+          OVSX_PAT: ${{ secrets.OVSX_TOKEN }}
+        run: npx --yes ovsx publish *.vsix
+
+      # The Marketplace side stays optional: without VSCE_PAT the step skips and
+      # the Open VSX publish above still counts as a release, rather than the job
+      # going red on a secret that was never added.
+      - name: Publish to the VS Code Marketplace
+        if: steps.version.outputs.changed == 'true' && env.VSCE_PAT != ''
+        run: npx vsce publish --packagePath *.vsix
+
+      - name: Keep the .vsix
+        if: steps.version.outputs.changed == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: agent-flow-${{ steps.version.outputs.version }}
+          path: "*.vsix"
+          retention-days: 90
