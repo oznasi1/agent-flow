@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.59.0] — 2026-08-30
+
 ### Added
 
 - Flows now keep an append-only journal beside each flow file
@@ -28,6 +30,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `@playwright/experimental-ct-react` 1.49.1 → 1.55.1; and `js-yaml`,
   `fast-uri`, `postcss` and `brace-expansion` move to their patched versions.
   `npm audit` now reports zero vulnerabilities.
+
+## [0.58.0] — 2026-08-29
 
 ### Changed
 
