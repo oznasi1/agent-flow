@@ -17,6 +17,7 @@ import { ActOutcome, applyFired, notifyLines } from "./engine/orchestrator/runne
 import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
 import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "./engine/orchestrator/command";
+import { blockedBy } from "./engine/orchestrator/neverAutoRun";
 import { buildRunStatus } from "./engine/status";
 import { UsageReader } from "./engine/usageFs";
 import type { UsageTotals } from "./engine/usage";
@@ -1375,8 +1376,22 @@ export class DeckPanel {
     if (action === "run") {
       const node = this.commandTarget(flow, edge);
       if (!node) return undefined;
-      const resolved = resolveCommand(node, getConfig().commands, edge.note);
+      const cfg = getConfig();
+      const resolved = resolveCommand(node, cfg.commands, edge.note);
       if (!resolved.ok) return undefined;
+      // A command `agentFlow.neverAutoRun` blocks is not a spend, because it is
+      // never going to happen: it resolves to nothing here, so the edge is stamped
+      // as an error by the same path a wrong-kinded target takes, and the consent
+      // modal is never raised for it. Asking someone to approve a command that
+      // cannot run either teaches them the approval is theatre or reads as a
+      // promise that saying yes will run it — and the setting exists precisely so
+      // that no answer to that modal can.
+      //
+      // `runCommand` refuses the same text again immediately before the shell.
+      // That is not redundant: this is a decision about what to ASK, and the one in
+      // `command.ts` is the guarantee. A future path that reached `performRun`
+      // without coming through here would still be stopped.
+      if (blockedBy(resolved.text, cfg.neverAutoRun) !== undefined) return undefined;
       return { action: "run", node, text: resolved.text, label: resolved.label, note: edge.note };
     }
     const node = this.placeTarget(flow, edge);
@@ -1770,8 +1785,14 @@ export class DeckPanel {
     // `this.log` is the Deck's output channel, and it is the ONLY place a
     // command's stdout/stderr ever lands: an unattended deploy that fails is not
     // diagnosable from a toast that says it exited 1.
+    const cfg = getConfig();
     const outcome = await runCommand(
-      { node, commands: getConfig().commands, note: edge.note, cwd: where.cwd },
+      // `neverAutoRun` is read HERE, at act time in this window, not captured when
+      // the flow was written or when the panel opened — the same posture the
+      // session seed takes with `agentFlow.agentProvider`. Adding a pattern must
+      // stop the very next pass of a flow that is already armed and already
+      // confirmed, without anyone reloading a window or re-saving a flow.
+      { node, commands: cfg.commands, note: edge.note, cwd: where.cwd, neverAutoRun: cfg.neverAutoRun },
       { run: shellCommandRunner, log: this.log },
     );
     if (!outcome.ok) {

@@ -470,6 +470,35 @@ describe("getConfig — environments", () => {
   });
 });
 
+describe("getConfig — neverAutoRun", () => {
+  // The ONE guarantee that lets this ship to thousands of existing installs: a
+  // user who has never heard of the setting gets an empty list, and an empty list
+  // blocks nothing. No defaults, ever — a shipped pattern would silently stop a
+  // flow someone already relies on.
+  it("defaults to an empty list, so the feature ships inert", () => {
+    expect(getConfig().neverAutoRun).toEqual([]);
+  });
+
+  it("reads the patterns as written, trimming each", () => {
+    setConfig({ neverAutoRun: ["  *rm -rf* ", "*| sh*"] });
+    expect(getConfig().neverAutoRun).toEqual(["*rm -rf*", "*| sh*"]);
+  });
+
+  it("drops blanks and non-strings from a hand-edited settings file", () => {
+    setConfig({ neverAutoRun: ["*rm -rf*", "", "   ", 7, null] });
+    expect(getConfig().neverAutoRun).toEqual(["*rm -rf*"]);
+  });
+
+  // Deliberately NOT the environments treatment, which falls back to its shipped
+  // defaults when the setting is unusable. This list has no defaults to fall back
+  // to, and inventing one here would be this module blocking commands nobody
+  // configured it to block.
+  it("reads an empty list when the setting is not an array", () => {
+    setConfig({ neverAutoRun: "*rm -rf*" });
+    expect(getConfig().neverAutoRun).toEqual([]);
+  });
+});
+
 describe("getConfig — commands", () => {
   it("reads commands, dropping entries with no id or no run", () => {
     setConfig({ commands: [
@@ -1228,6 +1257,15 @@ describe("forge", () => {
   // package.json, so a manifest default of "gitlab" would ship silently unless
   // something pins it. An existing install with no explicit `agentFlow.forge`
   // gets whatever VS Code's settings UI serves from this manifest default.
+  // Nothing in getConfig() reads package.json, so the manifest default is a
+  // separate promise from the code default — and this is the one setting where a
+  // non-empty manifest default would start refusing commands on installs that
+  // never opted in.
+  it("ships an empty manifest default for neverAutoRun", () => {
+    const props = manifestSettings<{ default?: unknown }>(pkg);
+    expect(props["agentFlow.neverAutoRun"].default).toEqual([]);
+  });
+
   it("ships a manifest default of github, so an existing install is unaffected", () => {
     const props = manifestSettings<{ default?: unknown }>(pkg);
     expect(props["agentFlow.forge"].default).toBe("github");

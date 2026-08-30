@@ -451,6 +451,11 @@ export interface AgentFlowConfig {
   // Named commands an Orchestrator command node can run. No built-ins — an
   // empty list means the user hasn't opted into any.
   commands: FlowCommand[];
+  /** `agentFlow.neverAutoRun` — glob patterns for command text this machine will
+   * never execute unattended, whatever a flow has been consented to. Empty by
+   * default and empty for every existing install; see `neverAutoRun.ts` for the
+   * matcher and why this outranks `Flow.commandConfirmedAt`. */
+  neverAutoRun: string[];
   /** Show the Deck header's "Tokens on board" total. Off by default: the figure
    * costs a board-wide transcript sweep, and the per-run breakdown in the detail
    * drawer is read lazily instead, so a default install parses nothing until a
@@ -685,6 +690,26 @@ function readCommands(c: vscode.WorkspaceConfiguration): FlowCommand[] {
   return out;
 }
 
+/** Read `agentFlow.neverAutoRun`. Trims each entry and drops anything blank or
+ * non-string, the same treatment `readCommands` gives a command's `run` — a
+ * `settings.json` is a text file people edit by hand, and a stray `""` must not
+ * become a rule.
+ *
+ * Deliberately does NOT fall back to a default list the way `readEnvironments`
+ * does. There is no default: an unusable setting reads as an empty list, because
+ * the alternative is this module refusing commands that nobody configured it to
+ * refuse. The setting is a brake the user installs, never one shipped pre-applied.
+ * That is also what makes it safe to ship to an existing install — see
+ * `test/unit/compat.test.ts` on new behavior arriving inert. */
+function readNeverAutoRun(c: vscode.WorkspaceConfiguration): string[] {
+  const raw = c.get<unknown[]>("neverAutoRun");
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter((v): v is string => typeof v === "string")
+    .map((v) => v.trim())
+    .filter((v) => v !== "");
+}
+
 /** The three merge strategies, as a value so both `getConfig()`'s fallback and the
  * telemetry snapshot's allowlist derive from one list. Here rather than beside
  * `WORKTREE_MODES` in `telemetry/settingsSnapshot.ts` because that module already
@@ -759,6 +784,7 @@ export function getConfig(): AgentFlowConfig {
     exploreActions,
     environments: readEnvironments(c),
     commands: readCommands(c),
+    neverAutoRun: readNeverAutoRun(c),
     // `?? false` rather than `|| false`: an explicit `false` and an unset value
     // must both read false, and neither may be silently coerced by a truthiness
     // check the way the string settings above are.

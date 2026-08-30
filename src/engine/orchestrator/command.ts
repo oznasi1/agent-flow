@@ -7,6 +7,7 @@
 // The actual process spawn is an injected `CommandRunner`, the same posture
 // `launch.ts` takes with `openWorkspace`.
 import { findNode, incomingEdges, isPlace } from "./model";
+import { blockedBy } from "./neverAutoRun";
 import type { CommandNode, Flow, PlaceNode } from "./model";
 import type { FlowCommand } from "../../types";
 
@@ -56,6 +57,12 @@ export interface RunCommandRequest {
   commands: FlowCommand[];
   note?: string;
   cwd: string;
+  /** `agentFlow.neverAutoRun` — command text this machine will not execute
+   * unattended, whatever the flow has been consented to. OPTIONAL, and absent
+   * means block nothing: the setting defaults to an empty list, so a user who has
+   * never heard of it sees no change at all, and every call site written before it
+   * existed keeps its exact behaviour. See `neverAutoRun.ts`. */
+  neverAutoRun?: string[];
 }
 
 export type CommandOutcome =
@@ -255,11 +262,38 @@ export async function runCommand(
   req: RunCommandRequest,
   deps: { run: CommandRunner; log: (m: string) => void },
 ): Promise<CommandOutcome> {
-  const { node, commands, note, cwd } = req;
+  const { node, commands, note, cwd, neverAutoRun } = req;
   try {
     const resolved = resolveCommand(node, commands, note);
     if (!resolved.ok) {
       return { ok: false, message: resolved.message, label: fallbackLabel(node) };
+    }
+
+    // THE chokepoint. `deckView.ts`'s `spendTarget` also refuses a blocked command,
+    // so the consent modal never offers to approve one — but that is the gate, and a
+    // gate is a decision some future caller can reach around. This is the last line
+    // before the shell: whatever asked, whatever was consented to, whatever stamp
+    // the flow file carries, a command that matches does not run.
+    //
+    // Against `resolved.text`, AFTER the `{note}` splice. Matching `node.run` would
+    // inspect the template — the one version of the command that is not the
+    // dangerous one — and `withNote` splices unquoted by design, so the template is
+    // exactly where the danger is absent. Before `deps.log`, like the refusal
+    // above: nothing announces a command it is not going to run.
+    const blocked = blockedBy(resolved.text, neverAutoRun ?? []);
+    if (blocked !== undefined) {
+      return {
+        ok: false,
+        // Names the PATTERN, because the user's next move is editing one line of
+        // settings.json and they have to know which. The label rather than the full
+        // text: for a free-text node the two are the same string anyway, and for a
+        // configured command the label is the name its author chose in the very
+        // setting they are about to go read.
+        message:
+          `"${resolved.label}" matches the agentFlow.neverAutoRun pattern "${blocked}" — ` +
+          `refusing to run it unattended.`,
+        label: resolved.label,
+      };
     }
 
     deps.log(`running: ${resolved.text}`);

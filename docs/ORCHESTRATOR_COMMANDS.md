@@ -98,7 +98,37 @@ an argument.
 > both commands. Quoting it yourself (`--env="{note}"`) does not fix it
 > either — a `"` inside the note closes your quote. This is the cost of
 > free-text commands, which is the trade you asked for; treat the note field
-> as shell you are typing.
+> as shell you are typing. `agentFlow.neverAutoRun`, below, is the brake.
+
+### Never, whatever you approved
+
+`agentFlow.neverAutoRun` is a list of patterns matched against the command
+**after** the note has been spliced in. A rule whose command matches does not
+run. There is no button that overrides it — not the consent modal, not a flow
+you confirmed months ago, not Reset. The rule stops with an error naming the
+pattern, and the only way past it is editing the list.
+
+```jsonc
+"agentFlow.neverAutoRun": ["*rm -rf*", "*| sh*", "*| bash*", "*--force*"]
+```
+
+`*` matches any run of characters, `?` matches exactly one, everything else is
+literal — a `.` means a dot, not "any character" — and matching ignores case.
+
+It is empty by default, so nothing changes until you add a pattern.
+
+Why this exists and not a finer consent: the two approvals a flow stores
+(`launchConfirmedAt`, `commandConfirmedAt`) are per flow and permanent. Approve
+one `deploy.sh` and every command node in that flow runs unattended from then
+on, **including ones added afterwards** — and a note added later can extend the
+command it lands in. An approval given once cannot know what it will authorise
+later. This list can, because it is checked against the text that is actually
+about to run, every time.
+
+The check happens in two places: the rule never reaches the consent modal (you
+are not asked to approve something that cannot happen), and it is refused again
+immediately before the shell. The second is the guarantee; the first is
+courtesy.
 
 ### In which directory
 
@@ -198,6 +228,8 @@ to batch about a command you have not typed yet.
   mode.
 - **Refuse the whole thing** — the command gate is separate from the session
   gate, so approving session launches never silently approved shell.
+- **Put commands out of reach entirely** — `agentFlow.neverAutoRun` patterns
+  outrank every approval, and no answer to any modal overrides one.
 
 ### You cannot
 
