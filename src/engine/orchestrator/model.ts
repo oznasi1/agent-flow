@@ -63,7 +63,7 @@ export type CommandNode = NodeBase & {
  *
  * The same shape as `NotifyNode` with `question` where `message` is — but not
  * the same thing at all. A notify terminal is not observed by anything; a gate
- * is, which is why it keeps an out port and why the two conditions above read
+ * is, which is why it keeps an out port and why the two conditions below read
  * off its incoming edge. It is the only node whose state a PERSON, rather than
  * the world, decides. */
 export type GateNode = NodeBase & { kind: "gate"; question: string };
