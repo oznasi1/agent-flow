@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as fs from "fs";
 import * as path from "path";
 import { deriveBucket, deriveLane, mergeTarget, prSignals, unreadRepos } from "../../../src/engine/bucket";
-import { PrEntryMap, PrFacts } from "../../../src/types";
+import { AgentState, PrEntryMap, PrFacts } from "../../../src/types";
 
 const prFacts = (over: Partial<PrFacts> = {}): PrFacts => ({
   number: 1, url: "https://github.com/o/r/pull/1", title: "t", state: "OPEN", isDraft: false,
@@ -27,11 +27,11 @@ describe("deriveBucket", () => {
     // one that is still on the board (an agent open in it, a PR still to merge)
     // deserves the column its live signals say.
     expect(deriveBucket({ agentState: "working" })).toBe("progress");
-    expect(deriveBucket({ agentState: "needs-you" })).toBe("needs");
+    expect(deriveBucket({ agentState: "blocked" })).toBe("needs");
   });
 
-  it("surfaces a needs-you agent even while Jira is in progress", () => {
-    expect(deriveBucket({ ticketStatus: "In Progress", agentState: "needs-you" })).toBe("needs");
+  it("surfaces a blocked agent even while Jira is in progress", () => {
+    expect(deriveBucket({ ticketStatus: "In Progress", agentState: "blocked" })).toBe("needs");
   });
 
   it("keeps a working agent in In-progress even in a review status (live beats review)", () => {
@@ -58,9 +58,21 @@ describe("deriveBucket", () => {
     expect(deriveBucket({ agentState: "unknown" })).toBe("progress");
   });
 
-  it("routes a stalled agent to needs — it is stuck, not calm", () => {
+  it("parks a stalled agent rather than calling it Action required", () => {
+    // A pending tool that is ungated or unbounded — a backgrounded subagent, a
+    // long MCP call. Something is probably still running and nobody is being
+    // asked anything, so this is not a session that cannot resume.
     expect(deriveBucket({ ticketStatus: null, agentState: "stalled",
-      prOpen: false, prBlocked: false, prReady: false })).toBe("needs");
+      prOpen: false, prBlocked: false, prReady: false })).toBe("progress");
+  });
+
+  it("parks an agent that merely ended its turn — an end_turn is not a question", () => {
+    // stop_reason "end_turn" is as often a session that finished cleanly and
+    // printed a summary as one that asked something. It was the column's whole
+    // volume problem, and the badge inherited it through attentionKeys.
+    expect(deriveBucket({ ticketStatus: null, agentState: "needs-you",
+      prOpen: false, prBlocked: false, prReady: false })).toBe("progress");
+    expect(deriveLane("progress", { open: false, blocked: false, ready: false, merged: false }, "needs-you")).toBe("parked");
   });
 
   it("routes an exited agent to needs — it died with work in flight", () => {
@@ -70,6 +82,13 @@ describe("deriveBucket", () => {
 
   it("routes blocked to needs — a permission prompt is a human being asked something", () => {
     expect(deriveBucket({ agentState: "blocked" })).toBe("needs");
+  });
+
+  it("sends an ended turn and a stalled tool to review when the run has a PR", () => {
+    // Neither is in `needs` any more, so both fall through the ladder like any
+    // other non-working agent — and a run with an open PR is In review.
+    expect(deriveBucket({ agentState: "needs-you", prOpen: true })).toBe("review");
+    expect(deriveBucket({ agentState: "stalled", prOpen: true })).toBe("review");
   });
 
   it("lets a landed merge outrank blocked, like every other agent state", () => {
@@ -119,21 +138,28 @@ describe("deriveBucket with PR signals", () => {
     expect(deriveBucket({ prOpen: true, prReady: true, prBlocked: true })).toBe("review");
   });
 
-  it("keeps a needs-you agent above a merge that has not happened yet", () => {
-    // Approved and green is not landed. Work is still in flight, so an agent
-    // that ended its turn asking something is still the more urgent signal.
-    expect(deriveBucket({ agentState: "needs-you", prOpen: true, prReady: true })).toBe("needs");
-    expect(deriveBucket({ agentState: "stalled", prOpen: true, prReady: true })).toBe("needs");
+  it("keeps a stopped session above a merge that has not happened yet", () => {
+    // Approved and green is not landed. Work is still in flight, so a session
+    // sitting at a prompt it cannot get past is still the more urgent signal.
+    expect(deriveBucket({ agentState: "blocked", prOpen: true, prReady: true })).toBe("needs");
     expect(deriveBucket({ agentState: "exited", prOpen: true, prReady: true })).toBe("needs");
   });
 
-  it("lets a landed merge outrank every needs-you signal", () => {
+  it("lets the merge you have yet to press outrank an ended turn or a stalled tool", () => {
+    // The mirror of the test above: neither state is in `needs` now, so the one
+    // action left on the run — pressing merge — is what the card says.
+    expect(deriveBucket({ agentState: "needs-you", prOpen: true, prReady: true })).toBe("merge");
+    expect(deriveBucket({ agentState: "stalled", prOpen: true, prReady: true })).toBe("merge");
+  });
+
+  it("lets a landed merge outrank every agent signal", () => {
     // The merge is a fact read from GitHub; the agent state is a transcript
     // reading that nothing invalidates once the work lands. A question asked
     // before the merge is answered by the merge.
     expect(deriveBucket({ agentState: "needs-you", prMerged: true })).toBe("merge");
     expect(deriveBucket({ agentState: "stalled", prMerged: true })).toBe("merge");
     expect(deriveBucket({ agentState: "exited", prMerged: true })).toBe("merge");
+    expect(deriveBucket({ agentState: "blocked", prMerged: true })).toBe("merge");
   });
 
   it("puts a landed run in the merged lane, not the ready one", () => {
@@ -144,11 +170,13 @@ describe("deriveBucket with PR signals", () => {
   });
 });
 
-describe("Action required is agent-driven", () => {
-  it("keeps every agent signal there — the column means an agent wants you", () => {
-    expect(deriveBucket({ agentState: "needs-you" })).toBe("needs");
-    expect(deriveBucket({ agentState: "stalled" })).toBe("needs");
-    expect(deriveBucket({ agentState: "exited" })).toBe("needs");
+describe("Action required means the session cannot resume on its own", () => {
+  it("admits exactly blocked and exited, and nothing else", () => {
+    // The whole column, enumerated: a prompt on screen, or a session that died
+    // holding the work. Every other state falls through the ladder.
+    const states: AgentState[] = ["blocked", "needs-you", "stalled", "exited", "working", "idle", "unknown"];
+    const inNeeds = states.filter((agentState) => deriveBucket({ agentState }) === "needs");
+    expect(inNeeds).toEqual(["blocked", "exited"]);
   });
 
   it("no longer sends a PR-only problem there — nobody asked you anything", () => {
@@ -159,16 +187,18 @@ describe("Action required is agent-driven", () => {
     expect(deriveBucket({ agentState: "unknown", prOpen: true, prBlocked: true })).toBe("review");
   });
 
-  it("still lets an agent that ended its turn outrank its own blocked PR", () => {
-    // Both are true at once all the time — the agent stopped *because* CI went
-    // red. The agent asking is the more answerable of the two.
-    expect(deriveBucket({ agentState: "needs-you", prOpen: true, prBlocked: true })).toBe("needs");
+  it("sends an ended turn beside its own blocked PR to fixes needed", () => {
+    // Both are true at once all the time — the session stopped *because* CI went
+    // red. Naming the fix is the useful half; "a session ended its turn" is not.
+    expect(deriveBucket({ agentState: "needs-you", prOpen: true, prBlocked: true })).toBe("review");
+    expect(deriveLane("review", { open: true, blocked: true, ready: false, merged: false }, "needs-you")).toBe("fixes");
   });
 
-  it("routes a blocked draft PR to In review, which prOpen alone would not", () => {
-    // prSignals.blocked counts drafts; prSignals.open does not. Without its own
-    // rung a red draft would fall past review into the parked lane of progress.
-    expect(deriveBucket({ agentState: "idle", prOpen: false, prBlocked: true })).toBe("review");
+  it("still lets a session that cannot resume outrank its own blocked PR", () => {
+    // A prompt on screen is answerable in one keystroke; the red CI is not going
+    // anywhere while the session sits frozen in front of it.
+    expect(deriveBucket({ agentState: "blocked", prOpen: true, prBlocked: true })).toBe("needs");
+    expect(deriveBucket({ agentState: "exited", prOpen: true, prBlocked: true })).toBe("needs");
   });
 });
 
@@ -258,6 +288,21 @@ describe("prSignals", () => {
   it("blocks on requested changes and on a conflict", () => {
     expect(prSignals(entries(prFacts({ review: "changes_requested" }))).blocked).toBe(true);
     expect(prSignals(entries(prFacts({ mergeable: "conflicting" }))).blocked).toBe(true);
+  });
+
+  it("does not block on a draft PR, whatever is wrong with it", () => {
+    // A draft has not been offered to anybody, so there is nobody it can be
+    // blocked on — and In review is for PRs somebody can actually review. This
+    // is what stops the same object landing in two columns depending on its CI.
+    const red = { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] };
+    expect(prSignals(entries(prFacts({ isDraft: true, ci: red }))).blocked).toBe(false);
+    expect(prSignals(entries(prFacts({ isDraft: true, review: "changes_requested" }))).blocked).toBe(false);
+    expect(prSignals(entries(prFacts({ isDraft: true, mergeable: "conflicting" }))).blocked).toBe(false);
+  });
+
+  it("still blocks on a non-draft sibling when one of the run's PRs is a red draft", () => {
+    const red = { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] };
+    expect(prSignals(entries(prFacts({ isDraft: true, ci: red }), prFacts({ ci: red }))).blocked).toBe(true);
   });
 
   it("does not block on a closed PR's stale failures", () => {

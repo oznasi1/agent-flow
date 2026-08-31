@@ -104,7 +104,7 @@ describe("NEEDS_STATES", () => {
     // Derived from deriveBucket, not a copy of its literals: add a state to its
     // needs rung and this fails, where asserting NEEDS_STATES against its own
     // contents would not.
-    const ALL_STATES: AgentState[] = ["working", "needs-you", "stalled", "exited", "idle", "unknown"];
+    const ALL_STATES: AgentState[] = ["blocked", "working", "needs-you", "stalled", "exited", "idle", "unknown"];
     for (const state of ALL_STATES) {
       expect(NEEDS_STATES.has(state)).toBe(deriveBucket({ agentState: state }) === "needs");
     }
@@ -129,12 +129,12 @@ describe("gatherAttention: tracked runs", () => {
   });
 
   it("takes the liveliest reading across a run's sessions and repos", () => {
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     const [c] = gatherAttention(deps({
       runs: () => [run()],
       sessions: () => [session()],
     }));
-    expect(c.agentState).toBe("needs-you");
+    expect(c.agentState).toBe("blocked");
     expect(c.hasLiveSession).toBe(true);
   });
 
@@ -174,7 +174,7 @@ describe("gatherAttention: the cost ladder", () => {
   });
 
   it("reads the PR cache for a run that IS waiting", () => {
-    repoActivity.mockReturnValue(activity({ state: "needs-you" }));
+    repoActivity.mockReturnValue(activity({ state: "blocked" }));
     gatherAttention(deps({ runs: () => [run()] }));
     expect(prEntries).toHaveBeenCalledWith("BITE-1");
   });
@@ -189,7 +189,7 @@ describe("gatherAttention: the cost ladder", () => {
 
   it("spends no git on a waiting run that already has a live session", () => {
     // A live session boards the card on its own, so the answer could not change.
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     gatherAttention(deps({ runs: () => [run()], sessions: () => [session()] }));
     expect(gitState).not.toHaveBeenCalled();
   });
@@ -226,7 +226,7 @@ describe("gatherAttention: the cost ladder", () => {
 
 describe("gatherAttention: PR facts filtered the way the Deck filters them", () => {
   it("empties the PR map for a notepad run, and never reads the cache for it, even though it is waiting", () => {
-    repoActivity.mockReturnValue(activity({ state: "needs-you" }));
+    repoActivity.mockReturnValue(activity({ state: "blocked" }));
     const [c] = gatherAttention(deps({ runs: () => [run({ kind: "notepad" })] }));
     expect(c.prs).toEqual({});
     expect(prEntries).not.toHaveBeenCalled();
@@ -241,7 +241,7 @@ describe("gatherAttention: PR facts filtered the way the Deck filters them", () 
     // case) calls it ineligible. Injecting the real function rather than a
     // local rule is the fix; this test locks in that gatherAttention actually
     // calls `deps.prEligible` with the real repo shape and obeys a `false`.
-    repoActivity.mockReturnValue(activity({ state: "needs-you" }));
+    repoActivity.mockReturnValue(activity({ state: "blocked" }));
     prEntries.mockReturnValue({ api: { facts: null, fetchedAt: 0 } });
     prEligible.mockReturnValue(false);
     const [c] = gatherAttention(deps({ runs: () => [run()] }));
@@ -253,14 +253,14 @@ describe("gatherAttention: PR facts filtered the way the Deck filters them", () 
     // The reachable failure this guards: a task re-taken with a different repo
     // selection leaves a stale MERGED entry keyed by the OLD repo name. Left in
     // place, it would vote prMerged on a run whose merge column outranks needs.
-    repoActivity.mockReturnValue(activity({ state: "needs-you" }));
+    repoActivity.mockReturnValue(activity({ state: "blocked" }));
     prEntries.mockReturnValue({ web: { facts: null, fetchedAt: 0 } }); // "web" is not in run().repos
     const [c] = gatherAttention(deps({ runs: () => [run()] }));
     expect(c.prs).toEqual({});
   });
 
   it("keeps a PR entry for a repo the injected prEligible accepts and that is still in the run", () => {
-    repoActivity.mockReturnValue(activity({ state: "needs-you" }));
+    repoActivity.mockReturnValue(activity({ state: "blocked" }));
     const entry = { facts: null, fetchedAt: 0 };
     prEntries.mockReturnValue({ api: entry });
     prEligible.mockReturnValue(true);
@@ -273,7 +273,7 @@ describe("gatherAttention: PR facts filtered the way the Deck filters them", () 
     // `onConfigChanged` only clears the branch-CI caches — so without this
     // gate the badge would keep reading stale entries the Deck itself has
     // stopped showing.
-    repoActivity.mockReturnValue(activity({ state: "needs-you" }));
+    repoActivity.mockReturnValue(activity({ state: "blocked" }));
     prEntries.mockReturnValue({ api: { facts: null, fetchedAt: 0 } }); // entries ARE on disk
     const [c] = gatherAttention(deps({ runs: () => [run()], prFacts: false }));
     expect(c.prs).toEqual({});
@@ -313,7 +313,7 @@ describe("gatherAttention: openAgents gates the session half of the state union"
 
 describe("gatherAttention: ownership across a shared checkout", () => {
   it("gives a shared checkout's live session to only the run that owns it", () => {
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     repoActivity.mockReturnValue(activity({ state: "idle" }));
     // `older` already existed when the session started; `newer` did not, so
     // ownership must go to `older` — see ownership.ts's `resolveOwnership`.
@@ -326,13 +326,13 @@ describe("gatherAttention: ownership across a shared checkout", () => {
       sessions: () => [shared],
     }));
 
-    expect(olderCand.agentState).toBe("needs-you"); // owns the session
+    expect(olderCand.agentState).toBe("blocked"); // owns the session
     expect(newerCand.agentState).toBe("idle");       // sees no session at all
   });
 
   it("gives a shared checkout's dirty state to only the run that owns the path", () => {
     // No live session anywhere, so pathOwner falls back to the newest holder.
-    repoActivity.mockReturnValue(activity({ state: "needs-you" }));
+    repoActivity.mockReturnValue(activity({ state: "blocked" }));
     gitState.mockReturnValue(repoGit({ dirty: true }));
     const older = run({ key: "BITE-1", createdAt: 100 });
     const newer = run({ key: "BITE-2", createdAt: 200 });
@@ -425,10 +425,10 @@ describe("gatherAttention: local session cards", () => {
   });
 
   it("makes a candidate for a session in a place no run claims", () => {
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     const got = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
     expect(got.length).toBe(1);
-    expect(got[0].agentState).toBe("needs-you");
+    expect(got[0].agentState).toBe("blocked");
     expect(got[0].hasLiveSession).toBe(true);
     expect(got[0].hasWorkToLose).toBe(false);
     expect(got[0].prs).toEqual({});
@@ -492,10 +492,10 @@ describe("gatherAttention: local session cards", () => {
     // double-count test above) — but only the OUTER filter keeps a claimed
     // root's session out of `group.places`, and so out of the reduction, for
     // an unclaimed SIBLING root sharing its multi-root window. Drop the outer
-    // filter and "/repo/a"'s loud "needs-you" session would leak into "/repo/b"'s
+    // filter and "/repo/a"'s loud "blocked" session would leak into "/repo/b"'s
     // card even though "/repo/a" belongs to run BITE-1.
     sessionActivity.mockImplementation((_cwd: string, sessionId: string) =>
-      sessionId === "s1" ? activity({ state: "needs-you" }) : activity({ state: "idle" }));
+      sessionId === "s1" ? activity({ state: "blocked" }) : activity({ state: "idle" }));
     const got = gatherAttention(deps({
       runs: () => [run({ key: "BITE-1", repos: [{ name: "a", path: "/repo/a", isGit: true }] })],
       sessions: () => [
@@ -532,12 +532,12 @@ describe("gatherAttention: local session cards", () => {
     // readAgentActivity's directory scan would find. Without the per-place
     // repo reading in the union, this session would board the badge as
     // "unknown" while the Deck's own card — which takes the identical
-    // union, per status.ts's `activityRepos` — shows needs-you.
+    // union, per status.ts's `activityRepos` — shows blocked.
     sessionActivity.mockReturnValue(activity({ state: "unknown" }));
-    repoActivity.mockReturnValue(activity({ state: "needs-you" }));
+    repoActivity.mockReturnValue(activity({ state: "blocked" }));
     const got = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
     expect(got.length).toBe(1);
-    expect(got[0].agentState).toBe("needs-you");
+    expect(got[0].agentState).toBe("blocked");
     // The per-place reading added for this is `deps.repoActivity` — a
     // transcript read — never `deps.gitState`, which is what keeps this
     // affordable on every tick regardless of whether anyone is waiting.
@@ -587,7 +587,7 @@ describe("gatherAttention: PR facts for a local card, filtered the way the Deck 
   });
 
   it("reads the PR cache for a local card that IS waiting", () => {
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
     expect(prEntries).toHaveBeenCalledWith(localKey("/repo/solo"));
   });
@@ -598,7 +598,7 @@ describe("gatherAttention: PR facts for a local card, filtered the way the Deck 
     // `stored[r.name] &&` short-circuits before `deps.prEligible`/`branchOf`
     // are ever reached — the same short-circuit order the tracked half's
     // "drops an entry for a repo that has since left the run" test locks in.
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     // prEntries's default beforeEach mock already returns {} — nothing cached.
     gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
     expect(prEntries).toHaveBeenCalled();
@@ -606,7 +606,7 @@ describe("gatherAttention: PR facts for a local card, filtered the way the Deck 
   });
 
   it("keeps a PR entry for the live-session root, filtered exactly like the tracked half", () => {
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     const entry = { facts: null, fetchedAt: 0 };
     prEntries.mockReturnValue({ solo: entry });
     const [c] = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
@@ -617,7 +617,7 @@ describe("gatherAttention: PR facts for a local card, filtered the way the Deck 
   });
 
   it("drops a local PR entry the injected prEligible rejects", () => {
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     prEntries.mockReturnValue({ solo: { facts: null, fetchedAt: 0 } });
     prEligible.mockReturnValue(false);
     const [c] = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
@@ -625,7 +625,7 @@ describe("gatherAttention: PR facts for a local card, filtered the way the Deck 
   });
 
   it("never reads the PR cache for a local card when agentFlow.prFacts is off", () => {
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     prEntries.mockReturnValue({ solo: { facts: null, fetchedAt: 0 } }); // entry IS on disk
     const [c] = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })], prFacts: false }));
     expect(c.prs).toEqual({});
@@ -637,7 +637,7 @@ describe("gatherAttention: PR facts for a local card, filtered the way the Deck 
     // roots with a live session — not the window's full declared root list.
     // A stale or stranger's PR fact under the sibling's name must not vote on
     // this card just because that root happens to share the workspace.
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     prEntries.mockReturnValue({
       a: { facts: null, fetchedAt: 0 },
       b: { facts: null, fetchedAt: 0 }, // "/repo/b" has no live session
@@ -657,7 +657,7 @@ describe("gatherAttention: what a candidate is called", () => {
   // are not the same string at all — `localKey` is a slug plus a sha1 — and
   // announcing the key gave "local-solo-<hash> is waiting on you".
   it("labels a local card with its folder name, not localKey's hash", () => {
-    sessionActivity.mockReturnValue(activity({ state: "needs-you" }));
+    sessionActivity.mockReturnValue(activity({ state: "blocked" }));
     const [c] = gatherAttention(deps({ sessions: () => [session({ cwd: "/repo/solo" })] }));
     expect(c.key).toBe(localKey("/repo/solo"));
     expect(c.key).toContain("local-");

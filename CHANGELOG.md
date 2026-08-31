@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Action required now means one thing: a session that cannot resume on its
+  own.** The column admits `blocked` — a permission prompt or a question left
+  pending — and `exited` — a session that died holding the work. A session that
+  merely **ended its turn** no longer lands there, and neither does one
+  `stalled` on a long-running tool: an `end_turn` is as often a session that
+  finished cleanly and printed a summary as one that asked you something, and a
+  stalled tool is probably still running. Both now fall through to the column
+  their run's own signals say — In review when a pull request is open, In
+  progress's *parked* lane otherwise — and read in the calm tone rather than the
+  attention colour. The attention badge and the "waiting on you" notification
+  read the same rule, so they go quiet for finished work too.
+- **A draft pull request stays out of In review**, whatever its CI says. A draft
+  has not been offered to anybody, so there is nobody it can be blocked on;
+  previously a draft with a failing check landed in *fixes needed* while a green
+  one fell to In progress's *parked* lane — the same pull request in two
+  different columns depending on its checks. Both now park, with the failing
+  checks still drawn on the card and the Address-PR row still offered.
+
 ## [0.61.0] — 2026-08-30
 
 ### Added

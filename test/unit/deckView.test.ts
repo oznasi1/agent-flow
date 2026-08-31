@@ -11019,7 +11019,7 @@ describe("latestCandidates", () => {
     h.buildRunStatus.mockReset().mockImplementation(
       (i: { run: Run; ticket: { category: string | null } | null }) =>
         i.run.kind === "local"
-          ? { ...statusFor(i.run, i.ticket?.category ?? null), agent: { state: "needs-you" as const, lastActivityMs: null, slug: null } }
+          ? { ...statusFor(i.run, i.ticket?.category ?? null), agent: { state: "blocked" as const, lastActivityMs: null, slug: null } }
           : statusFor(i.run, i.ticket?.category ?? null),
     );
     show(true);
@@ -11028,7 +11028,7 @@ describe("latestCandidates", () => {
     expect(published?.candidates.length).toBe(1);
     const [local] = published!.candidates;
     expect(local.hasLiveSession).toBe(true);
-    expect(local.agentState).toBe("needs-you");
+    expect(local.agentState).toBe("blocked");
     expect(attentionKeys(published!.candidates)).toEqual([local.key]);
   });
 
@@ -11049,7 +11049,7 @@ describe("latestCandidates", () => {
         i.run.kind === "local"
           ? {
               ...statusFor(i.run, i.ticket?.category ?? null),
-              agent: { state: "needs-you" as const, lastActivityMs: null, slug: null },
+              agent: { state: "blocked" as const, lastActivityMs: null, slug: null },
               prs: { webapp: { facts, fetchedAt: Date.now() } },
             }
           : statusFor(i.run, i.ticket?.category ?? null),
@@ -11077,12 +11077,12 @@ describe("latestCandidates: the tracked half", () => {
     name: "svc", path: "/r/svc", branch: "b", dirty: true, ahead: 0,
     added: 1, removed: 0, files: 1, ...over,
   });
-  /** buildRunStatus, answering `needs-you` with the repos a test hands it. */
+  /** buildRunStatus, answering `blocked` with the repos a test hands it. */
   const needsYou = (repos: RepoGit[]) =>
     h.buildRunStatus.mockReset().mockImplementation(
       (i: { run: Run; ticket: { category: string | null } | null }) => ({
         ...statusFor(i.run, i.ticket?.category ?? null),
-        agent: { state: "needs-you" as const, lastActivityMs: null, slug: null },
+        agent: { state: "blocked" as const, lastActivityMs: null, slug: null },
         repos,
       }),
     );
@@ -11104,7 +11104,7 @@ describe("latestCandidates: the tracked half", () => {
     const c = published!.candidates.find((x) => x.key === "PROJ-7")!;
     expect({ hasWorkToLose: c.hasWorkToLose, justLaunched: c.justLaunched, showAll: c.showAll })
       .toEqual({ hasWorkToLose: true, justLaunched: false, showAll: false });
-    expect(c.agentState).toBe("needs-you");
+    expect(c.agentState).toBe("blocked");
   });
 
   it("marks a run launched moments ago as just launched, with nothing on disk to lose", async () => {
@@ -11158,7 +11158,7 @@ describe("latestCandidates: the tracked half", () => {
     h.buildRunStatus.mockReset().mockImplementation(
       (i: { run: Run; ticket: { category: string | null } | null }) =>
         i.run.kind === "local"
-          ? { ...statusFor(i.run, i.ticket?.category ?? null), agent: { state: "needs-you" as const, lastActivityMs: null, slug: null } }
+          ? { ...statusFor(i.run, i.ticket?.category ?? null), agent: { state: "blocked" as const, lastActivityMs: null, slug: null } }
           : statusFor(i.run, i.ticket?.category ?? null),
     );
     show(true);
@@ -11178,7 +11178,7 @@ describe("latestCandidates: the tracked half", () => {
     h.buildRunStatus.mockReset().mockImplementation(
       (i: { run: Run; ticket: { category: string | null } | null }) =>
         i.run.kind === "local"
-          ? { ...statusFor(i.run, i.ticket?.category ?? null), agent: { state: "needs-you" as const, lastActivityMs: null, slug: null } }
+          ? { ...statusFor(i.run, i.ticket?.category ?? null), agent: { state: "blocked" as const, lastActivityMs: null, slug: null } }
           : statusFor(i.run, i.ticket?.category ?? null),
     );
     show(true);

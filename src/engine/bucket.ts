@@ -16,15 +16,42 @@ function isReviewStatus(name?: string | null): boolean {
 
 /**
  * Decide which board column a run belongs in. Precedence, most-decisive first:
- *   the landed merge → an agent waiting on you (needs-you, blocked, stalled, exited) → a
+ *   the landed merge → a session that cannot resume on its own (blocked, exited) → a
  *   blocked PR → the merge you have yet to press → the live "working" signal →
  *   review (an open PR / Jira review status) → else "progress" as the in-flight
  *   catch-all.
  *
- * `needs` is agent-driven and nothing else: the column means a session stopped
- * and wants you. A PR that needs a human is the review column's business, in its
- * `fixes` lane — the two used to share a column, which put "Claude is asking you
- * something" and "GitHub is asking you something" under one header.
+ * `needs` is agent-driven and nothing else, and admits exactly two states,
+ * because the column means one thing: **this session is stopped and cannot
+ * resume on its own.** `blocked` is a gated tool call left pending past its
+ * ceiling — there is a prompt on screen and it wants an answer. `exited` is a
+ * transcript that stopped mid-work with no live session behind it — nothing is
+ * going to resume it, and its worktree may still be holding the work.
+ *
+ * `needs-you` and `stalled` are deliberately NOT here. Both fall through to
+ * whatever the rest of the ladder says, and neither passes the test above:
+ *
+ *  - `needs-you` is `stop_reason: "end_turn"` and nothing more, which is just as
+ *    often a session that finished cleanly and printed a summary as one that
+ *    asked a question. It was this column's whole volume problem: every
+ *    completed session parked here forever. And because `attentionKeys` reads
+ *    this same ladder, each one also fired a "waiting on you" toast for work
+ *    that wanted nothing — the badge inherited the mistake.
+ *  - `stalled` is a pending tool that is ungated or unbounded — a backgrounded
+ *    subagent, a long MCP call. Something is probably still running and nobody
+ *    is being asked anything. `blocked` is the half of the old `stalled` reading
+ *    that IS a question, and it is the half that stayed.
+ *
+ * Where those two land instead is the ladder's answer rather than a new rule: a
+ * run with an open PR reads as In review, one without reads as In progress's
+ * `parked` lane. That is a strictly better answer for the common pair — a card
+ * whose CI went red AND whose session then ended its turn now reads `fixes
+ * needed`, which is the thing to do about it, rather than Action required, which
+ * is not.
+ *
+ * A PR that needs a human is the review column's business, in its `fixes` lane —
+ * that column and this one used to be the same one, which put "Claude is asking
+ * you something" and "GitHub is asking you something" under a single header.
  *
  * `ticketCategory` is not read here at all. A done ticket that never merged has
  * left the board before this function sees it (`shelfFor`), and one still on the
@@ -55,8 +82,11 @@ function isReviewStatus(name?: string | null): boolean {
  * parked in Review.
  *
  * What `ready` does NOT outrank is `needs`. Approved and green is not landed:
- * the work is still in flight, so an agent that ended its turn asking something
- * is the more urgent of the two. Only the merge itself settles that.
+ * the work is still in flight, so a session sitting at a prompt it cannot get
+ * past is the more urgent of the two. Only the merge itself settles that. An
+ * ended turn no longer competes here at all — it is not in `needs` any more, so
+ * a run whose PR is approved and whose session then stopped talking goes to the
+ * merge, which is the one thing left to do to it.
  *
  * `prMerged` sitting above `prBlocked` is inert rather than a policy: `blocked`
  * requires an OPEN PR and `merged` requires every PR merged, so neither input
@@ -69,21 +99,16 @@ function isReviewStatus(name?: string | null): boolean {
  */
 export function deriveBucket(i: BucketInput): DeckColumn {
   if (i.prMerged) return "merge";
-  // blocked joins needs-you, stalled and exited here: all four mean a human has
-  // to do something. blocked is the one that says which human question, and it
-  // is split out of stalled rather than added beside it — see deriveActivity.
-  if (
-    i.agentState === "blocked" ||
-    i.agentState === "needs-you" ||
-    i.agentState === "stalled" ||
-    i.agentState === "exited"
-  ) {
-    return "needs";
-  }
+  // Two states, one meaning: the session is stopped and cannot resume on its
+  // own — waiting on your answer, or dead holding the work. `needs-you` and
+  // `stalled` used to sit here and no longer do; the docblock says why.
+  if (i.agentState === "blocked" || i.agentState === "exited") return "needs";
   // Same rung a blocked PR always held — above the merge you have yet to press,
-  // above the live agent — pointed at the column that owns PR trouble. `prOpen`
-  // below would miss a red *draft*: prSignals.blocked counts drafts, .open does
-  // not, so without this the draft falls all the way to progress's parked lane.
+  // above the live agent — pointed at the column that owns PR trouble. The rung
+  // has to be its own, above `working`, because `prOpen` below sits beneath it: a
+  // red PR in a run with a live session would otherwise read as In progress, and
+  // an agent cannot know CI failed until something tells it. Drafts do not reach
+  // here any more — see `prSignals`.
   if (i.prBlocked) return "review";
   if (i.prReady) return "merge";
   if (i.agentState === "working") return "progress";
@@ -101,8 +126,18 @@ export interface PrSignals {
 
 /**
  * Reduce a run's per-repo PR entries to the booleans the ladder needs, each the
- * worst state across the run. `blocked` only considers OPEN PRs — a closed PR's
- * stale red checks must not pin a card in Needs you forever.
+ * worst state across the run. `blocked` considers only OPEN, NON-DRAFT PRs, for
+ * two separate reasons: a closed PR's stale red checks must not pin a card in
+ * `fixes needed` forever, and a draft has not been offered to anybody, so there
+ * is nobody it can be blocked on.
+ *
+ * Excluding drafts is what makes In review mean "a PR somebody can actually
+ * review". With drafts counted, the same object landed in two different columns
+ * depending on its CI: a red draft in `fixes needed`, a green one all the way
+ * down in In progress's `parked` lane, because `blocked` counted drafts and
+ * `open` never has. A red draft now parks beside the green one — with its failing
+ * checks still drawn on the card and its Address-PR row still offered, since
+ * `cardActions` has never gated on draft.
  *
  * `merged` needs *every* PR-bearing repo: a run whose backend landed and whose
  * frontend has not has not landed. It is deliberately narrower than `landed()`
@@ -111,8 +146,8 @@ export interface PrSignals {
  *
  * `ready` is the mirror image of `blocked` and deliberately stricter: every open
  * PR approved, mergeable clean, and nothing red or still running. Where `blocked`
- * forgives an advisory failure — a flaky optional check is not worth pinning a
- * card in Action required — `ready` does not, because it promises there is
+ * forgives an advisory failure — a flaky optional check is not worth calling a
+ * PR broken over — `ready` does not, because it promises there is
  * nothing left to look at before you press merge. It needs an open PR to be true
  * at all: a merged run has nothing left to merge, and a run with no PR has
  * nothing to be ready about. Pure.
@@ -123,10 +158,8 @@ export function prSignals(prs: PrEntryMap): PrSignals {
     .filter((f): f is NonNullable<typeof f> => f !== null);
   if (all.length === 0) return { open: false, blocked: false, ready: false, merged: false };
   const openPrs = all.filter((f) => f.state === "OPEN" && !f.isDraft);
-  const blocked = all.some(
-    (f) =>
-      f.state === "OPEN" &&
-      ((f.ci.failing.length > 0 && !f.ciAdvisory) || f.review === "changes_requested" || f.mergeable === "conflicting"),
+  const blocked = openPrs.some(
+    (f) => (f.ci.failing.length > 0 && !f.ciAdvisory) || f.review === "changes_requested" || f.mergeable === "conflicting",
   );
   const ready =
     openPrs.length > 0 &&
@@ -209,7 +242,7 @@ export interface MergeTarget {
  *    skipped — withholds the button. That is the exact case where "no comments
  *    open" is unproven, and it is the fact `ready` does not read at all.
  *  - No forgiveness for `ciAdvisory`. `prSignals.blocked` forgives a flaky
- *    optional check because it is not worth pinning a card in Action required;
+ *    optional check because it is not worth calling a PR broken over;
  *    this cannot, because the button promises there is nothing left to look at.
  *
  * Every unknown fails, matching the rule `branchCi` already states for itself:

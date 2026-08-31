@@ -26,7 +26,7 @@ const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
 
 describe("projectCards", () => {
   it("makes one card per agent when each lands in a different column", () => {
-    const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "working"), mkAgent("s2", "needs-you")] })]);
+    const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "working"), mkAgent("s2", "blocked")] })]);
     expect(cards.map((c) => c.id)).toEqual(["a:s1", "a:s2"]);
     expect(cards.every((c) => c.agent !== null)).toBe(true);
     expect(cards.map((c) => c.agents)).toEqual([[cards[0].agent], [cards[1].agent]]);
@@ -43,8 +43,15 @@ describe("projectCards", () => {
   });
 
   it("splits one run across columns by each agent's own state", () => {
-    const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "working"), mkAgent("s2", "needs-you")] })]);
+    const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "working"), mkAgent("s2", "blocked")] })]);
     expect(cards.map((c) => c.column)).toEqual(["progress", "needs"]);
+  });
+
+  it("merges a working session and one that merely ended its turn into In progress", () => {
+    // An ended turn is not its own column any more, so both sessions land in
+    // progress — and a run whose sessions agree on a column gets one card.
+    const cards = projectCards([mkStatus({ agents: [mkAgent("s1", "working"), mkAgent("s2", "needs-you")] })]);
+    expect(cards.map((c) => [c.column, c.lane])).toEqual([["progress", "working"]]);
   });
 
   it("still lets a blocked PR outrank a working agent, per run — into In review now", () => {
@@ -98,10 +105,23 @@ describe("projectCards and the merge column", () => {
     // The one bucketing this migration deliberately changed: the merge outranks
     // the live agent signal now that it has a column to be seen in.
     const cards = projectCards([mkStatus({
-      agents: [mkAgent("s1", "working"), mkAgent("s2", "needs-you")],
+      agents: [mkAgent("s1", "working"), mkAgent("s2", "blocked")],
       prs: prs(facts({ review: "approved" })),
     })]);
     expect(cards.map((c) => c.column).sort()).toEqual(["merge", "needs"]);
+  });
+
+  it("parks a draft PR whatever its CI says, instead of splitting drafts across two columns", () => {
+    // A draft has not been offered to anybody, so In review is not for it — and
+    // that has to hold whether its checks are red or green, or the same object
+    // lands in two different columns depending on CI.
+    const red = { passing: 0, pending: 0, failing: [{ name: "build", url: "" }] };
+    const green = projectCards([mkStatus({ agents: [mkAgent("s1", "idle")], prs: prs(facts({ isDraft: true })) })]);
+    const broken = projectCards([mkStatus({
+      agents: [mkAgent("s1", "idle")], prs: prs(facts({ isDraft: true, ci: red })),
+    })]);
+    expect(green.map((c) => [c.column, c.lane])).toEqual([["progress", "parked"]]);
+    expect(broken.map((c) => [c.column, c.lane])).toEqual([["progress", "parked"]]);
   });
 
   it("puts a merged run in the merged lane, wrap-up agent and all", () => {
