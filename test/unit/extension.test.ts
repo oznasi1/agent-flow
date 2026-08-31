@@ -82,7 +82,7 @@ vi.mock("../../src/deckView", () => ({
 // closures nothing here would exercise.
 vi.mock("../../src/engine/attentionFs", () => ({
   gatherAttention: vi.fn(() => [{
-    key: "GATHERED-1", agentState: "needs-you", prs: {}, ticketStatus: null,
+    key: "GATHERED-1", agentState: "blocked", prs: {}, ticketStatus: null,
     hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false,
   }]),
   defaultAttentionDeps: vi.fn((o: unknown) => o),
@@ -684,7 +684,7 @@ describe("attentionPass", () => {
     // Same reduction over the same inputs is what keeps the badge from
     // contradicting the column beside it.
     vi.mocked(DeckPanel.latestCandidates).mockReturnValue({
-      candidates: [{ key: "BITE-9", agentState: "needs-you", prs: {}, ticketStatus: null,
+      candidates: [{ key: "BITE-9", agentState: "blocked", prs: {}, ticketStatus: null,
         hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false }],
       at: Date.now(),
     });
@@ -701,7 +701,7 @@ describe("attentionPass", () => {
     // a panel. Without this, deleting the freshness check entirely (always trust
     // whatever the Deck last built) would pass every other test in this file.
     vi.mocked(DeckPanel.latestCandidates).mockReturnValue({
-      candidates: [{ key: "STALE-1", agentState: "needs-you", prs: {}, ticketStatus: null,
+      candidates: [{ key: "STALE-1", agentState: "blocked", prs: {}, ticketStatus: null,
         hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false }],
       at: Date.now() - 2 * 6000 - 1,
     });
@@ -739,7 +739,7 @@ describe("attentionPass", () => {
     setConfig({ notifyOnActionRequired: true });
     window.state.focused = false;
     vi.mocked(DeckPanel.latestCandidates).mockReturnValue({
-      candidates: [{ key: "BITE-9", agentState: "needs-you", prs: {}, ticketStatus: null,
+      candidates: [{ key: "BITE-9", agentState: "blocked", prs: {}, ticketStatus: null,
         hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false }],
       at: Date.now(),
     });

@@ -11,7 +11,9 @@ let setAttention: ReturnType<typeof vi.fn>;
 let logged: string[];
 
 const cand = (key: string, over: Partial<AttentionCandidate> = {}): AttentionCandidate => ({
-  key, agentState: "needs-you", prs: {}, ticketStatus: null,
+  // `blocked` rather than `needs-you`: an ended turn is not Action required any
+  // more, so it would make every candidate here an empty pass.
+  key, agentState: "blocked", prs: {}, ticketStatus: null,
   hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false, ...over,
 });
 

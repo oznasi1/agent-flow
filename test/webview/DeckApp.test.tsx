@@ -256,10 +256,15 @@ describe("DeckApp", () => {
     expect(screen.getByText(/working ·/i)).toBeInTheDocument();
   });
 
-  it("labels a needs-you agent as ended turn", () => {
-    render(<DeckApp />);
-    host(runsMsg([mkStatus({ column: "needs", agent: { state: "needs-you", lastActivityMs: Date.now(), slug: null } })]));
+  it("labels a needs-you agent as ended turn, in the calm tone", () => {
+    // Not the attention tone: an ended turn is as often a session that finished
+    // cleanly as one that asked something, it is not in Action required any more,
+    // and a red line in the parked lane would contradict the column it sits in.
+    const { container } = render(<DeckApp />);
+    host(runsMsg([mkStatus({ agent: { state: "needs-you", lastActivityMs: Date.now(), slug: null } })]));
     expect(screen.getByText(/ended turn/i)).toBeInTheDocument();
+    expect(container.querySelector(".status.tone-attn")).toBeNull();
+    expect(container.querySelector(".status.tone-idle")).not.toBeNull();
   });
 
   it("labels an idle agent as idle", () => {
@@ -271,11 +276,14 @@ describe("DeckApp", () => {
   // Extra pair authorized beyond the brief: nothing pinned a wrong tone or label
   // on either new agent state before this — both would have passed every test
   // in the suite.
-  it("labels a stalled agent as stalled, with the attention tone", () => {
+  it("labels a stalled agent as stalled, in the calm tone", () => {
+    // A pending tool that is ungated or unbounded — probably still running.
+    // Same reasoning as the ended turn above: not a failure, not Action required.
     const { container } = render(<DeckApp />);
-    host(runsMsg([mkStatus({ column: "needs", agent: { state: "stalled", lastActivityMs: Date.now(), slug: null } })]));
+    host(runsMsg([mkStatus({ agent: { state: "stalled", lastActivityMs: Date.now(), slug: null } })]));
     expect(screen.getByText(/stalled ·/i)).toBeInTheDocument();
-    expect(container.querySelector(".status.tone-attn")).not.toBeNull();
+    expect(container.querySelector(".status.tone-attn")).toBeNull();
+    expect(container.querySelector(".status.tone-idle")).not.toBeNull();
   });
 
   it("labels an exited agent as exited, with the attention tone", () => {
@@ -1524,14 +1532,14 @@ describe("Agents view", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [
       { ...mkAgent("agent-flow-2e", "working", 100), repo: "svc" },
-      { ...mkAgent("svc-7f", "needs-you", 200), repo: "svc" },
+      { ...mkAgent("svc-7f", "blocked", 200), repo: "svc" },
     ] })]));
     // Claude's own session name/slug never renders on a card — it's not a
     // user-facing name, it's CLI-internal (e.g. "agent-flow-2e").
     expect(screen.queryByText("agent-flow-2e")).not.toBeInTheDocument();
     expect(screen.queryByText("svc-7f")).not.toBeInTheDocument();
     expect(screen.getByText(/working ·/)).toBeInTheDocument();
-    expect(screen.getByText(/ended turn ·/)).toBeInTheDocument();
+    expect(screen.getByText(/blocked ·/)).toBeInTheDocument();
     // One run, two cards, so the ticket appears twice.
     expect(screen.getAllByText("PROJ-1")).toHaveLength(2);
   });
@@ -1602,7 +1610,7 @@ describe("Agents view", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [
       { ...mkAgent("a-working", "working", 100), repo: "svc" },
-      { ...mkAgent("a-ended", "needs-you", 200), repo: "svc" },
+      { ...mkAgent("a-blocked", "blocked", 200), repo: "svc" },
     ] })]));
     const columns = Array.from(document.querySelectorAll(".col")).map((c) => ({
       name: c.querySelector(".nm")!.textContent,
@@ -1628,7 +1636,7 @@ describe("Agents view", () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus({ agents: [
       { ...mkAgent("a1", "working", 100), repo: "svc" },
-      { ...mkAgent("a2", "needs-you", 200), repo: "svc" },
+      { ...mkAgent("a2", "blocked", 200), repo: "svc" },
     ] })]));
     const tiles = Array.from(document.querySelectorAll(".stat")).map((s) => [s.querySelector(".l")!.textContent, s.querySelector(".n")!.textContent]);
     // One run, one agent per column — two cards total, not one per run.

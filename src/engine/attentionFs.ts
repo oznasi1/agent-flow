@@ -20,10 +20,13 @@ import { readAgentActivity, readSessionActivity } from "./transcript";
 import { currentBranch, gitState as realGitState, prEligible as realPrEligible, repoRoot } from "./git";
 import { JUST_LAUNCHED_MS } from "./visibility";
 
-/** `deriveBucket`'s needs rung, named once so the cost ladder and its test agree. */
-export const NEEDS_STATES: ReadonlySet<AgentState> = new Set<AgentState>([
-  "blocked", "needs-you", "stalled", "exited",
-]);
+/** `deriveBucket`'s needs rung, named once so the cost ladder and its test agree.
+ *
+ * This gates COST, not verdicts — every run is pushed as a candidate below
+ * regardless, and `attentionKeys` does the filtering. So narrowing it to the two
+ * states the rung now admits cannot silence a badge: a run it skips is a run
+ * whose column could not have been `needs` anyway. */
+export const NEEDS_STATES: ReadonlySet<AgentState> = new Set<AgentState>(["blocked", "exited"]);
 
 export interface AttentionDeps {
   runs: () => Run[];

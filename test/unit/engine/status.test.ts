@@ -188,7 +188,9 @@ describe("buildRunStatus", () => {
         agents: [agent("working", NOW - 1_000), agent("needs-you", NOW - 60_000)],
       });
       expect(s.agent.state).toBe("needs-you");
-      expect(s.column).toBe("needs");
+      // An ended turn is not Action required — it falls through the ladder to
+      // In progress's parked lane. See deriveBucket.
+      expect(s.column).toBe("progress");
       expect(s.agents).toHaveLength(2);
     });
 

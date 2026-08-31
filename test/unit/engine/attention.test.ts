@@ -15,7 +15,9 @@ const prs = (...f: (PrFacts | null)[]): PrEntryMap =>
   Object.fromEntries(f.map((x, i) => [`repo${i}`, { facts: x, fetchedAt: 0 }]));
 
 const cand = (over: Partial<AttentionCandidate> = {}): AttentionCandidate => ({
-  key: "BITE-1", agentState: "needs-you", prs: {}, ticketStatus: null,
+  // `blocked` rather than `needs-you`: the default has to be a candidate the
+  // badge actually counts, and an ended turn is no longer one of those.
+  key: "BITE-1", agentState: "blocked", prs: {}, ticketStatus: null,
   hasLiveSession: true, justLaunched: false, hasWorkToLose: false, showAll: false, ...over,
 });
 
@@ -33,13 +35,22 @@ describe("attention.ts stays a leaf", () => {
 });
 
 describe("attentionKeys", () => {
-  it("counts every state that means a human has to do something", () => {
+  it("counts a session that cannot resume on its own — a prompt, or a death", () => {
     const keys = attentionKeys([
+      cand({ key: "A", agentState: "blocked" }),
+      cand({ key: "B", agentState: "exited", hasLiveSession: false, justLaunched: true }),
+    ]);
+    expect(keys).toEqual(["A", "B"]);
+  });
+
+  it("stays quiet for a session that merely ended its turn, or stalled on a tool", () => {
+    // The badge and the toast read this ladder, so these two used to fire
+    // "BITE-1 is waiting on you" for every session that finished cleanly and for
+    // every backgrounded subagent that took a while. That was the noise.
+    expect(attentionKeys([
       cand({ key: "A", agentState: "needs-you" }),
       cand({ key: "B", agentState: "stalled" }),
-      cand({ key: "C", agentState: "exited", hasLiveSession: false, justLaunched: true }),
-    ]);
-    expect(keys).toEqual(["A", "B", "C"]);
+    ])).toEqual([]);
   });
 
   it("ignores a run nobody is waiting on", () => {
@@ -182,7 +193,7 @@ describe("attentionKeys agrees with the column the Deck draws", () => {
     // feeds the column check — does not. The `isDraft: true` entry in
     // `prSets` below exists to exercise exactly that seam; swap which of the
     // two `prOpen`s attentionKeys reads and this fails.
-    const states: AgentState[] = ["needs-you", "stalled", "exited", "working", "idle", "unknown"];
+    const states: AgentState[] = ["blocked", "needs-you", "stalled", "exited", "working", "idle", "unknown"];
     const prSets: PrEntryMap[] = [
       {},
       prs(facts()),

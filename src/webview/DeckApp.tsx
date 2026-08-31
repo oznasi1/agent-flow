@@ -71,12 +71,14 @@ const DEFAULT_AGENT_LABEL = "Claude Code";
 // says, in the summary tile, the column header and the legend alike: one name for
 // one thing. `merge` needs no translation: Merge is the label too.
 //
-// Board order is the attention ramp: something is running, an agent wants you,
-// a pull request wants somebody, something is at the merge. Three of the four are
+// Board order is the attention ramp: something is running, a session is stuck, a
+// pull request wants somebody, something is at the merge. Three of the four are
 // stages rather than states and split into lanes below; Action required is the
-// exception, and means exactly one thing. There is no Done column: a ticket
-// closed with nothing merged left no wrap-up, and leaves for the Recently closed
-// strip.
+// exception, and means exactly one thing — a session that cannot resume on its
+// own, either waiting on your answer or dead holding the work. A session that
+// merely ended its turn is NOT that, and lives in In progress's parked lane; see
+// deriveBucket. There is no Done column: a ticket closed with nothing merged left
+// no wrap-up, and leaves for the Recently closed strip.
 //
 // `glow` marks a zone where the dot means something is alive right now, and only
 // those zones get the halo. In review deliberately does not. A live agent *can*
@@ -101,8 +103,10 @@ const COLUMNS: { id: DeckColumn; label: string; varName: string; glow: boolean }
 // it to that.
 //
 // `needs` has no entry on purpose. It is the only column left that means exactly
-// one thing — an agent stopped and wants you — so a sub-header under it could
-// only restate the header above it.
+// one thing — the session is stopped and cannot resume on its own — so a
+// sub-header under it could only restate the header above it. Its two states are
+// not two bands: the card's own state line already says which ("blocked · waiting
+// on Edit" against "exited"), and both want the same click.
 const LANES: Partial<Record<DeckColumn, { id: DeckLane; label: string }[]>> = {
   progress: [
     { id: "working", label: "working" },
@@ -153,9 +157,15 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
   if (r.agent.state === "unknown") return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
   switch (r.agent.state) {
     case "working": return { text: `working · ${timeAgo(r.agent.lastActivityMs)}`, tone: "working" };
-    case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
+    // An ended turn is as often a session that finished cleanly as one that asked
+    // something, and `stalled` is a tool that is probably still running — neither
+    // is a failure, so neither wears the attention colour. They are also no longer
+    // in Action required (deriveBucket), and a red line in the parked lane would
+    // be the card contradicting the column it sits in. `blocked` and `exited`
+    // keep it: those two ARE stopped.
+    case "needs-you": return { text: `ended turn · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
     case "blocked": return { text: `blocked${onTool(r.agent.pendingTool)} · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
-    case "stalled": return { text: `stalled${onTool(r.agent.pendingTool)} · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
+    case "stalled": return { text: `stalled${onTool(r.agent.pendingTool)} · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
     case "exited": return { text: `exited · ${timeAgo(r.agent.lastActivityMs)}`, tone: "attn" };
     case "idle": return { text: `idle · ${timeAgo(r.agent.lastActivityMs)}`, tone: "idle" };
     default: return { text: `parked · git + ${sourceLabel} only`, tone: "parked" };
