@@ -21,6 +21,17 @@ const PRODUCT_NAME = /\bAgent Flow(?: Deck)?\b/g;
 export const hasAgentWord = (s: string): boolean =>
   AGENT_WORD.test(s.replace(PRODUCT_NAME, ""));
 
+/** The template/workflow gate's word. Matched the same way as the agent-word —
+ * boundary-only, so "workflow"/"Workflows" (no boundary before "flow", since
+ * the preceding letter is a word character too) never trips it, only a bare
+ * "flow"/"flows" does. The product name is "Agent Flow Deck", so it must be
+ * stripped first for the same reason `hasAgentWord` strips it: without that,
+ * the product's own name would fail the gate everywhere it is printed. */
+const FLOW_WORD = /\bflows?\b/i;
+
+export const hasFlowWord = (s: string): boolean =>
+  FLOW_WORD.test(s.replace(PRODUCT_NAME, ""));
+
 /** Stylesheet modules each export ONE template literal holding a whole CSS
  * file. That string is code, not prose: its class names (`.c-agents`) and CSS
  * comments would land in the allowlist as multi-kilobyte entries that any
@@ -52,9 +63,13 @@ function isNotCopy(node: ts.Node): boolean {
   return false;
 }
 
-/** Every user-facing string in one source file that contains the agent-word,
- * whitespace-collapsed so a reflowed line does not change the allowlist. */
-export function userFacingStrings(fileName: string, source: string): string[] {
+/** Every candidate user-facing string in one source file — plain literals,
+ * template chunks, JSX text — whitespace-collapsed so a reflowed line does not
+ * change the allowlist, and with no word filter applied. This is the shared
+ * extraction the agent-word and flow-word gates both build on, so a fix to
+ * what counts as "copy" (comments excluded, object keys excluded, etc.) helps
+ * every gate at once rather than needing a second AST walk. */
+export function allUiStrings(fileName: string, source: string): string[] {
   const sf = ts.createSourceFile(
     fileName,
     source,
@@ -71,7 +86,7 @@ export function userFacingStrings(fileName: string, source: string): string[] {
     // string literal like "agents" in the same file — allowlisting the wire
     // value would then silently allowlist the display string too. Do not
     // "fix" this by adding .trim() back.
-    if (hasAgentWord(text)) out.push(text.replace(/\s+/g, " "));
+    out.push(text.replace(/\s+/g, " "));
   };
   const visit = (n: ts.Node): void => {
     if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && !isNotCopy(n)) take(n.text);
@@ -81,6 +96,14 @@ export function userFacingStrings(fileName: string, source: string): string[] {
   };
   visit(sf);
   return out;
+}
+
+/** Every user-facing string in one source file that contains the agent-word.
+ * Kept as its own export — rather than inlining `allUiStrings(...).filter(hasAgentWord)`
+ * at every call site — because it is the one the top-level describe block below
+ * documents and tests directly. */
+export function userFacingStrings(fileName: string, source: string): string[] {
+  return allUiStrings(fileName, source).filter(hasAgentWord);
 }
 
 function walk(dir: string, acc: string[] = []): string[] {

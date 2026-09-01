@@ -232,6 +232,40 @@ run. Repos are still not a parameter (`params: {}` leaves the format room). The 
 back a History tab in the block later — "what just happened" beside "where am I" — and is not
 in v1.
 
+## Not in this build
+
+Three things this document promises that shipped without.
+
+1. **`Output` on a failed step.** §5's table promises "Output / Reset inline"
+   for the `stopped` state. Only Reset shipped. Command output goes to the
+   Deck's own output channel and nowhere else — reading it back into the
+   drawer needs a host round trip that does not exist, and building one is
+   deferred alongside the journal-backed History tab §9 already defers. What
+   the user gets instead: the failed edge's own `error` stamp surfaces as the
+   step's receipt (`WorkflowBlock.tsx`'s `stepText`), so the reason the rule
+   failed is on screen — just not the command's stdout/stderr.
+2. **One-step Replace.** §2 promises that `Attach workflow…` on a card that
+   already carries one "offers Replace". The host supports `flow:attach`'s
+   `replace: true` and it is tested, but no UI ever sends it: the picker only
+   opens while the block shows `flow === undefined` (nothing attached), and
+   deriving `replace` from a `workflow` read at render time created a race —
+   another window's poll could attach a workflow to the same card while the
+   picker sat open, and a stale-derived `replace: true` would then delete a
+   workflow the user never saw. What the user gets instead: Detach, then
+   Attach — and on an *advancing* workflow the block's header offers Disarm,
+   not Detach (only `done`/`stopped` offer it), so swapping an advancing
+   workflow means opening the Workflows drawer and deleting the flow there.
+3. **The Templates tab is unreachable with zero workflows.**
+   `OrchestratorDrawer.tsx` returns `null` whenever no flow is open
+   (`if (!flow) return null`), and the picker holding the Running/Templates
+   tabs renders only past that point. A user who deletes their last workflow
+   therefore has no way to open the drawer at all, and so cannot rename,
+   duplicate, or delete a saved template from any surface until a workflow
+   exists again. What the user gets instead: the card's own `Attach
+   workflow…` picker still lists every template by name — attaching one still
+   works — it is only template *management* (§8) that is unreachable in this
+   state.
+
 ## File structure
 
 | File | Responsibility |

@@ -208,6 +208,36 @@ test) two trips through the same menu.
 Free text stays a footer action rather than a tickable row: there is nothing
 to batch about a command you have not typed yet.
 
+## Templates and workflows
+
+A **template** is a flow with no ticket and no run, saved so its shape can be
+reused. A **workflow** is a template attached to one card. That split is
+UI-only — a workflow is an ordinary flow underneath, and everything above
+about one pass, consent, and the latch applies to it exactly as it does to
+any other flow. The names never appear in the source: the code keeps `Flow`,
+`FlowTemplate`, and every `flow:*` message, because they are frozen by
+`test/unit/compat.test.ts` and thousands of installs read them.
+
+- **`flow:saveTemplate`** demotes every `place` node in the flow to a
+  `planned` node — stripping the run it was bound to — and writes the result
+  to a sibling `templates` directory, next to the flows directory this whole
+  page has been describing. A template is never armed and never evaluated by
+  the pass above: it has no ticket and nothing to watch.
+- **`flow:attach`** instantiates a template against one card, binding the
+  card's ticket to every planned node the template holds. The result is an
+  ordinary flow, disarmed, with neither consent stamp — arming it and giving
+  consent both happen exactly as described above, from scratch. Its optional
+  `replace: true` first detaches whatever workflow the card already carries;
+  omitting it while one is already there is a refusal, not a silent second
+  attachment.
+- **`flow:detach`** deletes the flow's file outright. Attachment is derived
+  from the graph — a `place`/`planned` node bound to the card's run or ticket
+  — never stored, so there is no separate link to clear.
+- **`flow:renameTemplate`**, **`flow:deleteTemplate`**, **`flow:duplicateTemplate`**
+  act on the template file only. Deleting a template never touches a workflow
+  already instantiated from it: `instantiate` copies the shape once, and the
+  workflow does not reference the template again afterwards.
+
 ## Boundaries
 
 ### You can

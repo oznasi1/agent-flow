@@ -249,3 +249,17 @@ This page describes the event catalog as it stands in this repo, not a particula
 release: no version is stamped here, because a hard-coded number goes stale the
 moment the next version ships. If the event catalog changes, this file (and the
 drift test that checks it, `test/unit/telemetry/docs.test.ts`) must change with it.
+
+**The drift test only checks event names, not what is inside a row.**
+`test/unit/telemetry/docs.test.ts` extracts every `{ name: "…" }` literal from
+`src/telemetry/events.ts` and asserts each one appears as a substring
+somewhere in this file — it never parses a row's own content, so it cannot
+tell a `flow_action` row listing three of its action enum's members from one
+listing all of them. A row can go stale the moment a new action (or property)
+is added to an existing event, and this test stays green throughout. That is
+exactly what happened to `flow_action`'s action list during this feature: it
+sat one value behind before workflow templates added six more actions to the
+enum, and would have sat seven behind afterwards had it not been corrected by
+hand. Trust this page's *prose*, verified by reading the source it cites, over
+the fact that the test suite is green — passing here proves only that no
+event was renamed or dropped, not that every row is complete.
