@@ -70,16 +70,21 @@ async function dragGrip(page: Page, dx: number) {
   const box = (await grip(page).boundingBox())!;
   const x = box.x + box.width / 2;
   const y = box.y + box.height / 2;
+  const widthBefore = await ddWidth(page);
   await page.mouse.move(x, y);
   await page.mouse.down();
   // The `pointermove`/`pointerup` pair are bound in a `useEffect` gated on
   // `resizing`, which only runs after React commits the `pointerdown`
   // handler's `setResizing` — a real browser can paint (and this test's next
-  // `mouse.move` can fire) before that commit lands. A short wait here is
-  // standing in for how much slower a real press-then-drag is than a
-  // scripted one; without it the first `mousemove` sometimes reaches no
-  // listener at all and the whole drag is silently a no-op.
-  await page.waitForTimeout(30);
+  // `mouse.move` can fire) before that commit lands. Rather than guess a
+  // fixed delay (this file's one non-condition wait, and its only flake
+  // candidate under CI's `retries: 1`), nudge one pixel in the drag's own
+  // direction and poll until the rendered width actually moves off its
+  // pre-drag value — proof the listener is attached — before committing to
+  // the real move.
+  const nudge = dx > 0 ? 1 : -1;
+  await page.mouse.move(x + nudge, y);
+  await expect.poll(() => ddWidth(page)).not.toBe(widthBefore);
   await page.mouse.move(x + dx, y, { steps: 10 });
   await page.mouse.up();
 }
@@ -106,12 +111,18 @@ test("dragging the grip widens the rendered drawer and persists the width under 
     .toBeCloseTo(before + 120, 0);
 
   // Same shape drawerResize.ts's own header comment warns about: a merge, not
-  // a replace. Nothing else has been persisted yet in this test, so the
-  // stored object's only key IS ddWidth — proving the write didn't silently
-  // wipe a sibling key would need the Orchestrator drawer open too, which
+  // a replace. Asserted narrowly on purpose — `stored.ddWidth` and that
+  // `orchWidth` (the Orchestrator drawer's own sibling key in the same
+  // persisted object) is untouched — rather than pinning the object's
+  // COMPLETE key set: `DeckApp` persisting some unrelated bit of state
+  // through the same `vscodeApi.setState` in the future is not a bug this
+  // test should own, and an earlier version of this assertion would have
+  // broken on exactly that. Proving the merge doesn't wipe a SIBLING DRAWER's
+  // width needs the Orchestrator drawer open too, which
   // test/webview/DeckDetail.test.tsx already covers over a mocked API.
-  const stored = await page.evaluate(() => window.__state);
-  expect(Object.keys(stored as object)).toEqual(["ddWidth"]);
+  const stored = await page.evaluate(() => window.__state as Record<string, unknown>);
+  expect(stored.ddWidth).toBeCloseTo(before + 120, 0);
+  expect(stored.orchWidth).toBeUndefined();
 });
 
 // The important one: `--dd-w` is set on `document.documentElement`, and

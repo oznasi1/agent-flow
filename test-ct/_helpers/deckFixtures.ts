@@ -1,5 +1,5 @@
 import type { Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
-import type { OutboundMessage, RepoGit, RunStatus } from "../../src/types";
+import type { OutboundMessage, RunStatus } from "../../src/types";
 
 /** Restated from `test/webview/DeckApp.test.tsx`'s own `mkStatus`, not
  *  imported: that file carries a `// @vitest-environment jsdom` docblock and
@@ -76,6 +76,3 @@ export const doneOn = (runKey: string): Flow => ({
   nodes: [place("n1", runKey), notify("n2")],
   edges: [edge({ id: "e1", from: "n1", to: "n2", performed: true, firedAt: 1, firedNote: "merged" })],
 });
-
-export const mkRepos = (names: string[]): RepoGit[] =>
-  names.map((n) => ({ name: n, path: `/r/${n}`, branch: null, dirty: false, ahead: 0, added: 0, removed: 0, files: 0 }));

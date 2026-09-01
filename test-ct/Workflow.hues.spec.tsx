@@ -29,6 +29,25 @@ import type { StepState, WorkflowStatus } from "../src/engine/orchestrator/attac
  * hardcoded here.
  */
 
+// Guards the method every test below relies on: each one compares an
+// element's painted colour to `tokenColor(page, "--some-var")`, so if
+// `tokenColor` itself stopped discriminating tokens (a broken selector in
+// its throwaway probe, or `playwright/index.tsx` no longer injecting
+// TOKENS_CSS at all) every `.not.toBe()` below could start passing for the
+// wrong reason and every `.toBe()` could start failing in a way that reads
+// as an unrelated colour bug rather than a hole in the test's own premise.
+// `tokens.test.ts` already fails CI on a renamed/deleted token; this is the
+// CT-side half of the same guarantee — that the four tokens this whole file
+// leans on are still four distinct, live values.
+test("the four status tokens this file leans on resolve to four different colours", async ({ mount, page }) => {
+  await mount(<DeckApp />);
+  const [progress, attn, danger, done] = await Promise.all([
+    tokenColor(page, "--c-progress"), tokenColor(page, "--c-attn"),
+    tokenColor(page, "--c-danger"), tokenColor(page, "--c-done"),
+  ]);
+  expect(new Set([progress, attn, danger, done]).size).toBe(4);
+});
+
 test("an advancing card's chip is the quiet blue, not amber or red", async ({ mount, page }) => {
   await mount(<DeckApp />);
   await host(page, flowsMsg([shipItOn("PROJ-142")]));
@@ -106,13 +125,17 @@ test("WorkflowBlock hues its five step marks to the same tokens the card chip us
     else if (state === "now") expect(got).toBe(await tokenColor(page, "--c-progress"));
     else if (state === "done") expect(got).toBe(await tokenColor(page, "--c-done"));
     else {
-      // "waiting": deliberately the quiet default (--dim), never one of the
-      // two attention hues — a step merely NEXT IN LINE must not compete
-      // visually with a step that actually needs a human.
-      const [dim, attn, danger] = await Promise.all([
-        tokenColor(page, "--dim"), tokenColor(page, "--c-attn"), tokenColor(page, "--c-danger"),
-      ]);
-      expect(got).toBe(dim);
+      // "waiting": deliberately the quiet default, never one of the two
+      // attention hues — a step merely NEXT IN LINE must not compete
+      // visually with a step that actually needs a human. Not asserted as
+      // `.toBe(tokenColor(page, "--dim"))`: `--dim` is
+      // `var(--vscode-descriptionForeground)` with no literal fallback of
+      // its own, so in this plain-browser harness (no VS Code variables
+      // defined) it resolves to the same guaranteed-invalid → inherited
+      // black every OTHER undeclared property would, making that equality
+      // vacuously true regardless of which colour `.wf-mark` actually used.
+      // The two inequalities below are what §6 actually asks for here.
+      const [attn, danger] = await Promise.all([tokenColor(page, "--c-attn"), tokenColor(page, "--c-danger")]);
       expect(got).not.toBe(attn);
       expect(got).not.toBe(danger);
     }

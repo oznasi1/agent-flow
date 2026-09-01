@@ -10,36 +10,39 @@ import type { FlowTemplate } from "../src/engine/orchestrator/templates";
  * `TemplateRow`) that no `className` assertion can see, because neither
  * changed a class name — both changed what a rule DOES:
  *
- *  - `.orch-tmpl-row .row` needed `display: flex` and `.orch-tmpl-row .sp`
- *    needed `flex: 1`. Without them the name and the rule count jam together
- *    with no gap (block-level `span`s simply stack), and in the
- *    confirm-delete state Cancel/Confirm drop onto their own line below the
- *    sentence instead of sitting at its end.
+ *  - `.orch-tmpl-row .row` carries its own `gap: 6px` (the ancestor
+ *    `.orch-hd .row` — see `orchestratorStyles.ts`'s own comment on it — uses
+ *    8px and already supplies `display: flex` to every `.row` nested under
+ *    `.orch-hd`, template rows included, since before this fix ever landed).
+ *    Without the 6px gap here the confirm-delete state's Cancel/Confirm pair
+ *    sits closer to the sentence than this row's own siblings do.
  *  - `.orch-kw` is a 40px column sized for "WHEN"/"THEN" (four letters), but
  *    the Save dialog hands it an arbitrary run key (`endLabel` — a place
- *    node's own `runKey`, verbatim). A long one needs to ellipsize rather
- *    than overflow its box or collide with the select beside it.
+ *    node's own `runKey`, verbatim). A long one needs a wider, single-line
+ *    column that stops short of the select beside it, rather than a cramped
+ *    40px cell or one that grows past the select.
  *
  * jsdom has no layout engine: every `span` it renders sits at (0,0) with a
  * 0×0 box regardless of `display`, so "on one line" and "stacked on two
  * lines" produce identical jsdom output. Only real Chromium computes a real
  * line box.
  *
- * A mutation-check surfaced something the design doc doesn't mention: every
- * `.orch-tmpl-row` lives INSIDE `.orch-hd` (`OrchestratorDrawer.tsx` never
- * closes that div until after the whole flow-switcher popover), and
- * `.orch-hd .row`/`.orch-hd .sp` — an older, more general pair of rules —
- * already supply `display: flex`/`flex: 1` to any `.row`/`.sp` nested
- * anywhere under it, template rows included. So deleting JUST
- * `.orch-tmpl-row .row`'s own `display: flex` (or `.orch-tmpl-row .sp`'s own
- * `flex: 1`) does NOT reproduce the bug the code comment describes — the
- * ancestor rule quietly covers for it, and the first two tests below still
- * pass. What they DO still catch is the more direct regression: if flex
- * layout is missing from BOTH the specific rule and the general one (e.g. a
- * refactor that also touches `.orch-hd .row`, or moves the Templates tab out
- * from under `.orch-hd` without carrying its own flex rule along), the name
- * and count really do stack and these tests fail. See this file's own git
- * history / the accompanying report for the mutation actually run.
+ * A mutation-check surfaced something the original fix's own commit message
+ * got wrong, confirmed by walking the git history: `.orch-hd .row` and
+ * `.orch-hd .sp` predate the Templates tab fix, and the tab has lived inside
+ * `.orch-hd` since ITS first commit too — so the ancestor rule always
+ * reached these elements, and the "name and rule count jam together with no
+ * gap" bug the fix's commit message describes never actually shipped.
+ * `.orch-tmpl-row .sp { flex: 1 }` was accordingly dead (identical property
+ * and value to the ancestor `.orch-hd .sp`) and has been deleted;
+ * `.orch-tmpl-row .row`'s `display: flex` is kept as insurance against a
+ * plausible future refactor (moving the tab out from under `.orch-hd`, the
+ * way its own Save dialog already lives in `.orch-body` instead) rather than
+ * because it does anything today — see that rule's own comment in
+ * `orchestratorStyles.ts`. The two layout tests below still stand as CI
+ * gates for the OUTCOME (one line, a real gap), just not ones sensitive to
+ * either specific declaration in isolation; a mutation removing flex from
+ * BOTH the specific rule and `.orch-hd .row` at once does fail them.
  */
 
 const noop = () => {};
@@ -131,7 +134,17 @@ test("the delete confirmation keeps Cancel and Confirm on the same line as the s
   expect(confirmBox.x).toBeGreaterThan(cancelBox.x + cancelBox.width - 4);
 });
 
-test("a long run key in the Save-as-template dialog ellipsizes instead of overflowing or colliding with the select", async ({ mount, page }) => {
+// Named narrowly on purpose: no DOM API exposes whether an "…" glyph was
+// actually painted (that is a rendered-pixel fact, not a computed-style one),
+// so this cannot claim to prove "ellipsized" — only what it can actually
+// observe. What it proves: the long key gets a WIDER column than the base
+// `.orch-kw`'s 40px (sized for "WHEN"/"THEN"), stays on one line rather than
+// wrapping into it, and never pushes the select outside the dialog. That is
+// the whole visible complaint the fix targets — a cramped, multi-line, or
+// colliding cell — even though the exact clipping mechanism (`text-overflow:
+// ellipsis` specifically, vs. some other clip) is outside what this test can
+// see.
+test("a long run key in the Save-as-template dialog widens its own column, stays on one line, and never collides with the select", async ({ mount, page }) => {
   await mount(<OrchestratorDrawer {...props} />);
   await settled(page, ".orch-hd");
   await page.getByRole("button", { name: /Save as template/ }).click();
@@ -157,16 +170,20 @@ test("a long run key in the Save-as-template dialog ellipsizes instead of overfl
   // and a mutant with `white-space: nowrap` deleted — this height check is
   // what tells them apart.
   expect(metrics.height).toBeLessThan(20);
-  // Ellipsized, not merely clipped-and-invisible: `scrollWidth` (the text's
-  // real, unwrapped width) must exceed `clientWidth` (the box it was
-  // actually given) by more than rounding noise — the real fix measures at
-  // 87px of overflow here (187 vs 100); the wrapped mutant above measured 2.
+  // The text's real, unwrapped width must exceed the box it was actually
+  // given by more than rounding noise — the real fix measures 87px of
+  // overflow here (187 vs 100); the wrapped mutant above measured 2.
   expect(metrics.scrollWidth - metrics.clientWidth).toBeGreaterThan(20);
 
-  // And it never grew past the room the Save dialog's own dialog gives the
-  // select beside it — `max-width: 100px` (`.orch-tmpl-dialog .orch-kw`) is
-  // exactly the number that keeps this true; the base `.orch-kw`'s 40px
-  // would instead collide with (or sit visibly cramped against) the select.
+  // Wider than the base `.orch-kw`'s 40px, not just narrower than the cap:
+  // an EARLIER version of this test only asserted `kwBox.width <= 100.5`,
+  // which the base 40px column (sized for "WHEN"/"THEN") also satisfies —
+  // deleting `.orch-tmpl-dialog .orch-kw`'s `width: auto; max-width: 100px`
+  // while leaving `white-space: nowrap`/`overflow: hidden` in place produces
+  // exactly the cramped 40px cell the fix targeted, showing only "PR…", and
+  // every other assertion here still passed. This lower bound is what a
+  // mutation-check of that partial deletion actually needs to fail.
+  expect(kwBox.width).toBeGreaterThan(60);
   expect(kwBox.width).toBeLessThanOrEqual(100.5);
   expect(kwBox.x + kwBox.width).toBeLessThanOrEqual(selectBox.x + 0.5);
 });
