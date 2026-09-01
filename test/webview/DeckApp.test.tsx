@@ -5,12 +5,13 @@ import { render, screen, fireEvent, act, within, waitFor } from "@testing-librar
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
-import { DeckApp } from "../../src/webview/DeckApp";
+import { DeckApp, workflowChipTrailer } from "../../src/webview/DeckApp";
 import { DECK_CSS, DRAWER_ANIM_MS } from "../../src/webview/deckStyles";
 import { DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { send } from "../../src/webview/vscodeApi";
 import type { AgentActivity, CardAgent, OutboundMessage, PrFacts, RepoGit, ReviewRequest, RunStatus } from "../../src/types";
 import type { Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
+import type { WorkflowState } from "../../src/engine/orchestrator/attach";
 
 const sent = vi.mocked(send);
 
@@ -3373,12 +3374,13 @@ describe("the card's workflow chip", () => {
    * and the gate's own outgoing edge is what `evaluate.ts` posts its
    * `awaiting-answer` note against — the same shape DeckDetail.test.tsx's
    * `withGateOn` builds, with the gate's `question` set to what the chip
-   * should say. */
-  const gateOn = (runKey: string): Flow => ({
+   * should say. `question` defaults to a real phrase; the blank-question test
+   * below passes `""` through the same fixture rather than a second one. */
+  const gateOn = (runKey: string, question = "approve deploy"): Flow => ({
     id: "f1", name: "Ship it", armed: true, createdAt: 100,
-    nodes: [place("n1", runKey), gateNode("g1", "approve deploy"), notify("n2")],
+    nodes: [place("n1", runKey), gateNode("g1", question), notify("n2")],
     edges: [
-      edge({ id: "e-ask", from: "n1", to: "g1", performed: true, firedAt: 1, firedNote: "asked you: approve deploy" }),
+      edge({ id: "e-ask", from: "n1", to: "g1", performed: true, firedAt: 1, firedNote: `asked you: ${question}` }),
       edge({ id: "e-gate", from: "g1", to: "n2", cond: { kind: "gate-approved" } }),
     ],
   });
@@ -3414,6 +3416,20 @@ describe("the card's workflow chip", () => {
     expect(screen.getByText(/Ship it — approve deploy/)).toBeTruthy();
   });
 
+  // The blank-question fallback, exercised end to end: a real, unanswered gate
+  // whose own `question` is empty must still render a chip — the name alone,
+  // never a trailing "— " with nothing after it.
+  it("shows the workflow name alone when a waiting gate's own question is blank", () => {
+    renderBoard({ flows: [gateOn("PROJ-142", "")] });
+    // `title` carries the label alone, with no leading glyph (see DeckApp.tsx's
+    // own comment on why the mark is `aria-hidden` and outside `wfLabel`) — the
+    // one place this test can assert "the name, and nothing else" without also
+    // asserting the unrelated attention mark this status always carries.
+    const chip = screen.getByTitle(/^Ship it$/);
+    expect(chip.title).toBe("Ship it");
+    expect(chip.textContent).not.toContain("—");
+  });
+
   it("says what a stopped workflow hit", () => {
     renderBoard({ flows: [failedOn("PROJ-142")] });
     expect(screen.getByText(/Ship it — smoke test failed/)).toBeTruthy();
@@ -3431,5 +3447,48 @@ describe("the card's workflow chip", () => {
   it("shows no chip when the orchestrator is off", () => {
     renderBoard({ flows: [shipItOn("PROJ-142")], orchEnabled: false });
     expect(screen.queryByTitle(/Ship it/)).toBeNull();
+  });
+});
+
+// `workflowChipTrailer`'s own defensive branch, tested directly rather than
+// through a rendered board: nothing REAL can construct a `WorkflowState`
+// where a "you" step's edge does not start at a gate — `evaluate.ts` only ever
+// posts `awaiting-answer` against a node that already IS one (see that
+// function's own doc comment) — so the only way to prove the fallback holds is
+// to hand it a `WorkflowState` a real derivation could never produce.
+describe("workflowChipTrailer's defensive fallback", () => {
+  const stepState = (over: Partial<WorkflowState["steps"][number]> & { edgeId: string; state: "you" }) =>
+    ({ ...over });
+
+  it("shows the name alone when the pending edge's own source is not a gate", () => {
+    // The edge a real derivation would only ever point at a gate points at the
+    // PLACE node instead — the shape `!gate || gate.kind !== "gate"` defends
+    // against, never reachable through `attach.ts` itself.
+    const flow: Flow = {
+      id: "f1", name: "Ship it", armed: true, createdAt: 100,
+      nodes: [
+        { id: "n1", x: 0, y: 0, join: "any", kind: "place", runKey: "PROJ-142", repo: "svc" },
+        { id: "n2", x: 0, y: 0, join: "any", kind: "notify", message: "" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+    };
+    const state: WorkflowState = {
+      status: "waiting-on-you", done: 0, total: 1,
+      steps: [stepState({ edgeId: "e1", state: "you", reason: "awaiting-answer" })],
+    };
+    expect(workflowChipTrailer(flow, state)).toBeUndefined();
+  });
+
+  it("shows the name alone when the pending edge names a node that no longer exists", () => {
+    const flow: Flow = {
+      id: "f1", name: "Ship it", armed: true, createdAt: 100,
+      nodes: [{ id: "n2", x: 0, y: 0, join: "any", kind: "notify", message: "" }],
+      edges: [{ id: "e1", from: "gone", to: "n2", cond: { kind: "pr-merged" } }],
+    };
+    const state: WorkflowState = {
+      status: "waiting-on-you", done: 0, total: 1,
+      steps: [stepState({ edgeId: "e1", state: "you", reason: "awaiting-answer" })],
+    };
+    expect(workflowChipTrailer(flow, state)).toBeUndefined();
   });
 });

@@ -4,7 +4,7 @@ import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromp
 import type { AccountSlot } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
-import { attachedWorkflows, rankByState, workflowState, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
+import { cardWorkflow, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
 import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
@@ -201,8 +201,18 @@ const CHIP_MARK: Partial<Record<WorkflowStatus, string>> = {
  * "waiting for your answer" — true, but not what the flow is actually asking
  * for — so this reaches past it for the one thing that can honestly say that:
  * the gate's own words. A blank question falls back to the name alone rather
- * than printing an empty dash. */
-function workflowChipTrailer(flow: Flow, state: WorkflowState): string | undefined {
+ * than printing an empty dash, and so does the `!gate || gate.kind !== "gate"`
+ * guard: `evaluate.ts`'s own precondition for posting `awaiting-answer`
+ * (`findNode(i.flow, e.from)?.kind === "gate"`) makes that branch unreachable
+ * through the real `attach.ts` derivation — a "you" step's edge always starts
+ * at a gate — but this function does not trust that from the outside; a
+ * `WorkflowState` built any other way (a test, a future caller) gets the same
+ * honest fallback rather than a crash or a fabricated phrase.
+ *
+ * Exported for exactly that: it is the only way to exercise the defensive
+ * branch at all, since nothing REAL can construct a `WorkflowState` that trips
+ * it — see `DeckApp.test.tsx`'s own `workflowChipTrailer` describe block. */
+export function workflowChipTrailer(flow: Flow, state: WorkflowState): string | undefined {
   if (state.status === "stopped") {
     return state.steps.find((s) => s.state === "fail")?.receipt;
   }
@@ -418,7 +428,14 @@ function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, se
             truncates. */}
         {workflow && (
           <span className={`c-wf ${workflow.state.status}`} title={wfLabel}>
-            {wfMark ? `${wfMark} ` : ""}{wfLabel}
+            {/* Decoration, not information: the state is already carried by
+                the visible words ("Ship it — approve deploy" already says
+                waiting, "Ship it — smoke test failed" already says stopped),
+                so the glyph is `aria-hidden` the same way `WorkflowBlock.tsx`'s
+                own per-step `MARK` is — without it, a screen reader would
+                announce a bare "!" or "✕" ahead of the sentence that already
+                says the same thing in words. */}
+            {wfMark && <span aria-hidden="true">{wfMark} </span>}{wfLabel}
           </span>
         )}
         <button
@@ -803,35 +820,34 @@ export function DeckApp(): JSX.Element {
   // component regularly regardless of what this line does.
   const now = Date.now();
 
-  // Per card: `attachedWorkflows` filters the WHOLE board's flows down to this
-  // run's own (almost always 0 or 1, per attach.ts's "one workflow per card is
-  // a display rule" comment), then `rankByState` picks the one that most needs
-  // a human when more than one is bound. Done ONCE here, per card, per board
-  // pass — not inside `Card` itself, which re-renders independently and would
-  // otherwise repeat this derivation on every one of ITS OWN re-renders rather
-  // than once per pass over the board.
+  // `cardWorkflow` (attach.ts) is the exact `attachedWorkflows` → `rankByState`
+  // → `workflowState` chain, plus the ticket-key derivation, that
+  // `DeckDetail.tsx`'s own drawer calls for the one selected card — the SAME
+  // function, not a second hand-written copy of the same three-step chain: a
+  // ticket-key rule that changed in one call site and not the other would let
+  // a card's own chip and its own drawer disagree about which workflow it
+  // carries, with nothing failing to say so. Called once per card, per board
+  // pass, from THIS closure — not from `Card` itself, which re-renders
+  // independently and would otherwise repeat the derivation on every one of
+  // ITS OWN re-renders rather than once per pass over the board.
   //
   // The cost actually measured: `workflowState` runs `previewFlow` internally,
   // which runs `evaluateFlow` twice, each rebuilding a `Map` over every run on
   // the board. For the common case — one armed workflow per card — `rankByState`
   // sorts a one-element array (zero comparisons, so it calls `workflowState`
-  // zero times internally) and the explicit call below is the only one: a board
-  // of 30 cards each with one workflow costs 30 `workflowState` calls, i.e. 60
-  // `evaluateFlow` calls, per second. Cheap. The number only climbs where a
-  // card binds SEVERAL workflows at once (attach.ts's escape hatch, not the
-  // common shape): `rankByState`'s sort then calls `workflowState` twice per
-  // comparison, so a handful of 4-workflow cards on the same board could reach
-  // into the hundreds of `evaluateFlow` calls a second. That is a property of
-  // `rankByState` itself (unchanged here, and out of this task's files), not of
-  // computing it once per card instead of once per card per `Card` re-render —
-  // this fix removes the latter multiplier; it does not remove the former.
-  const cardWorkflow = (c: DeckCard): { flow: Flow; state: WorkflowState } | undefined => {
-    if (!orchEnabled) return undefined;
-    const key = c.status.run.key;
-    const boundTicketKey = isTicketRun(c.status.run) ? key : c.status.inferredTicketKey;
-    const wf = rankByState(attachedWorkflows(flows, key, boundTicketKey), runs, now, branchCi)[0];
-    return wf ? { flow: wf, state: workflowState(wf, runs, now, branchCi) } : undefined;
-  };
+  // zero times internally) and the one explicit call inside `cardWorkflow` is
+  // the only one: a board of 30 cards each with one workflow costs 30
+  // `workflowState` calls, i.e. 60 `evaluateFlow` calls, per second. Cheap. The
+  // number only climbs where a card binds SEVERAL workflows at once (attach.ts's
+  // escape hatch, not the common shape): `rankByState`'s sort then calls
+  // `workflowState` twice per comparison, so a handful of 4-workflow cards on
+  // the same board could reach into the hundreds of `evaluateFlow` calls a
+  // second. That is a property of `rankByState` itself (unchanged here, and out
+  // of this task's files), not of computing it once per card instead of once
+  // per card per `Card` re-render — this fix removes the latter multiplier; it
+  // does not remove the former.
+  const chipWorkflow = (c: DeckCard): { flow: Flow; state: WorkflowState } | undefined =>
+    orchEnabled ? cardWorkflow(flows, c.status, runs, now, branchCi) : undefined;
 
   // One card, wherever it lands — a lane renders exactly what an unlaned column
   // does, so a lane can never quietly grow its own kind of card.
@@ -844,7 +860,7 @@ export function DeckApp(): JSX.Element {
       }}
       selected={c.id === selId}
       onSelect={() => { setOpenFlowId(null); setSelId((cur) => (cur === c.id ? null : c.id)); }}
-      workflow={cardWorkflow(c)} />
+      workflow={chipWorkflow(c)} />
   );
 
   return (

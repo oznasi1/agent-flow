@@ -12,7 +12,7 @@ import { CardKindIcon } from "./icons";
 import { createDrawerResize, RESIZE_STEP } from "./drawerResize";
 import { keyLabel, timeAgo } from "./helpers";
 import type { Flow } from "../engine/orchestrator/model";
-import { attachedWorkflows, rankByState, workflowState } from "../engine/orchestrator/attach";
+import { boundTicketKeyOf, cardWorkflow } from "../engine/orchestrator/attach";
 import { WorkflowBlock } from "./WorkflowBlock";
 
 export interface DeckDetailProps {
@@ -212,11 +212,15 @@ export function DeckDetail({
   // A place binds by the run key every card has; a planned node binds by the
   // ticket key, which a local card only has when the host could infer one off
   // its branch (see `inferredKey`'s identical reasoning in DeckApp.tsx's Card).
-  const boundTicketKey = tracked ? key : r.inferredTicketKey;
-  // `[]` while the setting is off rather than skipping the call: `orchEnabled`
-  // is the one gate for the whole section below, so nothing downstream needs a
-  // second one. `now` is read fresh on every render, deliberately not
-  // memoized — `workflowState`/`rankByState` are pure and cheap (bounded by one
+  // `boundTicketKeyOf` (attach.ts) is the one place that rule lives — DeckApp.tsx's
+  // board reads a card's own workflow through the same function, and a second,
+  // differently-worded copy of this derivation here is exactly how the two could
+  // quietly disagree about which workflow a card carries.
+  const boundTicketKey = boundTicketKeyOf(r);
+  // `undefined` while the setting is off rather than skipping the call:
+  // `orchEnabled` is the one gate for the whole section below, so nothing
+  // downstream needs a second one. `now` is read fresh on every render,
+  // deliberately not memoized — `cardWorkflow` is pure and cheap (bounded by one
   // flow's edge count), and a cached wall-clock reading is exactly the kind of
   // state that goes stale the moment the drawer sits open across a poll: a
   // `branch-ci-passed` rule waiting on an elapsed window would freeze mid-wait
@@ -225,16 +229,10 @@ export function DeckDetail({
   // that key invalidates every render anyway — so a plain call is the whole
   // fix, and it stays cheap because `DeckApp.tsx`'s own 1s `forceTick` already
   // re-renders this drawer regularly regardless of what this file does.
-  //
-  // Read once, not twice: `rankByState` and `workflowState` below both need
-  // "now", and two separate `Date.now()` calls would let the rank and the
-  // displayed state disagree by whatever elapsed between them — a window where
-  // the SAME "now" is the only thing that makes the winner's rank and its own
-  // rendered status agree.
   const now = Date.now();
-  const bound = orchEnabled ? rankByState(attachedWorkflows(flows, key, boundTicketKey), runs, now, branchCi) : [];
-  const wf = bound[0];
-  const wfState = wf ? workflowState(wf, runs, now, branchCi) : undefined;
+  const workflow = orchEnabled ? cardWorkflow(flows, r, runs, now, branchCi) : undefined;
+  const wf = workflow?.flow;
+  const wfState = workflow?.state;
   const [pickerOpen, setPickerOpen] = React.useState(false);
   // A card switch (`DeckApp.tsx` never remounts this component — see
   // `DeckDetailProps.closing`'s own comment) must not leave the picker open
@@ -466,17 +464,18 @@ export function DeckDetail({
         {/* The workflow bound to this card, directly under the promoted actions —
           * see DeckDetailProps' own doc comments for why `orchEnabled` gates the
           * whole section, not just the picker: the setting defaults off and this
-          * entire surface must ship inert. `bound` and `wf` are computed above,
-          * once, from the same `flows`/`runs`/`branchCi` the Orchestrator drawer
-          * reads, so this section and that drawer cannot disagree about the
-          * workflow's state. */}
+          * entire surface must ship inert. `workflow` is computed above, once,
+          * via `cardWorkflow` (attach.ts) — the same function `DeckApp.tsx`'s
+          * board calls for its own chip, from the same `flows`/`runs`/`branchCi`
+          * the Orchestrator drawer reads, so this section and that drawer cannot
+          * disagree about the workflow's state. */}
         {orchEnabled && (
           <div className="dd-sec">
             <div className="dd-lbl">Workflow</div>
             <WorkflowBlock
               flow={wf}
               state={wfState}
-              extraCount={Math.max(bound.length - 1, 0)}
+              extraCount={workflow?.extraCount ?? 0}
               onAttach={() => setPickerOpen(true)}
               onArm={(armed) => wf && send({ type: "flow:arm", id: wf.id, armed })}
               onDetach={() => wf && send({ type: "flow:detach", id: wf.id })}
@@ -490,14 +489,14 @@ export function DeckDetail({
                 templates={templates}
                 onPick={(templateId) => {
                   // Never `replace`, even though `WorkflowBlock` only ever
-                  // offers this picker's trigger while `bound.length === 0`
+                  // offers this picker's trigger while nothing is attached
                   // (its "Attach workflow…" button renders solely in the
-                  // `flow === undefined` branch): `bound` is read once at
+                  // `flow === undefined` branch): `workflow` is read once at
                   // render time, and this picker can sit open across a poll —
                   // another window, or the orchestrator's own 6s pass,
                   // attaching a workflow to this exact card while the user is
                   // still looking at an empty picker. Deriving `replace` from
-                  // a `bound.length` that is now stale would silently delete
+                  // a `workflow` that is now stale would silently delete
                   // a workflow the user never saw. Sending no `replace` means
                   // that race hits the host's own refusal (`flow:attach`'s
                   // doc comment in types.ts: an unset `replace` is a refusal,

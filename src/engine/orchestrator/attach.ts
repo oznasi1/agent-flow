@@ -19,7 +19,7 @@
 // `../../types` only — no Node builtins, directly or transitively. The Deck's
 // card drawer imports this file, and the webview bundles for a browser target
 // where esbuild resolves imports statically.
-import { RunStatus } from "../../types";
+import { isTicketRun, RunStatus } from "../../types";
 import { BranchCiStatus } from "./branchCi";
 import type { BlockedNote } from "./evaluate";
 import { RulePreview, previewFlow } from "./preview";
@@ -147,4 +147,50 @@ export function rankByState(
     const rb = RANK[workflowState(b, runs, nowMs, branchCi).status];
     return ra !== rb ? ra - rb : a.createdAt - b.createdAt;
   });
+}
+
+/** Which ticket key a PLANNED node would bind this run by: the run's own key
+ * once it is a tracked ticket, else whatever the host could infer off a local
+ * card's branch (absent when neither exists). A place binds by the run key
+ * every card has regardless — this only matters for the planned half of
+ * `bindsRun` — but it is real logic (not a passthrough), so it gets its own
+ * name rather than being re-typed at each call site: `DeckDetail.tsx`'s card
+ * drawer and `DeckApp.tsx`'s board both need this SAME answer for the SAME
+ * card, and a second, differently-worded copy of it is exactly how the two
+ * could quietly disagree about which workflow a card carries. */
+export function boundTicketKeyOf(status: RunStatus): string | undefined {
+  return isTicketRun(status.run) ? status.run.key : status.inferredTicketKey;
+}
+
+/** The one workflow a card's chip or drawer shows, and where it stands — the
+ * exact `attachedWorkflows` → `rankByState` → `workflowState` chain, run
+ * against the ticket key `boundTicketKeyOf` derives, with the top-ranked
+ * flow's own state already attached. `undefined` when nothing binds this run.
+ *
+ * The single call both `DeckDetail.tsx` (one card, on open) and `DeckApp.tsx`
+ * (every card, every board render) make, so neither can drift from the other
+ * about which workflow — or which STATE — a card's own UI is showing. Callers
+ * still own the `agentFlow.orchestrator` gate: this function does not know
+ * about that setting, and returns a real answer even while it is off. */
+export interface CardWorkflow {
+  flow: Flow;
+  state: WorkflowState;
+  /** How many OTHER workflows also bind this card — `attachedWorkflows`'s own
+   * list, minus the one shown. The board's chip has no use for it; the card
+   * drawer's block header reads it to say there is more than the one on
+   * screen. */
+  extraCount: number;
+}
+
+export function cardWorkflow(
+  flows: Flow[],
+  status: RunStatus,
+  runs: RunStatus[],
+  nowMs: number,
+  branchCi?: Record<string, BranchCiStatus>,
+): CardWorkflow | undefined {
+  const attached = attachedWorkflows(flows, status.run.key, boundTicketKeyOf(status));
+  const wf = rankByState(attached, runs, nowMs, branchCi)[0];
+  if (!wf) return undefined;
+  return { flow: wf, state: workflowState(wf, runs, nowMs, branchCi), extraCount: Math.max(attached.length - 1, 0) };
 }
