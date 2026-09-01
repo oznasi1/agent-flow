@@ -374,4 +374,11 @@ describe("keyMatches", () => {
     expect(keyMatches("PROJ-1234", "rate limiter")).toBe(false);
     expect(keyMatches("PROJ-1234", "")).toBe(false);
   });
+
+  it("handles a key with no number at all", () => {
+    // Not every source keys its work PROJ-123 — a key can be a bare slug, in
+    // which case there is no number to prefix and only the whole thing matches.
+    expect(keyMatches("SPIKE", "spike")).toBe(true);
+    expect(keyMatches("SPIKE", "1")).toBe(false);
+  });
 });

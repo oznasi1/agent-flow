@@ -24,7 +24,10 @@ function keyNumber(key: string): string {
  * is what separates "I am naming a ticket" from "I am typing a word". */
 export function keyMatches(key: string, query: string): boolean {
   const q = normalizeKey(query);
-  if (!q || !/\d/.test(q)) return normalizeKey(key) === q && q !== "";
+  if (!q) return false;
+  // Digitless: only the whole key, for a source that keys its work with a bare
+  // slug rather than a number.
+  if (!/\d/.test(q)) return normalizeKey(key) === q;
   if (normalizeKey(key).startsWith(q)) return true;
   return /^\d+$/.test(q) && keyNumber(key).startsWith(q);
 }
