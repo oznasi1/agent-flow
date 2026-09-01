@@ -211,6 +211,14 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
   public static readonly viewType = "agentFlow.tasks";
   private view?: vscode.WebviewView;
   private lastFilter: Filter = "unassigned";
+  /** The size lens the panel is actually showing, kept beside `lastFilter` for the
+   * same reason: a background refetch must ask for what is on screen. Without it a
+   * poll under an S/M/L lens would silently widen the list to everything. */
+  private lastSize: Size = "any";
+  /** The background refetch timer, when `agentFlow.refetchIntervalMinutes` is on.
+   * Owned by the resolved view and cleared with it — a hidden sidebar has no timer
+   * at all, which is the whole visibility gate (see `resolveWebviewView`). */
+  private refetchTimer: ReturnType<typeof setInterval> | undefined;
   /** The last attention count, held so a tick that fires before VS Code has
    * resolved this view is not simply lost — see `setAttention`. */
   private attention = 0;
@@ -252,8 +260,55 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     // not clear the live one.
     view.onDidDispose(() => {
       if (this.view === view) this.view = undefined;
+      // Same identity guard, same reason: a stale dispose must not stop the timer
+      // the newer view just started.
+      if (this.view === undefined) this.stopRefetch();
     });
     this.applyAttention();
+    this.startRefetch();
+  }
+
+  /** Start the background refetch, if the user has opted into one. Called on every
+   * resolve — VS Code disposes the WebviewView when the sidebar is hidden, so a
+   * resolve is also how a re-opened sidebar gets its timer back. The interval is
+   * read here rather than per tick, so a settings change takes effect the next time
+   * the sidebar opens; that matches how the panel treats its other lens settings
+   * ("Applies on refresh/reload"). */
+  private startRefetch(): void {
+    this.stopRefetch();
+    const minutes = getConfig().refetchIntervalMinutes;
+    if (minutes <= 0) return;
+    this.refetchTimer = setInterval(() => void this.backgroundRefetch(), minutes * 60_000);
+  }
+
+  private stopRefetch(): void {
+    if (this.refetchTimer) clearInterval(this.refetchTimer);
+    this.refetchTimer = undefined;
+  }
+
+  /** One background pass: refetch the lens on screen, quietly. Nothing here may
+   * speak up. A tick the user did not ask for must not flash a spinner, must not
+   * report a lens nobody chose to telemetry, and must not swap a working list for
+   * the sign-in gate on one bad answer — so it simply declines to run instead. */
+  private async backgroundRefetch(): Promise<void> {
+    // No `this.view` check here, deliberately: the timer is the visibility gate.
+    // It is armed on resolve and cleared on dispose, so a hidden sidebar has
+    // nothing left to tick and this never runs with a dead view. A guard would
+    // read as the gate while being unreachable — and a branch no test can reach
+    // is a branch that rots.
+    //
+    // An unconfigured install polls never: `postInitialState` already declines to
+    // fetch without a configured source, and a timer that ignored that would ask a
+    // provider that has nowhere to ask.
+    if (!this.connector.isConfigured()) return;
+    try {
+      if (!(await this.connector.isAuthenticated())) return;
+      await this.onMessage({ type: "fetch", filter: this.lastFilter, size: this.lastSize }, { background: true });
+    } catch {
+      // Best-effort by design: a poll that fails is simply a poll that did not
+      // happen. The list on screen stays, and the next tick tries again — surfacing
+      // this would toast at a user who never asked for the request.
+    }
   }
 
   private post(msg: OutboundMessage): void {
@@ -674,7 +729,10 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
     ]);
   }
 
-  private async onMessage(m: InboundMessage): Promise<void> {
+  /** `opts.background` marks a pass the timer started rather than the webview. It is a
+   * parameter and not a field on the message because nothing on the wire changed: the
+   * webview has no way to send it, and `InboundMessage` stays exactly as released. */
+  private async onMessage(m: InboundMessage, opts: { background?: boolean } = {}): Promise<void> {
     try {
       // Inside the try, not above it: a disposed output channel makes `this.log`
       // throw, and getConfig can throw on a malformed settings value. Either
@@ -724,7 +782,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
             }
             return;
           }
-          this.post({ type: "loading", loading: true });
+          // A background pass renders no spinner: the bar would flash every few
+          // minutes at a user who asked for nothing.
+          if (!opts.background) this.post({ type: "loading", loading: true });
           // Overlapping fetches resolve in any order, and only the latest-started
           // one may speak for the panel: a stale completion that posted its list,
           // pruned the saved order, or set lastFilter would desync the rendered
@@ -739,6 +799,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           const tasks = await provider.list(lens, m.size);
           if (seq !== this.fetchSeq) break; // a newer fetch owns the panel now
           this.lastFilter = lens;
+          this.lastSize = m.size;
           const repos = discoverRepos(cfg.reposRoot, cfg.repoBlocklist);
           for (const t of tasks) t.services = this.guessServices(t, repos);
           // Fires on every fetch, by design — this IS the lens-usage signal.
@@ -749,7 +810,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           // the same reason: no "invalid" member exists in this event's unions to
           // collapse an unrecognised value onto. The fetch itself (`provider.list`
           // above) already ran unaffected.
-          if (isKnownFilter(m.filter) && isKnownFilter(lens) && isKnownSize(m.size)) {
+          // …and never from a background pass. This event IS the lens-usage
+          // distribution; ticks nobody chose would swamp the lenses users did.
+          if (!opts.background && isKnownFilter(m.filter) && isKnownFilter(lens) && isKnownSize(m.size)) {
             track({
               name: "tasks_fetched", filter: m.filter, lens, size: m.size,
               task_count: tasks.length, repo_count: repos.length,
@@ -759,7 +822,12 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           }
           let outgoing = tasks;
           if (lens === "mysprint") {
-            if (m.size === "any") {
+            // Never from a background pass. Pruning is a write to the drag order, and
+            // while `fetchSeq` orders fetch against fetch, nothing orders a timer tick
+            // against a drag in progress — so a poll simply never prunes, and the write
+            // stays owned by the fetches a user set off. The sort below still runs: the
+            // refreshed list renders in the order they arranged.
+            if (m.size === "any" && !opts.background) {
               // Full sprint view: prune keys that have left the sprint.
               await this.saveOrder(pruneOrder(this.savedOrder(), tasks.map((t) => t.key)));
             }
@@ -767,7 +835,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           }
           this.post({ type: "tasks", filter: lens, tasks: outgoing,
             liveCount: cfg.trackOpenWindows ? this.liveWindows().length : undefined });
-          this.post({ type: "loading", loading: false });
+          if (!opts.background) this.post({ type: "loading", loading: false });
           break;
         }
         case "detail": {
@@ -963,6 +1031,18 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
         }
       }
     } catch (e) {
+      const msg0 = e instanceof Error ? e.message : String(e);
+      // A background pass fails silently — and this is the branch that matters most.
+      // Left to the handling below, one flaky answer to a request the user never made
+      // would toast at them, and (because `fetch` is one of the three messages allowed
+      // to replace the panel) swap a perfectly good list for the full-panel error
+      // screen. Even the auth re-gate is wrong here: a dead token still gates on the
+      // user's next real interaction, where they can see what provoked it. The list on
+      // screen stays; the next tick tries again. The log is the whole record.
+      if (opts.background) {
+        this.log(`background refetch failed — ${msg0}`);
+        return;
+      }
       const op = resolveOp(m, e);
       if (op) {
         const failure_class = classifyFailure(e);

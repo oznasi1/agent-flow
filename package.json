@@ -310,6 +310,12 @@
             "default": "mysprint",
             "description": "Default task filter lens shown when Agent Flow Deck opens."
           },
+          "agentFlow.refetchIntervalMinutes": {
+            "type": "number",
+            "default": 0,
+            "minimum": 0,
+            "markdownDescription": "Refetch the task list in the background every N minutes, so an open sidebar does not go stale. Refreshes whichever lens you are on, without a spinner. Polling stops while the sidebar is hidden. `0` turns it off."
+          },
           "agentFlow.filters.size": {
             "type": "boolean",
             "default": true,

@@ -420,6 +420,10 @@ export interface AgentFlowConfig {
   githubOrg: string;
   repoBlocklist: string[];
   defaultFilter: string;
+  /** Minutes between background task-list refetches in the sidebar. `0` is off,
+   * and is the shipped default — the panel then fetches only when asked, as it
+   * always has. */
+  refetchIntervalMinutes: number;
   seedAgent: boolean;
   // Which agent a seeded session starts: Claude Code, GitHub Copilot, or Cursor —
   // or `ask`, meaning pick one per launch. `copilot` is VS Code only and `cursor` is
@@ -771,6 +775,7 @@ export function getConfig(): AgentFlowConfig {
       return Array.isArray(b) ? b.filter((x) => typeof x === "string" && x.length) : [];
     })(),
     defaultFilter: c.get<string>("defaultFilter") || "mysprint",
+    refetchIntervalMinutes: Math.max(0, finiteNumber("refetchIntervalMinutes", 0)),
     seedAgent: c.get<boolean>("seedAgent") ?? true,
     agentProvider: readAgentProviderSetting(c),
     agentSurface: readAgentSurface(c),

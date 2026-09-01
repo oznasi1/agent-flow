@@ -153,6 +153,9 @@ const CFG = {
   githubOrg: "org",
   repoBlocklist: [] as string[],
   defaultFilter: "unassigned",
+  // Off, as it ships — the background-refetch describe at the end of this file is
+  // the only place that turns it on, so every other test polls exactly never.
+  refetchIntervalMinutes: 0,
   seedAgent: true,
   agentProvider: "claude-code" as const,
   agentSurface: "extension" as const,
@@ -351,6 +354,7 @@ function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown
     messages.push(m);
   });
   let handler: (m: InboundMessage) => Promise<void> = async () => {};
+  const disposeListeners: (() => void)[] = [];
   // `title` / `description` are the VS Code view title bar's text — the panel sets
   // them from the same state it posts, so they are asserted like any other output.
   const view = {
@@ -358,8 +362,14 @@ function setup(opts: { authed?: boolean; workspaceState?: Record<string, unknown
     description: undefined as string | undefined,
     // VS Code disposes a hidden WebviewView and the provider subscribes to that,
     // so the fake carries the event too — a fake missing it would make
-    // resolveWebviewView throw here and nowhere in production.
-    onDidDispose: (_cb: () => void) => ({ dispose() {} }),
+    // resolveWebviewView throw here and nowhere in production. The listeners are
+    // kept (not discarded) so a test can fire the dispose the way a hidden sidebar
+    // does; `view.dispose()` below is that trigger.
+    onDidDispose: (cb: () => void) => {
+      disposeListeners.push(cb);
+      return { dispose() {} };
+    },
+    dispose: () => disposeListeners.forEach((l) => l()),
     webview: {
       options: {},
       html: "",
@@ -8100,5 +8110,193 @@ describe("fetch — overlapping fetches", () => {
     // Backlog is the rendered lens, so a (stale-webview) reorder must stay ignored.
     await send({ type: "reorder", order: ["A"] });
     expect(workspaceState.update).not.toHaveBeenCalledWith("agentFlow.sprintOrder", ["A"]);
+  });
+});
+
+describe("background refetch", () => {
+  // The panel's only self-driven work. Every test here drives the timer rather
+  // than a webview message, because that IS the behaviour: no `fetch` arrives.
+  const MIN = 60_000;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  /** Mount with the poll configured, and let the mount's own fetch settle so the
+   * assertions below see only what a TICK did. `setup()` resolves the view (which
+   * starts the timer), so the config has to be installed before it. */
+  async function mounted(minutes: number, over: Partial<typeof CFG> = {}) {
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, refetchIntervalMinutes: minutes, ...over });
+    const s = setup();
+    await s.send({ type: "ready" });
+    clientStub.fetchTasks.mockClear();
+    trackSpy.mockClear();
+    s.post.mockClear();
+    s.messages.length = 0;
+    vi.mocked(s.workspaceState.update).mockClear();
+    return s;
+  }
+
+  it("never fires when the interval is zero — the shipped default", async () => {
+    // The setting ships inert: an install that has not opted in must make exactly
+    // the requests it made before this feature existed.
+    await mounted(0);
+    await vi.advanceTimersByTimeAsync(60 * MIN);
+    expect(clientStub.fetchTasks).not.toHaveBeenCalled();
+  });
+
+  it("arms no timer at all when off, rather than one that ticks into a no-op", async () => {
+    // The difference is observable: an armed timer keeps the extension host waking
+    // every few minutes in every window for a feature nobody turned on.
+    const before = vi.getTimerCount();
+    await mounted(0);
+    expect(vi.getTimerCount()).toBe(before);
+  });
+
+  it("refetches once the configured interval elapses", async () => {
+    await mounted(5);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(clientStub.fetchTasks).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps refetching on every subsequent interval", async () => {
+    await mounted(5);
+    await vi.advanceTimersByTimeAsync(15 * MIN);
+    expect(clientStub.fetchTasks).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not fire before the interval is up", async () => {
+    await mounted(5);
+    await vi.advanceTimersByTimeAsync(5 * MIN - 1);
+    expect(clientStub.fetchTasks).not.toHaveBeenCalled();
+  });
+
+  it("posts the refreshed list", async () => {
+    clientStub.fetchTasks.mockResolvedValue([{ key: "NEW-1", summary: "", labels: [], components: [] }]);
+    const { messages } = await mounted(5);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    const tasksMsg = messages.find((m) => m.type === "tasks") as { tasks: { key: string }[] };
+    expect(tasksMsg.tasks.map((t) => t.key)).toEqual(["NEW-1"]);
+  });
+
+  it("shows no spinner — a poll must not flicker the panel every few minutes", async () => {
+    const { messages } = await mounted(5);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(messages.filter((m) => m.type === "loading")).toEqual([]);
+  });
+
+  it("emits no tasks_fetched — the lens signal records lenses a user chose", async () => {
+    // The emit on the `fetch` path IS the lens-usage signal. Ticks nobody asked
+    // for would swamp it and make the distribution meaningless.
+    await mounted(5);
+    await vi.advanceTimersByTimeAsync(15 * MIN);
+    expect(trackSpy).not.toHaveBeenCalledWith(expect.objectContaining({ name: "tasks_fetched" }));
+  });
+
+  it("reuses the lens the panel is actually showing, not the configured default", async () => {
+    // defaultFilter is what a fresh panel opens on; a poll must refresh what the
+    // user has since switched to, or it would yank the list back on its own.
+    const s = await mounted(5, { defaultFilter: "unassigned" });
+    await s.send({ type: "fetch", filter: "backlog", size: "any" });
+    clientStub.fetchTasks.mockClear();
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(clientStub.fetchTasks).toHaveBeenCalledWith("backlog", "any", expect.anything());
+  });
+
+  it("reuses the size lens too", async () => {
+    const s = await mounted(5);
+    await s.send({ type: "fetch", filter: "mine", size: "l" });
+    clientStub.fetchTasks.mockClear();
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(clientStub.fetchTasks).toHaveBeenCalledWith("mine", "l", expect.anything());
+  });
+
+  it("leaves the saved sprint order alone", async () => {
+    // Pruning is the drag-order write. `fetchSeq` orders fetch against fetch but
+    // nothing orders a tick against an in-flight drag, so a poll simply never
+    // prunes — user-initiated fetches keep owning that write.
+    clientStub.fetchTasks.mockResolvedValue([{ key: "A", summary: "", labels: [], components: [] }]);
+    const s = await mounted(5, { defaultFilter: "mysprint" });
+    await s.send({ type: "fetch", filter: "mysprint", size: "any" });
+    vi.mocked(s.workspaceState.update).mockClear();
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(s.workspaceState.update).not.toHaveBeenCalledWith("agentFlow.sprintOrder", expect.anything());
+  });
+
+  it("still renders in saved order, having only skipped the write", async () => {
+    clientStub.fetchTasks.mockResolvedValue([
+      { key: "A", summary: "", labels: [], components: [] },
+      { key: "B", summary: "", labels: [], components: [] },
+    ]);
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, refetchIntervalMinutes: 5, defaultFilter: "mysprint" });
+    const s = setup({ workspaceState: { "agentFlow.sprintOrder": ["B", "A"] } });
+    await s.send({ type: "ready" });
+    s.messages.length = 0;
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    const tasksMsg = s.messages.find((m) => m.type === "tasks") as { tasks: { key: string }[] };
+    expect(tasksMsg.tasks.map((t) => t.key)).toEqual(["B", "A"]);
+  });
+
+  it("makes no request while the sidebar is hidden", async () => {
+    // VS Code disposes the WebviewView when the sidebar is hidden, and the timer
+    // is cleared with it — that disposal IS the visibility gate, which is why the
+    // pass itself carries no view check. Re-opening sends `ready`, which fetches
+    // on its own, so the panel comes back current anyway.
+    const s = await mounted(5);
+    s.view.dispose();
+    await vi.advanceTimersByTimeAsync(15 * MIN);
+    expect(clientStub.fetchTasks).not.toHaveBeenCalled();
+  });
+
+  it("resumes for the view that replaces a disposed one", async () => {
+    const s = await mounted(5);
+    s.view.dispose();
+    const s2 = setup();
+    await s2.send({ type: "ready" });
+    clientStub.fetchTasks.mockClear();
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(clientStub.fetchTasks).toHaveBeenCalled();
+  });
+
+  it("polls never on an install that has no source configured", async () => {
+    // The panel is showing the setup CTA, not a list. There is nothing to refresh
+    // and nowhere to ask.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, refetchIntervalMinutes: 5, baseUrl: "", project: "" });
+    const s = setup();
+    await s.send({ type: "ready" });
+    clientStub.fetchTasks.mockClear();
+    await vi.advanceTimersByTimeAsync(15 * MIN);
+    expect(clientStub.fetchTasks).not.toHaveBeenCalled();
+  });
+
+  it("does not gate the panel on a background auth failure", async () => {
+    // A single flaky answer must not swap a working list for the sign-in screen —
+    // the user did not ask for this request and cannot tell what provoked it.
+    const s = await mounted(5);
+    vi.mocked(s.auth.isAuthenticated).mockResolvedValue(false);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(s.messages.filter((m) => m.type === "state")).toEqual([]);
+    expect(clientStub.fetchTasks).not.toHaveBeenCalled();
+  });
+
+  it("survives a provider that rejects, and polls again next tick", async () => {
+    const s = await mounted(5);
+    clientStub.fetchTasks.mockRejectedValueOnce(new Error("502"));
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    clientStub.fetchTasks.mockResolvedValue([]);
+    await vi.advanceTimersByTimeAsync(5 * MIN);
+    expect(clientStub.fetchTasks).toHaveBeenCalledTimes(2);
+    expect(s.messages.filter((m) => m.type === "toast")).toEqual([]);
+  });
+
+  it("stops polling once the view is disposed, rather than leaking a timer", async () => {
+    const s = await mounted(5);
+    const before = vi.getTimerCount();
+    s.view.dispose();
+    expect(vi.getTimerCount()).toBeLessThan(before);
   });
 });

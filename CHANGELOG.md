@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **The task list can refresh itself.** Set `agentFlow.refetchIntervalMinutes`
+  and the sidebar refetches in the background on that cadence, so a panel you
+  opened this morning is not still showing this morning's sprint. It refreshes
+  whichever lens you are on — not the configured default — and does it quietly:
+  no spinner, and your drag order is left exactly as you arranged it. Polling
+  stops while the sidebar is hidden, and a failed poll changes nothing on screen
+  and simply tries again. Off by default (`0`).
+
 ## [0.65.0] — 2026-09-01
 
 ### Changed
