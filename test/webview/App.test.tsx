@@ -490,7 +490,7 @@ describe("multi-select & parallel launch", () => {
     fireEvent.click(checks()[0]); // PROJ-1
     fireEvent.click(checks()[1]); // PROJ-2
     // Search narrows the visible list to PROJ-1; PROJ-2 is still checked in state but hidden.
-    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "alpha" } });
+    fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: "alpha" } });
     fireEvent.click(screen.getByRole("button", { name: /Launch in parallel/i }));
     expect(sent).toHaveBeenCalledWith({ type: "takeBatch", keys: ["PROJ-1"], repos: ["api"] });
   });
@@ -543,7 +543,7 @@ describe("fuzzy title search", () => {
     render(<App />);
     authed();
     pool();
-    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "ratelim" } });
+    fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: "ratelim" } });
     expect(keys()).toEqual(expect.arrayContaining(["PROJ-1", "PROJ-3"]));
     expect(screen.queryByText("PROJ-2")).not.toBeInTheDocument();
   });
@@ -556,7 +556,7 @@ describe("fuzzy title search", () => {
     // "ratelim" scores "Rate-limit config per tenant" (PROJ-3, ~0.378) closer than
     // "Fix rate limiter dropping bursts" (PROJ-1, ~0.419) — verified empirically by running
     // fuse.search("ratelim") against this exact pool. The visible list must reflect that order.
-    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "ratelim" } });
+    fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: "ratelim" } });
     expect(keys()).toEqual(["PROJ-3", "PROJ-1"]);
   });
 
@@ -564,8 +564,8 @@ describe("fuzzy title search", () => {
     render(<App />);
     authed();
     pool();
-    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "zzzzz" } });
-    expect(screen.getByText(/No titles match/i)).toBeInTheDocument();
+    fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: "zzzzz" } });
+    expect(screen.getByText(/No tasks match/i)).toBeInTheDocument();
   });
 
   it("combines with the repo multiselect (AND across types)", () => {
@@ -589,7 +589,7 @@ describe("fuzzy title search", () => {
     // (same ambiguity already guarded against in the "repo multiselect" tests above).
     const repoList = document.querySelector(".repo-list") as HTMLElement;
     fireEvent.mouseDown(within(repoList).getByText("api").closest(".repo-opt")!);
-    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "rate" } });
+    fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: "rate" } });
     expect(keys()).toEqual(expect.arrayContaining(["PROJ-1", "PROJ-3"]));
     expect(screen.queryByText("PROJ-2")).not.toBeInTheDocument(); // billing filtered out by repo
     expect(screen.queryByText("PROJ-4")).not.toBeInTheDocument(); // api but no "rate" match — AND must exclude it
@@ -599,7 +599,66 @@ describe("fuzzy title search", () => {
     render(<App />);
     authed("PR initiated", { size: true, status: true, repo: true, search: false });
     pool();
-    expect(screen.queryByPlaceholderText("Search title…")).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText("Search title or ticket…")).not.toBeInTheDocument();
+  });
+});
+
+describe("ticket-number search", () => {
+  const keys = () => Array.from(document.querySelectorAll("a.key")).map((e) => e.textContent);
+  const type = (v: string) =>
+    fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: v } });
+  // Two decoys, both deliberate. PROJ-1235 is the near-miss a fuzzy key index
+  // surfaces for "1234"; PROJ-9 carries "1234" in its *summary*, which the title
+  // index scores as a strong hit. Ordered first in the pool so a build that simply
+  // appended the key to fuse's keys — no pin — would rank PROJ-9 above the ticket
+  // the user actually named and fail.
+  const pool = () =>
+    host({
+      type: "tasks",
+      filter: "mine",
+      tasks: [
+        mkTask({ key: "PROJ-9", summary: "Bump the gateway timeout to 1234 ms" }),
+        mkTask({ key: "PROJ-1234", summary: "Billing webhook retries" }),
+        mkTask({ key: "PROJ-1235", summary: "Rate-limit config per tenant" }),
+        mkTask({ key: "PROJ-77", summary: "Fix rate limiter dropping bursts" }),
+      ],
+    });
+
+  it("pins the named ticket first, however the user punctuated it", () => {
+    render(<App />);
+    authed();
+    pool();
+    for (const q of ["PROJ-1234", "proj-1234", "proj 1234", "1234"]) {
+      type(q);
+      expect(keys()[0]).toBe("PROJ-1234");
+    }
+  });
+
+  it("finds a ticket whose title shares nothing with the query", () => {
+    render(<App />);
+    authed();
+    pool();
+    // "77" appears nowhere in any summary — only the key can produce this hit.
+    type("77");
+    expect(keys()).toContain("PROJ-77");
+  });
+
+  it("still ranks by title when the query names no ticket", () => {
+    render(<App />);
+    authed();
+    pool();
+    type("billing");
+    expect(keys()).toEqual(["PROJ-1234"]);
+    type("timeout");
+    expect(keys()).toEqual(["PROJ-9"]);
+  });
+
+  it("says tasks, not titles, when nothing matches", () => {
+    render(<App />);
+    authed();
+    pool();
+    type("zzzzz");
+    expect(screen.getByText(/No tasks match/i)).toBeInTheDocument();
   });
 });
 
@@ -1327,9 +1386,9 @@ describe("lens usage telemetry (debounced tasks:lensUsed)", () => {
     render(<App />);
     authed();
     apiPool();
-    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "a" } });
-    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "al" } });
-    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "alp" } });
+    fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: "a" } });
+    fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: "al" } });
+    fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: "alp" } });
     // Still inside the debounce window from the LAST keystroke — nothing sent yet.
     act(() => vi.advanceTimersByTime(499));
     expect(sent).not.toHaveBeenCalledWith({ type: "tasks:lensUsed", lens: "search" });
@@ -1352,7 +1411,7 @@ describe("lens usage telemetry (debounced tasks:lensUsed)", () => {
     render(<App />);
     authed();
     apiPool();
-    fireEvent.change(screen.getByPlaceholderText("Search title…"), { target: { value: "a" } });
+    fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: "a" } });
     act(() => vi.advanceTimersByTime(200));
     selectRepo("api");
     act(() => vi.advanceTimersByTime(300)); // search's 500ms elapses; repo's does not yet

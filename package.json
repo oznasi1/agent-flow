@@ -328,7 +328,7 @@
           "agentFlow.filters.search": {
             "type": "boolean",
             "default": true,
-            "description": "Show the fuzzy title search box in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
+            "description": "Show the fuzzy title and ticket-number search box in the task-pool sidebar. Turn off to hide it. Applies on refresh/reload."
           }
         }
       },
