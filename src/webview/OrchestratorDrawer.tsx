@@ -6,6 +6,7 @@ import { Condition, edgeAction, Flow, FlowEdge, FlowNode, GateNode, incomingEdge
 import { CondParams, RepoOptions } from "./CondParams";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
 import { MultiCombo } from "./combo";
+import { createDrawerResize, RESIZE_STEP } from "./drawerResize";
 import { Drawer, useDrawerExit } from "./Drawer";
 import { FlowList } from "./flowList";
 import { ORCH_EDGE_PAINT_DY } from "./orchestratorStyles";
@@ -62,7 +63,7 @@ import {
   withNotifyMessage,
   withoutEdge,
 } from "./orchestratorRule";
-import { send, vscodeApi } from "./vscodeApi";
+import { send } from "./vscodeApi";
 
 /** The width before any drag or arrow-key resize, and the fallback for a
  * missing or corrupt stored value. Matches the default this same figure
@@ -75,72 +76,19 @@ const DEFAULT_ORCH_W = 560;
  * must not wrap or clip at it. 420px is the narrowest that still holds that
  * row comfortably.
  *
- * Ceiling: derived from the viewport, not a fixed pixel, so a maximized
- * editor and a half-screen one don't share one number. `deckStyles.ts`'s
- * board column is 318px wide (`.col { flex: 0 0 318px }`); reserving
- * somewhat more than that keeps at least one board column visible beside the
- * drawer — the whole reason resize won over an expand-only drawer (see this
- * file's own header comment and the mockup it points at). */
+ * The ceiling (viewport-derived, not a fixed pixel) and the persistence key
+ * this width lives under are also this drawer's own — see
+ * `createDrawerResize` in `drawerResize.ts` for the shared arithmetic every
+ * drawer built on that module reuses. */
 const MIN_ORCH_W = 420;
-const BOARD_MARGIN = 340;
 
-/** Recomputed on every drag move and every arrow-key press, not cached at
- * mount: the viewport can change (a window resize, a panel dragged wider)
- * while the drawer is open. */
-function orchCeiling(): number {
-  return Math.max(MIN_ORCH_W, window.innerWidth - BOARD_MARGIN);
-}
-
-function clampOrchWidth(w: number): number {
-  return Math.min(orchCeiling(), Math.max(MIN_ORCH_W, w));
-}
-
-/** What this file persists across a reload — a single small object, not a
- * shared state blob: nothing else in the webview calls `vscodeApi.getState`/
- * `setState` yet, so this is the pattern's first use, not an addition to an
- * existing one. */
-interface OrchPersisted {
-  orchWidth?: number;
-}
-
-/** Read defensively: a value written by a future version of `OrchPersisted`,
- * or one that got corrupted, must fall back to the default rather than throw
- * or hand back garbage for `--orch-w` to render. */
-function readPersistedWidth(): number | null {
-  let stored: unknown;
-  try {
-    stored = vscodeApi.getState<OrchPersisted>();
-  } catch {
-    return null;
-  }
-  if (!stored || typeof stored !== "object") return null;
-  const w = (stored as OrchPersisted).orchWidth;
-  return typeof w === "number" && Number.isFinite(w) ? w : null;
-}
-
-/** Best-effort: a webview host that rejects the write is not a reason to
- * throw out of a keypress or a pointer release. */
-function persistWidth(w: number): void {
-  try {
-    vscodeApi.setState({ orchWidth: w });
-  } catch {
-    // Losing persistence is not worse than losing the drawer over it.
-  }
-}
-
-/** Arrow-key step. Two grid units (see `GRID` in layout.ts) — a visible
- * increment without needing many presses to reach a useful width. */
-const RESIZE_STEP = 16;
-
-/** "Full panel width" for the Expand toggle. Deliberately `window.innerWidth`
- * itself, not `orchCeiling()`'s clamp: the ceiling's whole job is reserving
- * room for a board column during an ORDINARY resize (see its own doc
- * comment above), and Expand exists precisely to override that reservation
- * when a graph genuinely needs the room — the escape hatch resize alone
- * cannot offer, not a bigger ordinary resize. */
-function fullOrchWidth(): number {
-  return window.innerWidth;
-}
+/** This drawer's own instance of the shared width machinery — the ceiling,
+ * clamp, "full panel width" escape hatch, and defensive read/write — built
+ * once per module, not per render. `key: "orchWidth"` is the persisted
+ * shape this file has always used (see `drawerResize.ts`'s own note on
+ * `persist` replacing rather than merging: a second drawer built on this
+ * same factory needs its own merge story before both keys can coexist). */
+const orchResize = createDrawerResize({ min: MIN_ORCH_W, def: DEFAULT_ORCH_W, key: "orchWidth" });
 
 /** The drag payload a Deck card carries. A NUL separator cannot appear in a
  * ticket key or a repo name, so parsing is unambiguous. */
@@ -391,11 +339,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const [wiring, setWiring] = React.useState<string | null>(null);
   const [selEdge, setSelEdge] = React.useState<string | null>(null);
   const [width, setWidth] = React.useState<number>(() =>
-    clampOrchWidth(readPersistedWidth() ?? DEFAULT_ORCH_W),
+    orchResize.clamp(orchResize.read() ?? DEFAULT_ORCH_W),
   );
   /** The escape hatch, for a graph big enough that resize's board-reserving
    * ceiling still clips it. Deliberately NOT persisted alongside `width`
-   * (see `readPersistedWidth`/`persistWidth` above, which know nothing of
+   * (see `orchResize.read`/`orchResize.persist`, which know nothing of
    * this flag) and always starts `false`: reopening the drawer in a fresh
    * session should land on a resized-but-board-visible view, never
    * silently reopen with the board hidden because a PAST session happened
@@ -428,7 +376,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     const move = (e: PointerEvent) => {
       // Pulling the left border further LEFT (a smaller clientX) grows the
       // drawer, since it is anchored to the right edge of the panel.
-      const next = clampOrchWidth(resizing.startW + (resizing.startX - e.clientX));
+      const next = orchResize.clamp(resizing.startW + (resizing.startX - e.clientX));
       resizeRef.current = next;
       setWidth(next);
     };
@@ -436,7 +384,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       const finalWidth = resizeRef.current ?? resizing.startW;
       resizeRef.current = null;
       setResizing(null);
-      persistWidth(finalWidth);
+      orchResize.persist(finalWidth);
     };
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
@@ -604,9 +552,9 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const onGripKeyDown = (e: React.KeyboardEvent) => {
     if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
     e.preventDefault();
-    const next = clampOrchWidth(e.key === "ArrowLeft" ? width + RESIZE_STEP : width - RESIZE_STEP);
+    const next = orchResize.clamp(e.key === "ArrowLeft" ? width + RESIZE_STEP : width - RESIZE_STEP);
     setWidth(next);
-    persistWidth(next);
+    orchResize.persist(next);
   };
 
   /** A pure boolean flip that never touches `width` — the functional-updater
@@ -615,7 +563,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * same stale `expanded` and racing to the same answer. Because expanding
    * never writes into `width`, applying it again while already expanded is
    * automatically idempotent: `renderWidth` below always recomputes
-   * `fullOrchWidth()` fresh, so there is nothing to compound or drift. */
+   * `orchResize.full()` fresh, so there is nothing to compound or drift. */
   const toggleExpanded = () => setExpanded((v) => !v);
 
   const startDrag = (id: string, e: React.PointerEvent) => {
@@ -949,7 +897,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * `expanded` state's own doc comment — so this ternary IS the whole
    * mechanism: collapsing needs no separate "restore" step because `width`
    * was never overwritten to begin with. */
-  const renderWidth = expanded ? fullOrchWidth() : width;
+  const renderWidth = expanded ? orchResize.full() : width;
 
   /** `.orch-body`'s own left+right padding (16px each, see orchestratorStyles.ts)
    * plus `.orch-graph`'s own 1px border on each side — the fixed horizontal
@@ -1288,7 +1236,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           aria-label="Resize Orchestrator drawer"
           aria-valuenow={Math.round(width)}
           aria-valuemin={MIN_ORCH_W}
-          aria-valuemax={orchCeiling()}
+          aria-valuemax={orchResize.ceiling()}
           tabIndex={0}
           onPointerDown={startResize}
           onKeyDown={onGripKeyDown}
