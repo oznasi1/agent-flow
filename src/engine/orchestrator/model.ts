@@ -265,6 +265,19 @@ export interface Flow {
    * `launchConfirmedAt` into it would be inventing the consent this field exists to
    * require. */
   commandConfirmedAt?: number;
+  /** The template this workflow was instantiated from, when it was.
+   *
+   * Deliberately STORED rather than derived, unlike attachment (which is derived
+   * from the graph on purpose — see attach.ts): a workflow's origin leaves no
+   * trace in its own nodes and edges, so there is nothing to derive it from. The
+   * Templates tab reads it to answer "is this template in use, or did I abandon
+   * it?", and matching on name plus rule count instead would break the moment
+   * anyone renamed a template.
+   *
+   * Optional, and absent on every flow written before this field existed — which
+   * reads the same as "not from a template", the honest answer for a
+   * hand-drawn one. */
+  fromTemplate?: string;
 }
 
 export function emptyFlow(id: string, name: string, nowMs: number): Flow {
