@@ -1807,13 +1807,31 @@ const mkFlow = (id: string, name: string): Flow => ({
   id, name, armed: false, createdAt: 1_000, nodes: [], edges: [],
 });
 
-/** A flow with a single `place` node bound to `runKey` — the minimal shape
- * `flow:attach` produces (a fresh flow whose place binds the ticket's run),
- * used to prove the fresh-flow auto-open is suppressed for exactly the run
- * whose card drawer is already open, and only that one. */
+/** A flow with a single `place` node bound to `runKey` — ONE of the two shapes
+ * `bindsRun` (attach.ts) matches, used where a test only needs SOME flow bound
+ * to a run key, not the shape a real attach produces. `flow:attach` itself
+ * never writes a `place` node: `instantiate` writes a `planned` node carrying
+ * `ticketKey` (attach.ts's own comment on `boundTicketKeyOf` — "the ONLY
+ * binding a freshly attached workflow has, since a template carries no place
+ * nodes"). See `plannedFlow` below for that actual shape — the distinction
+ * matters because a run key and a ticket key can differ, which a
+ * `place`-bound fixture can never exercise. */
 const boundFlow = (id: string, name: string, runKey: string): Flow => ({
   id, name, armed: false, createdAt: 1_000,
   nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey, repo: "svc" }],
+  edges: [],
+});
+
+/** The shape `flow:attach` actually produces: a single `planned` node bound by
+ * TICKET key, not run key (`deckView.ts`'s `flow:attach` computes
+ * `ticketKeyFor` and `instantiate` writes it into a `planned` node's
+ * `ticketKey`). Distinct from `boundFlow` on purpose — a fixture whose run key
+ * already equals its ticket key cannot tell "matched by ticket key" from
+ * "matched by run key", which is exactly the gap a review round found
+ * unpinned at this call site. */
+const plannedFlow = (id: string, name: string, ticketKey: string): Flow => ({
+  id, name, armed: false, createdAt: 1_000,
+  nodes: [{ id: "n1", kind: "planned", x: 0, y: 0, join: "any", ticketKey, repos: ["svc"], mode: "implementation", dest: "new-window" }],
   edges: [],
 });
 
@@ -2141,6 +2159,34 @@ describe("the deck:flows handler", () => {
     host(flowsMsg([boundFlow("f1", "Ship it", "PROJ-9")]));
     expect(document.querySelector(".dd.closing")).not.toBeNull();
     expect(document.querySelector(".orch")).not.toBeNull();
+  });
+
+  // The gap a review round found unpinned: every other test in this file has
+  // a run whose ticket key happens to equal its own run key, so a predicate
+  // that reads `selected.status.run.key` instead of the correct
+  // `boundTicketKeyOf(selected.status)` passes every one of them anyway. This
+  // run genuinely disagrees — a local card (`local-1a2b`, the key Track it
+  // saves a promoted local run under) whose `inferredTicketKey` is `PROJ-7` —
+  // with a `planned` node (the REAL shape `flow:attach` produces, see
+  // `plannedFlow`'s own comment) bound by that ticket key, not the run key.
+  // Suppression must still fire.
+  it("keeps the card drawer open for a local card whose ticket key differs from its run key", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    host(runsMsg([mkStatus({
+      run: {
+        key: "local-1a2b", summary: "Local card", url: "https://fixture.invalid/browse/local-1a2b",
+        createdAt: 1, mode: "per-window",
+        repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "local-1a2b" }], briefPaths: [],
+      },
+      inferredTicketKey: "PROJ-7",
+    })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    host(flowsMsg([plannedFlow("f1", "Ship it", "PROJ-7")]));
+    expect(document.querySelector(".dd")).not.toBeNull();
+    expect(document.querySelector(".dd.closing")).toBeNull();
+    expect(document.querySelector(".orch")).toBeNull();
   });
 });
 

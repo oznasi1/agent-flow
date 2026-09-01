@@ -126,7 +126,7 @@ test.beforeEach(() => {
 });
 test.afterEach(async () => { await app?.close(); app = undefined; sb.dispose(); });
 
-test("attaching a template shows it disarmed, and arming grows the card's chip", async ({}, testInfo) => {
+test("attaching a template shows it disarmed, and arming turns the card's chip live", async ({}, testInfo) => {
   test.setTimeout(240_000);
   seedCard(sb, "E2E-WF");
   seedTemplate(sb, shipItTemplate("e2e-ship-it"));
@@ -158,31 +158,39 @@ test("attaching a template shows it disarmed, and arming grows the card's chip",
   // all before it can be armed (design doc §3 — attach is deliberately not
   // Arm). The card drawer stays open, on the very same block, showing the
   // template disarmed — no detour through the canvas.
+  //
+  // Order and load-bearing-ness, spelled out: `not.toHaveClass(/closing/)` is
+  // checked first but is the WEAKEST of the three — Playwright's negated
+  // matchers pass on a missing element too, so on its own it would even pass
+  // a beat after `.dd` finishes unmounting under the bug. The two assertions
+  // that actually catch a "suppressed setSelId but still auto-opened" mutant
+  // are the ones after it: `.orch` having zero count (nothing opened), and
+  // the POSITIVE read of `.wf-chip` inside the still-open `.dd` block
+  // (something is still there to read at all).
   await expect(deck.detail()).not.toHaveClass(/closing/);
-  await expect(deck.frame.locator(".orch")).toHaveCount(0);
   await expect(block.locator(".wf-chip")).toHaveText(/disarmed/i, { timeout: 15_000 });
+  await expect(deck.frame.locator(".orch")).toHaveCount(0);
   await expect(block).toContainText("Ship it");
   await expect(block.getByRole("button", { name: "Arm" })).toBeVisible();
   await shot(launched.page, testInfo, "2 · attached, disarmed, card drawer never left");
 
-  // Still no card chip — a disarmed workflow shows in the drawer alone until it
-  // is armed (the chip's own `{workflow && …}` guard has no "disarmed but shown"
-  // branch skipped here — it renders for every attached state, including this
-  // one, but confirming the pre-attach absence above is what proves the chip
-  // that is about to appear was actually caused by the click below, not already
-  // there from some other seam).
+  // The card ALREADY has a chip here, before arming — `.c-wf` renders for
+  // every attached state including `disarmed` (DeckApp.tsx's `Card`), so
+  // attaching alone is what creates it. What arming earns is the chip going
+  // LIVE: its class flips from `disarmed` to `advancing`.
+  const chip = deck.boardWorkflowChip("E2E-WF");
+  await expect(chip).toBeVisible();
+  await expect(chip).toContainText("Ship it");
+  await expect(chip).toHaveClass(/disarmed/);
+
   await block.getByRole("button", { name: "Arm" }).click();
 
-  // The card itself grows a workflow chip once armed — `.c-wf` (DeckApp.tsx),
-  // named after the template. This is the block and the board reading the exact
-  // same derivation (`cardWorkflow`, attach.ts) off the exact same `flows` —
-  // they cannot disagree about which workflow a card carries or where it stands.
-  const chip = deck.boardWorkflowChip("E2E-WF");
-  await expect(chip).toBeVisible({ timeout: 30_000 });
-  await expect(chip).toContainText("Ship it");
-  // `advancing`, never `disarmed` — the rule can never fire (its source is a
-  // still-planned node, so `evaluate.ts` reads it as simply not ready yet), but
-  // the flow itself is armed, and armed-with-nothing-settled reads `advancing`.
+  // `advancing`, never stuck on `disarmed` — the rule can never fire (its
+  // source is a still-planned node, so `evaluate.ts` reads it as simply not
+  // ready yet), but the flow itself is armed, and armed-with-nothing-settled
+  // reads `advancing`. The block and the board read the exact same
+  // derivation (`cardWorkflow`, attach.ts) off the exact same `flows` — they
+  // cannot disagree about which workflow a card carries or where it stands.
   await expect(chip).toHaveClass(/advancing/);
   await expect(block.locator(".wf-chip")).toHaveText(/advancing/i, { timeout: 30_000 });
   await shot(launched.page, testInfo, "3 · armed, card chip live");
@@ -207,9 +215,13 @@ test("an attached workflow is a real flow in the Workflows drawer, and Detach cl
   // Same fix this file's sibling test pins: attaching must not bounce the
   // card drawer through the Orchestrator. Reasserted here with a different
   // (zero-rule) template so the fix is proven against more than one shape.
+  // See the sibling test's own comment for why the order matters: the
+  // negated `.closing` check alone would pass even after `.dd` finishes
+  // unmounting, so the positive `.wf-chip` read and the `.orch` zero-count
+  // are the assertions actually doing the work here.
   await expect(deck.detail()).not.toHaveClass(/closing/);
-  await expect(deck.frame.locator(".orch")).toHaveCount(0);
   await expect(block.locator(".wf-chip")).toHaveText(/disarmed/i, { timeout: 15_000 });
+  await expect(deck.frame.locator(".orch")).toHaveCount(0);
   await shot(launched.page, testInfo, "1 · attached, disarmed, card drawer never left");
 
   // Round trip, reached the deliberate way now that attach itself does not
@@ -231,7 +243,11 @@ test("an attached workflow is a real flow in the Workflows drawer, and Detach cl
   await shot(launched.page, testInfo, "3 · the template, independent of the card");
 
   // Back to the card to arm from where the design's own controls live.
-  await deck.frame.getByRole("button", { name: "Close" }).click();
+  // Scoped to `orch`, not `deck.frame` — both drawers expose
+  // `aria-label="Close"` (`DeckDetail.tsx`, `OrchestratorDrawer.tsx`), and a
+  // frame-wide lookup only resolves today because the card drawer's own exit
+  // animation is long over by the time this runs.
+  await orch.getByRole("button", { name: "Close" }).click();
   await deck.card("E2E-WF2").click();
   await expect(block.locator(".wf-chip")).toHaveText(/disarmed/i, { timeout: 15_000 });
 

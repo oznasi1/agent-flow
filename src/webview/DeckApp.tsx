@@ -800,12 +800,18 @@ export function DeckApp(): JSX.Element {
    * on why a fresh flow normally auto-opens the Orchestrator and closes this
    * drawer, and why that must be suppressed for this one case. `null`
    * whenever no card is selected. */
+  // Theoretical, not reachable by anything this fix guards: a `message` event
+  // could in principle land between a commit that changes `selected` and the
+  // effect below flushing, reading one render stale. Not reachable for attach
+  // itself — the click that produces `flow:attach`'s answering `deck:flows`
+  // post is many ticks after the drawer already opened and this effect long
+  // since flushed — noted here so the next reader does not rediscover it.
   const openCardRef = React.useRef<{ runKey: string; ticketKey: string } | null>(null);
   React.useEffect(() => {
     openCardRef.current = selected
       ? { runKey: selected.status.run.key, ticketKey: boundTicketKeyOf(selected.status) }
       : null;
-  }, [selected]);
+  }, [selected?.status]);
   /** The card the detail drawer draws, and whether it is sliding out — the same
    * seam the Orchestrator drawer leaves the board through. It lives up here
    * rather than inside DeckDetail because the two signals it needs are this
