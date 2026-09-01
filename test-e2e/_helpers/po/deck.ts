@@ -115,4 +115,25 @@ export class Deck {
   clearStale(): Locator {
     return this.frame.getByRole("button", { name: /clear stale/i });
   }
+
+  /** The card drawer's Workflow block — `.wf-block` (`WorkflowBlock.tsx:190`,
+   *  rendered by `DeckDetail.tsx` under the `orchEnabled` gate). Present in
+   *  either its "none" shape (`.wf-none`, an "Attach workflow…" button) or its
+   *  attached shape (header name/status chip, a greyed-or-live stepper) — callers
+   *  distinguish the two the way `WorkflowBlock.tsx` itself does, by what is
+   *  inside, not by a second locator. Scoped to `detail()`: the board's OWN
+   *  workflow chip (`.c-wf`, see `boardWorkflowChip`) lives on the card, not in
+   *  this drawer, and the two must never be confused for one another. */
+  workflowBlock(): Locator {
+    return this.detail().locator(".wf-block");
+  }
+
+  /** The board's own workflow chip on one card's foot — `.c-wf`
+   *  (`DeckApp.tsx`'s `Card`, ~line 433). Absent entirely while nothing is
+   *  attached to that card (the span only renders `{workflow && (…)}`), which is
+   *  distinct from the drawer's `.wf-none` dash: the card has no "nothing here"
+   *  placeholder of its own. */
+  boardWorkflowChip(key: string): Locator {
+    return this.card(key).locator(".c-wf");
+  }
 }
