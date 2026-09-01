@@ -897,10 +897,12 @@ export const DECK_CSS = `
 
   /* A single-line fact: the section's own \`.dd-lbl\` shares its row with the
      one line of content that names it, rather than heading a block of rows.
-     Only Work uses this — its content (branch, elapsed time) is genuinely one
-     line; Pull requests' own facts stay a labelled column (see \`.pr-block\`'s
-     comment) and Sessions is already collapsed to one line by \`AgentsRow\`
-     itself, so neither needed this wrapper. */
+     Only Work uses this, and only Work was meant to: its content (branch,
+     elapsed time) is genuinely one line. Pull requests' own facts stay a
+     labelled column, which \`.pr-block\`'s comment defends as reading like a
+     table rather than sentences; Sessions stays EXPANDED (\`defaultOpen\` in
+     DeckDetail.tsx), because the width this drawer gained was spent precisely
+     on showing per-session detail without a second click. */
   .dd-strip { display: flex; align-items: baseline; gap: 8px; }
   .dd-strip .dd-lbl { margin-bottom: 0; flex: none; }
 

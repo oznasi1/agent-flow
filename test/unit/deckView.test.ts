@@ -10592,6 +10592,32 @@ describe("arm, disarm and reset", () => {
     expect(w.nodes).toHaveLength(1); // the graph edit itself still lands
   });
 
+  it("flow:save keeps the template a workflow came from", async () => {
+    // `fromTemplate` is HOST-written (by `instantiate`, once) and HOST-read: the
+    // Templates tab's "on N cards" count is a lookup over it. A save carrying
+    // `undefined` for it would silently drop a workflow out of its own
+    // template's count. It survives today only because every `with*` transform
+    // in the drawer spreads the whole flow object; one reconstruction that did
+    // not, and the count goes quietly wrong.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "n"), fromTemplate: "k1" }];
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: { ...mkFlow("f1", "n"), nodes: [{ id: "n1", kind: "place", x: 3, y: 4, join: "any", runKey: "PROJ-1", repo: "r" }] } });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.fromTemplate).toBe("k1");
+    expect(w.nodes).toHaveLength(1); // the graph edit itself still lands
+  });
+
+  it("flow:save cannot invent a template origin the host never recorded", async () => {
+    // The other direction: a hand-drawn workflow must not be able to claim it
+    // came from a template and inflate that template's "on N cards" count.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "n") }];
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: { ...mkFlow("f1", "n"), fromTemplate: "k1" } });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).fromTemplate).toBeUndefined();
+  });
+
   it("flow:save cannot invent a consent the host never recorded", async () => {
     // The other direction, and the one that matters more: the drawer must not be
     // able to hand the host a `commandConfirmedAt` and thereby authorise shell

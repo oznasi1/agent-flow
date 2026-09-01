@@ -4140,7 +4140,7 @@ export class DeckPanel {
         const mine = new Map(existing.edges.map((e) => [e.id, e]));
         writeFlow(this.flowIo, this.flowsDir, {
           ...m.flow,
-          // The host owns five FLOW-level fields too, and a graph save has no
+          // The host owns six FLOW-level fields too, and a graph save has no
           // business carrying any of them. `armed` is written only by `flow:arm`
           // and `flow:resumeDisarm`: a save built from a `flow` prop captured
           // before a `deck:flows` post lands holds a stale value, so pressing
@@ -4158,6 +4158,13 @@ export class DeckPanel {
           createdAt: existing.createdAt,
           launchConfirmedAt: existing.launchConfirmedAt,
           commandConfirmedAt: existing.commandConfirmedAt,
+          // `fromTemplate` is written once, by `instantiate`, and read by the
+          // Templates tab's "on N cards" count — a webview save has no way to
+          // know it and nothing to say about it. It survives today only because
+          // every `with*` transform in the drawer spreads the whole flow; one
+          // reconstruction that did not, and a template would silently stop
+          // counting a workflow it made.
+          fromTemplate: existing.fromTemplate,
           edges: m.flow.edges.map((e) => {
             const host = mine.get(e.id);
             if (!host) return e;
@@ -4542,10 +4549,12 @@ export class DeckPanel {
       }
       case "flow:deleteTemplate": {
         if (!getConfig().orchestrator) return;
-        // Removes only the template. A workflow already made from it was built
-        // by COPYING the shape (`instantiate`) rather than referencing the
-        // template afterward, so it is an independent flow and is left running
-        // untouched.
+        // Removes only the template. A workflow already made from it keeps
+        // running untouched: `instantiate` COPIED the shape, so nothing the flow
+        // needs lives in the template file. It does still carry the template's id
+        // in `Flow.fromTemplate` (the Templates tab's "on N cards" count reads
+        // it), so a delete leaves that id dangling — a count nobody asks for any
+        // more, never a broken workflow.
         const existing = readTemplates(this.flowIo, this.templatesDir).some((t) => t.id === m.templateId);
         if (!existing) return;
         removeTemplate(this.flowIo, this.templatesDir, m.templateId);

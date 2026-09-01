@@ -198,7 +198,15 @@ genuinely want a human borrow attention.
 - **A promoted action row** at the top: Open workspace, Open PR, Diff, and Address PR when it
   applies. Real buttons, not list rows.
 - **The Workflow block second**, directly under it.
-- **Work, Pull request, Sessions** become one-line fact strips rather than blocks.
+- **Work becomes a one-line fact strip** — its label shares the branch/elapsed row instead of
+  heading a block. **Pull request and Sessions keep their shape**, and this is a revision of an
+  earlier draft of this section that asked for all three. Pull request's four labelled rows are
+  deliberately aligned as a table rather than as sentences (`deckStyles.ts`'s `.pr-block`
+  defends it), and compressing them would destroy that alignment; Sessions is expanded by
+  default on purpose, because the width this drawer gained was spent precisely on showing
+  per-session detail without a second click — the card's fold exists only because the card has
+  no room. The goal was that the drawer stop being a 2000px scroll, and that is met by moving
+  the spend table, every Copy row and the per-repo diffs behind `More`.
 - **Behind `› More`:** every Copy row, the per-repo diffs, the four-row spend table, Forget,
   Track it.
 - **The `N actions` counter goes.** It advertised the wrong thing: a drawer is not better for

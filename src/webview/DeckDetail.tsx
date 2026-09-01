@@ -571,11 +571,12 @@ export function DeckDetail({
 
         <div className="dd-sec">
           <div className="dd-lbl">Sessions</div>
-          {/* Already a single-line fact strip: collapsed, this is one row (a name
-            * or a count) with the per-session detail a click away — the same
-            * "compact by default, more on demand" shape `More` uses below.
-            * Expanded by default here — there is room in the drawer, unlike the
-            * card, where the fold existed because the card had none. */}
+          {/* NOT a one-line strip, on purpose — `defaultOpen` is right below.
+            * `AgentsRow` folds to one row on the CARD because the card has no
+            * room; the drawer does, and the design's own reason for the extra
+            * width was to show a session's detail without a second click. So
+            * Sessions keeps its shape here and only `Work` became a strip (see
+            * the design doc's §7, amended to say so). */}
           {card.agents.length > 0
             ? <AgentsRow agents={card.agents} defaultOpen />
             : <div className="dd-none">No session open — git + {sourceLabel} only</div>}

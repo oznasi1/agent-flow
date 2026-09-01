@@ -747,9 +747,11 @@ export type InboundMessage =
   // there is no separate link to clear.
   | { type: "flow:detach"; id: string }
   | { type: "flow:renameTemplate"; templateId: string; name: string }
-  // Removes only the template. A workflow already instantiated from it is an
-  // independent flow (`instantiate` copies the shape; it does not reference the
-  // template again) and is left running untouched.
+  // Removes only the template. A workflow already instantiated from it keeps
+  // running untouched: `instantiate` COPIED the shape, so nothing it needs to run
+  // lives in the template. It does keep the template's id in `Flow.fromTemplate`
+  // — that is what the Templates tab's "on N cards" count reads — but a dangling
+  // id is only a count nobody asks for any more, never a broken workflow.
   | { type: "flow:deleteTemplate"; templateId: string }
   | { type: "flow:duplicateTemplate"; templateId: string }
   // The Marketplace (separate webview panel)
