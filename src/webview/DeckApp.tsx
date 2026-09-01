@@ -4,7 +4,7 @@ import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromp
 import type { AccountSlot } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
-import { cardWorkflow, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
+import { bindsRun, boundTicketKeyOf, cardWorkflow, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
 import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
@@ -707,13 +707,28 @@ export function DeckApp(): JSX.Element {
         // Orchestrator is a one-time side effect (clearing `selId`) that must
         // happen exactly once per post, not once per replay.
         const fresh = seenBefore ? posted.find((f) => !old.some((o) => o.id === f.id)) : undefined;
+        // Suppressed when the fresh flow is the one just bound to the card
+        // whose drawer is open right now — `flow:attach` mints a fresh flow
+        // too, and treating it the same as "+ New flow" would slam the card
+        // drawer shut on a workflow the user just attached to it before they
+        // ever see it disarmed (design doc §3: attaching must show the shape
+        // before anything can spend). `bindsRun` (attach.ts) is the exact
+        // predicate `cardWorkflow` itself uses to decide whether a flow
+        // belongs to a card, so this cannot drift from what the block and
+        // chip already agree a card's workflow is.
+        const openCard = openCardRef.current;
+        const boundToOpenCard = fresh !== undefined && openCard !== null
+          && bindsRun(fresh, openCard.runKey, openCard.ticketKey);
+        const autoOpen = fresh !== undefined && !boundToOpenCard;
         // The two drawers share the same fixed slot at z-index 40 (see .dd and
         // .orch in deckStyles.ts) — a fresh flow auto-opening the Orchestrator
-        // must close any open card detail, or both mount at once.
-        if (fresh) setSelId(null);
+        // must close any open card detail, or both mount at once. Skipped
+        // when `boundToOpenCard`: then nothing is about to open BUT the card
+        // drawer already showing, so nothing needs to close under it.
+        if (autoOpen) setSelId(null);
         setOpenFlowId((cur) => {
           if (cur && posted.some((f) => f.id === cur)) return cur;
-          return fresh ? fresh.id : null;
+          return autoOpen ? fresh!.id : null;
         });
         setOrchEnabled(m.enabled);
         setPendingResume(m.pendingResume ?? []);
@@ -775,6 +790,22 @@ export function DeckApp(): JSX.Element {
   React.useEffect(() => {
     if (selId !== null && selected === null) setSelId(null);
   }, [selId, selected]);
+  /** The run key and ticket key of whichever card's drawer is open right now,
+   * mirrored into a ref rather than read as state: the `deck:flows` message
+   * handler above is registered once (`[]` deps — see `flowsRef`'s own doc
+   * comment) and would otherwise only ever see `selected` as it was at mount.
+   * `flow:attach` mints a fresh flow bound to exactly this card, and that
+   * handler needs to recognise "this fresh flow is the one just attached to
+   * the card already open" without waiting on a render — see its own comment
+   * on why a fresh flow normally auto-opens the Orchestrator and closes this
+   * drawer, and why that must be suppressed for this one case. `null`
+   * whenever no card is selected. */
+  const openCardRef = React.useRef<{ runKey: string; ticketKey: string } | null>(null);
+  React.useEffect(() => {
+    openCardRef.current = selected
+      ? { runKey: selected.status.run.key, ticketKey: boundTicketKeyOf(selected.status) }
+      : null;
+  }, [selected]);
   /** The card the detail drawer draws, and whether it is sliding out — the same
    * seam the Orchestrator drawer leaves the board through. It lives up here
    * rather than inside DeckDetail because the two signals it needs are this

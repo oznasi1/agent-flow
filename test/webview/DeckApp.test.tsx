@@ -1807,6 +1807,16 @@ const mkFlow = (id: string, name: string): Flow => ({
   id, name, armed: false, createdAt: 1_000, nodes: [], edges: [],
 });
 
+/** A flow with a single `place` node bound to `runKey` — the minimal shape
+ * `flow:attach` produces (a fresh flow whose place binds the ticket's run),
+ * used to prove the fresh-flow auto-open is suppressed for exactly the run
+ * whose card drawer is already open, and only that one. */
+const boundFlow = (id: string, name: string, runKey: string): Flow => ({
+  id, name, armed: false, createdAt: 1_000,
+  nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey, repo: "svc" }],
+  edges: [],
+});
+
 /** A flow whose single edge `e1` has already fired — for the reset-through-
  * DeckApp test below, which needs a real fired edge to click Reset on. */
 const firedFlow = (): Flow => ({
@@ -2092,6 +2102,43 @@ describe("the deck:flows handler", () => {
     // and inert for the length of it rather than vanishing in this frame. The
     // Orchestrator's own half of this pairing has read that way since it grew
     // an exit — see "closes the Orchestrator drawer when a card is selected".
+    expect(document.querySelector(".dd.closing")).not.toBeNull();
+    expect(document.querySelector(".orch")).not.toBeNull();
+  });
+
+  // The fix for the gap the card-workflows e2e spec caught: `flow:attach` also
+  // posts a fresh flow, and the auto-open above would otherwise slam the card
+  // drawer shut on the very workflow the user just attached to it, before they
+  // ever see it disarmed (design doc §3). Suppressed exactly when the fresh
+  // flow binds the run the open card drawer is already showing — the same
+  // `bindsRun` predicate `cardWorkflow` itself uses, so this cannot drift from
+  // what the block and chip agree a card's workflow is.
+  it("keeps the card drawer open, and does not auto-open the Orchestrator, when a fresh flow attaches to the open card", () => {
+    render(<DeckApp />);
+    host(flowsMsg([])); // establishes seenFlowsRef, previous list []
+    host(runsMsg([mkStatus()])); // PROJ-1
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    // A fresh flow bound to the SAME run the open card drawer is showing —
+    // exactly what attaching a template to this card produces.
+    host(flowsMsg([boundFlow("f1", "Ship it", "PROJ-1")]));
+    expect(document.querySelector(".dd")).not.toBeNull();
+    expect(document.querySelector(".dd.closing")).toBeNull();
+    expect(document.querySelector(".orch")).toBeNull();
+  });
+
+  // The other direction: a fresh flow that binds a DIFFERENT run must still go
+  // through the ordinary auto-open — the suppression above is about which run
+  // the flow is FOR, not about whether some card happens to be selected (the
+  // "suppress whenever any card is open" alternative was rejected precisely
+  // because it would break this case).
+  it("still closes the card and opens the Orchestrator when a fresh flow binds a different run", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    host(runsMsg([mkStatus()])); // PROJ-1 card open
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    host(flowsMsg([boundFlow("f1", "Ship it", "PROJ-9")]));
     expect(document.querySelector(".dd.closing")).not.toBeNull();
     expect(document.querySelector(".orch")).not.toBeNull();
   });
