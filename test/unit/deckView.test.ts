@@ -12,7 +12,7 @@ import type { CommandNode, Flow, FlowEdge, FlowNode } from "../../src/engine/orc
 import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branchCi";
 import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
 import type { AgentProvider, AgentProviderSetting } from "../../src/config";
-import type { FlowCommand } from "../../src/types";
+import type { DemotionChoice, FlowCommand, FlowTemplate } from "../../src/types";
 import { attentionKeys } from "../../src/engine/attention";
 import { forgeNote } from "../../src/deckView";
 
@@ -191,6 +191,13 @@ const h = vi.hoisted(() => ({
   readFlows: vi.fn((): Flow[] => []),
   writeFlow: vi.fn(),
   removeFlow: vi.fn(),
+  // Templates (Task 8): the on-disk store beside flows, mocked the same honest
+  // way — a write actually updates `templates`, so a read that follows a write
+  // in the same test sees it, exactly as the real file-per-id store would.
+  templates: [] as FlowTemplate[],
+  readTemplates: vi.fn((): FlowTemplate[] => []),
+  writeTemplate: vi.fn(),
+  removeTemplate: vi.fn(),
   // The flows-directory lock (Task 5). Granted by default, so every flow test
   // that is not about contention behaves as it did before the lock existed; a
   // test about a busy directory says so with mockReturnValue(false).
@@ -428,6 +435,10 @@ vi.mock("../../src/engine/orchestrator/store", async (importActual) => {
     readFlows: () => h.readFlows(),
     writeFlow: h.writeFlow,
     removeFlow: h.removeFlow,
+    defaultTemplatesDir: () => "/templates",
+    readTemplates: () => h.readTemplates(),
+    writeTemplate: h.writeTemplate,
+    removeTemplate: h.removeTemplate,
     // `journal.ts` turns a flow id straight into a path and checks it against the
     // SAME charset regex `fileFor` uses, from this module. It is re-exported real
     // rather than restated, because a second copy of that rule here could drift
@@ -821,6 +832,13 @@ beforeEach(() => {
     h.flows = i >= 0 ? h.flows.map((f, idx) => (idx === i ? flow : f)) : [...h.flows, flow];
   });
   h.removeFlow.mockClear();
+  h.templates = [];
+  h.readTemplates.mockClear().mockImplementation(() => h.templates);
+  h.writeTemplate.mockClear().mockImplementation((_io: unknown, _dir: string, t: FlowTemplate) => {
+    const i = h.templates.findIndex((x) => x.id === t.id);
+    h.templates = i >= 0 ? h.templates.map((x, idx) => (idx === i ? t : x)) : [...h.templates, t];
+  });
+  h.removeTemplate.mockClear();
   h.commands = [];
   h.exec.mockClear().mockImplementation((_command: string, _opts: unknown, cb: ExecCallback) => {
     cb(null, "deployed 3 services", "warning: slow");
@@ -5714,6 +5732,254 @@ describe("orchestrator flows", () => {
     // Not even the first question gets asked — the setting gate is checked
     // before the connector is ever touched.
     expect(window.showQuickPick).not.toHaveBeenCalled();
+  });
+
+  // A template is a workflow's shape with the ticket taken out (templates.ts).
+  // One planned node by default — enough to instantiate against — with a fresh
+  // `nodes` array per call so a test that mutates one fixture's nodes cannot
+  // bleed into another's.
+  const mkTemplate = (id: string, name: string, nodes: FlowNode[] = [
+    { id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["aws-ops"], mode: "plan", dest: "worktree" },
+  ]): FlowTemplate => ({
+    schema: 1, id, name, params: {}, savedAt: 1_000,
+    flow: { id: "unused", name, armed: false, createdAt: 0, nodes, edges: [] },
+  });
+
+  describe("flow:attach — instantiating a template onto a card (Task 8)", () => {
+    it("writes a disarmed workflow bound to the card's ticket", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "k1" });
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      expect(written.armed).toBe(false);
+      expect(
+        written.nodes.filter((n) => n.kind === "planned")
+          .every((n) => (n as { ticketKey: string }).ticketKey === "PROJ-142"),
+      ).toBe(true);
+      expect(written.launchConfirmedAt).toBeUndefined();
+      expect(written.commandConfirmedAt).toBeUndefined();
+    });
+
+    it("derives the ticket key from the run's url when a run is on the board", async () => {
+      // ticketKeyFor, not runKey verbatim: a promoted local card can be saved
+      // under a place-hash key while its ticket lives only in the run's url
+      // (see ticketKeyFor's own comment in types.ts) — the same derivation
+      // every other card action already goes through.
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      h.runs = [mkRun({ key: "hash-abc123", url: "https://jira/browse/PROJ-99" })];
+      const { send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "hash-abc123", templateId: "k1" });
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      const planned = written.nodes.find((n) => n.kind === "planned") as { ticketKey: string };
+      expect(planned.ticketKey).toBe("PROJ-99");
+    });
+
+    it("refuses when a workflow is already attached and replace is absent", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      h.flows = [{
+        id: "f-old", name: "Already running", armed: true, createdAt: 500,
+        nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-142", repo: "aws-ops" }],
+        edges: [],
+      }];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "k1" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/already/i);
+      expect(toast?.message).toContain("Already running");
+    });
+
+    it("with replace detaches the old workflow first", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      h.flows = [{
+        id: "f-old", name: "Already running", armed: true, createdAt: 500,
+        nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-142", repo: "aws-ops" }],
+        edges: [],
+      }];
+      const { send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "k1", replace: true });
+      expect(h.removeFlow).toHaveBeenCalledWith(expect.anything(), "/flows", "f-old");
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      expect(written.id).not.toBe("f-old");
+    });
+
+    it("warns when the template is no longer on disk", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "missing" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/no longer on disk/i);
+    });
+
+    it("warns, rather than writing a rootless workflow, for a template with no planned step", async () => {
+      // instantiate() throws for exactly this shape: a graph of notifications
+      // with nothing to bind the ticket to.
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Notify only", [
+        { id: "n1", x: 0, y: 0, join: "any", kind: "notify", message: "hi" },
+      ])];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "k1" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/no planned step/i);
+    });
+  });
+
+  describe("flow:detach — removing an attached workflow (Task 8)", () => {
+    it("removes the workflow's flow file", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:detach", id: "f1" });
+      expect(h.removeFlow).toHaveBeenCalledWith(expect.anything(), "/flows", "f1");
+    });
+
+    it("ignores an id that is not in the store", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:detach", id: "intruder" });
+      expect(h.removeFlow).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("flow:saveTemplate — saving a flow as a reusable template (Task 8)", () => {
+    it("demotes places using the choices it was given", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [{
+        id: "f1", name: "Ship it", armed: false, createdAt: 1_000,
+        nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" }],
+        edges: [],
+      }];
+      const { send } = await openPanel();
+      await send({
+        type: "flow:saveTemplate", id: "f1", name: "Ship it",
+        choices: [{ nodeId: "n1", mode: "plan", dest: "worktree" }] satisfies DemotionChoice[],
+      });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const t = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(t.name).toBe("Ship it");
+      expect(t.flow.nodes[0]).toMatchObject({ kind: "planned", mode: "plan", dest: "worktree", ticketKey: "" });
+    });
+
+    it("refuses a flow whose id is not in the store", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [];
+      const { send } = await openPanel();
+      await send({ type: "flow:saveTemplate", id: "nope", name: "x", choices: [] });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+
+    it("warns, rather than writing an unusable template, when a place has no demotion choice", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [{
+        id: "f1", name: "Ship it", armed: false, createdAt: 1_000,
+        nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" }],
+        edges: [],
+      }];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:saveTemplate", id: "f1", name: "Ship it", choices: [] });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/no prompt mode and destination chosen/i);
+    });
+  });
+
+  describe("flow:renameTemplate, flow:deleteTemplate, flow:duplicateTemplate (Task 8)", () => {
+    it("flow:renameTemplate changes only the name", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "old")];
+      const { send } = await openPanel();
+      await send({ type: "flow:renameTemplate", templateId: "k1", name: "Ship the migration" });
+      expect(h.writeTemplate.mock.calls.at(-1)![2]).toMatchObject({ id: "k1", name: "Ship the migration" });
+    });
+
+    it("flow:renameTemplate ignores an id it does not have", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "old")];
+      const { send } = await openPanel();
+      await send({ type: "flow:renameTemplate", templateId: "nope", name: "x" });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+
+    it("flow:deleteTemplate leaves workflows already made from it alone", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      h.flows = [{ ...mkFlow("f1", "Ship it"), fromTemplate: "k1" }];
+      const { send } = await openPanel();
+      await send({ type: "flow:deleteTemplate", templateId: "k1" });
+      expect(h.removeTemplate).toHaveBeenCalledWith(expect.anything(), "/templates", "k1");
+      expect(h.removeFlow).not.toHaveBeenCalled();
+    });
+
+    it("flow:deleteTemplate ignores an id it does not have", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:deleteTemplate", templateId: "nope" });
+      expect(h.removeTemplate).not.toHaveBeenCalled();
+    });
+
+    it("flow:duplicateTemplate writes a copy under a fresh id", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:duplicateTemplate", templateId: "k1" });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const written = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(written.id).not.toBe("k1");
+      expect(written.id).toMatch(/^[A-Za-z0-9_-]+$/);
+      expect(written.name).toContain("Ship it");
+    });
+
+    it("flow:duplicateTemplate ignores an id it does not have", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:duplicateTemplate", templateId: "nope" });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+  });
+
+  it("deck:flows carries templates alongside flows", async () => {
+    setConfig({ orchestrator: true });
+    h.templates = [mkTemplate("k1", "Ship it")];
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { templates: FlowTemplate[] };
+    expect(msg.templates.map((t) => t.name)).toEqual(["Ship it"]);
+  });
+
+  it("empties templates alongside flows when the setting is off", async () => {
+    setConfig({ orchestrator: false });
+    h.templates = [mkTemplate("k1", "Ship it")];
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { templates: FlowTemplate[] };
+    expect(msg.templates).toEqual([]);
+  });
+
+  it("ignores every attach/detach/template message when the setting is off", async () => {
+    setConfig({ orchestrator: false });
+    h.templates = [mkTemplate("k1", "Ship it")];
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    await send({ type: "flow:attach", runKey: "PROJ-1", templateId: "k1" });
+    await send({ type: "flow:detach", id: "f1" });
+    await send({ type: "flow:saveTemplate", id: "f1", name: "x", choices: [] });
+    await send({ type: "flow:renameTemplate", templateId: "k1", name: "x" });
+    await send({ type: "flow:deleteTemplate", templateId: "k1" });
+    await send({ type: "flow:duplicateTemplate", templateId: "k1" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(h.removeFlow).not.toHaveBeenCalled();
+    expect(h.writeTemplate).not.toHaveBeenCalled();
+    expect(h.removeTemplate).not.toHaveBeenCalled();
   });
 
   describe("flow:addPlanned — the missing ticket picker (Task 4b)", () => {

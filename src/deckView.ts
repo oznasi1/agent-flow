@@ -7,9 +7,11 @@ import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type Agen
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps } from "./engine/orchestrator/model";
-import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
+import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, JournalEventInput } from "./engine/orchestrator/journal";
+import { DemotionChoice, FlowTemplate, instantiate, toTemplate } from "./engine/orchestrator/templates";
+import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
 import { unfirableRules } from "./engine/orchestrator/armability";
@@ -524,6 +526,9 @@ export class DeckPanel {
    * shape this file already uses for `defaultRunsDir()`. Resolved once, since
    * it never changes for the life of the panel. */
   private readonly flowsDir = defaultFlowsDir();
+  /** Templates sit beside flows on disk, read and written through the same
+   * `FlowIo` — see `store.ts`'s own comment on why the two share every rule. */
+  private readonly templatesDir = defaultTemplatesDir();
   private readonly flowIo = nodeFlowIo();
   /** The lock's IO. `this.log` is reached through an arrow rather than passed
    * directly so this initializer cannot depend on whether TypeScript assigns
@@ -694,6 +699,10 @@ export class DeckPanel {
     const cfg = getConfig();
     const enabled = cfg.orchestrator;
     const flows: Flow[] = enabled ? readFlows(this.flowIo, this.flowsDir) : [];
+    // Emptied alongside `flows`, for the same reason `pendingResume` below is:
+    // with the setting off there is nothing to attach, and silence must not read
+    // as "not loaded yet".
+    const templates: FlowTemplate[] = enabled ? readTemplates(this.flowIo, this.templatesDir) : [];
     // Emptied alongside `flows` when the setting is off, for the same reason:
     // silence must not be mistaken for "not loaded yet", and a stale hold from
     // before the setting was switched off has nothing left to be approved.
@@ -728,7 +737,7 @@ export class DeckPanel {
     // than narrowed — see the `deck:flows` member's own comment in types.ts.
     this.post({
       type: "deck:flows", flows, enabled, pendingResume, promptModes,
-      commands: cfg.commands, branchCi,
+      commands: cfg.commands, branchCi, templates,
     });
   }
 
@@ -4415,6 +4424,131 @@ export class DeckPanel {
           unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
           source: "resume-banner",
         });
+        this.postFlows();
+        return;
+      }
+      // ── Workflow templates ──────────────────────────────────────────────
+      case "flow:saveTemplate": {
+        if (!getConfig().orchestrator) return;
+        // Same membership check every other flow:* write in this file makes: the
+        // drawer can only ever be editing a flow the host gave it.
+        const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
+        if (!flow) return;
+        let saved: FlowTemplate;
+        try {
+          // `toTemplate` throws for a flow with no steps at all, or for a place
+          // node the drawer sent no demotion choice for — both refusals written
+          // for a human, not a stack trace, so they are surfaced rather than
+          // left to escape into the Deck's refresh.
+          saved = toTemplate(flow, m.name, newFlowId(Date.now()), Date.now(), m.choices);
+        } catch (e) {
+          this.post({ type: "toast", level: "error", message: (e as Error).message });
+          return;
+        }
+        writeTemplate(this.flowIo, this.templatesDir, saved);
+        // The template's own name is the user's text; only the gesture is reported.
+        trackEvent({ name: "flow_action", action: "save_template" });
+        this.postFlows();
+        return;
+      }
+      case "flow:attach": {
+        if (!getConfig().orchestrator) return;
+        // `this.run` is the same lookup every other card action uses — a local
+        // card has no record on disk, so the last refresh's synthetic runs are
+        // the only place to find it. A run this panel does not know about still
+        // gets an attach attempt: `ticketKeyFor` needs a `Run` to read a url off,
+        // but the runKey itself is exactly what a ticket-less lookup falls back
+        // to, so there is nothing more accurate to fall back to here either.
+        const run = this.run(m.runKey);
+        const ticketKey = run ? ticketKeyFor(run, this.connector) : m.runKey;
+        const t = readTemplates(this.flowIo, this.templatesDir).find((x) => x.id === m.templateId);
+        if (!t) {
+          this.post({ type: "toast", level: "error", message: "That template is no longer on disk." });
+          return;
+        }
+        // Re-read immediately before deciding — the discipline every other
+        // user-driven flow write in this file follows (see the note on
+        // `advanceArmedFlows` explaining why these writes are UNLOCKED): another
+        // window may have attached or detached a workflow to this same card
+        // since the drawer rendered its button.
+        const existing = attachedWorkflows(readFlows(this.flowIo, this.flowsDir), m.runKey, ticketKey);
+        if (existing.length > 0 && !m.replace) {
+          this.post({
+            type: "toast", level: "error",
+            message: `${m.runKey} already has the "${existing[0].name}" workflow attached.`,
+          });
+          return;
+        }
+        const now = Date.now();
+        let fresh: Flow;
+        try {
+          // `instantiate` throws for a template with no planned step: there is
+          // nothing to bind the ticket to. Caught here, rather than left to
+          // escape into the Deck's refresh, because the message is written for
+          // a human to read.
+          fresh = instantiate(t, ticketKey, newFlowId(now), now);
+        } catch (e) {
+          this.post({ type: "toast", level: "error", message: (e as Error).message });
+          return;
+        }
+        // Detach the old workflow(s) only once the new one is known to build —
+        // a refusal above must leave the card's existing workflow untouched.
+        for (const old of m.replace ? existing : []) removeFlow(this.flowIo, this.flowsDir, old.id);
+        writeFlow(this.flowIo, this.flowsDir, fresh);
+        trackEvent({ name: "flow_action", action: "attach" });
+        this.postFlows();
+        return;
+      }
+      case "flow:detach": {
+        if (!getConfig().orchestrator) return;
+        // The same membership check flow:delete makes: an id not on disk is not
+        // a detach to carry out. Attachment is derived from the graph
+        // (attach.ts), never stored, so removing the flow file is the whole of
+        // detaching — there is no separate link to clear.
+        const existing = readFlows(this.flowIo, this.flowsDir).some((f) => f.id === m.id);
+        if (!existing) return;
+        removeFlow(this.flowIo, this.flowsDir, m.id);
+        trackEvent({ name: "flow_action", action: "detach" });
+        this.postFlows();
+        return;
+      }
+      case "flow:renameTemplate": {
+        if (!getConfig().orchestrator) return;
+        const existing = readTemplates(this.flowIo, this.templatesDir).find((t) => t.id === m.templateId);
+        if (!existing) return;
+        writeTemplate(this.flowIo, this.templatesDir, { ...existing, name: m.name });
+        trackEvent({ name: "flow_action", action: "rename_template" });
+        this.postFlows();
+        return;
+      }
+      case "flow:deleteTemplate": {
+        if (!getConfig().orchestrator) return;
+        // Removes only the template. A workflow already made from it was built
+        // by COPYING the shape (`instantiate`) rather than referencing the
+        // template afterward, so it is an independent flow and is left running
+        // untouched.
+        const existing = readTemplates(this.flowIo, this.templatesDir).some((t) => t.id === m.templateId);
+        if (!existing) return;
+        removeTemplate(this.flowIo, this.templatesDir, m.templateId);
+        trackEvent({ name: "flow_action", action: "delete_template" });
+        this.postFlows();
+        return;
+      }
+      case "flow:duplicateTemplate": {
+        if (!getConfig().orchestrator) return;
+        const templates = readTemplates(this.flowIo, this.templatesDir);
+        const existing = templates.find((t) => t.id === m.templateId);
+        if (!existing) return;
+        // The same re-mint-past-a-collision discipline `flow:create` uses:
+        // `newFlowId` is probabilistic, and a collision here must not silently
+        // overwrite an unrelated template instead of creating a copy.
+        const now = Date.now();
+        const taken = new Set(templates.map((t) => t.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
+        writeTemplate(this.flowIo, this.templatesDir, { ...existing, id, name: `${existing.name} copy`, savedAt: now });
+        trackEvent({ name: "flow_action", action: "duplicate_template" });
         this.postFlows();
         return;
       }

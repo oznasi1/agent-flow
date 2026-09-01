@@ -1796,7 +1796,7 @@ const firedFlow = (): Flow => ({
 // with no rendering yet (Task 6 wires the banner) — every existing fixture here
 // predates the field and has nothing to hold.
 const flowsMsg = (flows: Flow[], enabled = true): OutboundMessage =>
-  ({ type: "deck:flows", commands: [], branchCi: {}, flows, enabled, pendingResume: [], promptModes: [] });
+  ({ type: "deck:flows", commands: [], branchCi: {}, flows, enabled, pendingResume: [], promptModes: [], templates: [] });
 
 /** The drawer itself, not the header chip that shares its name. */
 const drawer = () => screen.queryByRole("complementary", { name: "Orchestrator" });
@@ -2146,6 +2146,7 @@ describe("the drawer's callbacks", () => {
       enabled: true,
       pendingResume: [{ flowId: "f1", flowName: "Ship the migration", lines: ["ready"] }],
       promptModes: [],
+      templates: [],
     });
     fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     fireEvent.click(screen.getByRole("button", { name: /^go$/i }));
@@ -2172,6 +2173,7 @@ describe("the drawer's callbacks", () => {
       enabled: true,
       pendingResume: [],
       promptModes: [{ id: "quick", label: "Quick pass from the host" }],
+      templates: [],
     });
     fireEvent.click(chip());
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
@@ -2585,7 +2587,7 @@ describe("card selection", () => {
   it("closes the Orchestrator drawer when a card is selected", () => {
     render(<DeckApp />);
     host({ type: "deck:flows", flows: [{ id: "f1", name: "F", nodes: [], edges: [], armed: false } as never],
-      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {} } as OutboundMessage);
+      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [] } as OutboundMessage);
     host(runsMsg([mkStatus()]));
     fireEvent.click(screen.getByRole("button", { name: /orchestrator/i }));
     expect(document.querySelector(".orch")).not.toBeNull();
@@ -2606,7 +2608,7 @@ describe("card selection", () => {
   it("closes the card detail drawer when the Orchestrator chip is clicked", () => {
     render(<DeckApp />);
     host({ type: "deck:flows", flows: [{ id: "f1", name: "F", nodes: [], edges: [], armed: false } as never],
-      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {} } as OutboundMessage);
+      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [] } as OutboundMessage);
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(document.querySelector(".dd")).not.toBeNull();

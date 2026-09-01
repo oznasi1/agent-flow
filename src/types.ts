@@ -11,6 +11,13 @@ import type { UsageTotals } from "./engine/usage";
 // one door is easier to keep webview-safe than two.
 import type { BranchCiStatus } from "./engine/orchestrator/branchCi";
 export type { BranchCiStatus };
+// A template's shape and the save dialog's per-place answer — re-exported for the
+// same reason `BranchCiStatus` is: the webview needs both (the drawer's template
+// picker renders `FlowTemplate[]` off `deck:flows`; "Save as template" builds a
+// `DemotionChoice[]` to send back) and every other Deck type it needs already
+// comes from this module.
+import type { DemotionChoice, FlowTemplate } from "./engine/orchestrator/templates";
+export type { DemotionChoice, FlowTemplate };
 
 export type Filter = "unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
 export type Size = "any" | "s" | "m" | "l"; // by original time estimate
@@ -717,6 +724,27 @@ export type InboundMessage =
   // host still validates all three as finite, non-negative numbers before they
   // reach an event, because a webview payload is untrusted whatever this type says.
   | { type: "flow:dryRun"; edges: number; fired: number; blocked: number }
+  // ── Workflow templates ──────────────────────────────────────────────
+  // Save the flow named `id` as a reusable template. `choices` answers, one per
+  // place the flow contains, the question `toTemplate` cannot answer on its
+  // own — see `DemotionChoice`'s own comment in templates.ts.
+  | { type: "flow:saveTemplate"; id: string; name: string; choices: DemotionChoice[] }
+  // Instantiate `templateId` against the card named by `runKey`, binding the
+  // card's ticket to every planned node — see `instantiate` in templates.ts.
+  // `replace` detaches whatever workflow the card already carries first; its
+  // absence is a refusal, not a silent second attachment, when one is already
+  // there.
+  | { type: "flow:attach"; runKey: string; templateId: string; replace?: true }
+  // Remove the attached workflow named `id`. Detaching is deleting its flow
+  // file — attachment is derived from the graph (`attach.ts`), not stored, so
+  // there is no separate link to clear.
+  | { type: "flow:detach"; id: string }
+  | { type: "flow:renameTemplate"; templateId: string; name: string }
+  // Removes only the template. A workflow already instantiated from it is an
+  // independent flow (`instantiate` copies the shape; it does not reference the
+  // template again) and is left running untouched.
+  | { type: "flow:deleteTemplate"; templateId: string }
+  | { type: "flow:duplicateTemplate"; templateId: string }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }
@@ -915,10 +943,13 @@ export type OutboundMessage =
   // because it is flow data (its keys come from the rules themselves) and
   // because `postFlows` runs AFTER the pass that reads the verdicts, whereas
   // the `deck:runs` post happens before it.
+  // `templates` rides the same emptied-with-`flows` rule as `pendingResume` and
+  // for the same reason: with the setting off there is nothing to attach, and
+  // silence must not read as "not loaded yet".
   | {
       type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[];
       promptModes: FlowPromptMode[]; commands: FlowCommand[];
-      branchCi: Record<string, BranchCiStatus>;
+      branchCi: Record<string, BranchCiStatus>; templates: FlowTemplate[];
     }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }
