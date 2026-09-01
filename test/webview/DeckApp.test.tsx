@@ -20,6 +20,19 @@ function host(msg: OutboundMessage) {
   });
 }
 
+// Copy, per-repo diffs, the spend table and Forget/Track it moved behind the
+// drawer's `More` disclosure (DeckDetail.tsx) — its body renders only once
+// open, not merely once the browser's own `open` attribute lands (that
+// attribute is set by the click's default action a tick before the "toggle"
+// event that actually flips React state and renders the body, so waiting on
+// it directly resolves too early). "Spend" is unconditional in the body, so
+// it is present the instant the body renders at all, whatever the card's
+// own PR/local/tracked state.
+async function openMore() {
+  fireEvent.click(screen.getByRole("button", { name: /^More/ }));
+  await waitFor(() => expect(screen.getByText("Spend")).toBeTruthy());
+}
+
 const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
   run: {
     key: "PROJ-1", summary: "Export fails on large accounts", url: "https://jira/PROJ-1",
@@ -390,18 +403,20 @@ describe("DeckApp", () => {
     expect(container.querySelector(".act.primary.live")).toBeNull();
   });
 
-  it("forgets a run from the drawer's action list", () => {
+  it("forgets a run from the drawer's action list", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "PROJ-1" });
   });
 
-  it("removes a forgotten card immediately, without waiting for the host", () => {
+  it("removes a forgotten card immediately, without waiting for the host", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
     fireEvent.click(document.querySelectorAll(".card")[0]);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     // No deck:runs has arrived; the card is gone regardless.
     expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
@@ -409,11 +424,12 @@ describe("DeckApp", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "PROJ-1" });
   });
 
-  it("restores an optimistically removed card if the host still reports it", () => {
+  it("restores an optimistically removed card if the host still reports it", async () => {
     // The host post is authoritative — a delete that failed must not vanish the run.
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
     host(runsMsg([mkStatus()]));
@@ -444,10 +460,11 @@ describe("DeckApp", () => {
     expect(screen.getByText(/synced/i)).toBeInTheDocument();
   });
 
-  it("opens the ticket in Jira from the drawer's action list", () => {
+  it("opens the ticket in Jira from the drawer's action list", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: "Open in Jira" }));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/PROJ-1" });
   });
@@ -472,10 +489,11 @@ describe("DeckApp", () => {
     expect(screen.getByTitle("explore-retry-logic")).toBeInTheDocument();
   });
 
-  it("does not offer to open a ticketless run in Jira", () => {
+  it("does not offer to open a ticketless run in Jira", async () => {
     render(<DeckApp />);
     host(runsMsg([untracked()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     expect(screen.queryByText(/Open in Jira/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Forget" })).toBeInTheDocument();
   });
@@ -555,26 +573,29 @@ describe("DeckApp", () => {
     expect(screen.queryByText("PROJ-5641")).toBeNull();
   });
 
-  it("offers Track it and no Forget", () => {
+  it("offers Track it and no Forget", async () => {
     render(<DeckApp />);
     host(runsMsg([mkLocal()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     expect(screen.getByRole("button", { name: "Track it" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Forget" })).toBeNull();
   });
 
-  it("posts deck:track", () => {
+  it("posts deck:track", async () => {
     render(<DeckApp />);
     host(runsMsg([mkLocal()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: "Track it" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-webapp-1a2b3c4d" });
   });
 
-  it("still offers Forget on a tracked card", () => {
+  it("still offers Forget on a tracked card", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     expect(screen.getByRole("button", { name: "Forget" })).toBeTruthy();
   });
 
@@ -1698,13 +1719,15 @@ describe("DeckApp — source label", () => {
     expect(document.querySelector(".note")!.textContent).toBe("git + Jira backbone · best-effort live from ~/.claude/projects");
   });
 
-  it("renders a tracked card's Jira strings byte-for-byte: key title, status pill title, drawer action item", () => {
+  it("renders a tracked card's Jira strings byte-for-byte: key title, status pill title, drawer action item", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     expect(screen.getByTitle("Open PROJ-1 in Jira")).toBeInTheDocument();
-    // The status pill and the "Open in <source>" action both moved into the drawer.
+    // The status pill and the "Open in <source>" action both moved into the drawer —
+    // the action item a further click away, behind `More`.
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("Jira status: In Progress")).toBeInTheDocument();
+    await openMore();
     expect(screen.getByText("Open in Jira")).toBeInTheDocument();
   });
 
@@ -1714,15 +1737,17 @@ describe("DeckApp — source label", () => {
     expect(screen.getByTitle("Open PROJ-5641 in Jira")).toBeInTheDocument();
   });
 
-  it("templates every one of those strings off a non-Jira sourceLabel — proving the label actually reaches the render", () => {
+  it("templates every one of those strings off a non-Jira sourceLabel — proving the label actually reaches the render", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()], "PR initiated", "Acme"));
     expect(screen.getByTitle("Re-read git, Acme and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Acme backbone · best-effort live from ~/.claude/projects");
     expect(screen.getByTitle("Open PROJ-1 in Acme")).toBeInTheDocument();
-    // The status pill and the "Open in <source>" action both moved into the drawer.
+    // The status pill and the "Open in <source>" action both moved into the drawer —
+    // the action item a further click away, behind `More`.
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("Acme status: In Progress")).toBeInTheDocument();
+    await openMore();
     expect(screen.getByText("Open in Acme")).toBeInTheDocument();
     // A fresh deck:runs post with an unknown agent activity is the only way left
     // to reach the parked string — the live signal is unconditional now, so
@@ -2849,10 +2874,11 @@ describe("DeckApp card anatomy", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:usageFor", key: "PROJ-1" });
   });
 
-  it("feeds a deck:usage reply into the open drawer", () => {
+  it("feeds a deck:usage reply into the open drawer", async () => {
     render(<DeckApp />);
     host(runsMsg([withPr(healthyPr())]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
     host({ type: "deck:usage", key: "PROJ-1", usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
     expect(document.querySelector(".dd-spend")).not.toBeNull();
@@ -2862,10 +2888,11 @@ describe("DeckApp card anatomy", () => {
   // A reply can land after the user has moved on. Keying by run rather than
   // holding one "current" slot is what stops the new drawer showing the old
   // run's figure.
-  it("ignores a deck:usage reply for a run other than the open one", () => {
+  it("ignores a deck:usage reply for a run other than the open one", async () => {
     render(<DeckApp />);
     host(runsMsg([withPr(healthyPr())]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     host({ type: "deck:usage", key: "SOMEONE-ELSE", usage: { input: 0, output: 99_000, cacheWrite: 0, cacheRead: 0 } });
     expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
     expect(document.querySelector(".dd-spend")).toBeNull();

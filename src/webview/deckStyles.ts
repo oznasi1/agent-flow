@@ -762,14 +762,37 @@ export const DECK_CSS = `
     to { transform: translateX(100%); opacity: 0; }
   }
 
-  /* The selected card's detail. 460px is the narrowest width at which a
-     .pr-block's label column and value column both fit without wrapping.
+  /* The selected card's detail. \`--dd-w\` carries the live value — resized by
+     drag or arrow key, defaulting to 620px (drawerResize.ts's \`ddResize.DEFAULT\`,
+     which DeckDetail.tsx overrides with an inline style carrying the current
+     width; the override direction only works because the default already
+     exists here to be overridden, same reason \`--orch-w\` is declared locally
+     in orchestratorStyles.ts). 460px — narrow enough to still hold the header
+     row without wrapping or clipping, see \`.dd-hd .k\` below — is the floor
+     \`ddResize\`'s own \`min\` enforces, not a number repeated here.
 
-     \`hidden auto\`, not \`auto\`: the drawer is a fixed-width panel of rows that all
+     \`hidden auto\`, not \`auto\`: the drawer is a panel of rows that all
      ellipsize, so sideways scroll here is never a feature — it is always a row that
      failed to shrink (a long mono key did exactly that), and it takes the close
      button off-screen with it. Vertical scroll is the only axis it needs. */
-  .dd { width: 460px; overflow: hidden auto; }
+  .dd { --dd-w: 620px; width: var(--dd-w); overflow: hidden auto; }
+  /* The resize grip, centred ON the left border rather than beside it, same as
+     the Orchestrator drawer's own \`.orch-grip\` (orchestratorStyles.ts) — half
+     outside the drawer's box, half inside, so it never nudges the header,
+     body, or action row's own layout. One quiet, permanent affordance (three
+     dots) rather than a hover-only tint, for the same reason that file gives:
+     a control that only reveals itself on touch is a control nobody finds. */
+  .dd-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 9px; z-index: 1;
+    background: transparent; border: 0; padding: 0; cursor: ew-resize; }
+  .dd-grip::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 21px;
+    transform: translate(-50%, -50%); pointer-events: none;
+    background-image: radial-gradient(circle, var(--dim) 1px, transparent 1.4px);
+    background-size: 3px 7px; background-repeat: repeat-y; opacity: .6; }
+  .dd-grip:hover, .dd-grip:focus-visible { background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
+  .dd-grip:hover::after, .dd-grip:focus-visible::after { opacity: .9; }
+  .dd-grip:focus-visible { outline: none;
+    box-shadow: inset 0 0 0 1px var(--vscode-focusBorder); }
   /* Two rows, and the header is the block that stacks them: \`.dd-id\` carries the
      identity (mark, key, tracker status, close) and the title takes the next row
      whole.
@@ -829,8 +852,44 @@ export const DECK_CSS = `
   .dd-sec + .dd-sec { border-top: 1px solid var(--hair); }
   .dd-lbl { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
     color: var(--dim); opacity: .8; margin-bottom: 7px; }
-  .dd-count { padding: 9px 12px 0; margin: 0; }
   .dd-none { font-size: var(--t-body); color: var(--dim); }
+
+  /* The promoted action row: the drawer's busiest controls, above the fold and
+     always visible — everything else waits behind \`More\` (\`.dd-more\` below).
+     Real buttons, not \`.dd-act\` list rows: there are at most four of them, so
+     a row-per-action list would be mostly empty space, and a control this
+     frequently used earns a bordered target rather than a hover-only one. */
+  .dd-acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px;
+    border-bottom: 1px solid var(--hair); }
+  .dd-pact { flex: 1 1 auto; min-width: 0; padding: 6px 10px; border-radius: var(--r-ctl);
+    border: 1px solid var(--edge); background: none; color: var(--vscode-foreground);
+    font-size: var(--t-body); cursor: pointer; text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dd-pact:hover { background: var(--vscode-toolbar-hoverBackground); }
+  .dd-pact:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+
+  /* A single-line fact: the section's own \`.dd-lbl\` shares its row with the
+     one line of content that names it, rather than heading a block of rows.
+     Only Work uses this — its content (branch, elapsed time) is genuinely one
+     line; Pull requests' own facts stay a labelled column (see \`.pr-block\`'s
+     comment) and Sessions is already collapsed to one line by \`AgentsRow\`
+     itself, so neither needed this wrapper. */
+  .dd-strip { display: flex; align-items: baseline; gap: 8px; }
+  .dd-strip .dd-lbl { margin-bottom: 0; flex: none; }
+
+  /* Everything below the fold: copy, per-repo diffs, the spend breakdown,
+     forget. A real disclosure widget rather than a bespoke toggle, for its
+     keyboard and accessibility behavior alone — \`role="button"\` on the
+     summary is still needed on top of that, since neither jsdom's nor a real
+     screen reader's role mapping treats a bare \`<summary>\` as one. */
+  .dd-more { border-top: 1px solid var(--hair); }
+  .dd-more > summary { list-style: none; cursor: pointer; padding: 9px 12px;
+    font-size: var(--t-body); color: var(--dim); }
+  .dd-more > summary::-webkit-details-marker { display: none; }
+  .dd-more > summary:hover { color: var(--vscode-foreground);
+    background: var(--vscode-toolbar-hoverBackground); }
+  .dd-more[open] > summary { border-bottom: 1px solid var(--hair); }
+
   /* A list row, not a button slab: twelve bordered controls in a column would
      read as twelve competing calls to action. */
   .dd-act { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left;
@@ -877,11 +936,14 @@ export const DECK_CSS = `
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* At any realistic panel width there is no arrangement in which four columns
-     and a 460px drawer all fit — something is always off-screen. .board is
+     and the drawer both fit — something is always off-screen. .board is
      already a horizontal scroller, so this does not MOVE the columns: it adds
      scroll run-out past the last one, which is what lets a covered column be
-     scrolled clear of the drawer. Nothing becomes unreachable. */
-  .board.dd-open { padding-right: 470px; }
+     scrolled clear of the drawer. Nothing becomes unreachable. Tracks \`--dd-w\`
+     rather than a fixed figure now that the drawer is resizable — the 620px
+     fallback is only for the (never-expected) case this rule is read before
+     \`.dd\` has set the variable at all. */
+  .board.dd-open { padding-right: calc(var(--dd-w, 620px) + 10px); }
 
   /* The two-tier card. A floor with no flex column would hang dead space under
      the last row; making the card a column is what lets the footer's margin-top:

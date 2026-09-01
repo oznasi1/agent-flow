@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
@@ -48,6 +48,25 @@ const render1 = (
   usage?: UsageTotals | null,
 ) =>
   render(<DeckDetail card={card} sourceLabel="Jira" usage={usage} onClose={onClose} onForget={onForget} />);
+
+// Copy, per-repo diffs, the spend table and Forget/Track it all moved behind
+// the `More` disclosure — its body renders only once open (see DeckDetail.tsx's
+// own comment on why it does not lean on the browser's native
+// `details:not([open])` hiding, which jsdom does not implement anyway). The
+// `toggle` event fires asynchronously even in jsdom, so this needs a real
+// `waitFor`, never a bare click-then-assert — the same rule this file's own
+// header comment already states for an async `FileReader` post.
+// Waits for "Spend" specifically, not the `<details>`'s own `open` attribute:
+// the browser sets that attribute as part of the click's default action, a
+// tick BEFORE the "toggle" event (which is what actually flips `moreOpen` and
+// renders the body) fires — waiting on the attribute alone was found to
+// resolve before React had re-rendered, leaving the body still absent. Spend's
+// own heading is unconditional inside the body, so it is there the instant the
+// body renders at all, whatever the card's own PR/local/tracked state.
+const openMore = async () => {
+  fireEvent.click(screen.getByRole("button", { name: /^More/ }));
+  await waitFor(() => expect(screen.getByText("Spend")).toBeTruthy());
+};
 
 describe("DeckDetail", () => {
   it("names the run in its header", () => {
@@ -111,6 +130,16 @@ describe("DeckDetail", () => {
     expect(document.querySelector(".dd .c-repos .repo")!.textContent).toContain("svc");
   });
 
+  // Work is a single-line fact strip now: the "Work" label shares its row with
+  // the branch/elapsed line instead of heading a block of rows above it.
+  it("renders Work as a single-line strip — the label shares the branch/elapsed row", () => {
+    render1(mkCard());
+    const strip = document.querySelector(".dd-strip")!;
+    expect(strip.querySelector(".dd-lbl")!.textContent).toBe("Work");
+    expect(strip.querySelector(".c-branch .bn")!.textContent).toContain("feat/x");
+    expect(strip.querySelector(".c-branch .elapsed")).toBeTruthy();
+  });
+
   it("relocates the PR block", () => {
     render1(mkCard({ prs: { svc: { facts: facts({ number: 77 }), fetchedAt: 1 } } as PrEntryMap }));
     expect(document.querySelector(".dd .pr-block")!.textContent).toContain("#77");
@@ -128,7 +157,9 @@ describe("DeckDetail", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "open" });
   });
 
-  it("scopes a per-repo diff to that repo", () => {
+  // Per-repo diffs moved into `More` — the plain "Diff" promoted above the fold
+  // stays scoped to the whole task, exactly as "Diff — all repos" always was.
+  it("scopes a per-repo diff to that repo", async () => {
     const card = mkCard({
       repos: [
         { name: "svc", path: "/r/svc", branch: "feat/x", dirty: false, ahead: 0, added: 1, removed: 0, files: 1 },
@@ -136,12 +167,14 @@ describe("DeckDetail", () => {
       ],
     });
     render1(card);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /diff — web/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "diff", repo: "web" });
   });
 
-  it("offers no per-repo diff on a single-repo card — the all-repos one already is it", () => {
+  it("offers no per-repo diff on a single-repo card — the all-repos one already is it", async () => {
     render1(mkCard());
+    await openMore();
     expect(screen.queryByRole("button", { name: /diff — svc/i })).toBeNull();
   });
 
@@ -185,75 +218,134 @@ describe("DeckDetail", () => {
     expect(within(container).queryByRole("button", { name: /address pr/i })).toBeNull();
   });
 
-  it("links each failing check by name", () => {
+  // The lead PR's own failing checks stay in `More` — `Open PR` itself is
+  // promoted, but the per-check links never had a promoted equivalent even
+  // before this rebuild.
+  it("links each failing check by name", async () => {
     render1(mkCard({
       prs: { svc: { facts: facts({ ci: { passing: 0, pending: 0, failing: [{ name: "e2e", url: "https://ci/e2e" }] } }), fetchedAt: 1 } } as PrEntryMap,
     }));
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /open failing check — e2e/i }));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://ci/e2e" });
   });
 
-  it("offers no action for a failing check with no url — there is nothing to open", () => {
+  it("offers no action for a failing check with no url — there is nothing to open", async () => {
     render1(mkCard({
       prs: { svc: { facts: facts({ ci: { passing: 0, pending: 0, failing: [{ name: "lint", url: "" }] } }), fetchedAt: 1 } } as PrEntryMap,
     }));
+    await openMore();
     expect(screen.queryByRole("button", { name: /open failing check — lint/i })).toBeNull();
   });
 
-  it("copies the branch name without touching the host", () => {
+  it("copies the branch name without touching the host", async () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render1(mkCard());
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /copy branch name/i }));
     expect(writeText).toHaveBeenCalledWith("feat/x");
     expect(sent).not.toHaveBeenCalled();
   });
 
-  it("copies the ticket key without touching the host", () => {
+  it("copies the ticket key without touching the host", async () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render1(mkCard());
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /copy ticket key/i }));
     expect(writeText).toHaveBeenCalledWith("PROJ-1");
     expect(sent).not.toHaveBeenCalled();
   });
 
-  it("copies the PR url without touching the host", () => {
+  it("copies the PR url without touching the host", async () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render1(mkCard({ prs: { svc: { facts: facts({ url: "https://gh/pr/77" }), fetchedAt: 1 } } as PrEntryMap }));
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /copy pr url/i }));
     expect(writeText).toHaveBeenCalledWith("https://gh/pr/77");
     expect(sent).not.toHaveBeenCalled();
   });
 
-  it("copies the worktree path without touching the host", () => {
+  it("copies the worktree path without touching the host", async () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render1(mkCard());
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /copy worktree path/i }));
     expect(writeText).toHaveBeenCalledWith("/r/svc");
     expect(sent).not.toHaveBeenCalled();
   });
 
-  it("forgets through the callback, not a raw post", () => {
+  it("forgets through the callback, not a raw post", async () => {
     const onForget = vi.fn();
     render1(mkCard(), vi.fn(), onForget);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /^forget$/i }));
     expect(onForget).toHaveBeenCalledWith("PROJ-1");
   });
 
-  it("offers Track it instead of Forget on a local card", () => {
+  it("offers Track it instead of Forget on a local card", async () => {
     render1(mkCard({ run: { ...mkCard().status.run, key: "local-abc", url: "", kind: "local" } as never }));
+    await openMore();
     expect(screen.queryByRole("button", { name: /^forget$/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /track it/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-abc" });
   });
 
-  it("prints how many actions it is offering", () => {
+  // The "N actions" counter is gone outright — `More`'s own summary names what
+  // it holds instead of counting it.
+  it("no longer prints an action count", () => {
     render1(mkCard());
-    const n = document.querySelectorAll(".dd-act").length;
-    expect(document.querySelector(".dd-count")!.textContent).toContain(String(n));
+    expect(screen.queryByText(/\d+ actions/)).toBeNull();
+    expect(document.querySelector(".dd-count")).toBeNull();
+  });
+
+  it("promotes exactly four actions above the fold, in order", () => {
+    render1(mkCard({ prs: { svc: { facts: facts({ number: 482 }), fetchedAt: 1 } } as PrEntryMap }));
+    const promoted = screen.getByRole("group", { name: "Actions" });
+    expect(within(promoted).getAllByRole("button").map((b) => b.textContent))
+      .toEqual(["Open workspace", "Open PR #482", "Diff", "Address PR"]);
+  });
+
+  // Fewer than four apply when there is no PR and no review to address: Open
+  // workspace and Diff are unconditional, so those are the floor.
+  it("promotes only what applies when there is no PR and nothing to address", () => {
+    render1(mkCard({ column: "progress" }));
+    const promoted = screen.getByRole("group", { name: "Actions" });
+    expect(within(promoted).getAllByRole("button").map((b) => b.textContent))
+      .toEqual(["Open workspace", "Diff"]);
+  });
+
+  it("hides every remaining action behind one disclosure", async () => {
+    render1(mkCard());
+    expect(screen.queryByText("Copy branch name")).toBeNull();
+    await openMore();
+    expect(screen.getByText("Copy branch name")).toBeTruthy();
+  });
+
+  // Enumerated on purpose: `More` is a disclosure, not a deletion. This test is
+  // what stops a rebuild quietly dropping an affordance somebody used. Built
+  // from what the drawer actually offers today (read off DeckDetail.tsx and
+  // this file's own fixtures) — four of the old dozen (Open workspace, Diff —
+  // all repos' promoted stand-in "Diff", Address PR, Open PR) moved above the
+  // fold instead of into `More`, and are checked there via the two tests above
+  // rather than repeated here, since a promoted button and a `More` row for
+  // the very same action would give `getByRole` two matches for one name.
+  it("keeps every action the old drawer had reachable", async () => {
+    const { container } = render1(mkCard({ prs: { svc: { facts: facts({ number: 482 }), fetchedAt: 1 } } as PrEntryMap }));
+    // Promoted, not in `More` — reachable already, before any click.
+    for (const label of ["Open workspace", "Diff", "Open PR #482", "Address PR"]) {
+      expect(within(container).getByRole("button", { name: label })).toBeTruthy();
+    }
+    await openMore();
+    for (const label of [
+      "Open in Jira", "Copy branch name", "Copy ticket key", "Copy PR url",
+      "Copy worktree path", "Forget",
+    ]) {
+      await waitFor(() => expect(screen.getByRole("button", { name: label })).toBeTruthy());
+    }
   });
 
   it("closes on its close button", () => {
@@ -444,30 +536,39 @@ describe("DeckDetail — Spend", () => {
 
   const spend = () => document.querySelector(".dd-spend") as HTMLElement | null;
 
-  it("reads as still-loading before the host answers", () => {
+  // Spend moved a second time, into `More` alongside Copy, per-repo diffs and
+  // Forget — every case here opens the disclosure first, since none of this
+  // text exists in the DOM until it does (see DeckDetail.tsx's own comment on
+  // why the body renders only while open, rather than leaning on the
+  // browser's native `details:not([open])` hiding).
+  it("reads as still-loading before the host answers", async () => {
     render1(mkCard(), undefined, undefined, undefined);
+    await openMore();
     expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
     expect(spend()).toBeNull();
   });
 
-  it("says so when the host could not read the transcripts", () => {
+  it("says so when the host could not read the transcripts", async () => {
     render1(mkCard(), undefined, undefined, null);
+    await openMore();
     expect(screen.getByText(/Couldn't read/)).toBeTruthy();
     expect(spend()).toBeNull();
   });
 
   // The invariant the card's tests existed to protect, relocated: a run that was
   // measured and genuinely cost nothing must not look like one still being read.
-  it("distinguishes a genuine zero from an unread run", () => {
+  it("distinguishes a genuine zero from an unread run", async () => {
     render1(mkCard(), undefined, undefined, totals());
+    await openMore();
     expect(screen.getByText("No recorded usage")).toBeTruthy();
     expect(screen.queryByText(/Reading transcripts/)).toBeNull();
     expect(spend()).toBeNull();
   });
 
-  it("breaks the four token classes out, each with its raw count", () => {
+  it("breaks the four token classes out, each with its raw count", async () => {
     render1(mkCard(), undefined, undefined,
       totals({ input: 1_234, output: 5_678, cacheWrite: 90_123, cacheRead: 4_567_890 }));
+    await openMore();
     const rows = Array.from(spend()!.querySelectorAll(".sp-row")).map((el) => ({
       k: el.querySelector(".sp-k")!.textContent,
       v: el.querySelector(".sp-v")!.textContent,
@@ -479,8 +580,9 @@ describe("DeckDetail — Spend", () => {
     expect(rows[3].v).toBe("4,567,890");
   });
 
-  it("labels the weighted total eq, never tok", () => {
+  it("labels the weighted total eq, never tok", async () => {
     render1(mkCard(), undefined, undefined, totals({ cacheRead: 3_804_000 }));
+    await openMore();
     const tot = spend()!.querySelector(".sp-tot")!;
     // weightedEq({cacheRead: 3_804_000}) = 380,400 → formatEq → "380k"
     expect(tot.querySelector(".sp-v")!.textContent).toContain("380k");
@@ -494,8 +596,9 @@ describe("DeckDetail — Spend", () => {
   // The weighted total is deliberately NOT the sum of the rows above it: cache
   // reads are ~96.7% of raw tokens at a tenth the rate, so a raw sum would rank
   // tasks by conversation length rather than by cost.
-  it("does not print the weighted total as the raw sum of its rows", () => {
+  it("does not print the weighted total as the raw sum of its rows", async () => {
     render1(mkCard(), undefined, undefined, totals({ output: 1_000_000, cacheRead: 1_000_000 }));
+    await openMore();
     const tot = spend()!.querySelector(".sp-tot .sp-v")!.textContent;
     // raw sum would be 2,000,000 → "2.0M"; weighted is 1_000_000*5 + 1_000_000*0.1 = 5,100,000
     expect(tot).toContain("5.1M");

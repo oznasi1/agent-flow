@@ -85,9 +85,11 @@ const MIN_ORCH_W = 420;
 /** This drawer's own instance of the shared width machinery — the ceiling,
  * clamp, "full panel width" escape hatch, and defensive read/write — built
  * once per module, not per render. `key: "orchWidth"` is the persisted
- * shape this file has always used (see `drawerResize.ts`'s own note on
- * `persist` replacing rather than merging: a second drawer built on this
- * same factory needs its own merge story before both keys can coexist). */
+ * shape this file has always used. `persist` (see `drawerResize.ts`) merges
+ * into the one shared persisted-state object rather than replacing it, which
+ * is what lets a second drawer built on this same factory (`DeckDetail.tsx`'s
+ * card drawer, under its own `"ddWidth"` key) coexist with this one for free
+ * — neither drawer's resize can wipe out what the other has stored. */
 const orchResize = createDrawerResize({ min: MIN_ORCH_W, def: DEFAULT_ORCH_W, key: "orchWidth" });
 
 /** The drag payload a Deck card carries. A NUL separator cannot appear in a
