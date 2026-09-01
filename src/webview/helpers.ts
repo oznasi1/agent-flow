@@ -1,5 +1,37 @@
 import { Filter, isTicketRun, Run, runKind, Task } from "../types";
 
+/** Case-fold a ticket key or a search query and drop every non-alphanumeric, so
+ * the shapes a user actually types for one ticket — "PROJ-1234", "proj 1234",
+ * "proj_1234" — all collapse to the same string. */
+export function normalizeKey(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+/** The key's trailing number, read off the RAW key so a project whose prefix
+ * itself ends in a digit ("AB2-1234") still yields "1234" — normalizing first
+ * would glue the prefix's digit onto the number and break the bare-number match. */
+function keyNumber(key: string): string {
+  return /(\d+)\s*$/.exec(key)?.[1] ?? "";
+}
+
+/** Does `query` name this ticket? True for the whole key however it was
+ * punctuated, for a prefix that reaches into the number ("PROJ-12"), and for a
+ * bare number prefixing the key's own ("12" finds PROJ-1234).
+ *
+ * A digitless prefix deliberately does NOT match: "proj" prefixes every key in
+ * the project, so honouring it would pin the entire pool above the title matches
+ * and destroy the ranking the search box exists to provide. Reaching the number
+ * is what separates "I am naming a ticket" from "I am typing a word". */
+export function keyMatches(key: string, query: string): boolean {
+  const q = normalizeKey(query);
+  if (!q) return false;
+  // Digitless: only the whole key, for a source that keys its work with a bare
+  // slug rather than a number.
+  if (!/\d/.test(q)) return normalizeKey(key) === q;
+  if (normalizeKey(key).startsWith(q)) return true;
+  return /^\d+$/.test(q) && keyNumber(key).startsWith(q);
+}
+
 /** The tab bar's shipped order — NOT `types.ts`'s declaration order for `Filter`,
  * and not a connector's `supportedFilters` array order either. This has been the
  * rendered order since the "reorder task filter tabs" change (My sprint, Mine,

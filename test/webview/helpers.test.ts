@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, keyLabel, matchesStatus, moveKey, railClass, ticketKind, visibleFilters } from "../../src/webview/helpers";
+import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, keyLabel, keyMatches, matchesStatus, normalizeKey, moveKey, railClass, ticketKind, visibleFilters } from "../../src/webview/helpers";
 import type { Filter, Run, Task } from "../../src/types";
 import { mkTask } from "../_helpers/factories";
 
@@ -323,5 +323,62 @@ describe("keyLabel", () => {
   it("keeps a review run's key", () => {
     expect(keyLabel(run({ key: "review-webapp-850", url: "https://gh/pr/850", kind: "review" })))
       .toBe("review-webapp-850");
+  });
+});
+
+describe("normalizeKey", () => {
+  it("case-folds and strips every non-alphanumeric", () => {
+    expect(normalizeKey("PROJ-1234")).toBe("proj1234");
+    expect(normalizeKey("proj 1234")).toBe("proj1234");
+    expect(normalizeKey("  Proj_1234 ")).toBe("proj1234");
+  });
+
+  it("leaves an already-normal key alone, and survives an empty query", () => {
+    expect(normalizeKey("proj1234")).toBe("proj1234");
+    expect(normalizeKey("")).toBe("");
+  });
+});
+
+describe("keyMatches", () => {
+  it("matches the whole key however the user punctuated it", () => {
+    for (const q of ["PROJ-1234", "proj-1234", "PROJ 1234", "proj1234"]) {
+      expect(keyMatches("PROJ-1234", q)).toBe(true);
+    }
+  });
+
+  it("matches a prefix that reaches into the number", () => {
+    expect(keyMatches("PROJ-1234", "PROJ-12")).toBe(true);
+    expect(keyMatches("PROJ-1234", "proj 1")).toBe(true);
+  });
+
+  it("matches a bare number against the key's number part", () => {
+    expect(keyMatches("PROJ-1234", "1234")).toBe(true);
+    expect(keyMatches("PROJ-1234", "12")).toBe(true);
+  });
+
+  it("refuses a bare number that is not a prefix of the key's number", () => {
+    expect(keyMatches("PROJ-1234", "999")).toBe(false);
+    // A suffix is not a prefix — "234" must not pull in PROJ-1234, or every
+    // ticket sharing a digit run would pin itself to the top of the list.
+    expect(keyMatches("PROJ-1234", "234")).toBe(false);
+  });
+
+  it("refuses a digitless prefix, so a title word never pins the whole project", () => {
+    // "proj" prefixes every key in the project — treating that as a ticket hit
+    // would pin the entire pool above the title matches and destroy the ranking.
+    expect(keyMatches("PROJ-1234", "proj")).toBe(false);
+    expect(keyMatches("PROJ-1234", "pr")).toBe(false);
+  });
+
+  it("refuses an unrelated word and an empty query", () => {
+    expect(keyMatches("PROJ-1234", "rate limiter")).toBe(false);
+    expect(keyMatches("PROJ-1234", "")).toBe(false);
+  });
+
+  it("handles a key with no number at all", () => {
+    // Not every source keys its work PROJ-123 — a key can be a bare slug, in
+    // which case there is no number to prefix and only the whole thing matches.
+    expect(keyMatches("SPIKE", "spike")).toBe(true);
+    expect(keyMatches("SPIKE", "1")).toBe(false);
   });
 });

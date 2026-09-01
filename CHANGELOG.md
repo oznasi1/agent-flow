@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The sidebar search box finds tickets by number, not just by title.** Type
+  `PROJ-1234`, `proj 1234` or a bare `1234` and that ticket is pinned to the top
+  of the list — punctuation and casing don't matter, and neither does whether you
+  bothered with the project prefix. A partial number narrows as you type, and a
+  near-miss still surfaces fuzzily below the ticket you actually named, so a
+  fat-fingered digit doesn't come back empty. Title search is unchanged: a query
+  that names no ticket ranks purely by title relevance, exactly as before.
+
 ## [0.62.0] — 2026-08-31
 
 ### Changed

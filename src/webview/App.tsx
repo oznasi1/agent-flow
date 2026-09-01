@@ -3,7 +3,7 @@ import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
 import {
   addOnce, deriveStatuses, effectiveFilter, fmtEst, gateCopy, isPrReviewStatus, isTopPriority,
-  matchesStatus, moveKey, railClass, ticketKind, visibleFilters,
+  keyMatches, matchesStatus, moveKey, railClass, ticketKind, visibleFilters,
 } from "./helpers";
 import { Filter, FilterVisibility, Task, OutboundMessage, Size, NotepadItemView, NotepadSectionView } from "../types";
 import type { SerializedCaps } from "../tasks/provider";
@@ -456,9 +456,12 @@ export function App(): JSX.Element {
     [tasks],
   );
 
-  // Fuzzy index over each task's title (summary only — description is out of scope).
+  // Fuzzy index over each task's title and its ticket key (description is out of
+  // scope). Indexing the key is what lets a near-miss — "1234" against PROJ-1235,
+  // a digit fat-fingered — still surface; the exact ticket, when there is one, is
+  // pinned above all of it by the pass below rather than left to compete on score.
   const fuse = React.useMemo(
-    () => new Fuse(tasks, { keys: ["summary"], threshold: 0.4, ignoreLocation: true }),
+    () => new Fuse(tasks, { keys: ["summary", "key"], threshold: 0.4, ignoreLocation: true }),
     [tasks],
   );
 
@@ -466,7 +469,16 @@ export function App(): JSX.Element {
   // tasks touching any selected repo (OR) and, if a status lens is active, to
   // the selected statuses. All three filter types combine as AND.
   const q = textQuery.trim();
-  const searched = q ? fuse.search(q).map((r) => r.item) : tasks;
+  // Two tiers. A query that NAMES a ticket ("PROJ-1234", "proj 1234", a bare
+  // "1234") puts that ticket first, in pool order — pasting a key must land on
+  // that key, never on some task whose title happens to quote the same number.
+  // Everything else falls through to the fuzzy pass, with the pinned tasks
+  // removed so a task can't appear twice.
+  const named = q ? tasks.filter((t) => keyMatches(t.key, q)) : [];
+  const pinned = new Set(named.map((t) => t.key));
+  const searched = q
+    ? [...named, ...fuse.search(q).map((r) => r.item).filter((t) => !pinned.has(t.key))]
+    : tasks;
   const visibleTasks = searched.filter(
     (t) =>
       (selectedRepos.size === 0 || (t.services ?? []).some((s) => selectedRepos.has(s))) &&
@@ -641,7 +653,7 @@ export function App(): JSX.Element {
           <input
             value={textQuery}
             spellCheck={false}
-            placeholder="Search title…"
+            placeholder="Search title or ticket…"
             onChange={(e) => {
               setTextQuery(e.target.value);
               scheduleLensUsed("search");
@@ -665,7 +677,7 @@ export function App(): JSX.Element {
       {!loading && authed !== null && visibleTasks.length === 0 && (
         <div className="empty">
           {q
-            ? `No titles match “${q}”.`
+            ? `No tasks match “${q}”.`
             : selectedRepos.size > 0
               ? "No tasks touch the selected repos."
               : statuses.size > 0
