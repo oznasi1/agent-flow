@@ -8242,9 +8242,10 @@ describe("background refetch", () => {
   });
 
   it("makes no request while the sidebar is hidden", async () => {
-    // VS Code disposes the WebviewView when the sidebar is hidden, which is the
-    // whole visibility gate: no view, no poll. Re-opening sends `ready`, which
-    // fetches on its own.
+    // VS Code disposes the WebviewView when the sidebar is hidden, and the timer
+    // is cleared with it — that disposal IS the visibility gate, which is why the
+    // pass itself carries no view check. Re-opening sends `ready`, which fetches
+    // on its own, so the panel comes back current anyway.
     const s = await mounted(5);
     s.view.dispose();
     await vi.advanceTimersByTimeAsync(15 * MIN);
@@ -8259,6 +8260,17 @@ describe("background refetch", () => {
     clientStub.fetchTasks.mockClear();
     await vi.advanceTimersByTimeAsync(5 * MIN);
     expect(clientStub.fetchTasks).toHaveBeenCalled();
+  });
+
+  it("polls never on an install that has no source configured", async () => {
+    // The panel is showing the setup CTA, not a list. There is nothing to refresh
+    // and nowhere to ask.
+    vi.mocked(getConfig).mockReturnValue({ ...CFG, refetchIntervalMinutes: 5, baseUrl: "", project: "" });
+    const s = setup();
+    await s.send({ type: "ready" });
+    clientStub.fetchTasks.mockClear();
+    await vi.advanceTimersByTimeAsync(15 * MIN);
+    expect(clientStub.fetchTasks).not.toHaveBeenCalled();
   });
 
   it("does not gate the panel on a background auth failure", async () => {

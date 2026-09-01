@@ -291,10 +291,15 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
    * report a lens nobody chose to telemetry, and must not swap a working list for
    * the sign-in gate on one bad answer — so it simply declines to run instead. */
   private async backgroundRefetch(): Promise<void> {
-    // No view means the sidebar is hidden and VS Code disposed it. Re-opening
-    // sends `ready`, which fetches — so a hidden panel costs nothing and still
-    // comes back current.
-    if (!this.view) return;
+    // No `this.view` check here, deliberately: the timer is the visibility gate.
+    // It is armed on resolve and cleared on dispose, so a hidden sidebar has
+    // nothing left to tick and this never runs with a dead view. A guard would
+    // read as the gate while being unreachable — and a branch no test can reach
+    // is a branch that rots.
+    //
+    // An unconfigured install polls never: `postInitialState` already declines to
+    // fetch without a configured source, and a timer that ignored that would ask a
+    // provider that has nowhere to ask.
     if (!this.connector.isConfigured()) return;
     try {
       if (!(await this.connector.isAuthenticated())) return;
