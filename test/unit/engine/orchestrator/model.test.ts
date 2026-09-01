@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, incomingEdges,
-  actionFor, edgeAction, condIncomplete, stripHostStamps,
+  actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -266,5 +266,27 @@ describe("stripHostStamps", () => {
   it("does not mutate its argument", () => {
     stripHostStamps(stamped);
     expect(stamped.firedAt).toBe(1756200000000);
+  });
+});
+
+describe("id minting", () => {
+  const flow = (nodeIds: string[], edgeIds: string[]): Flow => ({
+    id: "f1", name: "Ship it", armed: false, createdAt: 0,
+    nodes: nodeIds.map((id) => ({ id, x: 0, y: 0, join: "any", kind: "notify", message: "" })),
+    edges: edgeIds.map((id) => ({ id, from: "n1", to: "n2", cond: { kind: "pr-merged" } })),
+  });
+
+  it("mints the first free node id, not length + 1", () => {
+    // A flow whose n2 was deleted has n1 and n3; length + 1 would mint n3 again.
+    expect(nextNodeId(flow(["n1", "n3"], []))).toBe("n2");
+  });
+
+  it("mints the first free edge id", () => {
+    expect(nextEdgeId(flow([], ["e1", "e2"]))).toBe("e3");
+  });
+
+  it("mints n1 and e1 for an empty flow", () => {
+    expect(nextNodeId(flow([], []))).toBe("n1");
+    expect(nextEdgeId(flow([], []))).toBe("e1");
   });
 });

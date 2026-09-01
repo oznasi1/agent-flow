@@ -27,6 +27,8 @@ import {
   FlowEdge,
   JoinMode,
   LaunchDest,
+  nextEdgeId,
+  nextNodeId,
   PlannedNode,
 } from "../engine/orchestrator/model";
 import { hasNote } from "../engine/prompt";
@@ -969,31 +971,10 @@ export function withoutEdge(flow: Flow, edgeId: string): Flow {
   return { ...flow, edges: flow.edges.filter((x) => x.id !== edgeId) };
 }
 
-/** The next unused `${prefix}N` id, scanning past whatever is already taken
- * rather than trusting the live count. A count alone drifts the moment
- * anything is deleted: three edges minus the middle one is a list of length
- * two, so `length + 1` mints the id the untouched third edge already has.
- * One minting strategy for both node and edge ids — see `nextNodeId` and
- * `nextEdgeId` below — shared by both presentations so a node or edge minted
- * from the canvas and one minted from the list can never collide. */
-function nextId(prefix: string, taken: Set<string>): string {
-  let n = 1;
-  while (taken.has(`${prefix}${n}`)) n++;
-  return `${prefix}${n}`;
-}
-
-/** An id unique within this flow. Node ids are local to a flow. */
-export function nextNodeId(flow: Flow): string {
-  return nextId("n", new Set(flow.nodes.map((x) => x.id)));
-}
-
-/** An id unique within this flow. Edge ids are local to a flow, and must stay
- * unique even after a delete: `deleteEdge`, `setCond` and the inspector's own
- * `flow.edges.find` all key off this id, so two edges sharing one silently
- * merge into whichever the code touches first. */
-export function nextEdgeId(flow: Flow): string {
-  return nextId("e", new Set(flow.edges.map((x) => x.id)));
-}
+// Moved to model.ts so `templates.ts` can mint ids without an engine module
+// importing from `src/webview/`. Re-exported because both presentations and
+// their tests import them from here.
+export { nextNodeId, nextEdgeId } from "../engine/orchestrator/model";
 
 /** A rule as one compact line, for a presentation with no room for the open
  * row's controls — the dry-run panel. Spends `endLabel`, `condOptionLabel` and
