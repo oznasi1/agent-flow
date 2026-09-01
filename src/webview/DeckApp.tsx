@@ -4,6 +4,7 @@ import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromp
 import type { AccountSlot } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
+import { attachedWorkflows, rankByState, workflowState, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
 import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
@@ -172,7 +173,50 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
   }
 }
 
-function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, selected, onSelect }: {
+/** The glyph that borrows attention, one per status — only the two states that
+ * genuinely want a human get one, echoing `WorkflowBlock.tsx`'s own per-step
+ * `MARK`. Advancing, done and disarmed say nothing beyond their hue: a glyph on
+ * every chip would put twenty exclamation points and checkmarks on an ordinary
+ * board and drown out the two that matter. */
+const CHIP_MARK: Partial<Record<WorkflowStatus, string>> = {
+  "waiting-on-you": "!",
+  stopped: "✕",
+};
+
+/** The trailing phrase after a chip's name, or `undefined` when no honest one
+ * exists — never a sentence this function invents (see attach.ts's own doc
+ * comment on `StepState.receipt`/`reason`).
+ *
+ * `stopped` names the failing edge's own recorded `error` — the same receipt
+ * `WorkflowBlock.tsx`'s `stepText` reads for a `fail` step, spent here instead
+ * of `reasonWhy` because an error string already IS the honest phrase; nothing
+ * to derive.
+ *
+ * `waiting-on-you` names the gate's own `question`, read off the flow graph the
+ * same way `runner.ts`'s `performedNote` reads a gate's question off an edge's
+ * `to` for its "asked you: …" receipt — except the pending edge here points
+ * AWAY from the gate (`evaluate.ts`'s `awaiting-answer` note is always posted
+ * against the node an outgoing edge's `from` names), so the lookup runs on
+ * `edge.from` instead of `edge.to`. `reasonWhy("awaiting-answer")` would give
+ * "waiting for your answer" — true, but not what the flow is actually asking
+ * for — so this reaches past it for the one thing that can honestly say that:
+ * the gate's own words. A blank question falls back to the name alone rather
+ * than printing an empty dash. */
+function workflowChipTrailer(flow: Flow, state: WorkflowState): string | undefined {
+  if (state.status === "stopped") {
+    return state.steps.find((s) => s.state === "fail")?.receipt;
+  }
+  if (state.status === "waiting-on-you") {
+    const step = state.steps.find((s) => s.state === "you");
+    const edge = step && flow.edges.find((e) => e.id === step.edgeId);
+    const gate = edge && flow.nodes.find((n) => n.id === edge.from);
+    if (!gate || gate.kind !== "gate") return undefined;
+    return gate.question || undefined;
+  }
+  return undefined;
+}
+
+function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, selected, onSelect, workflow }: {
   r: RunStatus;
   /** Non-null on the Sessions lens: this card is that one session, and its state
    * line and action target come from the agent rather than the run. */
@@ -184,6 +228,15 @@ function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, se
   onMerge: (t: MergeTarget) => void;
   selected: boolean;
   onSelect: () => void;
+  /** The one workflow this card shows a chip for, and where it stands —
+   * `undefined` whenever `agentFlow.orchestrator` is off or nothing binds this
+   * run, either of which must render no chip at all. Derived ONCE per card by
+   * the caller (`DeckApp`'s own `card` closure), not here: `workflowState` runs
+   * `previewFlow` internally, and doing that derivation inside every `Card`
+   * instance would repeat it on every one of this component's own re-renders
+   * rather than once per board pass — see that closure's own comment for the
+   * numbers this was measured against. */
+  workflow?: { flow: Flow; state: WorkflowState };
 }): JSX.Element {
   // The agent's own activity when this card is an agent; the run's reduction
   // otherwise. `column` is threaded in rather than read off `r` for the same
@@ -233,6 +286,12 @@ function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, se
   // reads the same lead PR, so the two cannot disagree.
   const firstBit = sigBits[0];
   const leadPrNumber = firstBit?.kind === "text" && firstBit.text.startsWith("#") ? firstBit.text.slice(1) : null;
+
+  // Name and state, no progress count — "2 of 5" is drawer information, and a
+  // card already carries a kind mark, a key, a status pill and a lane rail.
+  const wfTrailer = workflow ? workflowChipTrailer(workflow.flow, workflow.state) : undefined;
+  const wfLabel = workflow ? (wfTrailer ? `${workflow.flow.name} — ${wfTrailer}` : workflow.flow.name) : undefined;
+  const wfMark = workflow ? CHIP_MARK[workflow.state.status] : undefined;
 
   return (
     <div
@@ -351,6 +410,17 @@ function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, se
       </div>
 
       <div className="c-foot2" onClick={(e) => e.stopPropagation()}>
+        {/* `title` mirrors the visible text rather than carrying it alone: the
+            label is already readable on the card and to a screen reader without
+            it (a `title` is invisible to a keyboard user and absent from a
+            screenshot), so it is here only as a hover affordance for the rare
+            long gate question this chip's own `text-overflow: ellipsis`
+            truncates. */}
+        {workflow && (
+          <span className={`c-wf ${workflow.state.status}`} title={wfLabel}>
+            {wfMark ? `${wfMark} ` : ""}{wfLabel}
+          </span>
+        )}
         <button
           className={`act primary ${r.windowOpen ? "live" : ""}`}
           title={r.windowOpen ? "Open now — Open focuses the window already running this task" : "Open this task's workspace"}
@@ -723,6 +793,46 @@ export function DeckApp(): JSX.Element {
     send({ type: "deck:forget", key });
   }, []);
 
+  // One "now" for the whole board pass, read once and handed to every card's
+  // workflow chip below — not one read per card, and not one read per card
+  // PLUS a second inside `rankByState` and a third inside `workflowState`,
+  // which is what `DeckDetail.tsx`'s own single `Date.now()` call already
+  // guards against for one card. The reasoning carries over unchanged: `now` is
+  // deliberately not memoized (a cached wall-clock reading is exactly the state
+  // that goes stale), and `forceTick`'s own 1s interval already re-renders this
+  // component regularly regardless of what this line does.
+  const now = Date.now();
+
+  // Per card: `attachedWorkflows` filters the WHOLE board's flows down to this
+  // run's own (almost always 0 or 1, per attach.ts's "one workflow per card is
+  // a display rule" comment), then `rankByState` picks the one that most needs
+  // a human when more than one is bound. Done ONCE here, per card, per board
+  // pass — not inside `Card` itself, which re-renders independently and would
+  // otherwise repeat this derivation on every one of ITS OWN re-renders rather
+  // than once per pass over the board.
+  //
+  // The cost actually measured: `workflowState` runs `previewFlow` internally,
+  // which runs `evaluateFlow` twice, each rebuilding a `Map` over every run on
+  // the board. For the common case — one armed workflow per card — `rankByState`
+  // sorts a one-element array (zero comparisons, so it calls `workflowState`
+  // zero times internally) and the explicit call below is the only one: a board
+  // of 30 cards each with one workflow costs 30 `workflowState` calls, i.e. 60
+  // `evaluateFlow` calls, per second. Cheap. The number only climbs where a
+  // card binds SEVERAL workflows at once (attach.ts's escape hatch, not the
+  // common shape): `rankByState`'s sort then calls `workflowState` twice per
+  // comparison, so a handful of 4-workflow cards on the same board could reach
+  // into the hundreds of `evaluateFlow` calls a second. That is a property of
+  // `rankByState` itself (unchanged here, and out of this task's files), not of
+  // computing it once per card instead of once per card per `Card` re-render —
+  // this fix removes the latter multiplier; it does not remove the former.
+  const cardWorkflow = (c: DeckCard): { flow: Flow; state: WorkflowState } | undefined => {
+    if (!orchEnabled) return undefined;
+    const key = c.status.run.key;
+    const boundTicketKey = isTicketRun(c.status.run) ? key : c.status.inferredTicketKey;
+    const wf = rankByState(attachedWorkflows(flows, key, boundTicketKey), runs, now, branchCi)[0];
+    return wf ? { flow: wf, state: workflowState(wf, runs, now, branchCi) } : undefined;
+  };
+
   // One card, wherever it lands — a lane renders exactly what an unlaned column
   // does, so a lane can never quietly grow its own kind of card.
   const card = (c: DeckCard): JSX.Element => (
@@ -733,7 +843,8 @@ export function DeckApp(): JSX.Element {
         send({ type: "deck:mergePr", key: c.status.run.key, repo: t.repo, number: t.number });
       }}
       selected={c.id === selId}
-      onSelect={() => { setOpenFlowId(null); setSelId((cur) => (cur === c.id ? null : c.id)); }} />
+      onSelect={() => { setOpenFlowId(null); setSelId((cur) => (cur === c.id ? null : c.id)); }}
+      workflow={cardWorkflow(c)} />
   );
 
   return (

@@ -1038,6 +1038,34 @@ export const DECK_CSS = `
 
   .c-foot2 { display: flex; gap: 5px; margin-top: auto; padding-top: 2px; }
 
+  /* The workflow chip: name and state, no progress count — "2 of 5" is drawer
+     information, and a card already carries a kind mark, a key, a status pill
+     and a lane rail, so a pip count would be a fifth thing to parse. English,
+     not mono, since it reads as a name and a sentence fragment, never an
+     identifier. \`margin-right: auto\` is the whole layout trick: as the first
+     child of a flex row it pushes Open/Diff to the far end without a wrapper.
+     One line, ellipsized — a long gate question must not push the card's own
+     actions off the edge.
+
+     Hues, and why: \`--c-progress\` for advancing and \`--c-done\` for done read
+     as ordinary board colours already spent elsewhere on this card. Amber and
+     red are spent more carefully — \`--c-attn\` for waiting-on-you and
+     \`--c-danger\` for stopped are the only two states that genuinely want a
+     human, so they are the only two chips that borrow attention, glyph
+     included (! / ✕, prepended in DeckApp.tsx, matching WorkflowBlock's own
+     per-step marks). A workflow that is merely attached and fine is neither —
+     it takes the quiet blue rather than a colour already spoken for elsewhere
+     on the board. Disarmed gets no colour at all: --dim, the same ink the rest
+     of the card's quiet text uses, because a disarmed workflow is inert and
+     should read that way at a glance. */
+  .c-wf { flex: 0 1 auto; min-width: 0; margin-right: auto; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-body); }
+  .c-wf.advancing { color: var(--c-progress); }
+  .c-wf.done { color: var(--c-done); }
+  .c-wf.disarmed { color: var(--dim); }
+  .c-wf.waiting-on-you { color: var(--c-attn); font-weight: 600; }
+  .c-wf.stopped { color: var(--c-danger); font-weight: 600; }
+
   /* The spend figure. A count, so it is mono — the deck's rule is mono for
      identifiers and counts, prose in the UI font. It sits in the footer's dead
      right side: on the top row it wraps the ticket key onto a second line

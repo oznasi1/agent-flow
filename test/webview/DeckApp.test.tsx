@@ -10,7 +10,7 @@ import { DECK_CSS, DRAWER_ANIM_MS } from "../../src/webview/deckStyles";
 import { DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { send } from "../../src/webview/vscodeApi";
 import type { AgentActivity, CardAgent, OutboundMessage, PrFacts, RepoGit, ReviewRequest, RunStatus } from "../../src/types";
-import type { Flow } from "../../src/engine/orchestrator/model";
+import type { Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
 
 const sent = vi.mocked(send);
 
@@ -3342,5 +3342,94 @@ describe("the forge account in the legend", () => {
     expect(screen.getByText("oznasi1")).toBeTruthy();
     host({ ...runsMsg([mkStatus()]), ghAccount: null });
     expect(screen.queryByText("oznasi1")).toBeNull();
+  });
+});
+
+// The card's own workflow chip (Task 12): a single "name, and state" mark in
+// the foot, so a board of twenty cards says which one carries a workflow
+// without opening any of them. Same fixture shapes DeckDetail.test.tsx's own
+// `place`/`notify`/`gateNode`/`edge` use — a place feeding a notify terminal,
+// with a gate spliced in for the waiting case — reused rather than a second
+// set of node-builders for the same graph shapes.
+describe("the card's workflow chip", () => {
+  const place = (id: string, runKey: string): FlowNode =>
+    ({ id, x: 0, y: 0, join: "any", kind: "place", runKey, repo: "svc" });
+  const notify = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "notify", message: "" });
+  const gateNode = (id: string, question: string): FlowNode =>
+    ({ id, x: 0, y: 0, join: "any", kind: "gate", question });
+  const edge = (over: Partial<FlowEdge> & { id: string; from: string; to: string }): FlowEdge =>
+    ({ cond: { kind: "pr-merged" }, ...over });
+
+  /** Advancing: one place feeding one notify, its only edge still pending —
+   * `attach.ts`'s `workflowState` calls that "advancing" once armed with no
+   * step in `you`/`fail`. */
+  const shipItOn = (runKey: string): Flow => ({
+    id: "f1", name: "Ship it", armed: true, createdAt: 100,
+    nodes: [place("n1", runKey), notify("n2")],
+    edges: [edge({ id: "e1", from: "n1", to: "n2" })],
+  });
+
+  /** Waiting-on-you: the place already asked a gate (that incoming edge fired),
+   * and the gate's own outgoing edge is what `evaluate.ts` posts its
+   * `awaiting-answer` note against — the same shape DeckDetail.test.tsx's
+   * `withGateOn` builds, with the gate's `question` set to what the chip
+   * should say. */
+  const gateOn = (runKey: string): Flow => ({
+    id: "f1", name: "Ship it", armed: true, createdAt: 100,
+    nodes: [place("n1", runKey), gateNode("g1", "approve deploy"), notify("n2")],
+    edges: [
+      edge({ id: "e-ask", from: "n1", to: "g1", performed: true, firedAt: 1, firedNote: "asked you: approve deploy" }),
+      edge({ id: "e-gate", from: "g1", to: "n2", cond: { kind: "gate-approved" } }),
+    ],
+  });
+
+  /** Stopped: the one edge carries its own recorded `error`, which is the
+   * receipt `workflowState` reports for a `fail` step and the chip's only
+   * honest source for what a stopped workflow hit. */
+  const failedOn = (runKey: string): Flow => ({
+    id: "f1", name: "Ship it", armed: true, createdAt: 100,
+    nodes: [place("n1", runKey), notify("n2")],
+    edges: [edge({ id: "e1", from: "n1", to: "n2", error: "smoke test failed" })],
+  });
+
+  /** One card bound to `PROJ-142`, posted through the same `deck:flows`/
+   * `deck:runs` messages a real host sends — `enabled` defaults `true` the same
+   * way `flowsMsg` itself does, so a test that wants the orchestrator off says
+   * so explicitly rather than relying on an unstated default. */
+  const renderBoard = (opts: { flows: Flow[]; orchEnabled?: boolean }) => {
+    render(<DeckApp />);
+    host(flowsMsg(opts.flows, opts.orchEnabled ?? true));
+    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "PROJ-142" } })]));
+  };
+
+  it("names the workflow on an advancing card, with no progress count", () => {
+    renderBoard({ flows: [shipItOn("PROJ-142")] });
+    const chip = screen.getByTitle(/Ship it/);
+    expect(chip.textContent).toBe("Ship it");
+    expect(chip.textContent).not.toMatch(/\d+ of \d+/);
+  });
+
+  it("says what a waiting workflow wants", () => {
+    renderBoard({ flows: [gateOn("PROJ-142")] });
+    expect(screen.getByText(/Ship it — approve deploy/)).toBeTruthy();
+  });
+
+  it("says what a stopped workflow hit", () => {
+    renderBoard({ flows: [failedOn("PROJ-142")] });
+    expect(screen.getByText(/Ship it — smoke test failed/)).toBeTruthy();
+  });
+
+  it("shows no chip when the card has no workflow", () => {
+    renderBoard({ flows: [] });
+    expect(screen.queryByTitle(/Ship it/)).toBeNull();
+  });
+
+  // Paired with "names the workflow on an advancing card" above, which posts
+  // the identical fixture with the orchestrator left at its default `true` and
+  // gets a chip — so this failing to find one is proof of the setting's own
+  // effect, not of a selector that would never have matched anyway.
+  it("shows no chip when the orchestrator is off", () => {
+    renderBoard({ flows: [shipItOn("PROJ-142")], orchEnabled: false });
+    expect(screen.queryByTitle(/Ship it/)).toBeNull();
   });
 });
