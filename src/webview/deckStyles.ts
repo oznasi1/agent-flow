@@ -763,25 +763,40 @@ export const DECK_CSS = `
   }
 
   /* The selected card's detail. \`--dd-w\` carries the live value — resized by
-     drag or arrow key, defaulting to 620px (drawerResize.ts's \`ddResize.DEFAULT\`,
-     which DeckDetail.tsx overrides with an inline style carrying the current
-     width; the override direction only works because the default already
-     exists here to be overridden, same reason \`--orch-w\` is declared locally
-     in orchestratorStyles.ts). 460px — narrow enough to still hold the header
-     row without wrapping or clipping, see \`.dd-hd .k\` below — is the floor
-     \`ddResize\`'s own \`min\` enforces, not a number repeated here.
-
-     \`hidden auto\`, not \`auto\`: the drawer is a panel of rows that all
-     ellipsize, so sideways scroll here is never a feature — it is always a row that
-     failed to shrink (a long mono key did exactly that), and it takes the close
-     button off-screen with it. Vertical scroll is the only axis it needs. */
-  .dd { --dd-w: 620px; width: var(--dd-w); overflow: hidden auto; }
+     drag or arrow key, defaulting to 620px (drawerResize.ts's \`ddResize.DEFAULT\`).
+     Unlike \`--orch-w\` (orchestratorStyles.ts), it is NOT declared anywhere in
+     this sheet: it's set imperatively on \`document.documentElement\` by
+     DeckDetail.tsx's own resize effect, not as an inline style on this
+     element. \`.board.dd-open\` below has to track this same width, and
+     \`.board\` is this drawer's SIBLING in \`DeckApp.tsx\`, not its descendant —
+     a custom property only cascades to descendants of wherever it's declared,
+     so an inline style here could never have reached it. \`:root\` is the one
+     ancestor both share. (This is also why \`--dd-w\` is in \`tokens.test.ts\`'s
+     \`RUNTIME_ONLY\` allowlist alongside \`--zone\`, rather than declared as a
+     literal default the way \`--orch-w\` is — there is no rule in this sheet
+     that would own such a declaration.) The \`620px\` in \`var(--dd-w, 620px)\`
+     below is the fallback for the instant before that effect has run at all.
+     460px — narrow enough to still hold the header row without wrapping or
+     clipping, see \`.dd-hd .k\` below — is the floor \`ddResize\`'s own \`min\`
+     enforces, not a number repeated here. */
+  .dd { width: var(--dd-w, 620px); }
   /* The resize grip, centred ON the left border rather than beside it, same as
      the Orchestrator drawer's own \`.orch-grip\` (orchestratorStyles.ts) — half
      outside the drawer's box, half inside, so it never nudges the header,
      body, or action row's own layout. One quiet, permanent affordance (three
      dots) rather than a hover-only tint, for the same reason that file gives:
-     a control that only reveals itself on touch is a control nobody finds. */
+     a control that only reveals itself on touch is a control nobody finds.
+
+     Unlike \`.orch-grip\`, this one is NOT a child of the element that scrolls
+     (see \`.dd-scroll\` below): \`.dd\`, the element it's positioned relative to,
+     carries no \`overflow\` of its own any more. \`.orch\` never scrolled as a
+     whole to begin with, so copying this rule onto \`.dd\` verbatim while \`.dd\`
+     still owned \`overflow: hidden auto\` clipped the grip's own \`left: -4px\`
+     (only half the "half outside" it claimed) and carried it up and down with
+     whatever the drawer's content did — nearly out of reach the moment
+     \`More\` opened. Splitting the scrolling region into its own child fixes
+     both at once: the grip is bounded only by \`.dd\` itself now, which never
+     scrolls and never clips. */
   .dd-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 9px; z-index: 1;
     background: transparent; border: 0; padding: 0; cursor: ew-resize; }
   .dd-grip::after {
@@ -793,6 +808,18 @@ export const DECK_CSS = `
   .dd-grip:hover::after, .dd-grip:focus-visible::after { opacity: .9; }
   .dd-grip:focus-visible { outline: none;
     box-shadow: inset 0 0 0 1px var(--vscode-focusBorder); }
+  /* The one element that actually scrolls and clips — a sibling of \`.dd-grip\`
+     inside \`.drawer.dd\`, holding everything else. \`flex: 1 1 auto\` claims the
+     rest of the column \`.drawer\` lays out (see deckStyles.ts's own \`.drawer\`
+     rule); \`min-height: 0\` is load-bearing on a flex item that needs to
+     scroll — without it a flex child's automatic minimum size is its own
+     content height, which would grow the whole drawer instead of scrolling
+     inside it. \`hidden auto\`, not \`auto\`: this drawer is a panel of rows that
+     all ellipsize, so sideways scroll here is never a feature — it is always a
+     row that failed to shrink (a long mono key did exactly that), and it
+     takes the close button off-screen with it. Vertical scroll is the only
+     axis it needs. */
+  .dd-scroll { flex: 1 1 auto; min-height: 0; overflow: hidden auto; }
   /* Two rows, and the header is the block that stacks them: \`.dd-id\` carries the
      identity (mark, key, tracker status, close) and the title takes the next row
      whole.
@@ -940,9 +967,14 @@ export const DECK_CSS = `
      already a horizontal scroller, so this does not MOVE the columns: it adds
      scroll run-out past the last one, which is what lets a covered column be
      scrolled clear of the drawer. Nothing becomes unreachable. Tracks \`--dd-w\`
-     rather than a fixed figure now that the drawer is resizable — the 620px
-     fallback is only for the (never-expected) case this rule is read before
-     \`.dd\` has set the variable at all. */
+     rather than a fixed figure now that the drawer is resizable — this reads
+     it correctly (not just its 620px fallback) only because DeckDetail.tsx
+     sets it on \`document.documentElement\`, an ancestor \`.board\` actually has;
+     see \`.dd\`'s own comment above for why an inline style on the drawer
+     itself could never have reached this sibling rule. The 620px fallback
+     covers the instant before that effect has run at all, and the case where
+     no card is selected and no drawer has ever set the property in this
+     session. */
   .board.dd-open { padding-right: calc(var(--dd-w, 620px) + 10px); }
 
   /* The two-tier card. A floor with no flex column would hang dead space under

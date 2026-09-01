@@ -55,8 +55,8 @@ const ddResize = createDrawerResize({ min: 460, def: 620, key: "ddWidth" });
 interface Action {
   label: string;
   /** Extra context beside the label — an identifier (a branch, a key, a PR
-   * number, a path) when `id` is set, prose ("already running", "start a
-   * session against the review") otherwise. Only an identifier earns the mono
+   * number, a path) when `id` is set, prose ("give this place a ticket", "the
+   * worktree is left untouched") otherwise. Only an identifier earns the mono
    * treatment: the spec's rule is mono for identifiers, UI font for anything
    * that reads as English. */
   hint?: string;
@@ -104,16 +104,19 @@ export function DeckDetail({ card, sourceLabel, usage, closing = false, onClose,
   const openLeadPr = () => lead && send({ type: "openExternal", url: lead.url });
 
   // Everything that used to live here MINUS the four rows promoted into
-  // `dd-acts` above the fold (Open workspace, Open PR, Diff — all repos under
-  // its plain "Diff" label, and Address PR): those keep exactly the same
-  // handlers, called from the promoted buttons instead, so nothing about what
-  // a click actually does has changed, only where the button sits. Removing
-  // them here rather than duplicating them is what keeps every action
-  // reachable exactly once — a row surviving in both places would give a
-  // screen reader (and `getByRole`) two buttons with the same accessible name.
+  // `dd-acts` above the fold (Open workspace, Open PR, the old "Diff — all
+  // repos" row — now the promoted plain "Diff" button, calling the same
+  // `diffAll` and dropped from this list entirely rather than kept under its
+  // old label — and Address PR): those keep exactly the same handlers, called
+  // from the promoted buttons instead, so nothing about what a click actually
+  // does has changed, only where the button sits. Removing them here rather
+  // than duplicating them is what keeps every action reachable exactly once —
+  // a row surviving in both places would give a screen reader (and
+  // `getByRole`) two buttons with the same handler and a different label,
+  // which is a subtler bug than a name collision: nothing catches it by
+  // accessible name alone, only by tracing what each row actually calls.
   const actions: { group: string; items: Action[] }[] = [
     { group: "This task", items: [
-      { label: "Diff — all repos", run: diffAll },
       ...(r.repos.length > 1
         ? r.repos.map((g) => ({ label: `Diff — ${g.name}`,
             run: () => send({ type: "deck:inspect", key, action: "diff", repo: g.name }) }))
@@ -206,11 +209,39 @@ export function DeckDetail({ card, sourceLabel, usage, closing = false, onClose,
     ddResize.persist(next);
   };
 
+  // `--dd-w` is written on `document.documentElement` (`:root`), not as an
+  // inline style on this drawer's own element. A custom property only
+  // cascades to descendants of wherever it's declared, and `.board` — the
+  // rule that has to track this width so a resized drawer never permanently
+  // covers the last column (`.board.dd-open` in deckStyles.ts) — is
+  // `DeckApp.tsx`'s sibling of this drawer, not its child. `:root` is the one
+  // ancestor common to both, so that's where the live value has to live.
+  // `useLayoutEffect`, not `useEffect`: this runs before the browser paints,
+  // so a mount with a persisted non-default width (e.g. 800px) never flashes
+  // the CSS's own 620px fallback first. The cleanup removes the property on
+  // every re-run (including unmount) rather than leaving a stale value for
+  // whichever drawer opens next — harmless in practice (`.board.dd-open` only
+  // ever applies while _this_ drawer is the one open) but one fact in one
+  // place either way.
+  React.useLayoutEffect(() => {
+    document.documentElement.style.setProperty("--dd-w", `${width}px`);
+    return () => { document.documentElement.style.removeProperty("--dd-w"); };
+  }, [width]);
+
   return (
-    <Drawer surface="dd" label={`Detail for ${key}`} closing={closing} style={{ ["--dd-w" as any]: `${width}px` }}>
+    <Drawer surface="dd" label={`Detail for ${key}`} closing={closing}>
       {/* Same ARIA shape as the Orchestrator drawer's own grip (role="separator"
           + aria-orientation, keyboard-resizable): one resize control, one
-          contract, on both drawers this shell serves. */}
+          contract, on both drawers this shell serves. A direct child of
+          `.drawer` — a sibling of `.dd-scroll` below, never inside it — is
+          load-bearing, not cosmetic: `.dd-scroll` is the one element that
+          scrolls and clips horizontally, and the grip sitting a few pixels
+          outside this element's own left border needs neither to happen to
+          it. Inside `.dd-scroll` it would have been clipped by that element's
+          `overflow-x: hidden` (the same rule that keeps a long mono row from
+          taking the close button off-screen) and would have scrolled out of
+          reach the moment the panel's content — likely `More`, once open —
+          grew past one screen. */}
       <div
         className="dd-grip"
         role="separator"
@@ -223,188 +254,199 @@ export function DeckDetail({ card, sourceLabel, usage, closing = false, onClose,
         onPointerDown={startResize}
         onKeyDown={onGripKeyDown}
       />
-      <div className="dd-hd">
-        {/* Identity on one row, the title on the next. The title shared this row until
-         * a long one proved it could not: it and the status pill are both shrinkable,
-         * so at 460px they split the shortfall and neither came out readable. What
-         * names the run — mark, key, status — is short and bounded and belongs on a
-         * line together; the title is neither, and gets a line of its own below. */}
-        <div className="dd-id">
-          {/* The card's own mark, at the card's own size: a selected card and its
-            * drawer are one object, and a smaller mark here would read as two. */}
-          <CardKindIcon kind={runKind(r.run)} provider={r.provider} />
-          {/* The label, not the raw key: a notepad key is ~64 mono characters — wider
-           * than the drawer itself, which as a nowrap flex item took the header (and
-           * with it the whole drawer) into horizontal scroll, pushing the summary to
-           * zero width and the close button off-screen. Same rule the card's own key
-           * chip uses, so the two name the same run the same way. The full key stays
-           * on the title, and Copy ticket key still copies it verbatim. */}
-          <span className="k" title={key}>{keyLabel(r.run)}</span>
-          {/* Moved verbatim off the card's old .c-foot — the design's own list of
-           * what relocates here names "the status pill" alongside the branch row,
-           * repo chips, PR blocks and agents fold. */}
-          {r.ticketStatus && <span className="pill" title={`${sourceLabel} status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
-          <button type="button" className="dd-x" aria-label="Close" onClick={onClose}>✕</button>
-        </div>
-        {/* No `title`: it wraps to as many rows as it needs, so the text is already
-         * all there and a tooltip repeating it would be noise. */}
-        <span className="t">{r.run.summary}</span>
-      </div>
-
-      {/* The drawer's busiest actions, promoted above the fold — everything else
-        * (copy, per-repo diffs, the spend table, forget) lives one click away in
-        * `More` below. A real `role="group"` with its own name, not just a div: a
-        * reader tabbing through should land on "Actions" the same way they land
-        * on any other named control group in this app. */}
-      <div className="dd-acts" role="group" aria-label="Actions">
-        <button type="button" className="dd-pact" onClick={openWorkspace}
-          title={r.windowOpen ? "already running" : undefined}>
-          Open workspace
-        </button>
-        {lead && (
-          <button type="button" className="dd-pact" onClick={openLeadPr}>
-            Open PR #{lead.number}
-          </button>
-        )}
-        <button type="button" className="dd-pact" onClick={diffAll}>Diff</button>
-        {canAddressPr && (
-          <button type="button" className="dd-pact" onClick={addressPr} title="start a session against the review">
-            Address PR
-          </button>
-        )}
-      </div>
-
-      {/* Work: a single-line fact strip. The label now shares the branch/elapsed
-        * row instead of heading a block of its own — repo signal (dirty, ahead,
-        * added/removed) stays on its own row below, since collapsing it into the
-        * same line would either drop that detail or overflow every width this
-        * drawer supports. */}
-      <div className="dd-sec">
-        <div className="dd-strip">
-          <div className="dd-lbl">Work</div>
-          <div className="c-branch">
-            {branch && <span className="bn" title={branch}>⎇ {branch}</span>}
-            <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
+      {/* The one scrolling, horizontally-clipping element — see the grip's own
+        * comment above for why it has to be everything BUT the grip. */}
+      <div className="dd-scroll">
+        <div className="dd-hd">
+          {/* Identity on one row, the title on the next. The title shared this row until
+           * a long one proved it could not: it and the status pill are both shrinkable,
+           * so at 460px they split the shortfall and neither came out readable. What
+           * names the run — mark, key, status — is short and bounded and belongs on a
+           * line together; the title is neither, and gets a line of its own below. */}
+          <div className="dd-id">
+            {/* The card's own mark, at the card's own size: a selected card and its
+              * drawer are one object, and a smaller mark here would read as two. */}
+            <CardKindIcon kind={runKind(r.run)} provider={r.provider} />
+            {/* The label, not the raw key: a notepad key is ~64 mono characters — wider
+             * than the drawer itself, which as a nowrap flex item took the header (and
+             * with it the whole drawer) into horizontal scroll, pushing the summary to
+             * zero width and the close button off-screen. Same rule the card's own key
+             * chip uses, so the two name the same run the same way. The full key stays
+             * on the title, and Copy ticket key still copies it verbatim. */}
+            <span className="k" title={key}>{keyLabel(r.run)}</span>
+            {/* Moved verbatim off the card's old .c-foot — the design's own list of
+             * what relocates here names "the status pill" alongside the branch row,
+             * repo chips, PR blocks and agents fold. */}
+            {r.ticketStatus && <span className="pill" title={`${sourceLabel} status: ${r.ticketStatus}`}>{r.ticketStatus}</span>}
+            <button type="button" className="dd-x" aria-label="Close" onClick={onClose}>✕</button>
           </div>
+          {/* No `title`: it wraps to as many rows as it needs, so the text is already
+           * all there and a tooltip repeating it would be noise. */}
+          <span className="t">{r.run.summary}</span>
         </div>
-        {ws && r.repos.length > 1
-          ? <WorkspaceChip label={ws} repos={r.repos} filePath={r.run.workspaceFile ?? ws} />
-          : r.repos.length > 0 && (
-              <div className="c-repos">{r.repos.map((g) => <RepoChip key={g.name} g={g} />)}</div>
-            )}
-      </div>
 
-      {(r.run.children?.length ?? 0) > 0 && (
-        <div className="dd-sec">
-          <div className="dd-lbl">Children</div>
-          {/* No sessions of their own — the fan-out orchestrator's subagent per
-           * leaf worktree never opens a Claude Code session, so these never earn
-           * a card. This drawer is the only place they surface. Keyed by
-           * key+repo, not key alone: the same ticket key can span two repos
-           * (its own row per repo, per the fan-out shape) — and the repo has to
-           * be in the accessible name too, or two rows for the same key read to
-           * a screen reader as the exact same button twice, with only the
-           * (non-audible) `title` telling them apart. */}
-          {r.run.children!.map((c) => (
-            <button
-              type="button"
-              className="dd-child"
-              key={`${c.key}:${c.repo}`}
-              aria-label={`Copy ${c.key} worktree path in ${c.repo}`}
-              title={c.path}
-              onClick={() => copy(c.path)}
-            >
-              <span className="k">{c.key}</span>
-              <span className="t">{c.summary}</span>
-              <span className="bn">⎇ {c.branch}</span>
+        {/* The drawer's busiest actions, promoted above the fold — everything else
+          * (copy, per-repo diffs, the spend table, forget) lives one click away in
+          * `More` below. A real `role="group"` with its own name, not just a div: a
+          * reader tabbing through should land on "Actions" the same way they land
+          * on any other named control group in this app. */}
+        <div className="dd-acts" role="group" aria-label="Actions">
+          <button type="button" className="dd-pact" onClick={openWorkspace}
+            title={r.windowOpen ? "already running" : undefined}>
+            Open workspace
+          </button>
+          {lead && (
+            <button type="button" className="dd-pact" onClick={openLeadPr}>
+              Open PR #{lead.number}
             </button>
-          ))}
+          )}
+          <button type="button" className="dd-pact" onClick={diffAll}>Diff</button>
+          {canAddressPr && (
+            <button type="button" className="dd-pact" onClick={addressPr} title="start a session against the review">
+              Address PR
+            </button>
+          )}
         </div>
-      )}
 
-      <div className="dd-sec">
-        <div className="dd-lbl">Pull requests</div>
-        {withPr.length > 0
-          ? withPr.map(([name, e]) => <PrBlock key={name} repo={name} f={e.facts} showRepo={withPr.length > 1} />)
-          : <div className="dd-none">No pull request yet</div>}
-      </div>
-
-      <div className="dd-sec">
-        <div className="dd-lbl">Sessions</div>
-        {/* Already a single-line fact strip: collapsed, this is one row (a name
-          * or a count) with the per-session detail a click away — the same
-          * "compact by default, more on demand" shape `More` uses below.
-          * Expanded by default here — there is room in the drawer, unlike the
-          * card, where the fold existed because the card had none. */}
-        {card.agents.length > 0
-          ? <AgentsRow agents={card.agents} defaultOpen />
-          : <div className="dd-none">No session open — git + {sourceLabel} only</div>}
-      </div>
-
-      {/* Everything else, one click away. `<details>` rather than a second bespoke
-        * toggle: it is a real disclosure widget with its own keyboard and
-        * accessibility behavior for free. The body renders only while open —
-        * relying on the browser's native `details:not([open])` hiding would have
-        * left the content in the accessibility tree (and reachable to
-        * `getByText`) the instant it exists, open or not. */}
-      <details className="dd-more" onToggle={(e) => setMoreOpen((e.currentTarget as HTMLDetailsElement).open)}>
-        <summary role="button">More — copy, per-repo diffs, spend breakdown, forget</summary>
-        {moreOpen && (
-          <>
-            {/* Spend lives only here, never on the card: the four classes are what make
-              * the number honest, only the drawer has room for them, and a per-card figure
-              * competed with the state line and the failure rows the reader can act on.
-              * The eq total is
-              * effort-weighted, so it is deliberately NOT the sum of the four rows above
-              * it — cache reads dominate the raw count at a tenth the rate, and a raw sum
-              * would rank tasks by conversation length rather than by cost. The rows are
-              * raw token counts and say so; only the total carries the eq unit. */}
-            <div className="dd-sec">
-              <div className="dd-lbl">Spend</div>
-              {usage === undefined
-                ? <div className="dd-none">Reading transcripts…</div>
-                : usage === null
-                  ? <div className="dd-none">Couldn't read this task's transcripts</div>
-                  : weightedEq(usage) === 0
-                    ? <div className="dd-none">No recorded usage</div>
-                    : (
-                      <div className="dd-spend">
-                        <div className="sp-row"><span className="sp-k">input</span><span className="sp-v">{usage.input.toLocaleString()}</span></div>
-                        <div className="sp-row"><span className="sp-k">output</span><span className="sp-v">{usage.output.toLocaleString()}</span></div>
-                        <div className="sp-row"><span className="sp-k">cache write</span><span className="sp-v">{usage.cacheWrite.toLocaleString()}</span></div>
-                        <div className="sp-row"><span className="sp-k">cache read</span><span className="sp-v">{usage.cacheRead.toLocaleString()}</span></div>
-                        <div className="sp-row sp-tot">
-                          <span className="sp-k" title="Effort-weighted equivalent: input×1, cache-write×1.25, cache-read×0.1, output×5. Rate ratios, not prices — so it does not go stale and does not claim a dollar amount.">
-                            weighted
-                          </span>
-                          <span className="sp-v">{formatEq(weightedEq(usage))}<span className="u">eq</span></span>
-                        </div>
-                      </div>
-                    )}
+        {/* Work: a single-line fact strip. The label now shares the branch/elapsed
+          * row instead of heading a block of its own — repo signal (dirty, ahead,
+          * added/removed) stays on its own row below, since collapsing it into the
+          * same line would either drop that detail or overflow every width this
+          * drawer supports. */}
+        <div className="dd-sec">
+          <div className="dd-strip">
+            <div className="dd-lbl">Work</div>
+            <div className="c-branch">
+              {branch && <span className="bn" title={branch}>⎇ {branch}</span>}
+              <span className="elapsed">launched {timeAgo(r.run.createdAt)}</span>
             </div>
+          </div>
+          {ws && r.repos.length > 1
+            ? <WorkspaceChip label={ws} repos={r.repos} filePath={r.run.workspaceFile ?? ws} />
+            : r.repos.length > 0 && (
+                <div className="c-repos">{r.repos.map((g) => <RepoChip key={g.name} g={g} />)}</div>
+              )}
+        </div>
 
-            {groups.map((g) => (
-              <div className="dd-sec" key={g.group}>
-                <div className="dd-lbl">{g.group}</div>
-                {g.items.map((a) => (
-                  // Explicit aria-label: without it, an accessible name is computed from
-                  // the button's full text content, folding the hint into the name (e.g.
-                  // "Forget" becomes "Forget the worktree is left untouched"). The hint
-                  // itself stays in the DOM and reaches assistive tech exactly as the
-                  // sighted rendering shows it — "already running" tells a screen-reader
-                  // user the window is open, same as it tells a sighted one, which
-                  // aria-hidden-ing the span would have thrown away.
-                  <button type="button" className={`dd-act${a.danger ? " danger" : ""}`} key={a.label}
-                    aria-label={a.label} onClick={a.run}>
-                    <span className="t">{a.label}</span>
-                    {a.hint && <span className={`h${a.id ? " id" : ""}`}>{a.hint}</span>}
-                  </button>
-                ))}
-              </div>
+        {(r.run.children?.length ?? 0) > 0 && (
+          <div className="dd-sec">
+            <div className="dd-lbl">Children</div>
+            {/* No sessions of their own — the fan-out orchestrator's subagent per
+             * leaf worktree never opens a Claude Code session, so these never earn
+             * a card. This drawer is the only place they surface. Keyed by
+             * key+repo, not key alone: the same ticket key can span two repos
+             * (its own row per repo, per the fan-out shape) — and the repo has to
+             * be in the accessible name too, or two rows for the same key read to
+             * a screen reader as the exact same button twice, with only the
+             * (non-audible) `title` telling them apart. */}
+            {r.run.children!.map((c) => (
+              <button
+                type="button"
+                className="dd-child"
+                key={`${c.key}:${c.repo}`}
+                aria-label={`Copy ${c.key} worktree path in ${c.repo}`}
+                title={c.path}
+                onClick={() => copy(c.path)}
+              >
+                <span className="k">{c.key}</span>
+                <span className="t">{c.summary}</span>
+                <span className="bn">⎇ {c.branch}</span>
+              </button>
             ))}
-          </>
+          </div>
         )}
-      </details>
+
+        <div className="dd-sec">
+          <div className="dd-lbl">Pull requests</div>
+          {withPr.length > 0
+            ? withPr.map(([name, e]) => <PrBlock key={name} repo={name} f={e.facts} showRepo={withPr.length > 1} />)
+            : <div className="dd-none">No pull request yet</div>}
+        </div>
+
+        <div className="dd-sec">
+          <div className="dd-lbl">Sessions</div>
+          {/* Already a single-line fact strip: collapsed, this is one row (a name
+            * or a count) with the per-session detail a click away — the same
+            * "compact by default, more on demand" shape `More` uses below.
+            * Expanded by default here — there is room in the drawer, unlike the
+            * card, where the fold existed because the card had none. */}
+          {card.agents.length > 0
+            ? <AgentsRow agents={card.agents} defaultOpen />
+            : <div className="dd-none">No session open — git + {sourceLabel} only</div>}
+        </div>
+
+        {/* Everything else, one click away. `<details>` rather than a second bespoke
+          * toggle: it is a real disclosure widget with its own keyboard and
+          * accessibility behavior for free. The body renders only while open —
+          * relying on the browser's native `details:not([open])` hiding would have
+          * left the content in the accessibility tree (and reachable to
+          * `getByText`) the instant it exists, open or not.
+          *
+          * `role="button"` on the summary is there only because neither jsdom's
+          * nor a real screen reader's role mapping treats a bare `<summary>` as
+          * one — but overriding the role also throws away its native expanded/
+          * collapsed state, so `aria-expanded` puts that back explicitly rather
+          * than leaving every reader hearing "…button" whether this is open or
+          * shut. */}
+        <details className="dd-more" onToggle={(e) => setMoreOpen((e.currentTarget as HTMLDetailsElement).open)}>
+          <summary role="button" aria-expanded={moreOpen}>More — copy, per-repo diffs, spend breakdown, forget</summary>
+          {moreOpen && (
+            <>
+              {/* Spend lives only here, never on the card: the four classes are what make
+                * the number honest, only the drawer has room for them, and a per-card figure
+                * competed with the state line and the failure rows the reader can act on.
+                * The eq total is
+                * effort-weighted, so it is deliberately NOT the sum of the four rows above
+                * it — cache reads dominate the raw count at a tenth the rate, and a raw sum
+                * would rank tasks by conversation length rather than by cost. The rows are
+                * raw token counts and say so; only the total carries the eq unit. */}
+              <div className="dd-sec">
+                <div className="dd-lbl">Spend</div>
+                {usage === undefined
+                  ? <div className="dd-none">Reading transcripts…</div>
+                  : usage === null
+                    ? <div className="dd-none">Couldn't read this task's transcripts</div>
+                    : weightedEq(usage) === 0
+                      ? <div className="dd-none">No recorded usage</div>
+                      : (
+                        <div className="dd-spend">
+                          <div className="sp-row"><span className="sp-k">input</span><span className="sp-v">{usage.input.toLocaleString()}</span></div>
+                          <div className="sp-row"><span className="sp-k">output</span><span className="sp-v">{usage.output.toLocaleString()}</span></div>
+                          <div className="sp-row"><span className="sp-k">cache write</span><span className="sp-v">{usage.cacheWrite.toLocaleString()}</span></div>
+                          <div className="sp-row"><span className="sp-k">cache read</span><span className="sp-v">{usage.cacheRead.toLocaleString()}</span></div>
+                          <div className="sp-row sp-tot">
+                            <span className="sp-k" title="Effort-weighted equivalent: input×1, cache-write×1.25, cache-read×0.1, output×5. Rate ratios, not prices — so it does not go stale and does not claim a dollar amount.">
+                              weighted
+                            </span>
+                            <span className="sp-v">{formatEq(weightedEq(usage))}<span className="u">eq</span></span>
+                          </div>
+                        </div>
+                      )}
+              </div>
+
+              {groups.map((g) => (
+                <div className="dd-sec" key={g.group}>
+                  <div className="dd-lbl">{g.group}</div>
+                  {g.items.map((a) => (
+                    // Explicit aria-label: without it, an accessible name is computed from
+                    // the button's full text content, folding the hint into the name (e.g.
+                    // "Forget" becomes "Forget the worktree is left untouched"). The hint
+                    // itself stays in the DOM and reaches assistive tech exactly as the
+                    // sighted rendering shows it — "give this place a ticket" tells a
+                    // screen-reader user what Track it does, same as it tells a sighted
+                    // one, which aria-hidden-ing the span would have thrown away.
+                    <button type="button" className={`dd-act${a.danger ? " danger" : ""}`} key={a.label}
+                      aria-label={a.label} onClick={a.run}>
+                      <span className="t">{a.label}</span>
+                      {a.hint && <span className={`h${a.id ? " id" : ""}`}>{a.hint}</span>}
+                    </button>
+                  ))}
+                </div>
+              ))}
+            </>
+          )}
+        </details>
+      </div>
     </Drawer>
   );
 }

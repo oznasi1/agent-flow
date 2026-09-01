@@ -1,13 +1,44 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, within, waitFor } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor, act } from "@testing-library/react";
 
-vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
+// This repo's pinned jsdom has no PointerEvent constructor. Without it, a
+// fireEvent.pointer* call falls through to a bare Event with no clientX, and
+// every drag assertion in the "resizing" describe below would see NaN. jsdom's
+// MouseEvent does honour clientX via its init dict, so a thin PointerEvent-
+// shaped subclass of it is enough for the resize handlers under test, which
+// only read that one field. Same polyfill OrchestratorDrawer.test.tsx already
+// carries for its own grip's drag tests — duplicated rather than shared for
+// now, alongside the ~45 lines of resize wiring itself that the two drawers
+// don't yet share (a recorded, deliberately deferred follow-up).
+if (typeof window !== "undefined" && !window.PointerEvent) {
+  class PointerEventPolyfill extends MouseEvent {
+    pointerId: number;
+    pointerType: string;
+    constructor(type: string, params: MouseEventInit & { pointerId?: number; pointerType?: string } = {}) {
+      super(type, params);
+      this.pointerId = params.pointerId ?? 0;
+      this.pointerType = params.pointerType ?? "mouse";
+    }
+  }
+  // @ts-expect-error — jsdom's lib.dom types still declare PointerEvent even though
+  // the runtime lacks it, so this assignment looks redundant to tsc; it is not.
+  window.PointerEvent = PointerEventPolyfill;
+}
+
+// Same shape OrchestratorDrawer.test.tsx mocks vscodeApi with: `getState`/
+// `setState` are real spies (not just `send`), so the resizing tests below can
+// assert exactly what gets persisted and under which key — the whole point of
+// the two-drawer, two-key hazard this module exists to prevent.
+vi.mock("../../src/webview/vscodeApi", () => ({
+  send: vi.fn(),
+  vscodeApi: { getState: vi.fn(() => undefined), setState: vi.fn() },
+}));
 
 import { DeckDetail } from "../../src/webview/DeckDetail";
 import { DECK_CSS } from "../../src/webview/deckStyles";
-import { send } from "../../src/webview/vscodeApi";
+import { send, vscodeApi } from "../../src/webview/vscodeApi";
 import type { DeckCard } from "../../src/webview/deckCards";
 import type { PrEntryMap, PrFacts, RunStatus } from "../../src/types";
 import type { UsageTotals } from "../../src/engine/usage";
@@ -309,6 +340,12 @@ describe("DeckDetail", () => {
       .toEqual(["Open workspace", "Open PR #482", "Diff", "Address PR"]);
   });
 
+  it("opens the lead PR externally from the promoted button", () => {
+    render1(mkCard({ prs: { svc: { facts: facts({ number: 482, url: "https://gh/pr/482" }), fetchedAt: 1 } } as PrEntryMap }));
+    fireEvent.click(screen.getByRole("button", { name: "Open PR #482" }));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://gh/pr/482" });
+  });
+
   // Fewer than four apply when there is no PR and no review to address: Open
   // workspace and Diff are unconditional, so those are the floor.
   it("promotes only what applies when there is no PR and nothing to address", () => {
@@ -323,6 +360,18 @@ describe("DeckDetail", () => {
     expect(screen.queryByText("Copy branch name")).toBeNull();
     await openMore();
     expect(screen.getByText("Copy branch name")).toBeTruthy();
+  });
+
+  // `role="button"` on the summary is needed for it to be queryable as one at
+  // all (neither jsdom's nor a screen reader's role mapping treats a bare
+  // `<summary>` as a button), but overriding the role also throws away its
+  // native expanded/collapsed state — `aria-expanded` puts that back.
+  it("reports its open state via aria-expanded on the summary", async () => {
+    render1(mkCard());
+    const more = screen.getByRole("button", { name: /^More/ });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    await openMore();
+    expect(more).toHaveAttribute("aria-expanded", "true");
   });
 
   // Enumerated on purpose: `More` is a disclosure, not a deletion. This test is
@@ -457,8 +506,12 @@ describe("DeckDetail CSS", () => {
     return DECK_CSS.slice(at, DECK_CSS.indexOf("}", at));
   };
 
+  // The scroll/clip rule lives on `.dd-scroll` now, not `.dd` itself — `.dd`
+  // carries only width, so the resize grip (a sibling of `.dd-scroll`,
+  // positioned relative to `.dd`) is never clipped by this overflow rule or
+  // carried away when the scrollable content scrolls.
   it("gives the drawer vertical scroll only", () => {
-    const dd = block(".dd");
+    const dd = block(".dd-scroll");
     expect(dd).toMatch(/overflow:\s*hidden auto/);
     expect(dd).not.toMatch(/overflow:\s*auto\s*;/);
   });
@@ -602,5 +655,164 @@ describe("DeckDetail — Spend", () => {
     const tot = spend()!.querySelector(".sp-tot .sp-v")!.textContent;
     // raw sum would be 2,000,000 → "2.0M"; weighted is 1_000_000*5 + 1_000_000*0.1 = 5,100,000
     expect(tot).toContain("5.1M");
+  });
+});
+
+// Modeled on OrchestratorDrawer.test.tsx's own "resizing" describe (same shape,
+// same drawerResize.ts arithmetic underneath) — none of it needs a real drag,
+// only fireEvent's pointer/keyboard events and a manual act() around the
+// move+up pair, the same split that file uses so the resize effect's window
+// listeners are attached before the move they need to observe.
+//
+// The one real difference from that file's version: this drawer writes its
+// live width onto `document.documentElement`, not an inline style on its own
+// element (see deckStyles.ts's own comment on `.dd` for why — `.board.dd-open`
+// is a sibling of the drawer in DeckApp.tsx, not its descendant, and a custom
+// property only cascades to descendants of wherever it's declared). `widthOf`
+// below reads it from there.
+describe("resizing", () => {
+  const grip = () => screen.getByRole("separator", { name: /resize/i });
+  const widthOf = () => document.documentElement.style.getPropertyValue("--dd-w");
+
+  it("exposes the grip as a focusable vertical separator", () => {
+    render1(mkCard());
+    const g = grip();
+    expect(g).toHaveAttribute("aria-orientation", "vertical");
+    expect(g.tabIndex).toBe(0);
+  });
+
+  it("starts at the 620px default when nothing is stored", () => {
+    render1(mkCard());
+    expect(widthOf()).toBe("620px");
+  });
+
+  it("writes the live width onto document.documentElement so a sibling of the drawer (.board) can read it too", () => {
+    render1(mkCard());
+    expect(document.documentElement.style.getPropertyValue("--dd-w")).toBe("620px");
+  });
+
+  it("removes --dd-w from document.documentElement once the drawer unmounts", () => {
+    const { unmount } = render1(mkCard());
+    expect(widthOf()).toBe("620px");
+    unmount();
+    expect(document.documentElement.style.getPropertyValue("--dd-w")).toBe("");
+  });
+
+  it("dragging the grip changes the width", () => {
+    render1(mkCard());
+    fireEvent.pointerDown(grip(), { clientX: 300 });
+    act(() => {
+      // Left border pulled 40px further left grows the (right-anchored) drawer
+      // by 40px: 620 + (300 - 260) = 660.
+      fireEvent.pointerMove(window, { clientX: 260 });
+      fireEvent.pointerUp(window);
+    });
+    expect(widthOf()).toBe("660px");
+  });
+
+  it("persists the width via vscodeApi.setState once the drag ends, under ddWidth", () => {
+    render1(mkCard());
+    fireEvent.pointerDown(grip(), { clientX: 300 });
+    act(() => {
+      fireEvent.pointerMove(window, { clientX: 260 });
+      fireEvent.pointerUp(window);
+    });
+    expect(vscodeApi.setState).toHaveBeenCalledWith({ ddWidth: 660 });
+  });
+
+  // The precise hazard drawerResize.ts's merge exists to prevent: this
+  // drawer's own resize must never clobber the Orchestrator drawer's
+  // "orchWidth", stored in the same shared webview state object.
+  it("merges into existing state rather than clobbering the Orchestrator drawer's own width", () => {
+    // Two `.mockReturnValueOnce` rather than one `.mockReturnValue`, deliberately:
+    // this component calls `getState` exactly twice (the initial `read()` at
+    // mount, then `persist()`'s own internal read-before-merge) — scoping the
+    // stub to exactly those two calls keeps `vscodeApi.getState`'s default
+    // `() => undefined` in effect for every OTHER test in this file. A bare
+    // `mockReturnValue` here was found to leak `orchWidth` into the very next
+    // test below, since `clearMocks` (vitest.config.ts) resets call history but
+    // not a scripted return value.
+    vi.mocked(vscodeApi.getState)
+      .mockReturnValueOnce({ orchWidth: 560 })
+      .mockReturnValueOnce({ orchWidth: 560 });
+    render1(mkCard());
+    fireEvent.keyDown(grip(), { key: "ArrowLeft" });
+    expect(vscodeApi.setState).toHaveBeenCalledWith({ orchWidth: 560, ddWidth: 636 });
+  });
+
+  it("clamps the width at the floor", () => {
+    render1(mkCard());
+    fireEvent.pointerDown(grip(), { clientX: 300 });
+    act(() => {
+      // Dragged hugely toward "narrower" — far past the 460px floor.
+      fireEvent.pointerMove(window, { clientX: 900 });
+      fireEvent.pointerUp(window);
+    });
+    expect(widthOf()).toBe("460px");
+  });
+
+  // The ceiling is read from window.innerWidth at drag time, so this shrinks
+  // the viewport to 900 first (ceiling = max(460, 900 - 340) = 560, distinct
+  // from the 460px floor) then drags hugely toward "wider".
+  it("clamps the width at the ceiling, derived from the viewport", () => {
+    render1(mkCard());
+    const prevWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 900 });
+    try {
+      fireEvent.pointerDown(grip(), { clientX: 300 });
+      act(() => {
+        fireEvent.pointerMove(window, { clientX: -900 });
+        fireEvent.pointerUp(window);
+      });
+      expect(widthOf()).toBe("560px");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: prevWidth });
+    }
+  });
+
+  it("resizes with arrow keys — ArrowLeft grows, ArrowRight shrinks", () => {
+    render1(mkCard());
+    fireEvent.keyDown(grip(), { key: "ArrowLeft" });
+    expect(widthOf()).toBe("636px");
+    fireEvent.keyDown(grip(), { key: "ArrowRight" });
+    fireEvent.keyDown(grip(), { key: "ArrowRight" });
+    expect(widthOf()).toBe("604px");
+    expect(vscodeApi.setState).toHaveBeenLastCalledWith({ ddWidth: 604 });
+  });
+
+  it("ignores keys other than the two arrow keys", () => {
+    render1(mkCard());
+    fireEvent.keyDown(grip(), { key: "Enter" });
+    expect(widthOf()).toBe("620px");
+  });
+
+  it("honours a stored width from a previous session on mount", () => {
+    vi.mocked(vscodeApi.getState).mockReturnValueOnce({ ddWidth: 650 });
+    render1(mkCard());
+    expect(widthOf()).toBe("650px");
+  });
+
+  it("falls back to the default width when the stored value is corrupt", () => {
+    // A future version's shape, or a hand-edited value — either way, not the
+    // number this version expects.
+    vi.mocked(vscodeApi.getState).mockReturnValueOnce({ ddWidth: "wide" } as never);
+    expect(() => render1(mkCard())).not.toThrow();
+    expect(widthOf()).toBe("620px");
+  });
+
+  it("falls back to the default width when getState itself throws", () => {
+    vi.mocked(vscodeApi.getState).mockImplementationOnce(() => {
+      throw new Error("state store unavailable");
+    });
+    expect(() => render1(mkCard())).not.toThrow();
+    expect(widthOf()).toBe("620px");
+  });
+
+  it("does not throw when persisting the width fails", () => {
+    vi.mocked(vscodeApi.setState).mockImplementationOnce(() => {
+      throw new Error("state store unavailable");
+    });
+    render1(mkCard());
+    expect(() => fireEvent.keyDown(grip(), { key: "ArrowLeft" })).not.toThrow();
   });
 });
