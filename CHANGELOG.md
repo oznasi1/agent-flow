@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.63.0] — 2026-09-01
 
+### Fixed
+
+- **`npm run package` no longer packs your worktree into the `.vsix`.** The
+  contributing guide asks you to work in a git worktree, and `vsce` walks the
+  working directory rather than git — so a worktree under `.worktrees/` was swept
+  into the extension (760 files, 28 MB), and the build failed outright once that
+  worktree linked its own `node_modules`.
+
 ### Changed
 
 - **The sidebar search box finds tickets by number, not just by title.** Type

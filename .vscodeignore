@@ -16,6 +16,7 @@ docs/**
 scripts/**
 .github/**
 .claude/**
+.worktrees/**
 .pick-task/**
 .superpowers/**
 esbuild.js
