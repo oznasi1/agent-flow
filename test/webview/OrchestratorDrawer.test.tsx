@@ -4357,18 +4357,49 @@ describe("the Templates tab", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  it("starting a new template goes through the same onCreate a new flow does", async () => {
+  // A template is made by saving a workflow, not by a button on this tab —
+  // an earlier draft offered "＋ New template" here, wired to `onCreate`,
+  // which actually builds an ordinary WORKFLOW on the Running tab and leaves
+  // Templates exactly as empty as it was. That is the wrong verb for what a
+  // first-time user here is trying to do, so there is no such button, and no
+  // path from this tab calls `onCreate` at all.
+  it("has no way to create anything from here — a template comes from Save as template on a workflow", async () => {
     const onCreate = vi.fn();
     openTemplatesTab({ templates: [shipItTemplate()], onCreate });
-    fireEvent.click(await screen.findByRole("button", { name: "＋ New template" }));
-    expect(onCreate).toHaveBeenCalled();
+    await screen.findByText("Ship it");
+    expect(screen.queryByRole("button", { name: /new template/i })).toBeNull();
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("explains where a template comes from when there are none yet", () => {
+    // The header's own "Save as template…" button is ALSO on screen (the
+    // default open flow always has one) — matched with a text unique to the
+    // empty-state copy, never the button's own label, so this cannot pass
+    // against the wrong element.
+    openTemplatesTab({ templates: [] });
+    expect(screen.getByText(/No templates yet/)).toBeTruthy();
+  });
+
+  it("does not show the empty-state explanation once a template exists", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    await screen.findByText("Ship it");
+    expect(screen.queryByText(/No templates yet/)).toBeNull();
   });
 });
 
 describe("Save as template", () => {
-  it("sits beside the open flow's own Arm/Delete controls", () => {
+  // A DOM-position assertion, not merely "exists somewhere in the drawer":
+  // the button shares its actual parent with Arm, and does NOT share a
+  // parent with "Delete flow" (a real but different control, in the
+  // header's own row) — which is what "sits beside" has to mean to be worth
+  // asserting at all.
+  it("sits in the same row as the flow's own Arm control, not merely somewhere in the drawer", () => {
     render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
-    expect(screen.getByRole("button", { name: "Save as template…" })).toBeTruthy();
+    const save = screen.getByRole("button", { name: "Save as template…" });
+    const arm = screen.getByRole("button", { name: "Arm" });
+    const deleteFlow = screen.getByRole("button", { name: "Delete flow" });
+    expect(save.parentElement).toBe(arm.parentElement);
+    expect(save.parentElement).not.toBe(deleteFlow.parentElement);
   });
 
   it("is disabled on a flow with no steps — toTemplate refuses one anyway", () => {
@@ -4439,11 +4470,47 @@ describe("Save as template", () => {
     });
   });
 
-  it("Save is refused (never sent) while the name is still blank, even after clicking through", () => {
+  // Distinct from "disables Save until a name is typed" above: that one
+  // covers a literally empty field, this one covers a field that LOOKS
+  // non-empty but trims to nothing — proving the disabled check and the
+  // send both key off the trimmed value, not raw non-emptiness.
+  it("keeps Save disabled — and sends nothing — for a name that is only whitespace", () => {
     render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
     fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
-    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "   " } });
+    const saveBtn = screen.getByRole("button", { name: "Save" });
+    expect(saveBtn).toBeDisabled();
+    fireEvent.click(saveBtn);
     expect(send).not.toHaveBeenCalled();
+  });
+
+  // Important 2 from review: the switcher stays reachable while this dialog
+  // sits open, so nothing used to stop a user from opening it on flow A,
+  // typing a name, then using "Flows · N" to look at flow B — leaving the
+  // dialog open, still showing A's typed name, now rendering B's OWN place
+  // rows, and ready to send that name against B's id on the next Save. This
+  // is a WRITE, unlike the dry-run panel (a read that recomputes fresh off
+  // whichever flow is current and is left alone — see the effect's own
+  // comment for why).
+  it("closes itself, unsent, the moment the open flow changes — switching must not save the wrong workflow", () => {
+    const flowA = twoPlaces();
+    const flowB = flow({
+      id: "f2", name: "Other",
+      nodes: [{ id: "m1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-9", repo: "r" }],
+    });
+    const { rerender } = render(<OrchestratorDrawer {...props({ flows: [flowA, flowB] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ship it" } });
+    expect(screen.getByLabelText("Name")).toHaveValue("Ship it");
+
+    rerender(<OrchestratorDrawer {...props({ flows: [flowA, flowB], openId: "f2" })} />);
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+
+    // And reopening on the NEW flow starts blank — nothing typed for A
+    // survives into B's own dialog.
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("");
   });
 
   it("Cancel closes the dialog and sends nothing", () => {

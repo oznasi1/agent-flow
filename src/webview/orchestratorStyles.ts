@@ -179,9 +179,23 @@ export const ORCH_CSS = `
   .orch-tmpl-list { max-height: 260px; overflow-y: auto; }
   .orch-tmpl-row { padding: 6px 4px; }
   .orch-tmpl-row + .orch-tmpl-row { border-top: 1px solid var(--hair); margin-top: 2px; padding-top: 8px; }
+  /* Every \`.row\`/\`.sp\` pair in this sheet is scoped to its own parent —
+     there is no generic one — so this row needs its own, the same shape
+     \`.orch-hd .row\`/\`.orch-hd .sp\` and \`.orch-resume .row\` already give
+     theirs. Without it the name and rule count jam together with no gap, and
+     the confirm state's Cancel/Confirm-delete pair drops onto its own line
+     below the sentence instead of sitting at its end. */
+  .orch-tmpl-row .row { display: flex; align-items: center; gap: 6px; }
   .orch-tmpl-row .row + .row { margin-top: 4px; }
+  .orch-tmpl-row .sp { flex: 1; }
   .orch-tmpl-row .t { font-size: var(--t-body); font-weight: 600; }
   .orch-tmpl-row .meta { font-size: var(--t-micro); color: var(--dim); white-space: nowrap; }
+  /* A place's own key cell in the Save dialog reuses \`.orch-kw\`, sized for
+     "WHEN"/"THEN" (four letters). A run key like "PROJ-142" is longer and
+     variable-length, so this widens the column and lets a genuinely long key
+     ellipsize instead of colliding with the select beside it — see M-a. */
+  .orch-tmpl-dialog .orch-kw { width: auto; max-width: 100px; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
 
   /* The Save-as-template dialog. Lives in \`.orch-body\` (see
      OrchestratorDrawer.tsx), first among the panels that briefly take over

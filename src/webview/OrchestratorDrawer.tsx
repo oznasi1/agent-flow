@@ -432,10 +432,27 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * the dialog and pressing Save (the flow prop is live, same as everywhere
    * else in this file) cannot silently shift which row a stray edit lands on.
    * Cleared and reseeded every time the dialog opens (`openSaveTemplate`
-   * below) — never carried over from a previous flow's dialog. */
+   * below), and also force-closed the moment `p.openId` changes (the effect
+   * just below) — the switcher stays reachable while this dialog is open, and
+   * without that second clear, switching to another flow mid-type would leave
+   * the dialog open over the NEW flow: same typed name, now describing a
+   * different flow's places, and Save would write that name against the
+   * wrong workflow. A dry run has the identical gap but is a READ that
+   * recomputes fresh off whatever flow is current, so it stays open across a
+   * switch on purpose (see its own state, below); this is a WRITE, so it does
+   * not get the same latitude. */
   const [savingTemplate, setSavingTemplate] = React.useState(false);
   const [templateName, setTemplateName] = React.useState("");
   const [templateChoices, setTemplateChoices] = React.useState<Record<string, { mode: string; dest: LaunchDest }>>({});
+  // Keyed on `p.openId` alone, deliberately: this exists to catch the ID
+  // itself changing under an open dialog, not to react to anything else
+  // about the flow (an edit to the SAME flow while the dialog is open must
+  // not close it).
+  React.useEffect(() => {
+    setSavingTemplate(false);
+    setTemplateName("");
+    setTemplateChoices({});
+  }, [p.openId]);
   const [over, setOver] = React.useState(false);
   const [overGraph, setOverGraph] = React.useState(false);
   const graphRef = React.useRef<HTMLDivElement | null>(null);
@@ -1559,7 +1576,13 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 `role="tablist"`/`role="tab"`/`aria-selected` is this file's
                 own idiom (see the Canvas/List toggle above), not invented
                 fresh for this panel. */}
-            <div role="tablist" aria-label="Flow list" className="orch-tabs">
+            {/* "Workflow", not "Flow": the UI never says Flow or Orchestrator —
+                only the code keeps those names (see this task's own
+                vocabulary rule). The pre-existing "Flow view" label on the
+                Canvas/List toggle above predates that rule and is left alone;
+                this is a NEW screen-reader string, so it gets it right from
+                the start. */}
+            <div role="tablist" aria-label="Workflow list" className="orch-tabs">
               <button
                 type="button"
                 role="tab"
@@ -1606,13 +1629,23 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                     onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
                   />
                 ))}
-                {/* The one way in: build a workflow, then "Save as template…"
-                    on it once it is right. `onCreate` is the exact same
-                    control the Running tab's own "+ New flow" spends — a
-                    template starts life as an ordinary workflow, same as
-                    every other one, and there is nothing template-specific
-                    to construct until Save is pressed. */}
-                <button type="button" onClick={() => { setPicking(false); p.onCreate(); }}>＋ New template</button>
+                {/* A template is made by SAVING a workflow, never by a button
+                    on this tab — there used to be one here (＋ New template)
+                    that called `onCreate`, which builds an ordinary WORKFLOW:
+                    the panel would close, this tab would still be empty, and
+                    a new untitled entry would appear on Running instead. That
+                    is exactly the wrong verb for what a first-time user on an
+                    empty Templates tab is trying to do, so it is gone rather
+                    than fixed to do something else — creating a workflow
+                    already lives on the Running tab's own "+ New flow", and
+                    nothing is lost by not duplicating it here. `.orch-empty`
+                    is the same empty-state treatment the canvas itself uses. */}
+                {p.templates.length === 0 && (
+                  <div className="orch-empty">
+                    No templates yet. Build a workflow, then use its own
+                    &ldquo;Save as template&hellip;&rdquo; to keep the shape.
+                  </div>
+                )}
               </div>
             )}
           </div>
