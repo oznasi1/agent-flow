@@ -4,8 +4,9 @@ import * as React from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { WorkflowBlock, WorkflowBlockProps } from "../../src/webview/WorkflowBlock";
+import { DECK_CSS } from "../../src/webview/deckStyles";
 import type { Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
-import type { StepState } from "../../src/engine/orchestrator/attach";
+import type { StepState, WorkflowStatus } from "../../src/engine/orchestrator/attach";
 
 // Same minimal fixture shape test/unit/engine/orchestrator/attach.test.ts already
 // uses: a place feeding a notify terminal is enough for `ruleOneLine` and
@@ -67,15 +68,29 @@ describe("WorkflowBlock", () => {
 
   it("shows Arm and greys the steps when disarmed", async () => {
     const base = makeBase();
-    render(<WorkflowBlock {...base} state={{ status: "disarmed", done: 0, total: 2, steps: twoWaiting }} />);
+    const { container } = render(
+      <WorkflowBlock {...base} state={{ status: "disarmed", done: 0, total: 2, steps: twoWaiting }} />,
+    );
     await waitFor(() => expect(screen.getByText("disarmed")).toBeTruthy());
+    // The greying itself, which this test's own name had always promised and
+    // never checked: `.wf-greyed` on the list is the whole mechanism (it drops
+    // every step's opacity — see deckStyles.ts), so its absence would leave a
+    // disarmed workflow looking exactly like a running one.
+    expect(container.querySelector("ol.wf-steps")!.className).toBe("wf-steps wf-greyed");
     await userEvent.click(screen.getByRole("button", { name: "Arm" }));
     expect(base.onArm).toHaveBeenCalledWith(true);
   });
 
+  it("greys nothing while the workflow is actually running", () => {
+    // The pair to the assertion above: without this, a `wf-greyed` that had
+    // become unconditional would still pass it.
+    const { container } = render(<WorkflowBlock {...makeBase()} />);
+    expect(container.querySelector("ol.wf-steps")!.className).toBe("wf-steps");
+  });
+
   it("rings the current step and prints why it waits", async () => {
     const base = makeBase();
-    render(<WorkflowBlock {...base} state={{
+    const { container } = render(<WorkflowBlock {...base} state={{
       status: "advancing", done: 2, total: 5,
       steps: [...twoDone, { edgeId: "e3", state: "now", receipt: "1 of 2 approvals" }],
     }} />);
@@ -83,6 +98,13 @@ describe("WorkflowBlock", () => {
       expect(screen.getByText("2 of 5")).toBeTruthy();
       expect(screen.getByText("1 of 2 approvals")).toBeTruthy();
     });
+    // WHICH step is ringed, which this test's own name had always promised and
+    // never checked: the third, the two before it settled. All five edges read
+    // the same rule sentence (they share one condition), so position is the only
+    // honest way to ask — and the ring is `.wf-now`, so ringing the wrong step,
+    // or all three, changes this list.
+    const marks = [...container.querySelectorAll("li.wf-step")].map((li) => li.className);
+    expect(marks).toEqual(["wf-step wf-done", "wf-step wf-done", "wf-step wf-now"]);
   });
 
   it("offers Approve and Reject on a gate, and answers it", async () => {
@@ -216,5 +238,60 @@ describe("WorkflowBlock", () => {
     expect(names[0]).toBeTruthy();
     expect(names[1]).toBeTruthy();
     expect(names[0]).not.toBe(names[1]);
+  });
+});
+
+// The state → appearance mapping, which nothing asserted: every hue in this block
+// is applied by a class name (`deckStyles.ts` holds the colours), so a swap
+// between two of them — advancing painted with the failure's red, a stopped
+// workflow painted with the quiet blue — is invisible to every other test in this
+// suite and to the whole 6,000-test run. The design doc's §6 rule is what is at
+// stake: AMBER MEANS EXACTLY ONE THING AND RED MEANS A REAL FAILURE, so a
+// workflow that is merely attached and fine must be neither.
+//
+// These are class assertions, not visual ones — jsdom can hold the whole claim,
+// because the class IS the mapping. Each is asserted as the COMPLETE className
+// rather than with `toContain`, so a step carrying two state classes at once
+// fails too.
+describe("WorkflowBlock — state to appearance", () => {
+  const oneStep = (state: StepState["state"], status: WorkflowStatus = "advancing") =>
+    render(<WorkflowBlock {...makeBase()} state={{ status, done: 0, total: 1, steps: [{ edgeId: "e1", state }] }} />);
+
+  it.each([
+    ["done", "wf-done"],
+    ["now", "wf-now"],
+    ["waiting", "wf-waiting"],
+    ["you", "wf-you"],
+    ["fail", "wf-fail"],
+  ] as [StepState["state"], string][])("marks a %s step with .%s and nothing else", (state, cls) => {
+    const { container } = oneStep(state);
+    expect(container.querySelector("li.wf-step")!.className).toBe(`wf-step ${cls}`);
+  });
+
+  it.each([
+    ["disarmed", "wf-disarmed"],
+    ["advancing", "wf-advancing"],
+    ["waiting-on-you", "wf-waiting-on-you"],
+    ["stopped", "wf-stopped"],
+    ["done", "wf-done"],
+  ] as [WorkflowStatus, string][])("hues the header chip of a %s workflow with .%s", (status, cls) => {
+    const { container } = oneStep("waiting", status);
+    expect(container.querySelector(".wf-chip")!.className).toBe(`wf-chip ${cls}`);
+  });
+
+  // The hue rule itself, read off the stylesheet rather than trusted: the two
+  // attention colours must be spent on the two states that genuinely want a
+  // human, and nowhere else in this block. A class swap in the TSX is caught
+  // above; this catches the same swap made in the CSS.
+  it("spends --c-attn and --c-danger only on the states that need a human", () => {
+    const rules = [...DECK_CSS.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(\.(?:wf-chip|wf-step)\.wf-[\w-]+[^{]*)\{([^}]*)\}/g)]
+      .map(([, sel, body]) => [sel.trim(), body] as const);
+    const usersOf = (token: string) => rules.filter(([, body]) => body.includes(token)).map(([sel]) => sel);
+    expect(usersOf("--c-attn")).toEqual([".wf-chip.wf-waiting-on-you", ".wf-step.wf-you .wf-mark"]);
+    expect(usersOf("--c-danger"))
+      .toEqual([".wf-chip.wf-stopped", ".wf-step.wf-fail .wf-mark", ".wf-step.wf-fail .wf-receipt"]);
+    // And the rules really were found — an expression that matched nothing would
+    // satisfy every `toEqual([])` above if the selectors were ever renamed.
+    expect(rules.length).toBeGreaterThan(6);
   });
 });

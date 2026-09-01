@@ -3440,6 +3440,46 @@ describe("the card's workflow chip", () => {
     expect(screen.queryByTitle(/Ship it/)).toBeNull();
   });
 
+  /** Done: the one edge already fired, which `workflowState` reads as every rule
+   * settled. Disarmed is the same fixture as `shipItOn` with `armed` off — the
+   * flag is the whole difference, which is the point. */
+  const doneOn = (runKey: string): Flow => ({
+    id: "f1", name: "Ship it", armed: true, createdAt: 100,
+    nodes: [place("n1", runKey), notify("n2")],
+    edges: [edge({ id: "e1", from: "n1", to: "n2", performed: true, firedAt: 1, firedNote: "merged" })],
+  });
+
+  // The chip's hue is applied entirely by its status class (`deckStyles.ts` holds
+  // the colours), and nothing asserted the mapping: advancing and stopped could
+  // trade classes and the whole suite would stay green while a healthy workflow
+  // went red. The design doc's §6 rule is what that would break — amber means
+  // exactly one thing, red means a real failure, and a workflow that is merely
+  // attached and fine must be neither. Asserted as the COMPLETE className so a
+  // chip carrying two status classes at once fails too.
+  it.each([
+    ["advancing", () => shipItOn("PROJ-142")],
+    ["waiting-on-you", () => gateOn("PROJ-142")],
+    ["stopped", () => failedOn("PROJ-142")],
+    ["disarmed", () => ({ ...shipItOn("PROJ-142"), armed: false })],
+    ["done", () => doneOn("PROJ-142")],
+  ] as [string, () => Flow][])("hues a %s card's chip with that status as its only class", (status, mk) => {
+    renderBoard({ flows: [mk()] });
+    expect(document.querySelector(".c-wf")!.className).toBe(`c-wf ${status}`);
+  });
+
+  // The stylesheet half of the same rule: a class swap in the TSX is caught
+  // above, a colour swap in the CSS only here.
+  it("spends --c-attn and --c-danger only on the two chip states that need a human", () => {
+    const rules = [...DECK_CSS.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(\.c-wf\.[\w-]+)\s*\{([^}]*)\}/g)]
+      .map(([, sel, body]) => [sel, body] as const);
+    const usersOf = (token: string) => rules.filter(([, body]) => body.includes(token)).map(([sel]) => sel);
+    expect(usersOf("--c-attn")).toEqual([".c-wf.waiting-on-you"]);
+    expect(usersOf("--c-danger")).toEqual([".c-wf.stopped"]);
+    // And the rules really were found: a selector rename would otherwise leave
+    // every expectation above trivially satisfied by an empty list.
+    expect(rules).toHaveLength(5);
+  });
+
   // Paired with "names the workflow on an advancing card" above, which posts
   // the identical fixture with the orchestrator left at its default `true` and
   // gets a chip — so this failing to find one is proof of the setting's own
