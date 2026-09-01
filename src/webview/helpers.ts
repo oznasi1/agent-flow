@@ -14,7 +14,7 @@ function keyNumber(key: string): string {
   return /(\d+)\s*$/.exec(key)?.[1] ?? "";
 }
 
-/** Does `query` name this ticket? True for the whole key however it was
+/** Is the WHOLE query this ticket's name? True for the whole key however it was
  * punctuated, for a prefix that reaches into the number ("PROJ-12"), and for a
  * bare number prefixing the key's own ("12" finds PROJ-1234).
  *
@@ -22,7 +22,7 @@ function keyNumber(key: string): string {
  * the project, so honouring it would pin the entire pool above the title matches
  * and destroy the ranking the search box exists to provide. Reaching the number
  * is what separates "I am naming a ticket" from "I am typing a word". */
-export function keyMatches(key: string, query: string): boolean {
+function namesKey(key: string, query: string): boolean {
   const q = normalizeKey(query);
   if (!q) return false;
   // Digitless: only the whole key, for a source that keys its work with a bare
@@ -30,6 +30,23 @@ export function keyMatches(key: string, query: string): boolean {
   if (!/\d/.test(q)) return normalizeKey(key) === q;
   if (normalizeKey(key).startsWith(q)) return true;
   return /^\d+$/.test(q) && keyNumber(key).startsWith(q);
+}
+
+/** One key-shaped run inside a longer string: letters, then digits, with at most
+ * a single separator and no space across it. The tightness is the point —
+ * "limiter 12" is a word standing next to a number, not a key, and reading it as
+ * one would let an ordinary title query start pinning every ticket whose number
+ * happens to begin with 12. */
+const KEY_TOKEN = /[A-Za-z][A-Za-z0-9]*-?\d+/g;
+
+/** Does `query` name this ticket — as the whole query, or as a ticket the query
+ * merely CARRIES? The second case is how a key usually arrives in practice: a
+ * browse URL off the clipboard, or a note to yourself like "fix PROJ-1234".
+ * Every key-shaped token in the query gets tried, so where in the string it sits
+ * doesn't matter. */
+export function keyMatches(key: string, query: string): boolean {
+  if (namesKey(key, query)) return true;
+  return (query.match(KEY_TOKEN) ?? []).some((token) => namesKey(key, token));
 }
 
 /** The tab bar's shipped order — NOT `types.ts`'s declaration order for `Filter`,

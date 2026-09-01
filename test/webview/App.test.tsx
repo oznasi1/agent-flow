@@ -655,6 +655,26 @@ describe("ticket-number search", () => {
     expect(keys()).toEqual(expect.arrayContaining(["PROJ-1234", "PROJ-1235"]));
   });
 
+  it("finds the ticket in a pasted browse URL", () => {
+    render(<App />);
+    authed();
+    pool();
+    // Fuse alone answers this with nothing — the whole URL is far past its
+    // threshold against any key — so the hit can only come from the pin.
+    type("https://acme.atlassian.net/browse/PROJ-1234");
+    expect(keys()).toEqual(["PROJ-1234"]);
+  });
+
+  it("lets a title that quotes a ticket id rank as a title", () => {
+    render(<App />);
+    authed();
+    pool();
+    // PROJ-500's summary IS "PROJ 1234 rollout". Typing it must find PROJ-500, not
+    // hoist PROJ-1234 on the strength of the id buried in the phrase.
+    type("PROJ 1234 rollout");
+    expect(keys()[0]).toBe("PROJ-500");
+  });
+
   it("still ranks by title when the query names no ticket", () => {
     render(<App />);
     authed();
