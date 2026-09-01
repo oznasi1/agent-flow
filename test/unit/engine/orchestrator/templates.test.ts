@@ -44,14 +44,19 @@ describe("instantiate", () => {
     expect(keys).toEqual(["PROJ-142", "PROJ-142"]);
   });
 
-  it("mints node and edge ids disjoint from the template's", () => {
-    const t = template();
-    const f = instantiate(t, "PROJ-142", "f-new", 1756300000000);
-    // Edge ids key `outcomes` within a pass and are what Reset addresses; two
-    // workflows from one template sharing them is a collision waiting for the
-    // first cross-flow view.
-    expect(f.nodes.map((n) => n.id)).not.toEqual(t.flow.nodes.map((n) => n.id));
-    expect(new Set(f.edges.map((e) => e.id)).size).toBe(2);
+  it("mints ids unique within the instantiated flow", () => {
+    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000);
+    expect(new Set(f.nodes.map((n) => n.id)).size).toBe(f.nodes.length);
+    expect(new Set(f.edges.map((e) => e.id)).size).toBe(f.edges.length);
+  });
+
+  it("numbers an instantiated workflow like a hand-drawn one", () => {
+    // Ids are flow-local: `outcomes` is per-flow, the journal is per-flow, and
+    // Reset is flow-scoped. So there is nothing to avoid colliding with, and an
+    // instance numbered n1, n2, … is exactly what every other flow looks like.
+    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000);
+    expect(f.nodes.map((n) => n.id)).toEqual(["n1", "n2", "n3"]);
+    expect(f.edges.map((e) => e.id)).toEqual(["e1", "e2"]);
   });
 
   it("keeps the wiring after re-minting ids", () => {

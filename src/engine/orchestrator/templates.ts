@@ -75,19 +75,15 @@ export function instantiate(t: FlowTemplate, ticketKey: string, flowId: string, 
   // already been minted — they answer "unique within THIS flow".
   const out: Flow = { id: flowId, name: t.name, armed: false, createdAt: nowMs, nodes: [], edges: [] };
 
-  // Old id → new id, so every edge can be rewired after the nodes are minted.
-  //
-  // `nextNodeId`/`nextEdgeId` answer "unique within THIS flow" over whatever
-  // `Flow` they are handed — they know nothing about the template `out` was
-  // instantiated from. Handing them `out` alone would let a fresh id collide
-  // with an UNPROCESSED template id (a template whose ids start at "n1" mints
-  // its own replacement as "n1", since `out.nodes` starts empty) — exactly the
-  // cross-flow collision the id remap exists to prevent. Folding the template's
-  // own ids into the taken set for each call reserves them without mutating
-  // `out`, so the minted ids are disjoint from the template's from the first one.
+  // Ids are minted against the flow being BUILT, so an instantiated workflow is
+  // numbered n1, n2, … exactly like a hand-drawn one. They are flow-local by
+  // design — `outcomes` is per-flow (deckView.ts), the journal is per-flow, and
+  // Reset is flow-scoped — so an instance reusing the template's numbering
+  // collides with nothing. What must hold is uniqueness WITHIN this flow, which
+  // is what `nextNodeId`/`nextEdgeId` answer.
   const remap = new Map<string, string>();
   for (const n of t.flow.nodes) {
-    const id = nextNodeId({ ...out, nodes: [...out.nodes, ...t.flow.nodes] });
+    const id = nextNodeId(out);
     remap.set(n.id, id);
     const bound: FlowNode = isPlanned(n) ? { ...n, id, ticketKey } : { ...n, id };
     out.nodes.push(bound);
@@ -101,8 +97,7 @@ export function instantiate(t: FlowTemplate, ticketKey: string, flowId: string, 
     // `evaluate.ts` guards a missing target on the read side, but a template is
     // executed by being copied and this is the copy.
     if (from === undefined || to === undefined) continue;
-    const id = nextEdgeId({ ...out, edges: [...out.edges, ...t.flow.edges] });
-    const fresh: FlowEdge = { ...stripHostStamps(e), id, from, to };
+    const fresh: FlowEdge = { ...stripHostStamps(e), id: nextEdgeId(out), from, to };
     out.edges.push(fresh);
   }
 
