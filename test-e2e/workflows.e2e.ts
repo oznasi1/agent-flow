@@ -148,31 +148,22 @@ test("attaching a template shows it disarmed, and arming grows the card's chip",
   await block.getByRole("button", { name: /attach workflow/i }).click();
   await deck.detail().getByRole("button", { name: "Ship it" }).click();
 
-  // `flow:attach` mints a brand-new flow, and DeckApp.tsx's `deck:flows` handler
-  // treats EVERY fresh flow the same way regardless of what created it (its own
-  // comment: "a create posts a flow we did not have — open it"): it auto-opens
-  // the Orchestrator on that flow and closes whatever card drawer was open,
-  // because the two drawers share one fixed slot. So attaching does not leave
-  // the card drawer sitting open on the newly-disarmed block — it bounces
-  // through the Orchestrator first, exactly as pressing "+ New flow" would.
-  // `DeckApp.test.tsx`'s own "opening a workflow from the card drawer …" test
-  // pins the identical mutual-exclusion contract for the reverse direction.
-  const orch = deck.frame.locator(".orch-hd");
-  await expect(orch).toBeVisible({ timeout: 30_000 });
-  await expect(orch.locator(".orch-name")).toHaveValue("Ship it");
-  // Disarmed: the header's own toggle still reads "Arm", not "Armed · disarm"
-  // (`orch-arm`'s label in `OrchestratorDrawer.tsx`).
-  await expect(orch.getByRole("button", { name: "Arm" })).toBeVisible();
-  await shot(launched.page, testInfo, "2 · attach bounces through the Orchestrator, disarmed");
-
-  // Back to the card: closing the Orchestrator and reselecting shows the SAME
-  // workflow, disarmed, in the block this feature actually built.
-  await deck.frame.getByRole("button", { name: "Close" }).click();
-  await deck.card("E2E-WF").click();
+  // `flow:attach` mints a brand-new flow, and a NAIVE reading of
+  // `DeckApp.tsx`'s `deck:flows` handler would auto-open the Orchestrator on
+  // every fresh flow regardless of what created it (its own comment: "a
+  // create posts a flow we did not have — open it") and close whatever card
+  // drawer was open — exactly what pressing the Orchestrator chip with none
+  // does. THIS IS THE ASSERTION THAT MATTERS: attaching from a card must NOT
+  // bounce through that path, or the user never sees the workflow disarmed at
+  // all before it can be armed (design doc §3 — attach is deliberately not
+  // Arm). The card drawer stays open, on the very same block, showing the
+  // template disarmed — no detour through the canvas.
+  await expect(deck.detail()).not.toHaveClass(/closing/);
+  await expect(deck.frame.locator(".orch")).toHaveCount(0);
   await expect(block.locator(".wf-chip")).toHaveText(/disarmed/i, { timeout: 15_000 });
   await expect(block).toContainText("Ship it");
   await expect(block.getByRole("button", { name: "Arm" })).toBeVisible();
-  await shot(launched.page, testInfo, "3 · back on the card, attached and disarmed");
+  await shot(launched.page, testInfo, "2 · attached, disarmed, card drawer never left");
 
   // Still no card chip — a disarmed workflow shows in the drawer alone until it
   // is armed (the chip's own `{workflow && …}` guard has no "disarmed but shown"
@@ -194,7 +185,7 @@ test("attaching a template shows it disarmed, and arming grows the card's chip",
   // the flow itself is armed, and armed-with-nothing-settled reads `advancing`.
   await expect(chip).toHaveClass(/advancing/);
   await expect(block.locator(".wf-chip")).toHaveText(/advancing/i, { timeout: 30_000 });
-  await shot(launched.page, testInfo, "4 · armed, card chip live");
+  await shot(launched.page, testInfo, "3 · armed, card chip live");
 });
 
 test("an attached workflow is a real flow in the Workflows drawer, and Detach clears the card", async ({}, testInfo) => {
@@ -213,15 +204,23 @@ test("an attached workflow is a real flow in the Workflows drawer, and Detach cl
   await block.getByRole("button", { name: /attach workflow/i }).click();
   await deck.detail().getByRole("button", { name: "Nothing to do" }).click();
 
-  // Attaching mints a brand-new flow, which DeckApp.tsx's `deck:flows` handler
-  // auto-opens on the Orchestrator (closing the card drawer under it) exactly
-  // as it would for "+ New flow" — see the sibling test's own comment on this.
-  // That bounce is this test's own round-trip proof for free: the workflow the
-  // card drawer will show is not a projection, it is this exact flow.
+  // Same fix this file's sibling test pins: attaching must not bounce the
+  // card drawer through the Orchestrator. Reasserted here with a different
+  // (zero-rule) template so the fix is proven against more than one shape.
+  await expect(deck.detail()).not.toHaveClass(/closing/);
+  await expect(deck.frame.locator(".orch")).toHaveCount(0);
+  await expect(block.locator(".wf-chip")).toHaveText(/disarmed/i, { timeout: 15_000 });
+  await shot(launched.page, testInfo, "1 · attached, disarmed, card drawer never left");
+
+  // Round trip, reached the deliberate way now that attach itself does not
+  // navigate anywhere: the block's own "Open in Workflows ↗" is a real,
+  // independently reachable flow, not a projection that exists only inside
+  // this block.
+  await block.getByRole("button", { name: /open in workflows/i }).click();
   const orch = deck.frame.locator(".orch-hd");
-  await expect(orch).toBeVisible({ timeout: 30_000 });
+  await expect(orch).toBeVisible({ timeout: 15_000 });
   await expect(orch.locator(".orch-name")).toHaveValue("Nothing to do");
-  await shot(launched.page, testInfo, "1 · attach bounces through the Orchestrator");
+  await shot(launched.page, testInfo, "2 · same workflow, opened as a flow");
 
   // The Templates tab is the OTHER half of the round trip: the shape this
   // workflow came from is still a reusable template of its own, independent of
@@ -229,7 +228,7 @@ test("an attached workflow is a real flow in the Workflows drawer, and Detach cl
   await orch.getByRole("button", { name: /flows ·/i }).click();
   await deck.frame.getByRole("tab", { name: "Templates" }).click();
   await expect(deck.frame.locator(".orch-tmpl-row")).toContainText("Nothing to do");
-  await shot(launched.page, testInfo, "2 · the template, independent of the card");
+  await shot(launched.page, testInfo, "3 · the template, independent of the card");
 
   // Back to the card to arm from where the design's own controls live.
   await deck.frame.getByRole("button", { name: "Close" }).click();
@@ -241,7 +240,7 @@ test("an attached workflow is a real flow in the Workflows drawer, and Detach cl
   // state, besides `stopped`, whose header offers Detach rather than Disarm.
   await block.getByRole("button", { name: "Arm" }).click();
   await expect(block.locator(".wf-chip")).toHaveText(/done/i, { timeout: 30_000 });
-  await shot(launched.page, testInfo, "3 · zero-rule workflow reads done");
+  await shot(launched.page, testInfo, "4 · zero-rule workflow reads done");
 
   // Detach — the affordance this test is actually about, and the one the
   // block's header offers ONLY in the `done`/`stopped` states just reached.
@@ -252,5 +251,5 @@ test("an attached workflow is a real flow in the Workflows drawer, and Detach cl
   // no separate link left to clear.
   await expect(block).toContainText("No workflow attached", { timeout: 30_000 });
   await expect(deck.boardWorkflowChip("E2E-WF2")).toHaveCount(0);
-  await shot(launched.page, testInfo, "4 · detached");
+  await shot(launched.page, testInfo, "5 · detached");
 });
