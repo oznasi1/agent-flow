@@ -69,6 +69,18 @@ const withEdges = (edges: FlowEdge[], armed = true, createdAt = 0): Flow => ({
   edges,
 });
 
+/** A flow with a real gate node between the place and the notify terminal, so a
+ * `gate-approved` edge can be genuinely posed-and-unanswered rather than merely
+ * pending. `evaluate.ts`'s `gateAnswer` only reports `awaiting-answer` once an
+ * incoming edge into the gate is itself settled (`performed` and `firedAt` both
+ * set) — the caller supplies that "ask" edge. */
+const gate = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "gate", question: "Proceed?" });
+const withGate = (edges: FlowEdge[], armed = true, createdAt = 0): Flow => ({
+  id: "f1", name: "Ship it", armed, createdAt,
+  nodes: [place("n1", "PROJ-142"), gate("g1"), notify("n2")],
+  edges,
+});
+
 describe("workflowState", () => {
   it("is disarmed when the flow is not armed, whatever the rules say", () => {
     const s = workflowState(withEdges([edge({ id: "e1" })], false), [], 1000);
@@ -88,12 +100,60 @@ describe("workflowState", () => {
 
   it("prefers stopped over waiting-on-you", () => {
     // A failure the user can act on outranks a question, because the failure is
-    // what actually halted the workflow.
-    const s = workflowState(withEdges([
-      edge({ id: "e1", error: "exit 1" }),
-      edge({ id: "e2", cond: { kind: "gate-approved" } }),
+    // what actually halted the workflow. Verified against a REAL awaiting-answer
+    // step (a posed, unanswered gate) — not merely an ordinary pending edge that
+    // happens to carry a `gate-approved` condition with no gate behind it.
+    const s = workflowState(withGate([
+      edge({ id: "e-fail", error: "exit 1" }),
+      edge({ id: "e-ask", from: "n1", to: "g1", performed: true, firedAt: 1, firedNote: "asked" }),
+      edge({ id: "e-gate", from: "g1", to: "n2", cond: { kind: "gate-approved" } }),
     ]), [], 1000);
     expect(s.status).toBe("stopped");
+    expect(s.steps.find((x) => x.edgeId === "e-gate")).toMatchObject({
+      state: "you", reason: "awaiting-answer",
+    });
+  });
+
+  it("reaches waiting-on-you through a real posed, unanswered gate", () => {
+    // The gate is asked (an incoming edge settled with `firedAt`) but never
+    // answered (no `gateAnswer` on it), which is exactly what `evaluate.ts`
+    // reports as blocked `awaiting-answer` — not a hand-built `WorkflowState`.
+    const s = workflowState(withGate([
+      edge({ id: "e-ask", from: "n1", to: "g1", performed: true, firedAt: 1, firedNote: "asked" }),
+      edge({ id: "e-gate", from: "g1", to: "n2", cond: { kind: "gate-approved" } }),
+    ]), [], 1000);
+    expect(s.status).toBe("waiting-on-you");
+    expect(s.steps.find((x) => x.edgeId === "e-gate")).toMatchObject({
+      state: "you", reason: "awaiting-answer",
+    });
+    expect(s.steps.find((x) => x.edgeId === "e-gate")?.receipt).toBeUndefined();
+  });
+
+  it("reads a disarmed workflow with a failed edge as stopped", () => {
+    // An error is a fact about what already happened, not about what will — so
+    // it outranks the disarmed reading rather than being masked by it.
+    const s = workflowState(withEdges([edge({ id: "e1", error: "exit 1" })], false), [], 1000);
+    expect(s.status).toBe("stopped");
+  });
+
+  it("marks only the first pending step as current", () => {
+    // Marking every pending step "now" would say the workflow is doing three
+    // things at once. Nothing else in this file covers the latch.
+    const s = workflowState(withEdges([
+      edge({ id: "e1", firedAt: 5 }),
+      edge({ id: "e2" }),
+      edge({ id: "e3" }),
+    ]), [], 1000);
+    expect(s.steps.map((x) => x.state)).toEqual(["done", "now", "waiting"]);
+  });
+
+  it("carries previewFlow's reason as a code, not as prose", () => {
+    // A place naming a run no board has cannot be observed at all, which
+    // evaluate.ts reports as blocked "gone". The step hands that code on for
+    // the webview to word — it must not invent a sentence itself.
+    const s = workflowState(withEdges([edge({ id: "e1" })]), [], 1000);
+    expect(s.steps[0].reason).toBe("gone");
+    expect(s.steps[0].receipt).toBeUndefined();
   });
 
   it("reports a fired edge as done, with its receipt", () => {

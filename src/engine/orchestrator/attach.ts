@@ -21,6 +21,7 @@
 // where esbuild resolves imports statically.
 import { RunStatus } from "../../types";
 import { BranchCiStatus } from "./branchCi";
+import type { BlockedNote } from "./evaluate";
 import { RulePreview, previewFlow } from "./preview";
 import { Flow, isPlace, isPlanned, isSettled } from "./model";
 
@@ -56,7 +57,15 @@ export type WorkflowStatus = "disarmed" | "advancing" | "waiting-on-you" | "stop
 export interface StepState {
   edgeId: string;
   state: "done" | "now" | "waiting" | "you" | "fail";
+  /** Text the engine actually RECORDED — the edge's own `firedNote` or `error`, or
+   * `previewFlow`'s `blank`. Never a sentence this module composes: wording is the
+   * webview's job, and an engine module has no business holding English the UI
+   * then has to match. */
   receipt?: string;
+  /** Why this step cannot advance, as `previewFlow`'s own code rather than prose —
+   * `"gone"`, `"agent-state-unknown"`, `"awaiting-answer"`. The block turns it into
+   * a sentence. */
+  reason?: BlockedNote["reason"];
 }
 
 export interface WorkflowState {
@@ -93,14 +102,18 @@ export function workflowState(
 
     const p = previews.get(e.id);
     if (p?.reason === "awaiting-answer") {
-      return { edgeId: e.id, state: "you" as const, receipt: "waiting for your answer" };
+      // A gate IS pending — it still latches `firstPending` off, or a later
+      // pending edge would also read `now` and the workflow would look like it
+      // is doing two things at once.
+      firstPending = false;
+      return { edgeId: e.id, state: "you" as const, reason: "awaiting-answer" };
     }
     // The first rule still in play is the one the reader is waiting on; the rest
     // are simply "not yet", and marking them all as current would say the
     // workflow is doing five things at once.
     const state = firstPending ? ("now" as const) : ("waiting" as const);
     firstPending = false;
-    return { edgeId: e.id, state, receipt: p?.blank ?? undefined };
+    return { edgeId: e.id, state, receipt: p?.blank ?? undefined, reason: p?.reason };
   });
 
   const done = flow.edges.filter(isSettled).length;
