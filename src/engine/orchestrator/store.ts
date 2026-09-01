@@ -4,6 +4,7 @@
 import * as os from "os";
 import * as path from "path";
 import { ACTION_MISMATCH_PREFIX, edgeAction, Flow, FlowEdge, FlowNode, isSettled } from "./model";
+import { FlowTemplate, validTemplate } from "./templates";
 
 /** The only IO surface. Implementations return null / throw only from `readDir`;
  * `readFile` returns null for anything it cannot read, so one unreadable file
@@ -238,4 +239,50 @@ export function readFlows(io: FlowIo, dir: string): Flow[] {
 
 export function removeFlow(io: FlowIo, dir: string, id: string): void {
   io.remove(fileFor(dir, id));
+}
+
+/** Templates sit beside flows, read and written through the same `FlowIo` with
+ * the same rules: the same id charset (an id becomes a path, so this is a
+ * traversal guard, not cosmetics) and the same tolerance (one unreadable file
+ * costs one template, never the whole picker). */
+export function defaultTemplatesDir(): string {
+  return path.join(os.homedir(), ".agentflow", "templates");
+}
+
+function templateFileFor(dir: string, id: string): string {
+  if (!VALID_FLOW_ID.test(id)) throw new Error(`invalid template id: ${JSON.stringify(id)}`);
+  return path.join(dir, `${id}.json`);
+}
+
+export function writeTemplate(io: FlowIo, dir: string, t: FlowTemplate): void {
+  io.writeFile(templateFileFor(dir, t.id), JSON.stringify(t, null, 2));
+}
+
+export function readTemplates(io: FlowIo, dir: string): FlowTemplate[] {
+  let entries: string[];
+  try {
+    entries = io.readDir(dir);
+  } catch {
+    // No directory yet is the ordinary first-run case, not an error.
+    return [];
+  }
+  const out: FlowTemplate[] = [];
+  for (const name of entries) {
+    if (!name.endsWith(".json")) continue;
+    const text = io.readFile(path.join(dir, name));
+    if (text === null) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    const t = validTemplate(parsed);
+    if (t) out.push(t);
+  }
+  return out;
+}
+
+export function removeTemplate(io: FlowIo, dir: string, id: string): void {
+  io.remove(templateFileFor(dir, id));
 }

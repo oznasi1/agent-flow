@@ -1,8 +1,12 @@
 import { describe, it, expect } from "vitest";
 import * as os from "os";
 import * as path from "path";
-import { FlowIo, defaultFlowsDir, readFlows, writeFlow, removeFlow } from "../../../../src/engine/orchestrator/store";
+import {
+  FlowIo, defaultFlowsDir, readFlows, writeFlow, removeFlow,
+  defaultTemplatesDir, readTemplates, writeTemplate, removeTemplate,
+} from "../../../../src/engine/orchestrator/store";
 import { Flow, emptyFlow } from "../../../../src/engine/orchestrator/model";
+import { FlowTemplate } from "../../../../src/engine/orchestrator/templates";
 
 /** An in-memory FlowIo. `files` is the whole store; `removed` records deletions. */
 const fakeIo = (files: Record<string, string> = {}) => {
@@ -494,5 +498,66 @@ describe("a gate flow on disk", () => {
     };
     writeFlow(io, DIR, gateFlow);
     expect(readFlows(io, DIR)[0].edges[0].error).toBeUndefined();
+  });
+});
+
+describe("templates", () => {
+  const t = (id: string, name: string): FlowTemplate => ({
+    schema: 1, id, name, params: {}, savedAt: 1,
+    flow: {
+      id: "", name, armed: false, createdAt: 0,
+      nodes: [{ id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["r"], mode: "plan", dest: "worktree" }],
+      edges: [],
+    },
+  });
+
+  it("round trips through the same FlowIo", () => {
+    const { io } = fakeIo();
+    writeTemplate(io, "/tpl", t("k1", "Ship it"));
+    expect(readTemplates(io, "/tpl").map((x) => x.name)).toEqual(["Ship it"]);
+  });
+
+  it("one corrupt file costs one template, never the whole picker", () => {
+    const { io } = fakeIo();
+    writeTemplate(io, "/tpl", t("k1", "Ship it"));
+    io.writeFile("/tpl/broken.json", "{ not json");
+    writeTemplate(io, "/tpl", t("k2", "Review only"));
+    expect(readTemplates(io, "/tpl").map((x) => x.name).sort()).toEqual(["Review only", "Ship it"]);
+  });
+
+  it("ignores a bare Flow somebody moved into the directory", () => {
+    const { io } = fakeIo();
+    io.writeFile("/tpl/moved.json", JSON.stringify(t("k1", "Ship it").flow));
+    expect(readTemplates(io, "/tpl")).toEqual([]);
+  });
+
+  it("refuses to write an id outside the path-safe charset", () => {
+    const { io } = fakeIo();
+    expect(() => writeTemplate(io, "/tpl", t("../../../.zshrc", "evil"))).toThrow(/invalid template id/i);
+  });
+
+  it("removes by id", () => {
+    const { io } = fakeIo();
+    writeTemplate(io, "/tpl", t("k1", "Ship it"));
+    removeTemplate(io, "/tpl", "k1");
+    expect(readTemplates(io, "/tpl")).toEqual([]);
+  });
+
+  it("reads as empty when the directory does not exist yet", () => {
+    const { io } = fakeIo();
+    expect(readTemplates(io, "/nope")).toEqual([]);
+  });
+
+  it("templates and flows live in sibling directories", () => {
+    expect(defaultTemplatesDir()).not.toBe(defaultFlowsDir());
+    expect(defaultTemplatesDir().endsWith("templates")).toBe(true);
+  });
+
+  it("readFlows pointed at a templates directory returns nothing", () => {
+    // Two shapes, two readers, no overlap: an envelope is not a Flow, so a
+    // mis-filed template can never be loaded as a real, armable workflow.
+    const { io } = fakeIo();
+    writeTemplate(io, "/tpl", t("k1", "Ship it"));
+    expect(readFlows(io, "/tpl")).toEqual([]);
   });
 });
