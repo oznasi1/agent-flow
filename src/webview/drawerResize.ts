@@ -60,15 +60,12 @@ export interface DrawerResize {
    * the write is not a reason to throw out of a keypress or a pointer
    * release.
    *
-   * Replaces the whole persisted state object with one containing only this
-   * drawer's key — exactly what the Orchestrator drawer did before this
-   * module existed. It does NOT merge with whatever is already stored, so a
-   * second drawer persisting under a different key via this same function
-   * would clobber the first drawer's key rather than sit beside it. That is
-   * unchanged behaviour, carried forward on purpose by this refactor; a
-   * caller that needs two keys to coexist has to merge before calling
-   * `vscodeApi.setState` itself (or this module gains a merging `persist`
-   * later) — this module does not invent that merge on its own. */
+   * Merges into whatever is already persisted rather than replacing it:
+   * `vscodeApi.setState` itself is a whole-state replace, and two drawers
+   * share this one state object under two different keys, so writing only
+   * `{ [key]: w }` would make each drawer's resize wipe out whatever the
+   * OTHER drawer (or any other feature) had stored. Merging is this
+   * function's job, not something a caller has to do before calling it. */
   persist(w: number): void;
 }
 
@@ -99,7 +96,15 @@ export function createDrawerResize({ min, def, key }: DrawerResizeConfig): Drawe
 
   function persist(w: number): void {
     try {
-      vscodeApi.setState({ [key]: w });
+      // Merge, never replace. Two drawers persist under two keys in ONE state
+      // object, so `setState({ [key]: w })` would make each drawer's resize wipe
+      // the other's stored width — the first resize after an upgrade silently
+      // losing a width the user had deliberately set. Reading first costs one
+      // `getState` per resize COMMIT (not per pointer move), which is nothing.
+      // Same defensive guard `read` above uses for a non-object/garbage `stored`.
+      const stored = vscodeApi.getState<Record<string, unknown>>();
+      const base = !stored || typeof stored !== "object" ? {} : stored;
+      vscodeApi.setState({ ...base, [key]: w });
     } catch {
       // Losing persistence is not worse than losing the drawer over it.
     }
