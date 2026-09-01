@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
+import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromptMode, FlowTemplate, OutboundMessage, PendingResume, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
 import type { AccountSlot } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
@@ -452,6 +452,11 @@ export function DeckApp(): JSX.Element {
    * drawer needs them to say what a `branch-ci-passed` rule is waiting on;
    * nothing else on the board reads a branch. */
   const [branchCi, setBranchCi] = React.useState<Record<string, BranchCiStatus>>({});
+  /** Reusable workflow shapes, for the card drawer's attach picker. Rides
+   * `deck:flows` alongside `flows` itself — see that message's own comment in
+   * types.ts for why: with the orchestrator off there is nothing to attach,
+   * and this is emptied on the same beat as `pendingResume`/`promptModes`. */
+  const [templates, setTemplates] = React.useState<FlowTemplate[]>([]);
   const [orchEnabled, setOrchEnabled] = React.useState(false);
   const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
   /** The selected card's `DeckCard.id`, not a run key: the Sessions lens renders
@@ -623,6 +628,7 @@ export function DeckApp(): JSX.Element {
         setPendingResume(m.pendingResume ?? []);
         setPromptModes(m.promptModes ?? []);
         setCommands(m.commands ?? []);
+        setTemplates(m.templates ?? []);
         // The one field here that is NOT dereferenced unguarded downstream —
         // `describeCond` reads it as `c.branchCi?.[key]` — but defaulted with its
         // siblings anyway: the prop is typed non-optional, and leaving one member
@@ -1042,8 +1048,21 @@ export function DeckApp(): JSX.Element {
              `undefined` means still waiting; `null` means the host tried and
              failed. The drawer renders three distinct states from that. */
           usage={shownCard.status.usage ?? lazyUsage[shownCard.status.run.key]}
+          flows={flows}
+          templates={templates}
+          // The full list, not `live`: same reasoning as the Orchestrator drawer's
+          // own `runs` prop above — a place node binds a run key, and a run
+          // shelving as closed must not make its own node unresolvable.
+          runs={runs}
+          branchCi={branchCi}
+          orchEnabled={orchEnabled}
           onClose={() => setSelId(null)}
           onForget={forget}
+          // Same pairing the Orchestrator chip's own onClick uses above (open the
+          // Orchestrator, close the card): the two drawers share one slot, so
+          // opening one here has to close the other explicitly rather than
+          // trusting a render order.
+          onOpenWorkflow={(id) => { setOpenFlowId(id); setSelId(null); }}
         />
       )}
     </>

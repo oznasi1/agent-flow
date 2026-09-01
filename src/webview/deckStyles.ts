@@ -1127,4 +1127,26 @@ export const DECK_CSS = `
   .wf-step.wf-fail .wf-receipt { color: var(--c-danger); }
 
   .wf-step-acts { display: flex; gap: 6px; flex: none; }
+
+  /* The attach picker — search-and-pick, same visual family as combo.tsx's
+     MultiCombo (ORCH_CSS's .combo-search/.combo-opt), but a plain block
+     rather than a floating popover: it opens from a button already inside
+     ".wf-block", not a trigger of its own, so there is no anchor to position
+     a ".combo-pop" against. Picking a row commits immediately — see
+     WorkflowPicker's own doc comment for why this is not a second MultiCombo. */
+  .wf-picker { display: flex; flex-direction: column; gap: 6px; margin-top: 4px;
+    padding: 6px; border: 1px solid var(--hair); border-radius: var(--r-chip); }
+  .wf-picker-search { display: flex; align-items: center; gap: 6px; }
+  .wf-picker-search input { flex: 1; min-width: 0; border: 1px solid var(--hair);
+    border-radius: var(--r-chip); background: transparent; color: inherit;
+    font: inherit; padding: 3px 7px; }
+  .wf-picker-search input::placeholder { color: var(--vscode-input-placeholderForeground, var(--dim)); }
+  .wf-picker-close { flex: none; border: 0; background: transparent; color: var(--dim);
+    cursor: pointer; padding: 2px 4px; }
+  .wf-picker-close:hover { color: var(--vscode-foreground); }
+  .wf-picker-list { display: flex; flex-direction: column; max-height: 190px; overflow-y: auto; }
+  .wf-picker-opt { text-align: left; border: 0; background: transparent; color: inherit;
+    font: inherit; padding: 5px 7px; border-radius: var(--r-chip); cursor: pointer; }
+  .wf-picker-opt:hover { background: var(--vscode-list-hoverBackground); }
+  .wf-picker-empty { padding: 7px; font-size: var(--t-body); color: var(--dim); }
 `;

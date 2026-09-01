@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as React from "react";
 import { render, screen, fireEvent, within, waitFor, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 // This repo's pinned jsdom has no PointerEvent constructor. Without it, a
 // fireEvent.pointer* call falls through to a bare Event with no clientX, and
@@ -36,12 +37,13 @@ vi.mock("../../src/webview/vscodeApi", () => ({
   vscodeApi: { getState: vi.fn(() => undefined), setState: vi.fn() },
 }));
 
-import { DeckDetail } from "../../src/webview/DeckDetail";
+import { DeckDetail, type DeckDetailProps } from "../../src/webview/DeckDetail";
 import { DECK_CSS } from "../../src/webview/deckStyles";
 import { send, vscodeApi } from "../../src/webview/vscodeApi";
 import type { DeckCard } from "../../src/webview/deckCards";
-import type { PrEntryMap, PrFacts, RunStatus } from "../../src/types";
+import type { FlowTemplate, PrEntryMap, PrFacts, RunStatus } from "../../src/types";
 import type { UsageTotals } from "../../src/engine/usage";
+import type { Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
 
 const sent = vi.mocked(send);
 beforeEach(() => sent.mockClear());
@@ -72,13 +74,85 @@ const mkCard = (over: Partial<RunStatus> = {}, agent: DeckCard["agent"] = null):
 // `usage` is threaded as a 4th positional so every pre-existing call renders with
 // it undefined — the "still reading" state, which is what a drawer genuinely shows
 // before the host answers.
+//
+// `wf` is a 5th, optional positional covering the workflow-block props Task 11
+// added: every one of this file's 60-odd pre-existing calls omits it, which is
+// what proves "ships inert" — `orchEnabled` defaults false here exactly as it
+// does on a real install, and none of those tests had to change to keep the
+// Workflow section absent.
 const render1 = (
   card: DeckCard,
   onClose = vi.fn(),
   onForget = vi.fn(),
   usage?: UsageTotals | null,
+  wf: Partial<Pick<DeckDetailProps, "flows" | "templates" | "runs" | "branchCi" | "orchEnabled" | "onOpenWorkflow">> = {},
 ) =>
-  render(<DeckDetail card={card} sourceLabel="Jira" usage={usage} onClose={onClose} onForget={onForget} />);
+  render(<DeckDetail
+    card={card} sourceLabel="Jira" usage={usage} onClose={onClose} onForget={onForget}
+    flows={wf.flows ?? []}
+    templates={wf.templates ?? []}
+    runs={wf.runs ?? []}
+    branchCi={wf.branchCi ?? {}}
+    orchEnabled={wf.orchEnabled ?? false}
+    onOpenWorkflow={wf.onOpenWorkflow ?? vi.fn()}
+  />);
+
+// Same minimal fixture shapes test/unit/engine/orchestrator/attach.test.ts and
+// workflowBlock.test.tsx already use: a place feeding a notify terminal is
+// enough for every rule this file's own tests read.
+const place = (id: string, runKey: string): FlowNode =>
+  ({ id, x: 0, y: 0, join: "any", kind: "place", runKey, repo: "svc" });
+const notify = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "notify", message: "" });
+const edge = (over: Partial<FlowEdge> & { id: string }): FlowEdge =>
+  ({ from: "n1", to: "n2", cond: { kind: "pr-merged" }, ...over });
+
+const shipItOn = (runKey: string, over: Partial<Flow> = {}): Flow => ({
+  id: "f1", name: "Ship it", armed: true, createdAt: 100,
+  nodes: [place("n1", runKey), notify("n2")],
+  edges: [edge({ id: "e1" })],
+  ...over,
+});
+
+const shipItTemplate: FlowTemplate = {
+  schema: 1, id: "k1", name: "Ship it", params: {}, savedAt: 0,
+  flow: { id: "", name: "Ship it", armed: false, createdAt: 0,
+    nodes: [{ id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["svc"], mode: "plan", dest: "worktree" }],
+    edges: [] },
+};
+const reviewOnlyTemplate: FlowTemplate = {
+  schema: 1, id: "k2", name: "Review only", params: {}, savedAt: 0,
+  flow: { id: "", name: "Review only", armed: false, createdAt: 0,
+    nodes: [{ id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["svc"], mode: "plan", dest: "worktree" }],
+    edges: [] },
+};
+
+/** A real, posed-and-unanswered gate — same shape
+ * test/unit/engine/orchestrator/attach.test.ts's own `withGate` builds — for
+ * the one test below that needs a genuine `waiting-on-you` status rather than
+ * a hand-built `WorkflowState`. */
+const gateNode = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "gate", question: "Proceed?" });
+const withGateOn = (runKey: string): Flow => ({
+  id: "f1", name: "Ship it", armed: true, createdAt: 100,
+  nodes: [place("n1", runKey), gateNode("g1"), notify("n2")],
+  edges: [
+    edge({ id: "e-ask", from: "n1", to: "g1", performed: true, firedAt: 1, firedNote: "asked" }),
+    edge({ id: "e-gate", from: "g1", to: "n2", cond: { kind: "gate-approved" } }),
+  ],
+});
+
+/** `render1` with the onClose/onForget/usage positionals left at their
+ * defaults — every test below is only ever exercising the Workflow section. */
+const renderWf = (
+  card: DeckCard,
+  wf: Partial<Pick<DeckDetailProps, "flows" | "templates" | "runs" | "branchCi" | "orchEnabled" | "onOpenWorkflow">>,
+) => render1(card, undefined, undefined, undefined, wf);
+
+/** A card whose run key is `key` — every test below binds a workflow by run
+ * key, and `mkCard`'s own default ("PROJ-1") is never it. Same
+ * override-the-nested-run idiom this file's own `mkCard` callers already use
+ * (see the "explore-tenant-config" and "local-abc" cases above). */
+const cardWithKey = (key: string, over: Partial<RunStatus> = {}): DeckCard =>
+  mkCard({ run: { ...mkCard().status.run, key }, ...over });
 
 // Copy, per-repo diffs, the spend table and Forget/Track it all moved behind
 // the `More` disclosure — its body renders only once open (see DeckDetail.tsx's
@@ -814,5 +888,111 @@ describe("resizing", () => {
     });
     render1(mkCard());
     expect(() => fireEvent.keyDown(grip(), { key: "ArrowLeft" })).not.toThrow();
+  });
+});
+
+describe("DeckDetail — Workflow section", () => {
+  it("shows the workflow bound to this card", () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [shipItOn("PROJ-142")], orchEnabled: true });
+    expect(screen.getByText("Ship it")).toBeTruthy();
+  });
+
+  it("shows no Workflow section at all when the orchestrator is off", () => {
+    // New behaviour ships inert: agentFlow.orchestrator defaults to false, and
+    // this whole surface — the "Workflow" heading, the block, the chip — must
+    // be invisible, not merely un-armed.
+    renderWf(cardWithKey("PROJ-142"), { flows: [shipItOn("PROJ-142")], orchEnabled: false });
+    expect(screen.queryByText("Workflow")).toBeNull();
+    expect(screen.queryByText("Ship it")).toBeNull();
+  });
+
+  it("picks the workflow that most needs a human when two bind the card", () => {
+    const stopped: Flow = {
+      ...shipItOn("PROJ-142"), id: "f-stop", name: "Hotfix", createdAt: 200,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, error: "exit 1" }],
+    };
+    renderWf(cardWithKey("PROJ-142"), { flows: [shipItOn("PROJ-142"), stopped], orchEnabled: true });
+    expect(screen.getByText("Hotfix")).toBeTruthy();
+    expect(screen.getByText("+1 more")).toBeTruthy();
+    expect(screen.queryByText("Ship it")).toBeNull();
+  });
+
+  it("shows the attach picker's trigger, and no picker, before it is opened", () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    expect(screen.getByText("No workflow attached")).toBeTruthy();
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-142…")).toBeNull();
+  });
+
+  it("attaching sends flow:attach with the card's run key", async () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Ship it" }));
+    await waitFor(() => expect(sent).toHaveBeenCalledWith(
+      { type: "flow:attach", runKey: "PROJ-142", templateId: "k1" },
+    ));
+  });
+
+  it("the picker filters by name", async () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate, reviewOnlyTemplate], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    await userEvent.type(screen.getByPlaceholderText("Choose a template for PROJ-142…"), "review");
+    await waitFor(() => expect(screen.queryByText("Ship it")).toBeNull());
+    expect(screen.getByText("Review only")).toBeTruthy();
+  });
+
+  it("names a local card's inferred ticket in the picker's placeholder", async () => {
+    // A local card's run key is a worktree slug, not a ticket — the picker asks
+    // about the INFERRED ticket key (see DeckDetail.tsx's `boundTicketKey`),
+    // same as `attachedWorkflows` itself binds a planned node by.
+    renderWf(
+      cardWithKey("local-fix-export", { run: { ...mkCard().status.run, key: "local-fix-export", url: "", kind: "local" } as never,
+        inferredTicketKey: "PROJ-9" }),
+      { flows: [], templates: [shipItTemplate], orchEnabled: true },
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    expect(screen.getByPlaceholderText("Choose a template for PROJ-9…")).toBeTruthy();
+  });
+
+  it("closes the picker without sending anything when cancelled", async () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-142…")).toBeNull();
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("Arm sends flow:arm for this card's own workflow id", async () => {
+    const disarmed = shipItOn("PROJ-142", { armed: false });
+    renderWf(cardWithKey("PROJ-142"), { flows: [disarmed], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Arm" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:arm", id: "f1", armed: true });
+  });
+
+  it("Detach sends flow:detach for this card's own workflow id", async () => {
+    const done = shipItOn("PROJ-142", { edges: [edge({ id: "e1", firedAt: 1, firedNote: "ran" })] });
+    renderWf(cardWithKey("PROJ-142"), { flows: [done], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Detach" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:detach", id: "f1" });
+  });
+
+  it("Approve sends flow:answerGate for this card's own workflow id", async () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [withGateOn("PROJ-142")], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:answerGate", id: "f1", edgeId: "e-gate", answer: "approved" });
+  });
+
+  it("Reset sends flow:resetEdge for this card's own workflow id", async () => {
+    const stopped = shipItOn("PROJ-142", { edges: [edge({ id: "e1", error: "exit 1" })] });
+    renderWf(cardWithKey("PROJ-142"), { flows: [stopped], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+  });
+
+  it("Open in Workflows calls onOpenWorkflow with this card's own workflow id, sending no host message", async () => {
+    const onOpenWorkflow = vi.fn();
+    renderWf(cardWithKey("PROJ-142"), { flows: [shipItOn("PROJ-142")], orchEnabled: true, onOpenWorkflow });
+    await userEvent.click(screen.getByRole("button", { name: "Open in Workflows ↗" }));
+    expect(onOpenWorkflow).toHaveBeenCalledWith("f1");
+    expect(sent).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,6 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { isTicketRun, runKind, type PrFacts } from "../types";
+import { isTicketRun, runKind, type BranchCiStatus, type FlowTemplate, type PrFacts, type RunStatus } from "../types";
 import { formatEq, weightedEq, type UsageTotals } from "../engine/usage";
 import type { DeckCard } from "./deckCards";
 // Same import DeckApp.tsx's own Card makes, and safe for the same reason: bucket.ts
@@ -11,6 +11,9 @@ import { Drawer } from "./Drawer";
 import { CardKindIcon } from "./icons";
 import { createDrawerResize, RESIZE_STEP } from "./drawerResize";
 import { keyLabel, timeAgo } from "./helpers";
+import type { Flow } from "../engine/orchestrator/model";
+import { attachedWorkflows, rankByState, workflowState } from "../engine/orchestrator/attach";
+import { WorkflowBlock } from "./WorkflowBlock";
 
 export interface DeckDetailProps {
   card: DeckCard;
@@ -27,8 +30,105 @@ export interface DeckDetailProps {
    * it from lives there. Absent means open, which is what every caller that
    * only ever renders an open drawer gets for free. */
   closing?: boolean;
+  /** Every flow on the board, so this card's own workflow(s) can be derived
+   * (`attachedWorkflows`) rather than read off a field that could disagree with
+   * the graph — see attach.ts's own header comment for why attachment is never
+   * stored. */
+  flows: Flow[];
+  /** Reusable shapes the attach picker offers. Rides `deck:flows` alongside
+   * `flows` itself (see types.ts's own comment on `templates`), and is empty
+   * whenever the orchestrator is off — never "not loaded yet" and empty at once. */
+  templates: FlowTemplate[];
+  /** Every run on the board — `workflowState`/`previewFlow` need it to answer
+   * conditions that read OTHER cards, not just this one. The full list, not a
+   * caller's already-filtered one: same reasoning as `OrchestratorDrawer`'s own
+   * `runs` prop. */
+  runs: RunStatus[];
+  /** Branch-CI verdicts, keyed `repo#branch` — the same map `evaluateFlow` and
+   * the Orchestrator drawer read, so this drawer's workflow state cannot disagree
+   * with theirs about what a `branch-ci-passed` rule is waiting on. */
+  branchCi: Record<string, BranchCiStatus>;
+  /** `agentFlow.orchestrator`. The Workflow section — chip, block, picker,
+   * everything — renders nothing at all while this is false: the setting
+   * defaults off, and new surface must ship inert. */
+  orchEnabled: boolean;
   onClose: () => void;
   onForget: (key: string) => void;
+  /** "Open in Workflows ↗" on the block header. Sends no message of its own —
+   * the Orchestrator drawer already renders from state `DeckApp.tsx` holds, so
+   * this just names which flow to open there; the same component that owns
+   * `openFlowId` also owns closing this drawer, the way its own Orchestrator
+   * chip already does when it opens the drawer over a selected card. */
+  onOpenWorkflow: (flowId: string) => void;
+}
+
+/** The search-and-tick list `+ Add command…`/`+ Add place…` (`combo.tsx`'s
+ * `MultiCombo`) use, adapted for a single immediate pick rather than
+ * tick-then-commit: attaching a workflow binds exactly one template, so there
+ * is nothing to batch and no second "Add" click to wait for. Not a second
+ * `MultiCombo` instance — that component's whole shape is built around
+ * committing a ticked SET in one call, which has no meaning for a picker that
+ * answers with one templateId and closes. */
+function WorkflowPicker({
+  ticketKey,
+  templates,
+  onPick,
+  onClose,
+}: {
+  ticketKey: string;
+  templates: FlowTemplate[];
+  onPick: (templateId: string) => void;
+  onClose: () => void;
+}): JSX.Element {
+  const [q, setQ] = React.useState("");
+  const rootRef = React.useRef<HTMLDivElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
+  const placeholder = `Choose a template for ${ticketKey}…`;
+  const filtered = templates.filter((t) => t.name.toLowerCase().includes(q.toLowerCase()));
+
+  React.useEffect(() => { inputRef.current?.focus(); }, []);
+  // Same click-outside/Escape shape `useComboFilter` gives every other picker
+  // in this app — this one is not built on that hook (its open/closed state
+  // lives one level up, in `pickerOpen`, not inside this component), but a
+  // reader who dismisses any other picker this app renders the same two ways
+  // must get the same two ways here.
+  React.useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) onClose();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  return (
+    <div className="wf-picker" ref={rootRef}>
+      <div className="wf-picker-search">
+        <input
+          ref={inputRef}
+          value={q}
+          spellCheck={false}
+          placeholder={placeholder}
+          aria-label={placeholder}
+          onChange={(e) => setQ(e.target.value)}
+        />
+        <button type="button" className="wf-picker-close" aria-label="Cancel" onClick={onClose}>✕</button>
+      </div>
+      <div className="wf-picker-list">
+        {templates.length === 0 && <div className="wf-picker-empty">No templates saved yet</div>}
+        {templates.length > 0 && filtered.length === 0 && <div className="wf-picker-empty">No match for “{q}”</div>}
+        {filtered.map((t) => (
+          <button key={t.id} type="button" className="wf-picker-opt" onClick={() => onPick(t.id)}>
+            {t.name}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 /** This drawer's own instance of the shared width machinery (`drawerResize.ts`) —
@@ -74,7 +174,10 @@ function copy(text: string): void {
   void navigator.clipboard?.writeText(text);
 }
 
-export function DeckDetail({ card, sourceLabel, usage, closing = false, onClose, onForget }: DeckDetailProps): JSX.Element {
+export function DeckDetail({
+  card, sourceLabel, usage, closing = false, flows, templates, runs, branchCi, orchEnabled,
+  onClose, onForget, onOpenWorkflow,
+}: DeckDetailProps): JSX.Element {
   const r = card.status;
   const key = r.run.key;
   const tracked = isTicketRun(r.run);
@@ -87,6 +190,26 @@ export function DeckDetail({ card, sourceLabel, usage, closing = false, onClose,
   // order is preserved, and a null `facts` is skipped, same as there.
   const withPr = Object.entries(r.prs).filter(([, e]) => e.facts !== null) as [string, { facts: PrFacts }][];
   const lead = withPr[0]?.[1].facts;
+
+  // A place binds by the run key every card has; a planned node binds by the
+  // ticket key, which a local card only has when the host could infer one off
+  // its branch (see `inferredKey`'s identical reasoning in DeckApp.tsx's Card).
+  const boundTicketKey = tracked ? key : r.inferredTicketKey;
+  // `[]` while the setting is off rather than skipping the call: `orchEnabled`
+  // is the one gate for the whole section below, so nothing downstream needs a
+  // second one. `Date.now()` is read fresh on every render, deliberately not
+  // memoized — `workflowState`/`rankByState` are pure and cheap (bounded by one
+  // flow's edge count, same as the board's own per-card chip already computes
+  // every tick), and a cached wall-clock reading is exactly the kind of state
+  // that goes stale the moment the drawer sits open across a poll: a
+  // `branch-ci-passed` rule waiting on an elapsed window would freeze mid-wait
+  // until some unrelated prop changed and evicted the memo. Recomputing here
+  // costs nothing a `useMemo` keyed on `Date.now()` itself would have saved —
+  // that key invalidates every render anyway — so a plain call is the whole fix.
+  const bound = orchEnabled ? rankByState(attachedWorkflows(flows, key, boundTicketKey), runs, Date.now(), branchCi) : [];
+  const wf = bound[0];
+  const wfState = wf ? workflowState(wf, runs, Date.now(), branchCi) : undefined;
+  const [pickerOpen, setPickerOpen] = React.useState(false);
 
   // Address PR rides the column, not the ticket status. In review means one thing
   // now that ready-to-merge is a column of its own — a PR somebody still has to
@@ -307,6 +430,49 @@ export function DeckDetail({ card, sourceLabel, usage, closing = false, onClose,
             </button>
           )}
         </div>
+
+        {/* The workflow bound to this card, directly under the promoted actions —
+          * see DeckDetailProps' own doc comments for why `orchEnabled` gates the
+          * whole section, not just the picker: the setting defaults off and this
+          * entire surface must ship inert. `bound` and `wf` are computed above,
+          * once, from the same `flows`/`runs`/`branchCi` the Orchestrator drawer
+          * reads, so this section and that drawer cannot disagree about the
+          * workflow's state. */}
+        {orchEnabled && (
+          <div className="dd-sec">
+            <div className="dd-lbl">Workflow</div>
+            <WorkflowBlock
+              flow={wf}
+              state={wfState}
+              extraCount={Math.max(bound.length - 1, 0)}
+              onAttach={() => setPickerOpen(true)}
+              onArm={(armed) => wf && send({ type: "flow:arm", id: wf.id, armed })}
+              onDetach={() => wf && send({ type: "flow:detach", id: wf.id })}
+              onAnswerGate={(edgeId, answer) => wf && send({ type: "flow:answerGate", id: wf.id, edgeId, answer })}
+              onResetEdge={(edgeId) => wf && send({ type: "flow:resetEdge", id: wf.id, edgeId })}
+              onOpenInWorkflows={() => wf && onOpenWorkflow(wf.id)}
+            />
+            {pickerOpen && (
+              <WorkflowPicker
+                ticketKey={boundTicketKey ?? key}
+                templates={templates}
+                onPick={(templateId) => {
+                  send({
+                    type: "flow:attach", runKey: key, templateId,
+                    // A card that already carries a workflow can only gain a
+                    // second one by explicit replacement — see `flow:attach`'s
+                    // own doc comment in types.ts: an unset `replace` is a
+                    // refusal, not a silent second attachment, when one is
+                    // already there.
+                    ...(bound.length > 0 ? { replace: true as const } : {}),
+                  });
+                  setPickerOpen(false);
+                }}
+                onClose={() => setPickerOpen(false)}
+              />
+            )}
+          </div>
+        )}
 
         {/* Work: a single-line fact strip. The label now shares the branch/elapsed
           * row instead of heading a block of its own — repo signal (dirty, ahead,
