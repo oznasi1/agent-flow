@@ -4434,13 +4434,24 @@ export class DeckPanel {
         // drawer can only ever be editing a flow the host gave it.
         const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
         if (!flow) return;
+        const now = Date.now();
+        // `newFlowId` is probabilistic, not unique by construction: its salt space
+        // is 36^4, so two templates minted in the same millisecond CAN collide, and
+        // a collision here would silently overwrite an existing template, since the
+        // store writes by id. Re-mint against what is already on disk. Bounded
+        // rather than a while-loop so a pathological `Math.random()` cannot hang
+        // the extension host.
+        const taken = new Set(readTemplates(this.flowIo, this.templatesDir).map((t) => t.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
         let saved: FlowTemplate;
         try {
           // `toTemplate` throws for a flow with no steps at all, or for a place
           // node the drawer sent no demotion choice for — both refusals written
           // for a human, not a stack trace, so they are surfaced rather than
           // left to escape into the Deck's refresh.
-          saved = toTemplate(flow, m.name, newFlowId(Date.now()), Date.now(), m.choices);
+          saved = toTemplate(flow, m.name, id, now, m.choices);
         } catch (e) {
           this.post({ type: "toast", level: "error", message: (e as Error).message });
           return;
@@ -4471,7 +4482,8 @@ export class DeckPanel {
         // `advanceArmedFlows` explaining why these writes are UNLOCKED): another
         // window may have attached or detached a workflow to this same card
         // since the drawer rendered its button.
-        const existing = attachedWorkflows(readFlows(this.flowIo, this.flowsDir), m.runKey, ticketKey);
+        const flows = readFlows(this.flowIo, this.flowsDir);
+        const existing = attachedWorkflows(flows, m.runKey, ticketKey);
         if (existing.length > 0 && !m.replace) {
           this.post({
             type: "toast", level: "error",
@@ -4480,13 +4492,23 @@ export class DeckPanel {
           return;
         }
         const now = Date.now();
+        // `newFlowId` is probabilistic, not unique by construction: its salt space
+        // is 36^4, so two flows minted in the same millisecond CAN collide, and a
+        // collision here would silently overwrite the user's existing flow, since
+        // the store writes by id. Re-mint against what is already on disk. Bounded
+        // rather than a while-loop so a pathological `Math.random()` cannot hang
+        // the extension host.
+        const taken = new Set(flows.map((f) => f.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
         let fresh: Flow;
         try {
           // `instantiate` throws for a template with no planned step: there is
           // nothing to bind the ticket to. Caught here, rather than left to
           // escape into the Deck's refresh, because the message is written for
           // a human to read.
-          fresh = instantiate(t, ticketKey, newFlowId(now), now);
+          fresh = instantiate(t, ticketKey, id, now);
         } catch (e) {
           this.post({ type: "toast", level: "error", message: (e as Error).message });
           return;

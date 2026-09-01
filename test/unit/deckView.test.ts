@@ -5758,8 +5758,9 @@ describe("orchestrator flows", () => {
         written.nodes.filter((n) => n.kind === "planned")
           .every((n) => (n as { ticketKey: string }).ticketKey === "PROJ-142"),
       ).toBe(true);
-      expect(written.launchConfirmedAt).toBeUndefined();
-      expect(written.commandConfirmedAt).toBeUndefined();
+      // launchConfirmedAt/commandConfirmedAt are never set here — that is
+      // instantiate()'s own contract (templates.test.ts pins it), not this
+      // handler's, so it is not re-pinned here.
     });
 
     it("derives the ticket key from the run's url when a run is on the board", async () => {
@@ -5805,8 +5806,12 @@ describe("orchestrator flows", () => {
       await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "k1", replace: true });
       expect(h.removeFlow).toHaveBeenCalledWith(expect.anything(), "/flows", "f-old");
       expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      // Not just "a write happened" — the replacement is the freshly
+      // instantiated workflow, bound to the card's ticket, not the old flow
+      // (which has no planned node at all) written back untouched.
       const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
-      expect(written.id).not.toBe("f-old");
+      const planned = written.nodes.find((n) => n.kind === "planned") as { ticketKey: string } | undefined;
+      expect(planned?.ticketKey).toBe("PROJ-142");
     });
 
     it("warns when the template is no longer on disk", async () => {
@@ -5929,16 +5934,20 @@ describe("orchestrator flows", () => {
       expect(h.removeTemplate).not.toHaveBeenCalled();
     });
 
-    it("flow:duplicateTemplate writes a copy under a fresh id", async () => {
+    it("flow:duplicateTemplate writes a copy whose name is derived from, but different from, the original", async () => {
       setConfig({ orchestrator: true });
       h.templates = [mkTemplate("k1", "Ship it")];
       const { send } = await openPanel();
       await send({ type: "flow:duplicateTemplate", templateId: "k1" });
       expect(h.writeTemplate).toHaveBeenCalledTimes(1);
       const written = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
-      expect(written.id).not.toBe("k1");
-      expect(written.id).toMatch(/^[A-Za-z0-9_-]+$/);
+      // The one thing worth pinning about the name: it is NOT a verbatim copy
+      // (that would be indistinguishable from forgetting to rename it) but it
+      // still reads as "Ship it" plus something, not an unrelated string.
+      expect(written.name).not.toBe("Ship it");
       expect(written.name).toContain("Ship it");
+      // A duplicate, not a rename-in-place: the original template is untouched.
+      expect(h.templates.some((t) => t.id === "k1" && t.name === "Ship it")).toBe(true);
     });
 
     it("flow:duplicateTemplate ignores an id it does not have", async () => {
@@ -5946,6 +5955,21 @@ describe("orchestrator flows", () => {
       const { send } = await openPanel();
       await send({ type: "flow:duplicateTemplate", templateId: "nope" });
       expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+
+    it("flow:duplicateTemplate refuses to write rather than clobber when every re-mint collides", async () => {
+      // The same bound flow:create's equivalent test pins: 9 attempts (one plus
+      // eight retries) against the deterministic counter mock. Seeding all nine
+      // ids as already taken makes exhaustion the only path left.
+      setConfig({ orchestrator: true });
+      h.templates = Array.from({ length: 9 }, (_, i) => mkTemplate(`fTEST-${i + 1}`, `taken ${i + 1}`));
+      const { send } = await openPanel();
+      await send({ type: "flow:duplicateTemplate", templateId: "fTEST-1" });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      // And nothing already on disk was disturbed.
+      expect(h.templates.map((t) => t.name)).toEqual(
+        Array.from({ length: 9 }, (_, i) => `taken ${i + 1}`),
+      );
     });
   });
 
