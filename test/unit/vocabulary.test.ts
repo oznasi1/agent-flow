@@ -10,8 +10,10 @@ import * as path from "path";
 import { describe, expect, it } from "vitest";
 import {
   allUiStrings,
+  functionSource,
   hasAgentWord,
   hasFlowWord,
+  jsxBlockAround,
   scanManifest,
   scanSources,
   userFacingStrings,
@@ -318,13 +320,30 @@ describe("the template/workflow gate", () => {
   it("the UI never offers a template a workflow verb", () => {
     // A Templates row offering Detach, or a template being armed, is a
     // category error the reader has to untangle: a template has no ticket
-    // and nothing to watch (design doc §1). Scoped to OrchestratorDrawer.tsx,
-    // the one file with both a Templates tab and workflow-arming controls, so
-    // it is the one place the two vocabularies could actually collide.
+    // and nothing to watch (design doc §1).
+    //
+    // A first version of this test looked for one STRING containing both
+    // "template" and a verb — which a bare `Detach` button dropped into
+    // `TemplateRow` (the component that renders a template's own row of
+    // controls) would sail straight through, since neither "Detach" nor any
+    // sibling string in that button would need to mention "template" at all.
+    // Scoping by REGION instead of by a string's own content is what catches
+    // that: everything inside `TemplateRow`'s own render body is per-template
+    // controls by construction, so any verb found there is a verb offered to
+    // a template, whatever the string itself says.
+    //
+    // Two regions, because a stray verb button could land either inside the
+    // row component or as a sibling of it in the surrounding Templates-tab
+    // markup (the `orch-tmpl-list` wrapper — the empty state, or a future
+    // tab-level action):
     const location = "src/webview/OrchestratorDrawer.tsx";
     const source = fs.readFileSync(path.join(ROOT, location), "utf8");
-    const offenders = allUiStrings(location, source)
-      .filter((s) => /template/i.test(s) && /\b(arm|disarm|detach)\b/i.test(s));
+    const regions = [
+      functionSource(location, source, "TemplateRow"),
+      jsxBlockAround(location, source, "orch-tmpl-list"),
+    ];
+    const offenders = regions.flatMap((region) => allUiStrings(location, region))
+      .filter((s) => /\b(arm|disarm|detach)\b/i.test(s));
     expect(offenders).toEqual([]);
   });
 });

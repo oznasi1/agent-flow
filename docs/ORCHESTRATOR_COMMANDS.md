@@ -235,8 +235,13 @@ any other flow. The names never appear in the source: the code keeps `Flow`,
   — never stored, so there is no separate link to clear.
 - **`flow:renameTemplate`**, **`flow:deleteTemplate`**, **`flow:duplicateTemplate`**
   act on the template file only. Deleting a template never touches a workflow
-  already instantiated from it: `instantiate` copies the shape once, and the
-  workflow does not reference the template again afterwards.
+  already instantiated from it: `instantiate` copies the whole shape rather
+  than sharing it, so an existing workflow keeps running unaffected — a later
+  rename or delete of the template it came from changes none of its rules.
+  Each instantiated workflow does keep one pointer back, `Flow.fromTemplate`,
+  set once by `instantiate` and never re-read for shape — its only reader is
+  the Templates tab's own `on N cards` count (`OrchestratorDrawer.tsx`), which
+  is why that count is exact rather than a guess by name and rule count.
 
 ## Boundaries
 

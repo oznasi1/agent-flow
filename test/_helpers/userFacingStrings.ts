@@ -106,6 +106,78 @@ export function userFacingStrings(fileName: string, source: string): string[] {
   return allUiStrings(fileName, source).filter(hasAgentWord);
 }
 
+/** The exact source text of one top-level function — a `function NAME(...)`
+ * declaration, or a `const NAME = (...) => {...}` / `const NAME = function
+ * (...) {...}` assignment — found by name anywhere in the file. Lets a gate
+ * scope a scan to one component's own render body ("does a workflow verb
+ * appear anywhere INSIDE TemplateRow") rather than to a string's own content
+ * ("does a string contain both 'template' and a verb"), which is what makes
+ * the difference between catching a bare `Detach` button dropped into that
+ * component and missing it. Throws when the name is not found, so renaming or
+ * removing the component fails the test loudly instead of silently scanning
+ * nothing. */
+export function functionSource(fileName: string, source: string, name: string): string {
+  const sf = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  let found: ts.Node | undefined;
+  const visit = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isFunctionDeclaration(n) && n.name?.text === name) {
+      found = n;
+      return;
+    }
+    if (
+      ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name &&
+      n.initializer && (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer))
+    ) {
+      found = n.initializer;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (!found) throw new Error(`functionSource: no function or const named ${JSON.stringify(name)} in ${fileName}`);
+  return source.slice(found.getStart(sf), found.getEnd());
+}
+
+/** The full source text of the smallest enclosing JSX element (or fragment)
+ * that contains a given landmark string — a className, an aria-label, any
+ * literal or JSX-text substring. A second way to scope a scan to one region
+ * of a render method, for a block that is inline JSX rather than its own
+ * named component (`functionSource` cannot find what has no name). Throws
+ * when the landmark is not found, for the same reason `functionSource` does. */
+export function jsxBlockAround(fileName: string, source: string, landmark: string): string {
+  const sf = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  let marker: ts.Node | undefined;
+  const findMarker = (n: ts.Node): void => {
+    if (marker) return;
+    if ((ts.isStringLiteralLike(n) || ts.isJsxText(n)) && n.getText(sf).includes(landmark)) {
+      marker = n;
+      return;
+    }
+    ts.forEachChild(n, findMarker);
+  };
+  findMarker(sf);
+  if (!marker) throw new Error(`jsxBlockAround: landmark ${JSON.stringify(landmark)} not found in ${fileName}`);
+  let n: ts.Node | undefined = marker;
+  while (n && !ts.isJsxElement(n) && !ts.isJsxFragment(n)) n = n.parent;
+  if (!n) {
+    throw new Error(`jsxBlockAround: no enclosing JSX element around ${JSON.stringify(landmark)} in ${fileName}`);
+  }
+  return source.slice(n.getStart(sf), n.getEnd());
+}
+
 function walk(dir: string, acc: string[] = []): string[] {
   for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, e.name);

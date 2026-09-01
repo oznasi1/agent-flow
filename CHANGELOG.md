@@ -13,7 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   to any card straight from that card's own drawer — no separate picker, no ticket to
   choose. The workflow's rules show live in the drawer: which step it's on, why it's stuck if
   it is, and Approve / Reject or Reset right where you noticed the problem. A chip on the
-  card itself says which workflow it carries and whether it needs you.
+  card itself says which workflow it carries and whether it needs you. Off by default,
+  behind `agentFlow.orchestrator`, same as the rest of the Orchestrator.
 - **A Templates tab** in the Workflows drawer, alongside the existing Running tab: rename,
   duplicate and delete the shapes you've saved.
 
@@ -22,9 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The card detail drawer** is wider and resizable, with its most-used actions — Open
   workspace, Open PR, Diff, Address PR — promoted to the top and everything else moved
   behind **More** rather than laid out as a flat list of buttons.
-
-This surface is off by default behind `agentFlow.orchestrator`, same as the rest of the
-Orchestrator.
 
 ## [0.64.0] — 2026-09-01
 
