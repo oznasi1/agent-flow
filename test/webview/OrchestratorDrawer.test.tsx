@@ -4407,6 +4407,32 @@ describe("Save as template", () => {
     expect(screen.getByRole("button", { name: "Save as template…" })).toBeDisabled();
   });
 
+  // A flow `toTemplate` would happily save (it only throws on an EMPTY flow)
+  // but `instantiate` would then refuse forever, at every single attach,
+  // because there is no place or planned node to bind a ticket to. Disabling
+  // this button is the only thing that stops such a template from ever
+  // reaching the picker in the first place.
+  it("is disabled on a flow built only of command / gate / notify nodes, and says why", () => {
+    const commandOnly = flow({
+      nodes: [
+        { id: "n1", kind: "command", x: 0, y: 0, join: "any", run: "echo hi" },
+        { id: "n2", kind: "notify", x: 40, y: 0, join: "any", message: "done" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "command-succeeded" } }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [commandOnly] })} />);
+    const save = screen.getByRole("button", { name: "Save as template…" });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("title");
+  });
+
+  it("stays enabled, with no title, on a flow with at least one place", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    const save = screen.getByRole("button", { name: "Save as template…" });
+    expect(save).not.toBeDisabled();
+    expect(save).not.toHaveAttribute("title");
+  });
+
   it("asks for a name, plus a prompt mode and a destination per demoted place", () => {
     render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
     fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
@@ -4522,8 +4548,14 @@ describe("Save as template", () => {
   });
 
   it("asks nothing about places when the flow demotes none — a bare Name field", () => {
+    // A planned node, not a bare notify: this is the "demotes none" case
+    // (there is no PLACE to ask about), not the "cannot bind a ticket at
+    // all" case `canBindTicket` now disables the button for — a notify-only
+    // flow used to sit here before that guard existed, but that flow could
+    // never actually be saved once fixed, since it has nothing to bind.
     render(<OrchestratorDrawer {...props({ flows: [flow({ nodes: [
-      { id: "n1", kind: "notify", x: 24, y: 24, join: "any", message: "done" },
+      { id: "n1", kind: "planned", x: 24, y: 24, join: "any", ticketKey: "", repos: ["r"], mode: "quick", dest: "worktree" },
+      { id: "n2", kind: "notify", x: 64, y: 24, join: "any", message: "done" },
     ] })] })} />);
     fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
     expect(screen.getByLabelText("Name")).toBeTruthy();

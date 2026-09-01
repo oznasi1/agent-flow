@@ -3,7 +3,7 @@ import * as path from "path";
 import type { Flow, FlowEdge, FlowNode } from "../../../../src/engine/orchestrator/model";
 import { stripHostStamps } from "../../../../src/engine/orchestrator/model";
 import {
-  instantiate, placesToDemote, toTemplate, validTemplate, type FlowTemplate,
+  canBindTicket, instantiate, placesToDemote, toTemplate, validTemplate, type FlowTemplate,
 } from "../../../../src/engine/orchestrator/templates";
 import { FlowIo, readFlows, writeFlow } from "../../../../src/engine/orchestrator/store";
 
@@ -228,6 +228,45 @@ describe("toTemplate", () => {
     const byId = new Map(f.nodes.map((n) => [n.id, n]));
     expect(f.edges.every((e) => byId.has(e.from) && byId.has(e.to))).toBe(true);
     expect(f.edges.map((e) => byId.get(e.to)!.kind)).toEqual(["notify", "notify"]);
+  });
+});
+
+describe("canBindTicket", () => {
+  const command = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "command", run: "echo hi" });
+  const gate = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "gate", question: "ok?" });
+
+  it("refuses a flow built only of command / gate / notify nodes", () => {
+    // This is exactly the shape `toTemplate` would save cleanly (it only
+    // throws on an empty flow) but `instantiate` would then refuse forever —
+    // nothing here would ever become a `planned` node to bind a ticket to.
+    const flow: Flow = {
+      id: "f1", name: "x", armed: false, createdAt: 0,
+      nodes: [command("n1"), gate("n2"), notify("n3")],
+      edges: [edge("e1", "n1", "n2"), edge("e2", "n2", "n3")],
+    };
+    expect(canBindTicket(flow)).toBe(false);
+  });
+
+  it("accepts a flow with a place — toTemplate demotes it to planned", () => {
+    const flow: Flow = {
+      id: "f1", name: "x", armed: false, createdAt: 0,
+      nodes: [place("n1", "PROJ-142", "ingest-worker"), notify("n2")],
+      edges: [edge("e1", "n1", "n2")],
+    };
+    expect(canBindTicket(flow)).toBe(true);
+  });
+
+  it("accepts a flow with a planned node", () => {
+    const flow: Flow = {
+      id: "f1", name: "x", armed: false, createdAt: 0,
+      nodes: [planned("n1"), notify("n2")],
+      edges: [edge("e1", "n1", "n2")],
+    };
+    expect(canBindTicket(flow)).toBe(true);
+  });
+
+  it("refuses an empty flow", () => {
+    expect(canBindTicket({ id: "f1", name: "x", armed: false, createdAt: 0, nodes: [], edges: [] })).toBe(false);
   });
 });
 

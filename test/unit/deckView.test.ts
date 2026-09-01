@@ -5923,6 +5923,27 @@ describe("orchestrator flows", () => {
       const toast = posts(p).find((m) => m.type === "toast");
       expect(toast?.message).toMatch(/no prompt mode and destination chosen/i);
     });
+
+    // The drawer's own button already disables "Save as template…" for this
+    // shape (`canBindTicket`, templates.ts) — but that guard lives in a
+    // webview, which can be stale (open from before it shipped, or simply not
+    // re-rendered), and this handler is the one place that actually writes to
+    // disk. Without a refusal here, a command/gate/notify-only flow saves
+    // cleanly (`toTemplate` only throws on an EMPTY flow) and then fails
+    // `instantiate` at every single future attach, forever.
+    it("refuses a flow with no place or planned node — nothing for a saved template to ever bind a ticket to", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [{
+        id: "f1", name: "Notify only", armed: false, createdAt: 1_000,
+        nodes: [{ id: "n1", kind: "notify", x: 0, y: 0, join: "any", message: "done" }],
+        edges: [],
+      }];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:saveTemplate", id: "f1", name: "Notify only", choices: [] });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/nothing to bind|no step/i);
+    });
   });
 
   describe("flow:renameTemplate, flow:deleteTemplate, flow:duplicateTemplate (Task 8)", () => {

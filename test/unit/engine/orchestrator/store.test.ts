@@ -543,6 +543,16 @@ describe("templates", () => {
     expect(readTemplates(io, "/tpl")).toEqual([]);
   });
 
+  // Only `writeTemplate`'s path-safe charset was pinned before this; `remove`
+  // routes through the same `templateFileFor`, and an unguarded delete is
+  // worse than an unguarded write — it would let an id read back off disk
+  // (or handed up from the webview) delete a file outside the templates
+  // directory entirely.
+  it("refuses to remove an id outside the path-safe charset", () => {
+    const { io } = fakeIo();
+    expect(() => removeTemplate(io, "/tpl", "../../../.zshrc")).toThrow(/invalid template id/i);
+  });
+
   it("reads as empty when the directory does not exist yet", () => {
     const { io } = fakeIo();
     expect(readTemplates(io, "/nope")).toEqual([]);
@@ -559,5 +569,38 @@ describe("templates", () => {
     const { io } = fakeIo();
     writeTemplate(io, "/tpl", t("k1", "Ship it"));
     expect(readFlows(io, "/tpl")).toEqual([]);
+  });
+});
+
+describe("readTemplates — a filename that does not match the record's own id", () => {
+  const t = (id: string, name: string): FlowTemplate => ({
+    schema: 1, id, name, params: {}, savedAt: 1,
+    flow: {
+      id: "", name, armed: false, createdAt: 0,
+      nodes: [{ id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["r"], mode: "plan", dest: "worktree" }],
+      edges: [],
+    },
+  });
+
+  it("skips a copied file (same id inside, wrong name on disk), and still loads the correctly-named one", () => {
+    // `cp k1.json k1-backup.json` (a backup, a `cp`, a Finder duplicate) puts
+    // two templates claiming the same id in the store. Without this check
+    // that is two picker rows sharing one React key, and — because
+    // `removeTemplate`/`writeTemplate` both address by id, never by
+    // filename — the copy can never be deleted or overwritten: it is stuck
+    // in the list for good. The store itself only ever writes `<id>.json`
+    // (`templateFileFor`), so a mismatched name is never store-authored.
+    const { io } = fakeIo();
+    writeTemplate(io, "/tpl", t("k1", "Ship it"));
+    io.writeFile("/tpl/k1-backup.json", JSON.stringify(t("k1", "Ship it")));
+    expect(readTemplates(io, "/tpl").map((x) => x.id)).toEqual(["k1"]);
+  });
+
+  it("leaves nothing readable behind after removeTemplate, even when a copy existed", () => {
+    const { io } = fakeIo();
+    writeTemplate(io, "/tpl", t("k1", "Ship it"));
+    io.writeFile("/tpl/k1-backup.json", JSON.stringify(t("k1", "Ship it")));
+    removeTemplate(io, "/tpl", "k1");
+    expect(readTemplates(io, "/tpl")).toEqual([]);
   });
 });

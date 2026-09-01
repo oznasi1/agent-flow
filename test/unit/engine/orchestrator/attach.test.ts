@@ -182,6 +182,16 @@ describe("workflowState", () => {
     ]), [], 1000);
     expect([s.done, s.total]).toEqual([2, 3]);
   });
+
+  // The other four of `workflowState`'s five statuses are each asserted by
+  // name above; `advancing` was only ever implied through `rankByState`'s
+  // ordering ("puts a stopped workflow ahead of an advancing one" etc.),
+  // never pinned directly here. Armed, no error, no gate, and not every edge
+  // settled — the one status left once the other four are ruled out.
+  it("is advancing when armed with a pending rule and no failure, question, or completion", () => {
+    const s = workflowState(withEdges([edge({ id: "e1" })]), [], 1000);
+    expect(s.status).toBe("advancing");
+  });
 });
 
 describe("rankByState", () => {
