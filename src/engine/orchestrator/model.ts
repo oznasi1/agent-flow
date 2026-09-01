@@ -284,6 +284,30 @@ export function isSettled(e: FlowEdge): boolean {
   return e.firedAt !== undefined || e.error !== undefined;
 }
 
+/** Every field the HOST stamps onto an edge as it acts, removed — so the edge is
+ * back to what the user configured. Two callers: `flow:resetEdge` (deckView.ts),
+ * putting one rule back in play, and `toTemplate` (templates.ts), saving a shape
+ * that must carry no history.
+ *
+ * Deliberately a DENY-list. It used to be an allow-list that rebuilt the edge
+ * from its known non-host fields, and that allow-list silently dropped `note` —
+ * the user's own words — every time anyone pressed Reset. A new host-owned field
+ * on `FlowEdge` is therefore forgotten in exactly one place, here, rather than in
+ * whichever of two call sites nobody remembered.
+ *
+ * `mode` and `note` survive on purpose: they are the user's configuration, not a
+ * mirror of anything the host decided, and a seed's mode has nowhere else to live. */
+export function stripHostStamps(e: FlowEdge): FlowEdge {
+  const kept: FlowEdge = { ...e };
+  delete kept.firedAt;
+  delete kept.firedNote;
+  delete kept.performed;
+  delete kept.error;
+  delete kept.action;
+  delete kept.gateAnswer;
+  return kept;
+}
+
 /** Does this action spend money — open a window, start a paid session? The ONE
  * place that answers this, because it used to be answered three different ways
  * that had to be kept in sync by hand: `evaluate.ts`'s launch cap, the

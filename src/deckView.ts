@@ -6,7 +6,7 @@ import { exec } from "child_process";
 import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps } from "./engine/orchestrator/model";
 import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, JournalEventInput } from "./engine/orchestrator/journal";
@@ -4323,17 +4323,7 @@ export class DeckPanel {
           // readings ("it was saved as X but where it points now means Y"). `mode`
           // and `note` both survive: they are the user's own configuration, not a
           // mirror of anything, and a seed's mode has nowhere else to live.
-          edges: flow.edges.map((e) => {
-            if (e.id !== m.edgeId) return e;
-            const kept: FlowEdge = { ...e };
-            delete kept.firedAt;
-            delete kept.firedNote;
-            delete kept.performed;
-            delete kept.error;
-            delete kept.action;
-            delete kept.gateAnswer;
-            return kept;
-          }),
+          edges: flow.edges.map((e) => (e.id === m.edgeId ? stripHostStamps(e) : e)),
         });
         // The event this whole journal exists for. Reset's job is to DELETE the
         // edge's receipt — `firedAt`, `firedNote`, `error`, `performed` — so that
