@@ -1077,4 +1077,54 @@ export const DECK_CSS = `
      is not a place to put the board's accent. */
   .c-row .ok { color: var(--c-done); }
   .c-row .act { margin-left: auto; flex: none; height: 20px; padding: 0 7px; font-size: 11px; }
+
+  /* WorkflowBlock — the card drawer's live stepper. Sits second in the drawer,
+     directly under the promoted actions (see DeckDetail.tsx's anatomy). The
+     empty ("no workflow") row and the attached header/steps share the outer
+     ".wf-block" padding so neither one jumps when a workflow is attached. */
+  .wf-block { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
+    border-bottom: 1px solid var(--hair); }
+  .wf-none { flex-direction: row; align-items: center; gap: 10px; }
+  .wf-dash { color: var(--dim); border-bottom: 1px dashed var(--hair); padding-bottom: 1px; }
+
+  .wf-hd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .wf-name { font-weight: 600; }
+  .wf-count { font-family: var(--vscode-editor-font-family); color: var(--dim);
+    font-variant-numeric: tabular-nums; }
+  .wf-extra { color: var(--dim); }
+  .wf-hd-acts { display: flex; gap: 6px; margin-left: auto; }
+
+  /* The status chip. Hues are the same load-bearing set the card chip (Task 12)
+     will use: amber and red are already spoken for elsewhere on this board, so
+     a workflow that is merely attached and fine — disarmed or advancing — never
+     borrows either. */
+  .wf-chip { font-size: var(--t-micro); padding: 1px 6px; border-radius: var(--r-chip);
+    border: 1px solid var(--hair); color: var(--dim); }
+  .wf-chip.wf-advancing { color: var(--c-progress); border-color: color-mix(in srgb, var(--c-progress) 45%, var(--hair)); }
+  .wf-chip.wf-waiting-on-you { color: var(--c-attn); border-color: color-mix(in srgb, var(--c-attn) 45%, var(--hair)); }
+  .wf-chip.wf-stopped { color: var(--c-danger); border-color: color-mix(in srgb, var(--c-danger) 45%, var(--hair)); }
+  .wf-chip.wf-done { color: var(--c-done); border-color: color-mix(in srgb, var(--c-done) 45%, var(--hair)); }
+
+  .wf-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  /* Attaching leaves a workflow disarmed and every rule greyed (design doc §3) —
+     one dimming rule on the list rather than a second, muted copy of each
+     state's own color, so a step's hue always means the same thing whether or
+     not the workflow is currently spending anything. */
+  .wf-steps.wf-greyed .wf-step { opacity: .55; }
+
+  .wf-step { display: flex; align-items: baseline; gap: 8px; }
+  .wf-mark { flex: none; width: 1.2em; text-align: center; color: var(--dim); }
+  /* "waiting" — merely not yet — takes no color at all: the one state this
+     block must not make loud. */
+  .wf-step.wf-done .wf-mark { color: var(--c-done); }
+  .wf-step.wf-now .wf-mark { color: var(--c-progress); }
+  .wf-step.wf-you .wf-mark { color: var(--c-attn); }
+  .wf-step.wf-fail .wf-mark { color: var(--c-danger); }
+
+  .wf-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+  .wf-rule { overflow-wrap: anywhere; }
+  .wf-receipt { color: var(--dim); font-size: var(--t-body); }
+  .wf-step.wf-fail .wf-receipt { color: var(--c-danger); }
+
+  .wf-step-acts { display: flex; gap: 6px; flex: none; }
 `;
