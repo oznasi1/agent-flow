@@ -3596,7 +3596,11 @@ describe("the dry run", () => {
   it("says a rule is blocked, and why, when its source card is off the board", () => {
     const panel = openDryRun({ runs: [] });
     expect(panel.textContent).toContain("blocked");
-    expect(panel.textContent).toMatch(/not on the board/i);
+    // Wording moved to `reasonWhy` (orchestratorRule.ts), shared with the card
+    // drawer's own live stepper — "isn't on the board" now, not "is not on the
+    // board right now", because `gone` is a dead end while that stays true,
+    // not a transient absence (see `reasonWhy`'s own doc comment).
+    expect(panel.textContent).toMatch(/isn't on the board/i);
   });
 
   it("does not claim the pass will act on this verdict alone", () => {

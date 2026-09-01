@@ -10,11 +10,14 @@
 // model, two presentations" warns about; this file adds a third reader of the
 // same one, nothing more.
 //
-// What IS this file's own job: turning `StepState.reason` — a CODE
-// (`"gone" | "agent-state-unknown" | "awaiting-answer"`) — into a sentence.
-// `attach.ts` deliberately stops at the code: an engine module holding English
-// the UI then has to match is how two presentations drift, so the wording
-// lives here, once, in `REASON_TEXT`.
+// `StepState.reason` — a CODE (`"gone" | "agent-state-unknown" |
+// "awaiting-answer"`) — is turned into a sentence by `reasonWhy`, imported
+// below from `orchestratorRule.ts`: it already had to say the same three
+// things for the dry-run panel's `verdictWhy`, and an EARLIER version of this
+// file wrote its own second copy, which drifted from that one in the meaning
+// of `"gone"`, not just its phrasing — this file's own review caught it.
+// `attach.ts` deliberately stops at the code; the wording is now the ONE
+// place both readers call, not two that happen to agree today.
 //
 // Pure presentation: every effect a click has leaves through a prop. This
 // component sends no host message itself — wiring it into `DeckDetail` (which
@@ -22,7 +25,7 @@
 import * as React from "react";
 import { Flow, FlowEdge } from "../engine/orchestrator/model";
 import { StepState, WorkflowState, WorkflowStatus } from "../engine/orchestrator/attach";
-import { ruleOneLine } from "./orchestratorRule";
+import { reasonWhy, ruleOneLine } from "./orchestratorRule";
 
 export interface WorkflowBlockProps {
   /** `undefined` — nothing binds this card — is a state in its own right, not an
@@ -63,32 +66,13 @@ const MARK: Record<StepState["state"], string> = {
   fail: "✕",
 };
 
-/** `StepState.reason` in words. `attach.ts`'s own doc comment names these three
- * codes and hands the sentence to "the block" — this is that sentence, written
- * once, here, rather than re-derived at each call site.
- *
- * `gone` is deliberately not softened into another flavor of "waiting": the
- * engine's own doc comment on `RulePreview.blocked` says the source "cannot be
- * observed at all, so it can never be met while that stays true" — that is a
- * dead end, not a queue, and reads honestly only if it says so.
- *
- * `awaiting-answer` here reads identically to a gate's own receiptless "you"
- * step, because `workflowState` only ever attaches this reason where the state
- * IS `you` — the two are the same fact, not two different ones needing two
- * sentences. */
-const REASON_TEXT: Record<NonNullable<StepState["reason"]>, string> = {
-  gone: "its card isn't on the board — this can never be met while that stays true",
-  "agent-state-unknown": "can't tell what the session is doing right now",
-  "awaiting-answer": "waiting for your answer",
-};
-
 /** The receipt line under a step's rule sentence: the engine's own recorded
- * words if it has any, else this file's sentence for why it is stuck, else
+ * words if it has any, else `reasonWhy`'s sentence for why it is stuck, else
  * nothing — a `waiting` step with neither is simply next in line, and says so
  * by staying quiet rather than manufacturing a reason it doesn't have. */
 function stepText(step: StepState): string | undefined {
   if (step.receipt !== undefined) return step.receipt;
-  if (step.reason !== undefined) return REASON_TEXT[step.reason];
+  if (step.reason !== undefined) return reasonWhy(step.reason);
   return undefined;
 }
 
@@ -186,12 +170,19 @@ export function WorkflowBlock({
 
   // Exactly one contextual toggle in the header, mirroring the design doc's own
   // language: "a SINGLE Arm button" while disarmed, "Detach OFFERED" once done.
-  // Anything in between (advancing, waiting on you, stopped) is still an armed
-  // workflow doing something, and the one action that applies to all three
-  // alike is the ability to pause it.
+  // `stopped` gets Detach too, not Disarm: `workflowState` (attach.ts) checks
+  // `stopped` BEFORE `!armed`, so a failed edge reports "stopped" whatever its
+  // armed flag says — a Disarm button here would flip `flow.armed` and change
+  // nothing the reader can see, while Detach is the one drawer-level action
+  // that actually gets a user who has given up on a failed workflow off this
+  // card without opening the canvas, which is the design's own promise for
+  // both stalls ("actionable from the card drawer"). A stopped-and-armed
+  // workflow can still only be Detached or Reset from here — Reset (on the
+  // failed step itself) is exactly what you press when you DO want it to
+  // resume, so nothing about recovery is lost.
   const headerAction = state.status === "disarmed"
     ? <button type="button" className="dd-pact" onClick={() => onArm(true)}>Arm</button>
-    : state.status === "done"
+    : state.status === "done" || state.status === "stopped"
       ? <button type="button" className="dd-pact" onClick={onDetach}>Detach</button>
       : <button type="button" className="dd-pact" onClick={() => onArm(false)}>Disarm</button>;
 

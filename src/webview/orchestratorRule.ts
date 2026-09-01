@@ -1017,16 +1017,37 @@ export function verdictLabel(v: RulePreview): string {
   }
 }
 
+/** `BlockedNote`'s three reason codes, in words. Shared by `verdictWhy` (the
+ * dry-run panel, below) and `WorkflowBlock.tsx` (the card drawer's live
+ * stepper) — the two are reading the same fact off the same field
+ * (`RulePreview.reason` / `StepState.reason`, both `BlockedNote["reason"]`)
+ * and drifted once already: an earlier draft of the block wrote its own copy
+ * of these three sentences, and its `"gone"` wording disagreed with this
+ * one's in MEANING, not just phrasing — this file's original said "not on the
+ * board right now" (transient), where `"gone"` actually means the source
+ * "cannot be observed at all, so it can never be met while that stays true"
+ * (`preview.ts`'s own doc comment on `RulePreview.blocked`). That is a dead
+ * end, not a queue, and only the block's wording said so — this is now the
+ * one copy, used by both.
+ *
+ * `waiting` is deliberately absent: its reason is what the source place
+ * currently LOOKS like, which is `observationOf`'s question, not this one. */
+export function reasonWhy(reason: NonNullable<RulePreview["reason"]>): string {
+  if (reason === "gone") return "its card isn't on the board — this can never be met while that stays true";
+  if (reason === "awaiting-answer") return "waiting for your answer";
+  return "can't tell what the session is doing right now";
+}
+
 /** Why a rule is in the state `verdictLabel` names, or `null` where the verdict
  * says everything there is to say. `waiting` is deliberately absent: its reason
  * is what the source place currently LOOKS like, which is `observationOf`'s
  * question, and the caller already has that pair to hand.
  *
- * `blocked`'s three reasons get their first user-facing wording here.
- * `BlockedNote` has been computed on every armed pass since the orchestrator
- * shipped and read by nothing — `evaluate.ts`'s own doc comment claims the
- * drawer's footer surfaces it, which was never true. The dry run is its first
- * consumer, so these two strings are new copy, not a move. */
+ * `blocked`'s three reasons get their first user-facing wording in `reasonWhy`
+ * above. `BlockedNote` has been computed on every armed pass since the
+ * orchestrator shipped and read by nothing — `evaluate.ts`'s own doc comment
+ * claims the drawer's footer surfaces it, which was never true. The dry run
+ * is its first consumer. */
 export function verdictWhy(v: RulePreview): string | null {
   if (v.verdict === "defer") {
     return `met, but ${MAX_LAUNCHES_PER_PASS} is this pass's cap — fires on a later pass`;
@@ -1035,8 +1056,6 @@ export function verdictWhy(v: RulePreview): string | null {
   // this exact string and the arm warning counts the rules it applies to, so a
   // third phrasing here would be a third claim about one fact.
   if (v.verdict === "unset") return v.blank ?? null;
-  if (v.verdict !== "blocked") return null;
-  if (v.reason === "gone") return "its card is not on the board right now";
-  if (v.reason === "awaiting-answer") return "it is waiting on your answer";
-  return "its session activity cannot be read";
+  if (v.verdict !== "blocked" || v.reason === undefined) return null;
+  return reasonWhy(v.reason);
 }

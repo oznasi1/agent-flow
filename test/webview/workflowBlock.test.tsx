@@ -149,6 +149,25 @@ describe("WorkflowBlock", () => {
     expect(base.onArm).toHaveBeenCalledWith(false);
   });
 
+  it("offers Detach, not Disarm, on a stopped workflow", async () => {
+    // `workflowState` (attach.ts) checks `stopped` BEFORE `!armed`, so a failed
+    // edge reports "stopped" no matter what `flow.armed` says — a Disarm button
+    // here would flip a flag that changes nothing visible, and Detach was
+    // previously reachable only once `done`, which a failed edge cannot reach
+    // without a successful Reset first. That left a stopped workflow with no
+    // drawer-level way off the card at all, contradicting the design's own
+    // claim that both stalls are actionable from the drawer without opening
+    // the canvas.
+    const base = makeBase();
+    render(<WorkflowBlock {...base} state={{
+      status: "stopped", done: 1, total: 2,
+      steps: [{ edgeId: "e2", state: "fail", receipt: "exit 1 · 3 assertions failed" }],
+    }} />);
+    expect(screen.queryByRole("button", { name: "Disarm" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Detach" }));
+    expect(base.onDetach).toHaveBeenCalled();
+  });
+
   it("opens the Workflows drawer from the header", async () => {
     const base = makeBase();
     render(<WorkflowBlock {...base} />);
