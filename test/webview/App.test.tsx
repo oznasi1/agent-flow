@@ -607,17 +607,19 @@ describe("ticket-number search", () => {
   const keys = () => Array.from(document.querySelectorAll("a.key")).map((e) => e.textContent);
   const type = (v: string) =>
     fireEvent.change(screen.getByPlaceholderText("Search title or ticket…"), { target: { value: v } });
-  // Two decoys, both deliberate. PROJ-1235 is the near-miss a fuzzy key index
-  // surfaces for "1234"; PROJ-9 carries "1234" in its *summary*, which the title
-  // index scores as a strong hit. Ordered first in the pool so a build that simply
-  // appended the key to fuse's keys — no pin — would rank PROJ-9 above the ticket
-  // the user actually named and fail.
+  // PROJ-500 is the decoy that makes these assertions bite: its TITLE quotes
+  // another ticket's id, which is an ordinary thing for a follow-up ticket to do.
+  // Fuse scores that title hit (0.136 for "proj 1234") better than PROJ-1234's own
+  // key (0.333 — the separator mismatch costs it a substitution), verified
+  // empirically against this exact pool, so a build that only added "key" to fuse's
+  // keys and skipped the pin answers "proj 1234" with the rollout ticket. PROJ-1235
+  // is the adjacent number a fat-fingered query has to be able to reach.
   const pool = () =>
     host({
       type: "tasks",
       filter: "mine",
       tasks: [
-        mkTask({ key: "PROJ-9", summary: "Bump the gateway timeout to 1234 ms" }),
+        mkTask({ key: "PROJ-500", summary: "PROJ 1234 rollout" }),
         mkTask({ key: "PROJ-1234", summary: "Billing webhook retries" }),
         mkTask({ key: "PROJ-1235", summary: "Rate-limit config per tenant" }),
         mkTask({ key: "PROJ-77", summary: "Fix rate limiter dropping bursts" }),
@@ -628,7 +630,7 @@ describe("ticket-number search", () => {
     render(<App />);
     authed();
     pool();
-    for (const q of ["PROJ-1234", "proj-1234", "proj 1234", "1234"]) {
+    for (const q of ["PROJ-1234", "proj-1234", "proj 1234", "proj1234", "1234"]) {
       type(q);
       expect(keys()[0]).toBe("PROJ-1234");
     }
@@ -638,9 +640,19 @@ describe("ticket-number search", () => {
     render(<App />);
     authed();
     pool();
-    // "77" appears nowhere in any summary — only the key can produce this hit.
+    // "77" appears in no summary — only the key can produce this hit.
     type("77");
     expect(keys()).toContain("PROJ-77");
+  });
+
+  it("still surfaces near-misses fuzzily, so a fat-fingered digit isn't a dead end", () => {
+    render(<App />);
+    authed();
+    pool();
+    // No ticket IS PROJ-1239, so nothing is pinned; the neighbours can only come
+    // back off the fuzzy index, and only because that index covers the key.
+    type("PROJ-1239");
+    expect(keys()).toEqual(expect.arrayContaining(["PROJ-1234", "PROJ-1235"]));
   });
 
   it("still ranks by title when the query names no ticket", () => {
@@ -649,8 +661,8 @@ describe("ticket-number search", () => {
     pool();
     type("billing");
     expect(keys()).toEqual(["PROJ-1234"]);
-    type("timeout");
-    expect(keys()).toEqual(["PROJ-9"]);
+    type("rollout");
+    expect(keys()).toEqual(["PROJ-500"]);
   });
 
   it("says tasks, not titles, when nothing matches", () => {
