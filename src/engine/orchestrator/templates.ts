@@ -131,6 +131,25 @@ export function placesToDemote(flow: Flow): PlaceNode[] {
   return flow.nodes.filter(isPlace);
 }
 
+/** Whether this flow could ever be attached to a ticket once saved.
+ *
+ * `toTemplate` happily turns a flow made only of command / gate / notify nodes
+ * into a template — it demotes zero places and throws only on an empty flow —
+ * but `instantiate` then refuses that template at every single future attach,
+ * because a template with no `planned` node has nothing to bind the ticket to.
+ * The two functions' rules give this predicate directly rather than restating
+ * it: `toTemplate` demotes every `isPlace` node into a `planned` one, and a
+ * `planned` node it leaves alone stays `planned` — so "will produce a planned
+ * node" is exactly "has a place or a planned node right now".
+ *
+ * Checked on both ends of `flow:saveTemplate`: the drawer disables its button
+ * with this before the click, and the host handler refuses the write with it
+ * too, since a stale webview open from before this guard shipped can still
+ * send the message. */
+export function canBindTicket(flow: Flow): boolean {
+  return flow.nodes.some((n) => isPlace(n) || isPlanned(n));
+}
+
 /** A template from a live workflow.
  *
  * The direction here is the one the engine already runs, backwards:

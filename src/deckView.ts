@@ -10,7 +10,7 @@ import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, Planned
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, JournalEventInput } from "./engine/orchestrator/journal";
-import { DemotionChoice, FlowTemplate, instantiate, toTemplate } from "./engine/orchestrator/templates";
+import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, toTemplate } from "./engine/orchestrator/templates";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
@@ -4438,6 +4438,21 @@ export class DeckPanel {
         // drawer can only ever be editing a flow the host gave it.
         const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
         if (!flow) return;
+        // The drawer already disables "Save as template…" for this shape
+        // (`canBindTicket`, templates.ts), but that guard lives in a webview
+        // that can be stale — open from before this shipped, or simply not
+        // re-rendered yet — and this handler is the one place that actually
+        // writes to disk. Refuse here too rather than trust the button: a
+        // command/gate/notify-only flow would otherwise save cleanly (
+        // `toTemplate` only ever throws on an EMPTY flow) and then fail
+        // `instantiate` at every single future attach, forever.
+        if (!canBindTicket(flow)) {
+          this.post({
+            type: "toast", level: "error",
+            message: `"${flow.name}" has no step to bind a ticket to — add a place or a planned step first.`,
+          });
+          return;
+        }
         const now = Date.now();
         // `newFlowId` is probabilistic, not unique by construction: its salt space
         // is 36^4, so two templates minted in the same millisecond CAN collide, and

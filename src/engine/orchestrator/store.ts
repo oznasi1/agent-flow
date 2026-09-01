@@ -278,7 +278,17 @@ export function readTemplates(io: FlowIo, dir: string): FlowTemplate[] {
       continue;
     }
     const t = validTemplate(parsed);
-    if (t) out.push(t);
+    // The filename must be the one this record's own id resolves to — the same
+    // check `readFlows` makes, and for the same reason. The store only ever
+    // writes `<id>.json` (`templateFileFor`), so a mismatch is never
+    // store-authored: it is a copied file (`cp k1.json k1-backup.json`), and
+    // accepting it puts two templates claiming the same id in the picker —
+    // duplicate React keys — while `removeTemplate`/`writeTemplate` address by
+    // id, so the copy could never be reached to fix or delete it: it would
+    // resurrect in the list on every read, permanently stuck. Skip it, one
+    // item lost, exactly like every other malformed record this reader
+    // tolerates.
+    if (t && name === `${t.id}.json`) out.push(t);
   }
   return out;
 }

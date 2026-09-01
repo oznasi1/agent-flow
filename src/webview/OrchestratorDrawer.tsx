@@ -3,7 +3,7 @@ import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, GateNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
-import { DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
+import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
 import { MultiCombo } from "./combo";
@@ -1504,13 +1504,19 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               template is a thing the OPEN WORKFLOW does — the same reasoning
               that keeps "Delete flow" and Arm on this header rather than in
               a menu. Quiet `orch-mini`, same as every neighbour: Arm alone is
-              filled. Disabled on an empty flow, since `toTemplate` refuses
-              one with no steps — a disabled control here is a clearer no
-              than a toast the user has to read to learn the same thing. */}
+              filled. Disabled whenever `canBindTicket` says the saved
+              template could never be attached — an empty flow (`toTemplate`
+              itself refuses that one), or one built only of command / gate /
+              notify nodes, which `toTemplate` would save cleanly but
+              `instantiate` would then refuse at every attach forever. A
+              disabled control with a `title` is a clearer no, before the
+              click, than a toast the user has to read to learn the same
+              thing after it. */}
           <button
             type="button"
             className="orch-mini"
-            disabled={flow.nodes.length === 0}
+            disabled={!canBindTicket(flow)}
+            title={canBindTicket(flow) ? undefined : "Add a step (or a place) this template can bind a ticket to first"}
             onClick={openSaveTemplate}
           >
             Save as template…
