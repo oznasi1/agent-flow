@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.63.0] — 2026-09-01
+
 ### Changed
 
 - **The sidebar search box finds tickets by number, not just by title.** Type
