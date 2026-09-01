@@ -154,7 +154,7 @@ export const ORCH_CSS = `
     display: flex; align-items: center; gap: 10px; font-size: var(--t-micro); color: var(--dim); }
   .orch-ft .sp { flex: 1; }
 
-  .orch-flows { position: absolute; right: 16px; top: 40px; z-index: 5; min-width: 160px;
+  .orch-flows { position: absolute; right: 16px; top: 40px; z-index: 5; min-width: 220px; max-width: 320px;
     border: 1px solid var(--edge); border-radius: var(--r-ctl); padding: 4px;
     background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
     box-shadow: 0 6px 20px -8px rgba(0,0,0,.5); }
@@ -162,6 +162,34 @@ export const ORCH_CSS = `
     color: var(--vscode-foreground); font: inherit; font-size: var(--t-body);
     padding: 5px 8px; border-radius: var(--r-chip); cursor: pointer; }
   .orch-flows button:hover { background: var(--vscode-toolbar-hoverBackground); }
+
+  /* Running/Templates share this one popover (see the \`orch-tabs\` tablist in
+     OrchestratorDrawer.tsx) rather than a second panel — one switcher, one
+     place to open a flow or start one. \`.orch-flows button\` above forces
+     every plain button in here to sit full-width and left-aligned, which is
+     right for a flow row that IS the button and wrong for a tab or a
+     Duplicate/Rename/Delete action sitting inline beside its siblings.
+     These two selectors carry two classes each, so they outrank that rule
+     regardless of where either sits in the sheet. */
+  .orch-flows .orch-tabs { display: flex; gap: 4px; padding: 0 2px 6px; margin-bottom: 4px;
+    border-bottom: 1px solid var(--hair); }
+  .orch-flows .orch-tabs button, .orch-flows .orch-tmpl-row button {
+    display: inline-flex; width: auto; text-align: center; }
+
+  .orch-tmpl-list { max-height: 260px; overflow-y: auto; }
+  .orch-tmpl-row { padding: 6px 4px; }
+  .orch-tmpl-row + .orch-tmpl-row { border-top: 1px solid var(--hair); margin-top: 2px; padding-top: 8px; }
+  .orch-tmpl-row .row + .row { margin-top: 4px; }
+  .orch-tmpl-row .t { font-size: var(--t-body); font-weight: 600; }
+  .orch-tmpl-row .meta { font-size: var(--t-micro); color: var(--dim); white-space: nowrap; }
+
+  /* The Save-as-template dialog. Lives in \`.orch-body\` (see
+     OrchestratorDrawer.tsx), first among the panels that briefly take over
+     that slot — the resume banner and the dry-run readout are the other
+     two — so it borrows their spacing rather than the header's. */
+  .orch-tmpl-dialog { flex: none; margin-bottom: 12px; border: 1px solid var(--edge);
+    border-radius: var(--r-card); padding: 10px 10px 8px; }
+  .orch-tmpl-dialog .row { display: flex; justify-content: flex-end; gap: 6px; margin-top: 8px; }
 
   /* The tray sits ABOVE the graph: attaching comes before wiring, and this is
      the primary drop target. It is a view of the same node list the canvas

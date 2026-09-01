@@ -3,6 +3,7 @@ import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, GateNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
 import { MultiCombo } from "./combo";
@@ -196,6 +197,91 @@ function SaveCommandRow({ runNow }: { runNow: () => string }): JSX.Element {
   );
 }
 
+/** One row on the Templates tab: a template's name, its rule count, how many
+ * live workflows were built from it, and the three verbs a TEMPLATE offers —
+ * Duplicate, Rename, Delete. Never Arm, disarm or Detach: a template is the
+ * reusable SHAPE, not a workflow attached to a card, so those verbs do not
+ * exist here (see this task's own vocabulary rule).
+ *
+ * `onCards` is a lookup the caller already did (`Flow.fromTemplate === t.id`),
+ * never a guess from this row: matching on name or rule count would silently
+ * merge two unrelated templates that happen to look alike, and a workflow is
+ * free to diverge from its template's shape the moment it is instantiated —
+ * name and rule count are exactly the two things that can no longer be
+ * trusted to agree.
+ *
+ * Its own component, not inlined in the switcher panel below, so Rename and
+ * the delete confirmation each get their own local state scoped to one row —
+ * a `Record<templateId, …>` living for the switcher's whole lifetime would
+ * survive switching tabs and leak a half-confirmed delete onto the wrong
+ * template if the list re-orders under it. */
+function TemplateRow({
+  t, onCards, onDuplicate, onRename, onDelete,
+}: {
+  t: FlowTemplate;
+  onCards: number;
+  onDuplicate: () => void;
+  onRename: (name: string) => void;
+  onDelete: () => void;
+}): JSX.Element {
+  const [renaming, setRenaming] = React.useState(false);
+  const [confirming, setConfirming] = React.useState(false);
+  const ruleCount = t.flow.edges.length;
+  return (
+    <div className="orch-tmpl-row">
+      <div className="row">
+        {renaming ? (
+          <input
+            className="orch-name"
+            aria-label={`Rename ${t.name}`}
+            defaultValue={t.name}
+            autoFocus
+            onBlur={(ev) => {
+              const next = ev.currentTarget.value.trim();
+              setRenaming(false);
+              if (next && next !== t.name) onRename(next);
+            }}
+            // Enter commits the same way blur does; Escape backs out without
+            // touching the stored name — the same pair of exits the node
+            // inspector's own free-text fields (SaveCommandRow, above) offer.
+            onKeyDown={(ev) => {
+              if (ev.key === "Enter") ev.currentTarget.blur();
+              if (ev.key === "Escape") setRenaming(false);
+            }}
+          />
+        ) : (
+          <span className="t">{t.name}</span>
+        )}
+        <div className="sp" />
+        <span className="meta">{ruleCount} {ruleCount === 1 ? "rule" : "rules"}</span>
+      </div>
+      <div className="row">
+        <span className="meta">on {onCards} {onCards === 1 ? "card" : "cards"}</span>
+      </div>
+      {confirming ? (
+        <div className="row">
+          {/* Says both halves: what Delete does, and — just as load-bearing —
+              what it deliberately leaves alone. `toTemplate`/`instantiate`
+              copy the template's shape into a workflow rather than reference
+              it, so a workflow already built from this template is its own,
+              independent flow the moment it exists; this line is what keeps
+              the confirmation from implying otherwise. */}
+          <span className="meta">Delete “{t.name}”? Workflows already made from it keep running.</span>
+          <div className="sp" />
+          <button type="button" className="orch-mini" onClick={() => setConfirming(false)}>Cancel</button>
+          <button type="button" className="orch-mini" onClick={onDelete}>Confirm delete</button>
+        </div>
+      ) : (
+        <div className="row">
+          <button type="button" className="orch-mini" onClick={onDuplicate}>Duplicate</button>
+          <button type="button" className="orch-mini" onClick={() => setRenaming(true)}>Rename</button>
+          <button type="button" className="orch-mini" onClick={() => setConfirming(true)}>Delete</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** The tray shows what a condition can attach to: a place already on disk, or
  * work not yet launched. Named by the two kinds it admits, not by the ones it
  * excludes — `!== "notify"` once let a `CommandNode` through too (TypeScript
@@ -280,6 +366,16 @@ export interface OrchestratorDrawerProps {
    * before the first post, and whenever PR facts are off (the host refuses to
    * serve a verdict it would not act on itself). */
   branchCi: Record<string, BranchCiStatus>;
+  /** Every saved template, from the same `deck:flows` post as `flows` itself
+   * (`postFlows` in deckView.ts). Rendered on the Templates tab of the flow
+   * switcher — never armed, disarmed or detached, because a template is not
+   * attached to anything; those are WORKFLOW verbs. A row's own writes
+   * (`flow:renameTemplate`, `flow:deleteTemplate`, `flow:duplicateTemplate`)
+   * go straight through `send`, the same way `flow:saveCommand` and
+   * `flow:addPlanned` already do above — there is no host round trip this
+   * file's own closures need to wrap first, so no new prop callback exists
+   * for any of the three. */
+  templates: FlowTemplate[];
   onClose: () => void;
   onCreate: () => void;
   onOpen: (id: string) => void;
@@ -325,6 +421,21 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const dry = dryRun && flow ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : [];
   const firing = dry.filter((v) => v.verdict === "fire").length;
   const [picking, setPicking] = React.useState(false);
+  /** Which half of the switcher panel is showing. Running is the default on
+   * every open — never persisted, never remembered across a reopen — because
+   * the switcher's whole existing job (open another flow, or start one) must
+   * not cost a click just because Templates now shares the panel with it. */
+  const [pickTab, setPickTab] = React.useState<"running" | "templates">("running");
+  /** The Save-as-template dialog's own state: whether it is open, the name
+   * typed so far, and one {mode, dest} choice per place node being demoted.
+   * Keyed by node id rather than array index, so a re-render between opening
+   * the dialog and pressing Save (the flow prop is live, same as everywhere
+   * else in this file) cannot silently shift which row a stray edit lands on.
+   * Cleared and reseeded every time the dialog opens (`openSaveTemplate`
+   * below) — never carried over from a previous flow's dialog. */
+  const [savingTemplate, setSavingTemplate] = React.useState(false);
+  const [templateName, setTemplateName] = React.useState("");
+  const [templateChoices, setTemplateChoices] = React.useState<Record<string, { mode: string; dest: LaunchDest }>>({});
   const [over, setOver] = React.useState(false);
   const [overGraph, setOverGraph] = React.useState(false);
   const graphRef = React.useRef<HTMLDivElement | null>(null);
@@ -682,6 +793,51 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // QuickPicks) and appends the whole node in one write. See deckView.ts's
   // `addPlanned`.
   const addPlanned = () => send({ type: "flow:addPlanned", id: flow.id });
+
+  /** Open the Save-as-template dialog, seeded with one row per place this
+   * save will have to demote. Prefilled, never invented: the configured
+   * default prompt mode (the same `promptModes[0]?.id` fallback flowList.tsx
+   * already uses for a fresh rule) and `worktree`, both visible and both
+   * changeable before Save — see `placesToDemote`'s own doc comment in
+   * templates.ts for why a guessed destination is the one thing this dialog
+   * must never do quietly. The name field starts BLANK, not `flow.name`: a
+   * template is its own saved thing, and prefilling it with the workflow's
+   * current name would make "Ship it" (workflow) and "Ship it" (template)
+   * look identical in a list where only one of them can ever be armed. */
+  const openSaveTemplate = () => {
+    const seed: Record<string, { mode: string; dest: LaunchDest }> = {};
+    for (const n of placesToDemote(flow)) {
+      seed[n.id] = { mode: p.promptModes[0]?.id ?? "", dest: "worktree" };
+    }
+    setTemplateChoices(seed);
+    setTemplateName("");
+    setSavingTemplate(true);
+  };
+
+  const setTemplateMode = (nodeId: string, mode: string) =>
+    setTemplateChoices((c) => ({ ...c, [nodeId]: { mode, dest: c[nodeId]?.dest ?? "worktree" } }));
+
+  const setTemplateDest = (nodeId: string, dest: LaunchDest) =>
+    setTemplateChoices((c) => ({ ...c, [nodeId]: { mode: c[nodeId]?.mode ?? (p.promptModes[0]?.id ?? ""), dest } }));
+
+  /** One `DemotionChoice` per place, read from this dialog's own state rather
+   * than re-derived — `placesToDemote(flow)` is read again here (not memoised
+   * from `openSaveTemplate`) because the flow itself can change while the
+   * dialog is open (canvas edits keep writing through `p.onSave`), and a
+   * choice keyed by node id survives that: a node added after the dialog
+   * opened gets the same seeded default the row's own render already shows,
+   * never a missing entry `toTemplate` would then throw on. */
+  const submitSaveTemplate = () => {
+    const name = templateName.trim();
+    if (!name) return;
+    const choices: DemotionChoice[] = placesToDemote(flow).map((n) => ({
+      nodeId: n.id,
+      mode: templateChoices[n.id]?.mode ?? (p.promptModes[0]?.id ?? ""),
+      dest: templateChoices[n.id]?.dest ?? "worktree",
+    }));
+    send({ type: "flow:saveTemplate", id: flow.id, name, choices });
+    setSavingTemplate(false);
+  };
 
   /** Add one command node per ticked entry, in ONE save. Same fold, same reason
    * as `attachMany`: `addCommandNode` mints its id and its `y` from the flow it
@@ -1327,6 +1483,21 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             {flow.edges.length === 1 ? "rule" : "rules"}
           </span>
           <div className="sp" />
+          {/* Beside the flow's own Arm/Delete controls, because saving a
+              template is a thing the OPEN WORKFLOW does — the same reasoning
+              that keeps "Delete flow" and Arm on this header rather than in
+              a menu. Quiet `orch-mini`, same as every neighbour: Arm alone is
+              filled. Disabled on an empty flow, since `toTemplate` refuses
+              one with no steps — a disabled control here is a clearer no
+              than a toast the user has to read to learn the same thing. */}
+          <button
+            type="button"
+            className="orch-mini"
+            disabled={flow.nodes.length === 0}
+            onClick={openSaveTemplate}
+          >
+            Save as template…
+          </button>
           {/* The drawer's one filled control. Arm is the consent point for
               everything a flow does, so it is the only thing here allowed to
               be filled — armed is a state, not an invitation, so the fill goes
@@ -1381,17 +1552,137 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
         </div>
         {picking && (
           <div className="orch-flows">
-            {p.flows.map((f) => (
-              <button type="button" key={f.id} onClick={() => { setPicking(false); p.onOpen(f.id); }}>
-                {f.name}
+            {/* Running is the default and MUST stay it: this panel is the one
+                and only way to switch flows or start a new one, and that job
+                predates Templates entirely — a user reopening it to do what
+                it always did must not land on an empty Templates tab first.
+                `role="tablist"`/`role="tab"`/`aria-selected` is this file's
+                own idiom (see the Canvas/List toggle above), not invented
+                fresh for this panel. */}
+            <div role="tablist" aria-label="Flow list" className="orch-tabs">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={pickTab === "running"}
+                className="orch-mini"
+                onClick={() => setPickTab("running")}
+              >
+                Running
               </button>
-            ))}
-            <button type="button" onClick={() => { setPicking(false); p.onCreate(); }}>+ New flow</button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={pickTab === "templates"}
+                className="orch-mini"
+                onClick={() => setPickTab("templates")}
+              >
+                Templates
+              </button>
+            </div>
+            {pickTab === "running" ? (
+              <>
+                {p.flows.map((f) => (
+                  <button type="button" key={f.id} onClick={() => { setPicking(false); p.onOpen(f.id); }}>
+                    {f.name}
+                  </button>
+                ))}
+                <button type="button" onClick={() => { setPicking(false); p.onCreate(); }}>+ New flow</button>
+              </>
+            ) : (
+              <div className="orch-tmpl-list">
+                {/* A template is never attached from here — one entry point,
+                    the card that needs a workflow, and this panel offering a
+                    second, worse way to do what the card already does would
+                    be a category error this task's own brief calls out by
+                    name: this tab offers Duplicate/Rename/Delete and nothing
+                    that arms, disarms, or attaches anything. */}
+                {p.templates.map((t) => (
+                  <TemplateRow
+                    key={t.id}
+                    t={t}
+                    onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
+                    onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
+                    onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
+                    onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
+                  />
+                ))}
+                {/* The one way in: build a workflow, then "Save as template…"
+                    on it once it is right. `onCreate` is the exact same
+                    control the Running tab's own "+ New flow" spends — a
+                    template starts life as an ordinary workflow, same as
+                    every other one, and there is nothing template-specific
+                    to construct until Save is pressed. */}
+                <button type="button" onClick={() => { setPicking(false); p.onCreate(); }}>＋ New template</button>
+              </div>
+            )}
           </div>
         )}
       </div>
 
       <div className="orch-body">
+        {savingTemplate && (
+          // Same slot the resume banner and the dry-run panel below use for a
+          // thing that briefly takes over this body without leaving the
+          // drawer — first among them, since saving IS the reason the panel
+          // opened and a stale resume banner underneath it should not shift
+          // the moment the dialog closes. `role` and `aria-label` name what
+          // this actually is, the same as every other control on this
+          // surface.
+          <div className="orch-tmpl-dialog" role="group" aria-label="Save as template" data-testid="orch-save-template">
+            <div className="orch-clause">
+              <span className="orch-kw" />
+              <input
+                className="orch-msg"
+                aria-label="Name"
+                value={templateName}
+                placeholder="Name this template"
+                onChange={(ev) => setTemplateName(ev.currentTarget.value)}
+              />
+            </div>
+            {/* One row per place this save has to demote back to `planned` —
+                see `placesToDemote`'s own doc comment for why `mode` and
+                `dest` cannot be read off the place itself and must be asked. */}
+            {placesToDemote(flow).map((n) => {
+              const label = endLabel(flow, n.id);
+              const choice = templateChoices[n.id] ?? { mode: p.promptModes[0]?.id ?? "", dest: "worktree" as LaunchDest };
+              return (
+                <div className="orch-clause" key={n.id}>
+                  <span className="orch-kw" style={{ fontFamily: "var(--mono)" }}>{label}</span>
+                  <select
+                    className="orch-sel"
+                    aria-label={`Prompt mode for ${label}`}
+                    value={choice.mode}
+                    onChange={(ev) => setTemplateMode(n.id, ev.currentTarget.value)}
+                  >
+                    {p.promptModes.map((m) => (
+                      <option key={m.id} value={m.id}>{m.label}</option>
+                    ))}
+                  </select>
+                  <span style={{ fontSize: "var(--t-body)" }}>in a</span>
+                  <select
+                    className="orch-sel"
+                    aria-label={`Destination for ${label}`}
+                    value={choice.dest}
+                    onChange={(ev) => setTemplateDest(n.id, ev.currentTarget.value as LaunchDest)}
+                  >
+                    {OFFERED_DESTS.map((d) => <option key={d} value={d}>{DEST_LABEL[d]}</option>)}
+                  </select>
+                </div>
+              );
+            })}
+            <div className="row">
+              <button type="button" className="orch-mini" onClick={() => setSavingTemplate(false)}>Cancel</button>
+              <button
+                type="button"
+                className="orch-mini"
+                disabled={templateName.trim() === ""}
+                onClick={submitSaveTemplate}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        )}
         {resume && (
           // The gate the user asked for: an armed flow does not spend anything
           // a condition made true while they were away without this "go" first.

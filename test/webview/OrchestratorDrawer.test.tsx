@@ -5,6 +5,7 @@ import { act, render, screen, fireEvent, waitFor, within } from "@testing-librar
 import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { ORCH_ANIM_MS, ORCH_CSS, ORCH_EDGE_PAINT_DY } from "../../src/webview/orchestratorStyles";
 import type { Flow, FlowEdge } from "../../src/engine/orchestrator/model";
+import { TEMPLATE_SCHEMA, type FlowTemplate } from "../../src/engine/orchestrator/templates";
 // The real store, so the "a new wire is never latched" test below is answered by
 // the migration itself rather than by this file restating its rule. Its io is
 // injected (see `FlowIo`), so importing it here costs no temp directory.
@@ -99,6 +100,7 @@ const COMMANDS = [
 
 const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => ({
   flows: [flow()], openId: "f1", runs: [], pendingResume: [], promptModes: MODES, commands: COMMANDS, branchCi: {},
+  templates: [],
   onClose: vi.fn(), onCreate: vi.fn(), onOpen: vi.fn(),
   onRename: vi.fn(), onSave: vi.fn(), onDelete: vi.fn(),
   onArm: vi.fn(), onResumeApprove: vi.fn(), onResumeDisarm: vi.fn(), onResetEdge: vi.fn(),
@@ -4232,5 +4234,233 @@ describe("GATE_H and the stylesheet must agree", () => {
   // other, fails this.
   it("gives .orch-node.gate the exact height GATE_H names", () => {
     expect(ORCH_CSS).toContain(`.orch-node.gate { height: ${GATE_H}px; }`);
+  });
+});
+
+// Task 13: the Templates tab and the Save-as-template dialog. Until this
+// lands, nothing anywhere in the webview can create a template at all — the
+// attach picker built in an earlier task shows its empty state for every
+// user, no matter how many flows they have built.
+//
+// Five dummy edges, all pointing a node at itself — none of these tests ever
+// evaluate the template's own rules, only count and render them, so the
+// wiring only has to be well-typed, not meaningful.
+const dummyEdges = (n: number): FlowEdge[] =>
+  Array.from({ length: n }, (_, i) => ({ id: `e${i + 1}`, from: "n1", to: "n1", cond: { kind: "pr-merged" } }));
+
+const shipItTemplate = (over: Partial<FlowTemplate> = {}): FlowTemplate => ({
+  schema: TEMPLATE_SCHEMA,
+  id: "t1",
+  name: "Ship it",
+  params: {},
+  savedAt: 1_000,
+  flow: {
+    id: "", name: "Ship it", armed: false, createdAt: 0,
+    nodes: [
+      { id: "n1", kind: "planned", x: 24, y: 24, join: "any", ticketKey: "", repos: ["agent-flow"], mode: "quick", dest: "worktree" },
+    ],
+    edges: dummyEdges(5),
+  },
+  ...over,
+});
+
+/** Open the switcher and land on the Templates tab — the same two clicks a
+ * real user makes (the "Flows · N" trigger, then the tab), rather than a
+ * shortcut that could pass against a Templates tab rendered open by default. */
+const openTemplatesTab = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
+  render(<OrchestratorDrawer {...props(over)} />);
+  fireEvent.click(screen.getByRole("button", { name: /flows/i }));
+  fireEvent.click(screen.getByRole("tab", { name: "Templates" }));
+};
+
+describe("the Templates tab", () => {
+  it("opens on Running, not Templates — nothing the switcher does today should cost an extra click", () => {
+    render(<OrchestratorDrawer {...props({ flows: [flow(), flow({ id: "f2", name: "Second" })], templates: [shipItTemplate()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: /flows/i }));
+    expect(screen.getByRole("tab", { name: "Running" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByRole("tab", { name: "Templates" }).getAttribute("aria-selected")).toBe("false");
+    // The Running tab's own list, unchanged: the flow switcher's existing job.
+    expect(screen.getByRole("button", { name: "Second" })).toBeTruthy();
+  });
+
+  it("lists templates on the Templates tab with their rule counts", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    expect(await screen.findByText("Ship it")).toBeTruthy();
+    expect(screen.getByText("5 rules")).toBeTruthy();
+  });
+
+  it("says how many cards a template is in use on, by Flow.fromTemplate", async () => {
+    const onCard = flow({ id: "f9", fromTemplate: "t1" });
+    openTemplatesTab({ templates: [shipItTemplate()], flows: [flow(), onCard] });
+    expect(await screen.findByText("on 1 card")).toBeTruthy();
+  });
+
+  // The lookup this task's own brief insists on: a flow that merely looks
+  // like the template's output (same name, same rule count) is NOT counted —
+  // only `fromTemplate` naming this template's id counts, because a workflow
+  // is free to diverge from its template's shape the instant it exists.
+  it("does not count a workflow that only looks like the template's output", async () => {
+    const lookalike = flow({ id: "f9", name: "Ship it", edges: dummyEdges(5) });
+    openTemplatesTab({ templates: [shipItTemplate()], flows: [flow(), lookalike] });
+    await screen.findByText("Ship it");
+    expect(screen.getByText("on 0 cards")).toBeTruthy();
+  });
+
+  it("offers no way to attach a template from here — one entry point, and it is the card", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    await screen.findByText("Ship it");
+    expect(screen.queryByRole("button", { name: /Attach/i })).toBeNull();
+    // And never a WORKFLOW verb ON THE ROW ITSELF — a template is not
+    // attached to anything, so it cannot be armed, disarmed or detached (see
+    // this task's own naming rule: Template is the shape, Workflow is a
+    // template on one card). Scoped to the row, not the whole drawer: the
+    // OPEN flow behind this switcher keeps its own real Arm button, and that
+    // is a workflow's control, not a claim this row is making.
+    const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    expect(within(row).queryByRole("button", { name: /^Arm$/i })).toBeNull();
+    expect(within(row).queryByRole("button", { name: /disarm/i })).toBeNull();
+    expect(within(row).queryByRole("button", { name: /detach/i })).toBeNull();
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Rename", "Delete"]);
+  });
+
+  it("duplicates a template", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    fireEvent.click(await screen.findByRole("button", { name: "Duplicate" }));
+    expect(send).toHaveBeenCalledWith({ type: "flow:duplicateTemplate", templateId: "t1" });
+  });
+
+  it("renames a template on blur, not per keystroke", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    const input = screen.getByLabelText("Rename Ship it");
+    fireEvent.change(input, { target: { value: "Ship it fast" } });
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.blur(input);
+    expect(send).toHaveBeenCalledWith({ type: "flow:renameTemplate", templateId: "t1", name: "Ship it fast" });
+  });
+
+  it("deleting a template confirms first, and says what will and won't happen", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(await screen.findByText(/Delete “Ship it”\?/)).toBeTruthy();
+    expect(screen.getByText(/keep running/i)).toBeTruthy();
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    expect(send).toHaveBeenCalledWith({ type: "flow:deleteTemplate", templateId: "t1" });
+  });
+
+  it("cancelling the delete confirmation sends nothing", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText(/Delete “Ship it”\?/)).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("starting a new template goes through the same onCreate a new flow does", async () => {
+    const onCreate = vi.fn();
+    openTemplatesTab({ templates: [shipItTemplate()], onCreate });
+    fireEvent.click(await screen.findByRole("button", { name: "＋ New template" }));
+    expect(onCreate).toHaveBeenCalled();
+  });
+});
+
+describe("Save as template", () => {
+  it("sits beside the open flow's own Arm/Delete controls", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    expect(screen.getByRole("button", { name: "Save as template…" })).toBeTruthy();
+  });
+
+  it("is disabled on a flow with no steps — toTemplate refuses one anyway", () => {
+    render(<OrchestratorDrawer {...props({ flows: [flow()] })} />);
+    expect(screen.getByRole("button", { name: "Save as template…" })).toBeDisabled();
+  });
+
+  it("asks for a name, plus a prompt mode and a destination per demoted place", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    expect(screen.getByLabelText("Name")).toBeTruthy();
+    expect(screen.getAllByLabelText(/prompt mode/i)).toHaveLength(2);
+    expect(screen.getAllByLabelText(/destination/i)).toHaveLength(2);
+  });
+
+  // Prefilling is fine; inventing is not. Both values must be VISIBLE and
+  // CHANGEABLE before Save — a guessed destination is exactly the defect
+  // this dialog exists to prevent (see templates.ts's own doc comment on
+  // `DemotionChoice`).
+  it("prefills the configured default mode and worktree, visibly and changeably", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    const [mode1] = screen.getAllByLabelText(/prompt mode/i) as HTMLSelectElement[];
+    const [dest1] = screen.getAllByLabelText(/destination/i) as HTMLSelectElement[];
+    expect(mode1.value).toBe("quick"); // MODES[0].id — the configured default
+    expect(dest1.value).toBe("worktree");
+    fireEvent.change(mode1, { target: { value: "careful" } });
+    expect(mode1.value).toBe("careful");
+  });
+
+  it("disables Save until a name is typed", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ship it" } });
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
+  });
+
+  it("sends flow:saveTemplate with one choice per place, using the prefilled defaults", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ship it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(send).toHaveBeenCalledWith({
+      type: "flow:saveTemplate", id: "f1", name: "Ship it",
+      choices: [
+        { nodeId: "n1", mode: "quick", dest: "worktree" },
+        { nodeId: "n2", mode: "quick", dest: "worktree" },
+      ],
+    });
+  });
+
+  it("sends a changed mode/destination, not the prefill it replaced", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    const [mode1] = screen.getAllByLabelText(/prompt mode/i);
+    const [, dest2] = screen.getAllByLabelText(/destination/i);
+    fireEvent.change(mode1, { target: { value: "careful" } });
+    fireEvent.change(dest2, { target: { value: "new-window" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ship it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(send).toHaveBeenCalledWith({
+      type: "flow:saveTemplate", id: "f1", name: "Ship it",
+      choices: [
+        { nodeId: "n1", mode: "careful", dest: "worktree" },
+        { nodeId: "n2", mode: "quick", dest: "new-window" },
+      ],
+    });
+  });
+
+  it("Save is refused (never sent) while the name is still blank, even after clicking through", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("Cancel closes the dialog and sends nothing", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing about places when the flow demotes none — a bare Name field", () => {
+    render(<OrchestratorDrawer {...props({ flows: [flow({ nodes: [
+      { id: "n1", kind: "notify", x: 24, y: 24, join: "any", message: "done" },
+    ] })] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    expect(screen.getByLabelText("Name")).toBeTruthy();
+    expect(screen.queryAllByLabelText(/prompt mode/i)).toHaveLength(0);
+    expect(screen.queryAllByLabelText(/destination/i)).toHaveLength(0);
   });
 });

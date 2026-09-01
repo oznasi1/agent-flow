@@ -1153,6 +1153,7 @@ export function DeckApp(): JSX.Element {
           promptModes={promptModes}
           commands={commands}
           branchCi={branchCi}
+          templates={templates}
           onClose={() => setOpenFlowId(null)}
           onCreate={() => send({ type: "flow:create" })}
           onOpen={(id) => setOpenFlowId(id)}
