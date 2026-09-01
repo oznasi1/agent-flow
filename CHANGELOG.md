@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The search box finds a ticket you pasted a link to.** A browse URL off the
+  clipboard, or a note to yourself like `fix PROJ-1234`, now pins that ticket the
+  same way typing the bare key does — the key no longer has to be the whole query.
+  A ticket id buried in a longer phrase is still left alone: searching
+  `PROJ 1234 rollout` looks for that title, it doesn't hoist PROJ-1234.
+
+### Fixed
+
+- **The `.vsix` no longer carries the Pages dashboard's data.** `.reach-data/` is
+  generated and published by the reach workflow and nothing in the extension reads
+  it, so it had no business shipping to everyone who installs.
+
 ## [0.63.0] — 2026-09-01
 
 ### Fixed

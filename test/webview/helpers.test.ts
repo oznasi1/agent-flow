@@ -375,6 +375,34 @@ describe("keyMatches", () => {
     expect(keyMatches("PROJ-1234", "")).toBe(false);
   });
 
+  it("finds the ticket in a pasted browse URL", () => {
+    expect(keyMatches("PROJ-1234", "https://acme.atlassian.net/browse/PROJ-1234")).toBe(true);
+    expect(keyMatches("PROJ-1235", "https://acme.atlassian.net/browse/PROJ-1234")).toBe(false);
+  });
+
+  it("finds a ticket named in the middle of a sentence", () => {
+    expect(keyMatches("PROJ-1234", "fix PROJ-1234")).toBe(true);
+    expect(keyMatches("PROJ-1234", "PROJ-1234 is the follow-up")).toBe(true);
+  });
+
+  it("does not read a key-then-space-then-number inside a longer phrase as a ticket", () => {
+    // "PROJ 1234 rollout" is a TITLE — the title of some other ticket that quotes
+    // this one. The whole query isn't a key (the trailing word rules that out) and
+    // no key-shaped token forms across the space, so nothing gets pinned and the
+    // phrase is left to rank on title relevance, which is what the user meant.
+    expect(keyMatches("PROJ-1234", "PROJ 1234 rollout")).toBe(false);
+    // The same words with nothing after them ARE a key, and still match.
+    expect(keyMatches("PROJ-1234", "PROJ 1234")).toBe(true);
+  });
+
+  it("does not read a loose number in a phrase as a ticket", () => {
+    // "limiter 12" is two words, not a key: a number that merely follows a word
+    // must not pin every ticket whose number starts with 12, or typing an ordinary
+    // title query would start hijacking the ranking.
+    expect(keyMatches("PROJ-1234", "rate limiter 12")).toBe(false);
+    expect(keyMatches("PROJ-1234", "bump timeout to 12 seconds")).toBe(false);
+  });
+
   it("handles a key with no number at all", () => {
     // Not every source keys its work PROJ-123 — a key can be a bare slug, in
     // which case there is no number to prefix and only the whole thing matches.

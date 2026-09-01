@@ -16,6 +16,14 @@ describe(".vscodeignore", () => {
     expect(read(".vscodeignore")).toMatch(/^\.worktrees\/\*\*$/m);
   });
 
+  // .reach-data is the GitHub Pages dashboard's own data — index.html, traffic
+  // snapshots, star counts — generated and published by .github/workflows/reach.yml.
+  // Nothing under src/ reads it, so every byte of it inside the .vsix is dead
+  // weight shipped to every installer.
+  it("excludes the Pages dashboard data, which the extension never reads", () => {
+    expect(read(".vscodeignore").split("\n")).toContain(".reach-data/**");
+  });
+
   // Every path .vscodeignore names is a directory vsce must not walk; a stale entry
   // is harmless, but a dev directory that exists and is NOT listed ships to users.
   it("excludes each dev directory that the build actually creates", () => {
