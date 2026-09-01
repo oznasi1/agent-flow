@@ -92,11 +92,29 @@ function WorkflowPicker({
   // lives one level up, in `pickerOpen`, not inside this component), but a
   // reader who dismisses any other picker this app renders the same two ways
   // must get the same two ways here.
+  //
+  // The Escape branch calls `stopPropagation`, and this is load-bearing, not
+  // defensive: `DeckApp.tsx` ALSO listens for Escape (on `window`, to clear
+  // the card selection), and a native "keydown" propagates document before
+  // window. Without this, cancelling the picker with Escape reached this
+  // handler first (closing the picker, correctly) and then kept going to
+  // DeckApp's own listener, which slid the ENTIRE card drawer shut under it —
+  // so "cancel the picker" also lost the user's place on the card. Every
+  // other picker in this app (`combo.tsx`'s `useComboFilter`) avoids this a
+  // different way: it handles Escape as a React `onKeyDown` on its own input
+  // rather than a document listener, and it only ever opens inside the
+  // Orchestrator drawer, which is never open at the same time as a selected
+  // card. This picker breaks both of those assumptions (it lives inside the
+  // card drawer itself), so it needs the stop explicitly.
   React.useEffect(() => {
     const onDown = (e: MouseEvent) => {
       if (rootRef.current && !rootRef.current.contains(e.target as Node)) onClose();
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.stopPropagation();
+      onClose();
+    };
     document.addEventListener("mousedown", onDown);
     document.addEventListener("keydown", onKey);
     return () => {
@@ -197,19 +215,33 @@ export function DeckDetail({
   const boundTicketKey = tracked ? key : r.inferredTicketKey;
   // `[]` while the setting is off rather than skipping the call: `orchEnabled`
   // is the one gate for the whole section below, so nothing downstream needs a
-  // second one. `Date.now()` is read fresh on every render, deliberately not
+  // second one. `now` is read fresh on every render, deliberately not
   // memoized — `workflowState`/`rankByState` are pure and cheap (bounded by one
-  // flow's edge count, same as the board's own per-card chip already computes
-  // every tick), and a cached wall-clock reading is exactly the kind of state
-  // that goes stale the moment the drawer sits open across a poll: a
+  // flow's edge count), and a cached wall-clock reading is exactly the kind of
+  // state that goes stale the moment the drawer sits open across a poll: a
   // `branch-ci-passed` rule waiting on an elapsed window would freeze mid-wait
   // until some unrelated prop changed and evicted the memo. Recomputing here
   // costs nothing a `useMemo` keyed on `Date.now()` itself would have saved —
-  // that key invalidates every render anyway — so a plain call is the whole fix.
-  const bound = orchEnabled ? rankByState(attachedWorkflows(flows, key, boundTicketKey), runs, Date.now(), branchCi) : [];
+  // that key invalidates every render anyway — so a plain call is the whole
+  // fix, and it stays cheap because `DeckApp.tsx`'s own 1s `forceTick` already
+  // re-renders this drawer regularly regardless of what this file does.
+  //
+  // Read once, not twice: `rankByState` and `workflowState` below both need
+  // "now", and two separate `Date.now()` calls would let the rank and the
+  // displayed state disagree by whatever elapsed between them — a window where
+  // the SAME "now" is the only thing that makes the winner's rank and its own
+  // rendered status agree.
+  const now = Date.now();
+  const bound = orchEnabled ? rankByState(attachedWorkflows(flows, key, boundTicketKey), runs, now, branchCi) : [];
   const wf = bound[0];
-  const wfState = wf ? workflowState(wf, runs, Date.now(), branchCi) : undefined;
+  const wfState = wf ? workflowState(wf, runs, now, branchCi) : undefined;
   const [pickerOpen, setPickerOpen] = React.useState(false);
+  // A card switch (`DeckApp.tsx` never remounts this component — see
+  // `DeckDetailProps.closing`'s own comment) must not leave the picker open
+  // over the WRONG card: without this, opening the picker on card A, then
+  // selecting card B while it sits open, would still be showing (and would
+  // still attach to) A's own leftover picker state, re-placeholdered for B.
+  React.useEffect(() => setPickerOpen(false), [card.id]);
 
   // Address PR rides the column, not the ticket status. In review means one thing
   // now that ready-to-merge is a column of its own — a PR somebody still has to
@@ -457,15 +489,23 @@ export function DeckDetail({
                 ticketKey={boundTicketKey ?? key}
                 templates={templates}
                 onPick={(templateId) => {
-                  send({
-                    type: "flow:attach", runKey: key, templateId,
-                    // A card that already carries a workflow can only gain a
-                    // second one by explicit replacement — see `flow:attach`'s
-                    // own doc comment in types.ts: an unset `replace` is a
-                    // refusal, not a silent second attachment, when one is
-                    // already there.
-                    ...(bound.length > 0 ? { replace: true as const } : {}),
-                  });
+                  // Never `replace`, even though `WorkflowBlock` only ever
+                  // offers this picker's trigger while `bound.length === 0`
+                  // (its "Attach workflow…" button renders solely in the
+                  // `flow === undefined` branch): `bound` is read once at
+                  // render time, and this picker can sit open across a poll —
+                  // another window, or the orchestrator's own 6s pass,
+                  // attaching a workflow to this exact card while the user is
+                  // still looking at an empty picker. Deriving `replace` from
+                  // a `bound.length` that is now stale would silently delete
+                  // a workflow the user never saw. Sending no `replace` means
+                  // that race hits the host's own refusal (`flow:attach`'s
+                  // doc comment in types.ts: an unset `replace` is a refusal,
+                  // not a silent second attachment) instead of a surprise
+                  // deletion — the correct outcome, and the only one this
+                  // surface offers in v1. A "Change workflow…" affordance
+                  // that deliberately sends `replace: true` is future work.
+                  send({ type: "flow:attach", runKey: key, templateId });
                   setPickerOpen(false);
                 }}
                 onClose={() => setPickerOpen(false)}

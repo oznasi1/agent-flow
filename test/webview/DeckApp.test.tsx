@@ -1852,7 +1852,7 @@ describe("a deck:flows payload missing a field a newer webview reads", () => {
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
   });
 
-  const without = (field: "flows" | "commands" | "pendingResume" | "promptModes" | "branchCi"): OutboundMessage => {
+  const without = (field: "flows" | "commands" | "pendingResume" | "promptModes" | "branchCi" | "templates"): OutboundMessage => {
     const msg = { ...flowsMsg([withARule()]) } as Record<string, unknown>;
     delete msg[field];
     return msg as unknown as OutboundMessage;
@@ -1876,6 +1876,22 @@ describe("a deck:flows payload missing a field a newer webview reads", () => {
     // Free text stays offered, so a build that received no commands is still a
     // build you can add one in.
     expect(screen.getByRole("button", { name: "Free-text command…" })).toBeTruthy();
+  });
+
+  it("still lets the attach picker open with no templates when the field is missing", () => {
+    // `templates` is `DeckDetail.tsx`'s own field to defend — added in the
+    // same task that added the Workflow section, and not yet covered by
+    // either test above: `setTemplates(m.templates ?? [])` is the guard, and
+    // this is what proves it rather than assuming it. PROJ-9 is deliberately
+    // NOT one of `withARule()`'s two bound run keys (PROJ-1, PROJ-2), so its
+    // card renders "Attach workflow…" rather than an already-bound block.
+    render(<DeckApp />);
+    host(without("templates"));
+    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "PROJ-9" } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    expect(screen.getByPlaceholderText("Choose a template for PROJ-9…")).toBeTruthy();
+    expect(screen.getByText("No templates saved yet")).toBeTruthy();
   });
 
   it("survives every other missing list on that message too", () => {
@@ -2639,6 +2655,61 @@ describe("card selection", () => {
     expect(document.querySelector(".dd")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /orchestrator/i }));
     expect(document.querySelector(".dd.closing")).not.toBeNull();
+  });
+
+  // The Workflow section's own "Open in Workflows ↗" is a THIRD way to open the
+  // Orchestrator over a selected card (the chip above is the first; a fresh
+  // flow auto-opening is the second, in the deck:flows handler), and it has to
+  // honor the same mutual-exclusion contract the two tests above pin: `onSelect`
+  // clears `openFlowId`, the chip's `onClick` clears `selId`, and this callback
+  // (`onOpenWorkflow` in DeckApp.tsx) must clear `selId` too, or a workflow
+  // opened from a card mounts the Orchestrator drawer ON TOP of the still-open
+  // card drawer instead of replacing it.
+  it("opening a workflow from the card drawer closes the card and opens the Orchestrator on that flow", () => {
+    render(<DeckApp />);
+    const bound: Flow = {
+      id: "f9", name: "Ship it", armed: true, createdAt: 1,
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "svc" },
+        { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "done" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+    };
+    host({ type: "deck:flows", flows: [bound], enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [] } as OutboundMessage);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    expect(document.querySelector(".dd")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open in Workflows ↗" }));
+    // Same proof-of-closing shape the two tests above use: the card drawer
+    // starts its exit animation rather than vanishing outright.
+    expect(document.querySelector(".dd.closing")).not.toBeNull();
+    expect(document.querySelector(".orch")).not.toBeNull();
+    // Not just "some flow opened" — THIS one: the drawer's own rename field
+    // (`defaultValue={flow.name}` in OrchestratorDrawer.tsx) says which.
+    expect((screen.getByLabelText("Flow name") as HTMLInputElement).value).toBe("Ship it");
+  });
+
+  // Regression for the Escape-bubbling hazard the review round caught: this
+  // picker sits INSIDE the already-open card drawer (unlike every other picker
+  // in the app, which lives inside the Orchestrator drawer, never open at the
+  // same time as a selected card), and DeckApp itself also listens for Escape
+  // on `window` to clear the card selection. Without `stopPropagation` in the
+  // picker's own Escape handler, cancelling the picker also slid the whole
+  // card drawer shut underneath it — the user loses their place to cancel a
+  // search box.
+  it("Escape cancels the attach picker without closing the card drawer under it", () => {
+    render(<DeckApp />);
+    host({ type: "deck:flows", flows: [], enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [] } as OutboundMessage);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    fireEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    const input = screen.getByPlaceholderText("Choose a template for PROJ-1…");
+    fireEvent.keyDown(input, { key: "Escape" });
+    // The picker itself closed...
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-1…")).toBeNull();
+    // ...but the card drawer did not so much as start closing.
+    expect(document.querySelector(".dd")).not.toBeNull();
+    expect(document.querySelector(".dd.closing")).toBeNull();
   });
 
   // "does not select when a PR link is clicked" is deleted here, not re-pointed:

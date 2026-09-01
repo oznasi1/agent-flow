@@ -894,6 +894,10 @@ describe("resizing", () => {
 describe("DeckDetail — Workflow section", () => {
   it("shows the workflow bound to this card", () => {
     renderWf(cardWithKey("PROJ-142"), { flows: [shipItOn("PROJ-142")], orchEnabled: true });
+    // Paired with the inert test's own `queryByText("Workflow")` assertion —
+    // without a positive counterpart somewhere, a heading rename could still
+    // pass that test for the wrong reason.
+    expect(screen.getByText("Workflow")).toBeTruthy();
     expect(screen.getByText("Ship it")).toBeTruthy();
   });
 
@@ -959,6 +963,39 @@ describe("DeckDetail — Workflow section", () => {
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByPlaceholderText("Choose a template for PROJ-142…")).toBeNull();
     expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("closes the picker on Escape too, and stops the key there", () => {
+    // `DeckApp.test.tsx` has the full regression (Escape must not also close
+    // the surrounding card drawer, since `DeckApp` listens for the same key on
+    // `window`) — this is the narrower claim this file alone can prove: the
+    // picker's own handler treats Escape as ITS dismissal and calls
+    // `stopPropagation` rather than leaving the event to bubble untouched.
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    fireEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    const input = screen.getByPlaceholderText("Choose a template for PROJ-142…");
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const stopSpy = vi.spyOn(event, "stopPropagation");
+    fireEvent(input, event);
+    expect(stopSpy).toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-142…")).toBeNull();
+  });
+
+  it("closes the picker when the selected card changes under it", () => {
+    // `DeckApp.tsx` never remounts this component on a card switch (see
+    // `DeckDetailProps.closing`'s own doc comment), so `pickerOpen` would
+    // otherwise survive from card A onto card B — still open, re-placeholdered
+    // for B, and a pick would attach to the card the user is now looking at
+    // rather than the one they meant to when they opened it.
+    const result = renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    fireEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    expect(screen.getByPlaceholderText("Choose a template for PROJ-142…")).toBeTruthy();
+    result.rerender(<DeckDetail
+      card={cardWithKey("PROJ-9")} sourceLabel="Jira" onClose={vi.fn()} onForget={vi.fn()}
+      flows={[]} templates={[shipItTemplate]} runs={[]} branchCi={{}} orchEnabled onOpenWorkflow={vi.fn()}
+    />);
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-142…")).toBeNull();
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-9…")).toBeNull();
   });
 
   it("Arm sends flow:arm for this card's own workflow id", async () => {
