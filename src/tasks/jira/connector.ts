@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { getConfig } from "../../config";
 import type { AuthProbe, ProjectProbe } from "../../engine/doctor";
-import { SourceInfo, TaskConnector, TaskProvider } from "../provider";
+import { SetupStep, SourceInfo, TaskConnector, TaskProvider } from "../provider";
 import { ApiTokenAuth, JiraAuth } from "./auth";
 import { JiraClient, JiraAuthError } from "./client";
 import { describeJiraError, JiraApiError } from "./errors";
@@ -19,6 +19,7 @@ const SCOPE_SETTING = "agentFlow.jira.project";
 class JiraConnector implements TaskConnector {
   readonly id = "jira";
   readonly setupSteps = 2;
+  readonly signInSteps = 2; // email, then API token
 
   constructor(private readonly auth: JiraAuth) {}
 
@@ -82,7 +83,7 @@ class JiraConnector implements TaskConnector {
   }
 
   isAuthenticated(): Promise<boolean> { return this.auth.isAuthenticated(); }
-  signIn(): Promise<boolean> { return this.auth.signIn(); }
+  signIn(step?: SetupStep): Promise<boolean> { return this.auth.signIn(step); }
   signOut(): Promise<void> { return this.auth.signOut(); }
 
   provider(): TaskProvider {

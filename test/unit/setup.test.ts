@@ -77,6 +77,40 @@ describe("runSetup", () => {
     expect(opts.title).toBe("Agent Flow Deck Setup (3/3)");
   });
 
+  it("counts the connector's own sign-in prompts into the total", async () => {
+    const configure = vi.fn(async () => async () => undefined);
+    const c = connector({ setupSteps: 2, signInSteps: 2, configure });
+    stubInputBox("~/projects");
+
+    await runSetup(fakeContext().context, c, log);
+
+    // 2 connector steps + 1 repos root + 2 sign-in prompts = 5.
+    expect(configure).toHaveBeenCalledWith(1, 5);
+    const opts = vi.mocked(vscode.window.showInputBox).mock.calls[0][0] as { title: string };
+    expect(opts.title).toBe("Agent Flow Deck Setup (3/5)");
+  });
+
+  it("hands signIn the position its prompts occupy, so the count never restarts", async () => {
+    const c = connector({ setupSteps: 2, signInSteps: 2 });
+    stubInputBox("~/projects");
+
+    await runSetup(fakeContext().context, c, log);
+
+    expect(c.signIn).toHaveBeenCalledWith({ from: 4, total: 5 });
+  });
+
+  it("leaves signIn unnumbered when the connector prompts for nothing", async () => {
+    // Agile Accelerator's sign-in is a "run `sf org login web`" notification, not
+    // an input box: there is no step for it to be, so it is given no number.
+    const c = connector({ setupSteps: 2, signInSteps: 0 });
+    stubInputBox("~/projects");
+
+    await runSetup(fakeContext().context, c, log);
+
+    // Not `{ from: 4, total: 3 }` — a box number past the end of the wizard.
+    expect(c.signIn).toHaveBeenCalledWith(undefined);
+  });
+
   it("writes the repos root and workspace dir, signs in, sets the flag, and refreshes on the happy path", async () => {
     const c = connector();
     stubInputBox("~/code/");

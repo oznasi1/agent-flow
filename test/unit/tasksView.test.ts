@@ -303,6 +303,7 @@ function jiraConnector(auth: JiraAuth): TaskConnector {
   return {
     id: "jira",
     setupSteps: 2,
+    signInSteps: 2,
     info: () => {
       const cfg = getConfig();
       return {

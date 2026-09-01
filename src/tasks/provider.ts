@@ -147,6 +147,15 @@ export interface SourceInfo {
   scopeSetting: string;
 }
 
+/** Where a prompt sits in the first-run wizard: box `from` of `total`. Passed
+ * to `signIn()` only when the wizard is the caller, so the standalone "Sign in"
+ * command — which has no wizard, and so no total to be a fraction of — keeps its
+ * own numbering. */
+export interface SetupStep {
+  from: number;
+  total: number;
+}
+
 export interface TaskConnector {
   /** The `agentFlow.taskSource` value, e.g. "jira". */
   readonly id: string;
@@ -164,9 +173,17 @@ export interface TaskConnector {
    * already-configured user's settings before a later step can still abort. */
   configure(from: number, total: number): Promise<(() => Promise<void>) | null>;
   readonly setupSteps: number;
+  /** How many input boxes `signIn()` shows, so the wizard can number them as its
+   * own final steps instead of letting the count restart at 1. Zero for a source
+   * whose sign-in is a notification rather than a prompt (Agile Accelerator tells
+   * the user to run `sf org login web`); such a connector is called with no
+   * `step` at all. */
+  readonly signInSteps: number;
 
   isAuthenticated(): Promise<boolean>;
-  signIn(): Promise<boolean>;
+  /** `step` present means the first-run wizard is asking: number the prompts from
+   * `step.from` of `step.total` rather than from 1. */
+  signIn(step?: SetupStep): Promise<boolean>;
   signOut(): Promise<void>;
 
   /** Built from current settings, per operation — exactly as `client()` did. */
