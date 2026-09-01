@@ -69,7 +69,11 @@ async function doRunSetup(
 ): Promise<boolean> {
   log("setup: started");
 
-  const total = connector.setupSteps + 1; // + the repos root, which is ours not theirs
+  // The connector's settings, then the repos root (ours, not theirs), then the
+  // credential prompts its `signIn()` will show. One count over the whole wizard:
+  // a sign-in that restarted at "(1/2)" read as a second, unrelated wizard.
+  const reposRootStep = connector.setupSteps + 1;
+  const total = reposRootStep + connector.signInSteps;
   track({ name: "setup_started", source, connector_steps: connector.setupSteps });
   // Collected, not yet written: `null` means the user cancelled inside the
   // connector's own steps, anything else is the write to perform below.
@@ -80,7 +84,7 @@ async function doRunSetup(
   }
 
   const reposRoot = await vscode.window.showInputBox({
-    title: `Agent Flow Deck Setup (${total}/${total})`,
+    title: `Agent Flow Deck Setup (${reposRootStep}/${total})`,
     prompt: "Directory where your repo checkouts live",
     ignoreFocusOut: true,
     value: "~/projects",
@@ -121,7 +125,12 @@ async function doRunSetup(
   log(`setup: config saved (${info.scopeNoun} ${info.scopeValue}, root ${cleanRoot})`);
 
   const label = info.label;
-  if (!(await connector.signIn())) {
+  // A connector that prompts for nothing gets no step: `{ from: total + 1 }` would
+  // be a box number past the end of a wizard it never draws.
+  const signInStep = connector.signInSteps > 0
+    ? { from: reposRootStep + 1, total }
+    : undefined;
+  if (!(await connector.signIn(signInStep))) {
     vscode.window.showWarningMessage(
       `Agent Flow Deck: settings saved, but ${label} sign-in was cancelled. Use "Sign in to ${label}" to finish.`,
     );

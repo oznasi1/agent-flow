@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { SetupStep } from "../provider";
 
 /**
  * Pluggable Jira authentication. The rest of the extension only depends on this
@@ -9,7 +10,8 @@ export interface JiraAuth {
   /** Returns the value for the HTTP `Authorization` header, or undefined if not signed in. */
   getAuthHeader(): Promise<string | undefined>;
   isAuthenticated(): Promise<boolean>;
-  signIn(): Promise<boolean>;
+  /** `step` present means the first-run wizard is asking — see `SetupStep`. */
+  signIn(step?: SetupStep): Promise<boolean>;
   signOut(): Promise<void>;
 }
 
@@ -39,9 +41,17 @@ export class ApiTokenAuth implements JiraAuth {
     return (await this.getAuthHeader()) !== undefined;
   }
 
-  async signIn(): Promise<boolean> {
+  /** Two boxes, numbered as the wizard's last two steps when `step` says so and
+   * as their own little pair when it does not — the standalone "Sign in to Jira"
+   * command has no wizard to be part of. */
+  async signIn(step?: SetupStep): Promise<boolean> {
+    const title = (n: 0 | 1) =>
+      step
+        ? `Agent Flow Deck Setup (${step.from + n}/${step.total})`
+        : `Jira sign-in (${n + 1}/2)`;
+
     const email = await vscode.window.showInputBox({
-      title: "Jira sign-in (1/2)",
+      title: title(0),
       prompt: "Your Atlassian account email",
       ignoreFocusOut: true,
       placeHolder: "you@example.com",
@@ -49,10 +59,16 @@ export class ApiTokenAuth implements JiraAuth {
     });
     if (!email) return false;
 
+    // Handing over an API token is the step users hesitate at, so the prompt
+    // spends its width on where the token goes rather than on where to get one:
+    // it is stored by this editor, on this machine, and sent to nothing but the
+    // Jira site the user just named. The token URL moves to the placeholder,
+    // which is the one line long enough to hold it unclipped.
     const token = await vscode.window.showInputBox({
-      title: "Jira sign-in (2/2)",
-      prompt: "Atlassian API token — create one at id.atlassian.com/manage-profile/security/api-tokens",
+      title: title(1),
+      prompt: "Atlassian API token — kept on this machine only, in this editor's encrypted secret storage",
       ignoreFocusOut: true,
+      placeHolder: "Create one at id.atlassian.com/manage-profile/security/api-tokens",
       password: true,
     });
     if (!token) return false;

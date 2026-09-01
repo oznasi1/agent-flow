@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **First-run setup counts to one total.** Every box in the wizard is numbered
+  against the same denominator, credential prompts included — a Jira setup now
+  runs `Setup (1/5)` through `Setup (5/5)` instead of stopping at `(3/3)` and
+  then starting a fresh-looking `Jira sign-in (1/2)`. The standalone
+  "Sign in to Jira" command keeps its own `(1/2)` numbering; there is no wizard
+  around it to be part of.
+- **The API-token step says where the token goes.** It now reads "kept on this
+  machine only, in this editor's encrypted secret storage" — Agent Flow Deck
+  sends it nowhere but the Jira site you just named. The link for creating a
+  token moved to the placeholder so both fit unclipped.
+
 ## [0.64.0] — 2026-09-01
 
 ### Changed

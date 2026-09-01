@@ -151,8 +151,9 @@ export interface TaskConnector {
   isConfigured(): boolean;
   configure(from: number, total: number): Promise<(() => Promise<void>) | null>;
   readonly setupSteps: number;
+  readonly signInSteps: number;
   isAuthenticated(): Promise<boolean>;
-  signIn(): Promise<boolean>;
+  signIn(step?: SetupStep): Promise<boolean>;
   signOut(): Promise<void>;
   provider(): TaskProvider;
   probe(): Promise<{ auth?: AuthProbe; scope?: ProjectProbe }>;
@@ -211,12 +212,25 @@ export interface TaskConnector {
   Jira connector.
 
 - **`setupSteps`** — how many boxes `configure` shows, so `setup.ts` can
-  compute `total = connector.setupSteps + 1` (the `+1` is Agent Flow Deck's own
-  `reposRoot` step, not yours).
+  compute the wizard total: `setupSteps + 1 + signInSteps` (the `+1` is Agent
+  Flow Deck's own `reposRoot` step, not yours).
 
-- **`isAuthenticated()` / `signIn()` / `signOut()`** — your own credential
+- **`signInSteps`** — how many boxes `signIn()` shows. It is counted into the
+  same total, because a wizard whose credential prompts restart at "(1/2)"
+  reads as a second, unrelated wizard. Set it to `0` if your sign-in shows no
+  boxes — Agile Accelerator's is a notification telling the user to run
+  `sf org login web`.
+
+- **`isAuthenticated()` / `signIn(step?)` / `signOut()`** — your own credential
   lifecycle, stored however you like (SecretStorage is the expected place —
   see the compatibility rules below).
+
+  `signIn` gets a `step` — `{ from, total }` — only when the first-run wizard is
+  the caller, and only if you declared `signInSteps > 0`; title your boxes
+  `` `Agent Flow Deck Setup (${step.from + n}/${step.total})` ``. When `step` is
+  absent the standalone "Sign in to X" command is calling, and there is no wizard
+  for your prompts to be a fraction of — number them your own way
+  (Jira's says `Jira sign-in (1/2)`).
 
 - **`provider()`** — build a `TaskProvider` from current settings, fresh per
   call. This mirrors the pre-seam `client()` pattern deliberately: settings
