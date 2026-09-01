@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.65.0] — 2026-09-01
+
 ### Changed
 
 - **First-run setup counts to one total.** Every box in the wizard is numbered
