@@ -179,15 +179,24 @@ export const ORCH_CSS = `
   .orch-tmpl-list { max-height: 260px; overflow-y: auto; }
   .orch-tmpl-row { padding: 6px 4px; }
   .orch-tmpl-row + .orch-tmpl-row { border-top: 1px solid var(--hair); margin-top: 2px; padding-top: 8px; }
-  /* Every \`.row\`/\`.sp\` pair in this sheet is scoped to its own parent —
-     there is no generic one — so this row needs its own, the same shape
-     \`.orch-hd .row\`/\`.orch-hd .sp\` and \`.orch-resume .row\` already give
-     theirs. Without it the name and rule count jam together with no gap, and
-     the confirm state's Cancel/Confirm-delete pair drops onto its own line
-     below the sentence instead of sitting at its end. */
+  /* Every \`.orch-tmpl-row .row\` is ALSO an \`.orch-hd .row\` —
+     \`OrchestratorDrawer.tsx\` never closes its \`.orch-hd\` div until after the
+     whole flow-switcher popover, Templates tab included — and that ancestor
+     rule (above) already supplies \`display: flex\`/\`flex: 1\` to every \`.row\`
+     and \`.sp\` nested under it, this one included. So this rule is not what
+     stands between the name and the rule count jamming together; it exists
+     for its own \`gap: 6px\`, which DOES override the ancestor's \`8px\` (equal
+     specificity, later in the sheet). \`display: flex\` stays here anyway as
+     cheap insurance, not load-bearing today: the Templates tab living inside
+     \`.orch-hd\` is itself a little strange (\`.orch-tmpl-dialog\`, the Save
+     dialog for the very same tab, already lives in \`.orch-body\` instead), and
+     if a future refactor moves \`.orch-tmpl-list\` there too this rule keeps
+     working without anyone having to notice the ancestor's coverage went
+     with it. \`.orch-tmpl-row .sp\` carries no such difference from
+     \`.orch-hd .sp\` (same property, same value) and was removed as dead
+     weight. */
   .orch-tmpl-row .row { display: flex; align-items: center; gap: 6px; }
   .orch-tmpl-row .row + .row { margin-top: 4px; }
-  .orch-tmpl-row .sp { flex: 1; }
   .orch-tmpl-row .t { font-size: var(--t-body); font-weight: 600; }
   .orch-tmpl-row .meta { font-size: var(--t-micro); color: var(--dim); white-space: nowrap; }
   /* A place's own key cell in the Save dialog reuses \`.orch-kw\`, sized for
