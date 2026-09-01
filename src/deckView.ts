@@ -3600,15 +3600,12 @@ export class DeckPanel {
       // A local card has no record on disk — `removeRun` would be a no-op but
       // `writeRun` would *create* one, promoting a card the user never tracked.
       if (runKind(run) === "local") {
-        // The webview has no connector of its own to parse run.url with, so the
-        // inferred key crosses the wire pre-computed — through the same
-        // connector and the same ticketKeyFor every other caller here uses,
-        // rather than a second parser living in the webview.
         // A local card exists only because a session is open in it, so it is on
         // the board by construction.
-        out.push(run.url
-          ? { ...status, shelf: "board" as const, inferredTicketKey: ticketKeyFor(run, this.connector), usage: this.usageByRun.get(run.key) }
-          : { ...status, shelf: "board" as const, usage: this.usageByRun.get(run.key) });
+        out.push({
+          ...status, ...this.ticketKeyPatch(run),
+          shelf: "board" as const, usage: this.usageByRun.get(run.key),
+        });
         // Included for the same reason the card is on the board unconditionally:
         // a live session, by construction. The badge's "local/untracked session
         // cards included" requirement (design doc) means a local card stalled or
@@ -3653,7 +3650,7 @@ export class DeckPanel {
         justLaunched,
         hasWorkToLose,
       });
-      const shelved = { ...status, shelf, usage: this.usageByRun.get(run.key) };
+      const shelved = { ...status, ...this.ticketKeyPatch(run), shelf, usage: this.usageByRun.get(run.key) };
       if (this.applyVerdict(run, this.verdictFor(shelved, livePlaces, now))) continue;
       // Counted, not cleared: this is exactly what Clear stale would take. The
       // second call is free of side effects — `verdictFor` is pure, and only
@@ -4845,6 +4842,28 @@ export class DeckPanel {
     removePrEntries(defaultPrFactsDir(), key);
     this.localRuns.delete(key);
     await this.refreshBusy();
+  }
+
+  /** The `inferredTicketKey` half of a `RunStatus`, and the ONE place it is set.
+   *
+   * Present exactly when `ticketKeyFor` resolves the run's url to a key that is
+   * not the record's own — which is the whole information the webview lacks,
+   * since it has no connector to parse a url with. Absent otherwise, so that
+   * `inferredTicketKey ?? run.key` (the webview's `boundTicketKeyOf`, attach.ts)
+   * reconstructs `ticketKeyFor(run, this.connector)` exactly, for every run
+   * shape. That equality is what keeps `flow:attach` — which binds a planned node
+   * by `ticketKeyFor` — from writing a workflow the card it was attached to
+   * cannot see.
+   *
+   * Not only for local runs, which is what this was: a Track-it card promoted
+   * while another run already owned its inferred key keeps a `local-<hash>` KEY
+   * and carries its ticket only in the url (see `track`), so a webview reading
+   * `run.key` there looks for the hash while the host binds the ticket. The
+   * card's own inferred-key chip is still local-only — `DeckApp.tsx` guards that
+   * on `runKind`, not on this field's presence. */
+  private ticketKeyPatch(run: Run): { inferredTicketKey?: string } {
+    const key = ticketKeyFor(run, this.connector);
+    return key === run.key ? {} : { inferredTicketKey: key };
   }
 
   /** The run a card's action acts on. A local card has no record on disk — it is

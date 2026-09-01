@@ -19,7 +19,7 @@
 // `../../types` only — no Node builtins, directly or transitively. The Deck's
 // card drawer imports this file, and the webview bundles for a browser target
 // where esbuild resolves imports statically.
-import { isTicketRun, RunStatus } from "../../types";
+import type { RunStatus } from "../../types";
 import { BranchCiStatus } from "./branchCi";
 import type { BlockedNote } from "./evaluate";
 import { RulePreview, previewFlow } from "./preview";
@@ -149,17 +149,38 @@ export function rankByState(
   });
 }
 
-/** Which ticket key a PLANNED node would bind this run by: the run's own key
- * once it is a tracked ticket, else whatever the host could infer off a local
- * card's branch (absent when neither exists). A place binds by the run key
- * every card has regardless — this only matters for the planned half of
- * `bindsRun` — but it is real logic (not a passthrough), so it gets its own
- * name rather than being re-typed at each call site: `DeckDetail.tsx`'s card
- * drawer and `DeckApp.tsx`'s board both need this SAME answer for the SAME
- * card, and a second, differently-worded copy of it is exactly how the two
- * could quietly disagree about which workflow a card carries. */
-export function boundTicketKeyOf(status: RunStatus): string | undefined {
-  return isTicketRun(status.run) ? status.run.key : status.inferredTicketKey;
+/** Which ticket key a PLANNED node binds this run by, and the webview's HALF of
+ * a two-sided derivation: this must equal `ticketKeyFor(run, connector)`
+ * (types.ts) — the value `deckView.ts`'s `flow:attach` writes into the planned
+ * node it creates — for every run shape, or the host binds a workflow by one key
+ * while the card looks for it under another and the attachment is invisible on
+ * the very card that asked for it.
+ *
+ * The webview has no connector, so it cannot parse a ticket out of a url. It
+ * does not have to: `inferredTicketKey` is `ticketKeyFor`'s answer, computed
+ * host-side and put on the wire for exactly this reason, and present precisely
+ * when that answer differs from the record's own key (see `RunStatus`'s own doc
+ * comment, and `deckView.ts`'s `ticketKeyPatch`). So `inferredTicketKey ??
+ * run.key` IS `ticketKeyFor`, reconstructed — for a launched task run (whose key
+ * IS its ticket), a local card with a ticket-named branch, a local card with no
+ * ticket at all, a Track-it card still keyed by its place hash, and a review run
+ * whose url is a PR's. `test/unit/engine/orchestrator/attach.test.ts` pins that
+ * equality against `ticketKeyFor` itself, on all five.
+ *
+ * NOT `isTicketRun(run) ? run.key : …`, which is what this used to be: that
+ * excludes only review runs, so a LOCAL card — which has a real url and a
+ * `local-<hash>` key — read as a ticket run and bound by its hash, while the
+ * host bound by the ticket. Attaching a workflow to a local card then did
+ * nothing visible, and pressing Attach again produced the host's refusal naming
+ * the hash. The `inferredTicketKey` branch was unreachable besides: it is only
+ * set when the url resolved, and `isTicketRun` was only false when there was no
+ * url.
+ *
+ * A place binds by the run key every card has regardless — this only matters for
+ * the planned half of `bindsRun`, which is the ONLY binding a freshly attached
+ * workflow has, since a template carries no place nodes. */
+export function boundTicketKeyOf(status: RunStatus): string {
+  return status.inferredTicketKey ?? status.run.key;
 }
 
 /** The one workflow a card's chip or drawer shows, and where it stands — the

@@ -210,12 +210,13 @@ export function DeckDetail({
   const lead = withPr[0]?.[1].facts;
 
   // A place binds by the run key every card has; a planned node binds by the
-  // ticket key, which a local card only has when the host could infer one off
-  // its branch (see `inferredKey`'s identical reasoning in DeckApp.tsx's Card).
-  // `boundTicketKeyOf` (attach.ts) is the one place that rule lives — DeckApp.tsx's
-  // board reads a card's own workflow through the same function, and a second,
-  // differently-worded copy of this derivation here is exactly how the two could
-  // quietly disagree about which workflow a card carries.
+  // ticket key, which is the run's own key unless the host resolved a different
+  // one off its url (a local card's inferred branch ticket, or a Track-it card
+  // still keyed by its place hash). `boundTicketKeyOf` (attach.ts) is the one
+  // place that rule lives — DeckApp.tsx's board reads a card's own workflow
+  // through the same function, and the HOST's `flow:attach` derives the same key
+  // through `ticketKeyFor`; a second, differently-worded copy here is exactly how
+  // a card and the workflow attached to it came to disagree once already.
   const boundTicketKey = boundTicketKeyOf(r);
   // `undefined` while the setting is off rather than skipping the call:
   // `orchEnabled` is the one gate for the whole section below, so nothing
@@ -485,7 +486,7 @@ export function DeckDetail({
             />
             {pickerOpen && (
               <WorkflowPicker
-                ticketKey={boundTicketKey ?? key}
+                ticketKey={boundTicketKey}
                 templates={templates}
                 onPick={(templateId) => {
                   // Never `replace`, even though `WorkflowBlock` only ever

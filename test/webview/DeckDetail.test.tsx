@@ -41,9 +41,10 @@ import { DeckDetail, type DeckDetailProps } from "../../src/webview/DeckDetail";
 import { DECK_CSS } from "../../src/webview/deckStyles";
 import { send, vscodeApi } from "../../src/webview/vscodeApi";
 import type { DeckCard } from "../../src/webview/deckCards";
-import type { FlowTemplate, PrEntryMap, PrFacts, RunStatus } from "../../src/types";
+import { ticketKeyFor, type FlowTemplate, type PrEntryMap, type PrFacts, type RunStatus } from "../../src/types";
 import type { UsageTotals } from "../../src/engine/usage";
 import type { Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
+import { instantiate } from "../../src/engine/orchestrator/templates";
 
 const sent = vi.mocked(send);
 beforeEach(() => sent.mockClear());
@@ -153,6 +154,25 @@ const renderWf = (
  * (see the "explore-tenant-config" and "local-abc" cases above). */
 const cardWithKey = (key: string, over: Partial<RunStatus> = {}): DeckCard =>
   mkCard({ run: { ...mkCard().status.run, key }, ...over });
+
+/** The `keyFromUrl` half of a Jira-shaped connector, matching
+ * `src/tasks/jira/connector.ts` — the one method `ticketKeyFor` asks for. The
+ * connector itself reaches `vscode` and cannot be imported here. */
+const jiraish = { keyFromUrl: (url: string) => url.split("/browse/")[1]?.trim() || null };
+
+/** A local card as the host really posts one: a `local-<slug>-<sha1>` key, a
+ * NON-EMPTY url (`localRunFor` builds it from the inferred ticket, so a local
+ * run with a ticket always has one), and `inferredTicketKey` derived through the
+ * same `ticketKeyFor` the host's own `flow:attach` uses. Both halves of the
+ * fixture come from one derivation, so it cannot describe a run production
+ * could not produce. */
+const localRun = (ticket: string): RunStatus["run"] =>
+  ({ ...mkCard().status.run, key: "local-webapp-9f2c1a4", url: `https://jira/browse/${ticket}`, kind: "local" });
+
+const localCard = (ticket: string): DeckCard => {
+  const run = localRun(ticket);
+  return mkCard({ run, inferredTicketKey: ticketKeyFor(run, jiraish) });
+};
 
 // Copy, per-repo diffs, the spend table and Forget/Track it all moved behind
 // the `More` disclosure — its body renders only once open (see DeckDetail.tsx's
@@ -948,13 +968,37 @@ describe("DeckDetail — Workflow section", () => {
     // A local card's run key is a worktree slug, not a ticket — the picker asks
     // about the INFERRED ticket key (see DeckDetail.tsx's `boundTicketKey`),
     // same as `attachedWorkflows` itself binds a planned node by.
-    renderWf(
-      cardWithKey("local-fix-export", { run: { ...mkCard().status.run, key: "local-fix-export", url: "", kind: "local" } as never,
-        inferredTicketKey: "PROJ-9" }),
-      { flows: [], templates: [shipItTemplate], orchEnabled: true },
-    );
+    //
+    // The url is NON-EMPTY, which the previous version of this fixture had
+    // wrong: the host only ever sends `inferredTicketKey` because it resolved a
+    // ticket out of `run.url` (`localRunFor` sets that url FROM the inferred
+    // ticket, so no url means no inferred key either — see deckView.ts's
+    // `ticketKeyPatch`). Pairing an empty url with an inferred key asked for
+    // behaviour production cannot produce, and it was the shape that let the
+    // real bug through: the derivation under test reads the url-less branch
+    // only, which no local card with a ticket ever takes.
+    renderWf(localCard("PROJ-9"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
     await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
     expect(screen.getByPlaceholderText("Choose a template for PROJ-9…")).toBeTruthy();
+  });
+
+  // The user-visible failure the seam caused, end to end and in the one place it
+  // was seen: a local card whose branch names a ticket, carrying a workflow the
+  // HOST attached — bound by `ticketKeyFor`, the host's own derivation, run here
+  // against the same url the wire carries, and instantiated by the host's own
+  // `instantiate`. Before the fix the drawer said "No workflow attached" on a
+  // card that demonstrably had one, and pressing Attach again produced a refusal
+  // naming the hash.
+  it("shows the workflow the host attached to a local card, bound by the host's own ticket key", () => {
+    const run = localRun("PROJ-9");
+    const hostKey = ticketKeyFor(run, jiraish);
+    // A template carries no place nodes, so this planned node's ticket key is
+    // the ONLY thing binding the flow to the card.
+    const attached = instantiate(shipItTemplate, hostKey, "f-new", 100);
+    expect(attached.nodes.filter((n) => n.kind === "place")).toEqual([]);
+    renderWf(localCard("PROJ-9"), { flows: [attached], orchEnabled: true });
+    expect(screen.getByText("Ship it")).toBeTruthy();
+    expect(screen.queryByText("No workflow attached")).toBeNull();
   });
 
   it("closes the picker without sending anything when cancelled", async () => {

@@ -2253,6 +2253,32 @@ describe("DeckPanel local cards", () => {
     expect(local.inferredTicketKey).toBeUndefined();
   });
 
+  // A TRACKED run, not a local one, but the same field and the same reason: the
+  // wire has to carry the ticket key wherever the record's own key is not it, or
+  // the webview — which has no connector to parse a url with — binds a workflow
+  // by a hash while `flow:attach` binds it by the ticket. `track()` produces
+  // exactly this record: a promoted local card keeps its place-hash key when a
+  // real run already owned the inferred key, and its ticket then lives only in
+  // the url. See attach.ts's `boundTicketKeyOf`, which is `inferredTicketKey ??
+  // run.key`, and is only equal to `ticketKeyFor` because of this.
+  it("sends the ticket key for a Track-it run still keyed by its place hash", async () => {
+    h.runs = [mkRun({ key: "local-webapp-9f2c1a4", url: "https://jira/browse/PROJ-5641" })];
+    h.openSessions = [];
+    show(true);
+    await settled();
+    const tracked = lastRunsPost().runs.find((r: RunStatus) => r.run.key === "local-webapp-9f2c1a4")!;
+    expect(tracked.inferredTicketKey).toBe("PROJ-5641");
+  });
+
+  it("omits it on a launched run, whose own key already IS its ticket", async () => {
+    h.runs = [mkRun({ key: "PROJ-1", url: "https://jira/browse/PROJ-1" })];
+    h.openSessions = [];
+    show(true);
+    await settled();
+    const tracked = lastRunsPost().runs.find((r: RunStatus) => r.run.key === "PROJ-1")!;
+    expect(tracked.inferredTicketKey).toBeUndefined();
+  });
+
   it("does not make a second card for a place a tracked run already owns", async () => {
     h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "PROJ-1-x" }] })];
     h.openSessions = [sess()];

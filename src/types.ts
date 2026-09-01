@@ -307,13 +307,20 @@ export interface RunStatus {
    * mark rather than guessing from the current setting, which may have changed since the
    * launch or be `ask`. */
   provider?: AgentProvider;
-  /** A local card's ticket key, inferred from its branch name rather than from a
-   * launch — set only when the run is local and its url resolved to one. The
-   * branch could name a ticket somebody else owns, so the status shown on the
-   * card would then be theirs; the webview renders this key differently from a
-   * launched run's for exactly that reason. Computed host-side, through the
-   * connector (see `ticketKeyFor`), because the webview has no connector of its
-   * own to parse a url with — this is the one place that value crosses the wire. */
+  /** The ticket this run's url names, when that is NOT the record's own key —
+   * `ticketKeyFor`'s answer, computed host-side (see `deckView.ts`'s
+   * `ticketKeyPatch`, the one place it is set) because the webview has no
+   * connector of its own to parse a url with. Absent whenever the two agree,
+   * so `inferredTicketKey ?? run.key` reconstructs `ticketKeyFor` exactly —
+   * which is how `attach.ts`'s `boundTicketKeyOf` binds a workflow by the same
+   * key the host does.
+   *
+   * Two run shapes have one: a LOCAL card, whose key is a worktree hash and
+   * whose ticket was inferred from a branch name, and a Track-it card promoted
+   * under that same hash because a real run already owned the inferred key. An
+   * inferred key could name a ticket somebody else owns, so the status shown
+   * would then be theirs — the card renders it differently for that reason, and
+   * gates that rendering on the run being local rather than on this field. */
   inferredTicketKey?: string;
   /** Board or Recently-closed strip. Computed host-side because the rule needs
    * path ownership, which needs canonical paths and therefore `fs`. */

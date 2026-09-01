@@ -206,3 +206,115 @@ describe("rankByState", () => {
     expect(rankByState([b, a], [], 1000).map((f) => f.id)).toEqual(["f-old", "f-new"]);
   });
 });
+
+import { boundTicketKeyOf, cardWorkflow } from "../../../../src/engine/orchestrator/attach";
+import { ticketKeyFor, type PrEntryMap, type Run, type RunStatus } from "../../../../src/types";
+
+// The seam these two halves meet at, tested as an EQUALITY rather than as two
+// independent expectations: `deckView.ts`'s `flow:attach` binds the planned node
+// it creates by `ticketKeyFor(run, connector)`, and the card's own drawer looks
+// for that node by `boundTicketKeyOf`. They must be the same string for every run
+// shape — when they were not, attaching a workflow to a local card created a flow
+// the card could not see, and pressing Attach again produced a refusal naming a
+// hash the user had never been shown.
+//
+// `ticketKeyFor` is the real host function, called here with the one method it
+// asks for: a Jira-shaped `keyFromUrl` (a `/browse/` url yields its key, anything
+// else — a PR url, an empty string — yields null, exactly as
+// `src/tasks/jira/connector.ts` does). The connector itself cannot be imported
+// into a unit test: it reaches `vscode`.
+const BROWSE = "/browse/";
+const connector = {
+  keyFromUrl: (url: string): string | null => {
+    const i = url.indexOf(BROWSE);
+    if (i < 0) return null;
+    return url.slice(i + BROWSE.length).trim() || null;
+  },
+};
+
+const mkRun = (over: Partial<Run> & { key: string }): Run => ({
+  summary: "Export fails", url: "", createdAt: 1, mode: "per-window",
+  repos: [{ name: "ingest-worker", path: "/r/ingest-worker", isGit: true, branch: "feat/x" }],
+  briefPaths: [], ...over,
+});
+
+/** What the host actually puts on the wire for a run — the rule `deckView.ts`'s
+ * `ticketKeyPatch` applies: `inferredTicketKey` is present exactly when
+ * `ticketKeyFor` disagrees with the record's own key. Mirrored here rather than
+ * imported because the method is private to a class that needs a running editor;
+ * `test/unit/deckView.test.ts` pins the host's half against the real thing. */
+const wire = (run: Run): RunStatus => {
+  const key = ticketKeyFor(run, connector);
+  return {
+    run,
+    column: "review", ticketStatus: null, ticketCategory: "indeterminate",
+    repos: [], agent: { state: "unknown", lastActivityMs: null, slug: null },
+    windowOpen: false, prs: {} as PrEntryMap, agents: [], shelf: "board",
+    ...(key === run.key ? {} : { inferredTicketKey: key }),
+  };
+};
+
+/** Every run shape a card can have, with the ticket key a planned node must be
+ * bound by on each. The local key is `localKey`'s real shape
+ * (`local-<slug>-<sha1 prefix>`), and the Track-it row is that same hash after
+ * `track()` promoted it to a "task" record because a real run already owned
+ * PROJ-9 — its ticket then lives ONLY in the url. */
+const SHAPES: [string, Run, string][] = [
+  ["a launched task run", mkRun({ key: "PROJ-142", url: "https://jira/browse/PROJ-142", kind: "task" }), "PROJ-142"],
+  ["a local run whose branch names a ticket", mkRun({ key: "local-webapp-9f2c1a4", url: "https://jira/browse/PROJ-9", kind: "local" }), "PROJ-9"],
+  ["a local run with no ticket at all", mkRun({ key: "local-webapp-9f2c1a4", url: "", kind: "local" }), "local-webapp-9f2c1a4"],
+  ["a Track-it run still keyed by its place hash", mkRun({ key: "local-webapp-9f2c1a4", url: "https://jira/browse/PROJ-9", kind: "task" }), "PROJ-9"],
+  ["a review run", mkRun({ key: "review-webapp-850", url: "https://gh/o/r/pull/850", kind: "review" }), "review-webapp-850"],
+];
+
+describe("boundTicketKeyOf", () => {
+  it.each(SHAPES)("%s: binds by the same key ticketKeyFor gives the host", (_name, run, expected) => {
+    expect(boundTicketKeyOf(wire(run))).toBe(expected);
+    expect(boundTicketKeyOf(wire(run))).toBe(ticketKeyFor(run, connector));
+  });
+
+  it("does not read a local card's hash as its ticket", () => {
+    // The regression itself, stated as its own claim: the old derivation
+    // (`isTicketRun(run) ? run.key : …`) returned the hash here, because a local
+    // run has a real url and `isTicketRun` only excludes review runs.
+    const local = mkRun({ key: "local-webapp-9f2c1a4", url: "https://jira/browse/PROJ-9", kind: "local" });
+    expect(boundTicketKeyOf(wire(local))).not.toBe(local.key);
+  });
+});
+
+describe("cardWorkflow", () => {
+  // A freshly attached workflow, as `instantiate` builds one: a template carries
+  // NO place nodes (saving demotes every place to planned), so the planned node's
+  // ticket key is the only binding that exists. This is the shape the seam above
+  // decides — nothing else in the flow names the card.
+  const plannedOnly = (ticketKey: string): Flow =>
+    ({ id: "f1", name: "Ship it", armed: false, createdAt: 100, nodes: [planned("n1", ticketKey)], edges: [] });
+
+  it.each(SHAPES)("%s: finds the workflow the host bound to it", (_name, run, expected) => {
+    const found = cardWorkflow([plannedOnly(expected)], wire(run), [], 1000);
+    expect(found?.flow.id).toBe("f1");
+    expect(found?.state.status).toBe("disarmed");
+    expect(found?.extraCount).toBe(0);
+  });
+
+  it("returns undefined when no flow binds the card", () => {
+    const run = mkRun({ key: "local-webapp-9f2c1a4", url: "https://jira/browse/PROJ-9", kind: "local" });
+    expect(cardWorkflow([plannedOnly("PROJ-141")], wire(run), [], 1000)).toBeUndefined();
+  });
+
+  it("still binds by a place's run key, and counts the workflows it is not showing", () => {
+    // Both halves of `bindsRun` on one card: a hand-drawn flow with a place on
+    // the run key, plus the attached one bound by the ticket. The failed flow
+    // ranks first (`rankByState`), and the other is what `extraCount` counts.
+    const run = mkRun({ key: "local-webapp-9f2c1a4", url: "https://jira/browse/PROJ-9", kind: "local" });
+    const stopped: Flow = {
+      id: "f-stop", name: "Hotfix", armed: true, createdAt: 200,
+      nodes: [place("n1", run.key), notify("n2")],
+      edges: [edge({ id: "e1", error: "exit 1" })],
+    };
+    const found = cardWorkflow([plannedOnly("PROJ-9"), stopped], wire(run), [], 1000);
+    expect(found?.flow.id).toBe("f-stop");
+    expect(found?.state.status).toBe("stopped");
+    expect(found?.extraCount).toBe(1);
+  });
+});

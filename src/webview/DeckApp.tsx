@@ -279,8 +279,12 @@ function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, se
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the ticket status on this card would
   // then be theirs. Computed host-side (the webview has no connector to parse
-  // r.run.url with) and sent as `inferredTicketKey` — absent whenever the host
-  // found no ticket in the url, which for a non-local run is always.
+  // r.run.url with) and sent as `inferredTicketKey` — absent whenever the url
+  // named no ticket, or named the run's own key. A tracked Track-it card can
+  // carry one too (its key stayed a place hash), which is why this reads the
+  // run's KIND rather than the field's presence: "the key came from a branch,
+  // not from a launch" is a statement about a local card, and a promoted one has
+  // been through Track it since.
   const inferredKey = local ? (r.inferredTicketKey ?? "") : "";
   // Only a card that names one run and one repo can become a node: a place node
   // resolves to exactly one repo so no condition is ever ambiguous about which
