@@ -9,7 +9,8 @@
 // `npm run build` stops resolving while `tsc` and the tests pass regardless. This
 // file may import `model.ts` and nothing else.
 import {
-  Flow, FlowEdge, FlowNode, isPlanned, nextEdgeId, nextNodeId, stripHostStamps,
+  Flow, FlowEdge, FlowNode, isPlace, isPlanned, LaunchDest, nextEdgeId, nextNodeId,
+  PlaceNode, PlannedNode, stripHostStamps,
 } from "./model";
 
 /** The one schema this build knows how to copy into a live workflow. */
@@ -108,4 +109,74 @@ export function instantiate(t: FlowTemplate, ticketKey: string, flowId: string, 
   // deploy.sh on the strength of a single click made about a different ticket.
   // Simply never assigned here — the fresh object above has neither.
   return { ...out, fromTemplate: t.id };
+}
+
+/** What the save dialog must ask about one place it is demoting.
+ *
+ * `mode` and `dest` are the two fields a `PlaceNode` cannot give back:
+ * `promoteToPlace` rewrote a planned node into a place and those two lived on the
+ * planned node it destroyed — and a place created by a Take never had them at
+ * all. They are asked for, never invented, because a guessed destination means a
+ * template that silently launches a session into the window you are working in,
+ * months later, on someone else's ticket. */
+export interface DemotionChoice {
+  nodeId: string;
+  mode: string;
+  dest: LaunchDest;
+}
+
+/** Every place this flow would have to demote, in node order — one row per
+ * place for the save dialog to ask about. */
+export function placesToDemote(flow: Flow): PlaceNode[] {
+  return flow.nodes.filter(isPlace);
+}
+
+/** A template from a live workflow.
+ *
+ * The direction here is the one the engine already runs, backwards:
+ * `promoteToPlace` rewrites `planned → place` the moment a launch succeeds,
+ * keeping the node's `id`, `x`, `y` and `join` precisely so every downstream edge
+ * stays pointing at it. This preserves the same four for the same reason. */
+export function toTemplate(
+  flow: Flow,
+  name: string,
+  id: string,
+  savedAt: number,
+  choices: DemotionChoice[],
+): FlowTemplate {
+  if (flow.nodes.length === 0) throw new Error("this workflow has no steps: nothing to reuse");
+
+  const byNode = new Map(choices.map((c) => [c.nodeId, c]));
+  const nodes: FlowNode[] = flow.nodes.map((n) => {
+    if (!isPlace(n)) return { ...n };
+    const choice = byNode.get(n.id);
+    if (!choice) {
+      throw new Error(`no prompt mode and destination chosen for step ${n.id} (${n.runKey})`);
+    }
+    const demoted: PlannedNode = {
+      id: n.id, x: n.x, y: n.y, join: n.join,
+      kind: "planned",
+      // The parameter, and the only field deliberately blank: `instantiate` fills it.
+      ticketKey: "",
+      // A place is exactly one repo, by construction.
+      repos: [n.repo],
+      mode: choice.mode,
+      dest: choice.dest,
+    };
+    return demoted;
+  });
+
+  return {
+    schema: TEMPLATE_SCHEMA,
+    id,
+    name,
+    params: {},
+    savedAt,
+    flow: {
+      // The flow id is not part of the shape; `instantiate` is given a fresh one.
+      id: "", name, armed: false, createdAt: 0,
+      nodes,
+      edges: flow.edges.map(stripHostStamps),
+    },
+  };
 }
