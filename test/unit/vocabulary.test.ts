@@ -124,6 +124,9 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "a blocked-reason code recorded for diagnostics, not rendered to the user — result.blocked has no reader in deckView.ts or any webview" },
   { location: "src/webview/orchestratorRule.ts", text: "agent-idle-over", why: "condition key, as above" },
   { location: "src/webview/CondParams.tsx", text: "agent-idle-over", why: "condition key, as above" },
+  // Task 1 (built-in starters): the shipped templates encode the same
+  // released condition key, three times over — one per starter that uses it.
+  { location: "src/engine/orchestrator/starters.ts", text: "agent-ended-turn", why: "condition key, as above" },
   // Task 7: host-side wire values and subagent references.
   { location: "src/config.ts", text: "agents",
     why: "the agentFlow.deckGrouping value normalized here — the stored setting, not copy" },
