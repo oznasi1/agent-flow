@@ -111,14 +111,14 @@ function WorkflowStep({
   const descId = `wf-rule-${step.edgeId}`;
 
   // Whether this rule's TARGET can ever have captured output — only a `run`
-  // rule does (a launch, a seed, a notify have no command to capture), so
-  // gating on the target rather than on outcome keeps the button from
-  // appearing where a click could only ever be met with a refusal. Combined
-  // below with `step.state`, which is what actually decides whether the
-  // button renders: `done` and `fail` are the only states with a journal line
-  // to read at all, and a succeeded command is exactly as often worth reading
-  // back as a failed one — the design doc's own "Output on a failed step" was
-  // the smaller of the two asks, not the only one.
+  // rule does (a launch, a seed, a notify, or a gate's `ask` have no command
+  // to capture), so gating on the target rather than on outcome keeps the
+  // button from appearing where a click could only ever be met with a
+  // refusal. Combined below with `step.state`, which is what actually decides
+  // whether the button renders: `done` and `fail` are the only states with a
+  // journal line to read at all, and a succeeded command is exactly as often
+  // worth reading back as a failed one — the design doc's own "Output on a
+  // failed step" was the smaller of the two asks, not the only one.
   const canShowOutput = edgeAction(flow, edge) === "run";
 
   return (

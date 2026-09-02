@@ -278,7 +278,7 @@ export type EdgeOutputRefusal =
   | "no-output"; // this edge fired or errored, but that event carries no `output`
 
 export type EdgeOutputResult =
-  | { ok: true; output: string; kind: "fired" | "errored" }
+  | { ok: true; output: string; kind: "fired" | "errored"; action: string; at: number }
   | { ok: false; reason: EdgeOutputRefusal };
 
 /** What `flow:openOutput` shows for one edge: the OUTPUT half of its most
@@ -293,7 +293,13 @@ export type EdgeOutputResult =
  * from. Falling back to an OLDER event's output when the latest has none would
  * show a previous run's evidence under the current run's step — exactly the
  * kind of stale-but-plausible answer this function refuses to give; `no-output`
- * is the honest one instead. */
+ * is the honest one instead.
+ *
+ * `kind`, `action` and `at` ride along on a hit so the caller can stamp the
+ * opened document with WHERE the text came from: a bare output blob in an
+ * `Untitled-N` tab gives no way to tell two steps' tabs apart, or to say
+ * whether the text on screen is from the run that succeeded or a later one
+ * that failed. */
 export function findEdgeOutput(events: JournalEvent[], edgeId: string): EdgeOutputResult {
   if (events.length === 0) return { ok: false, reason: "no-journal" };
   const forEdge = events.filter(
@@ -303,5 +309,5 @@ export function findEdgeOutput(events: JournalEvent[], edgeId: string): EdgeOutp
   if (forEdge.length === 0) return { ok: false, reason: "no-event" };
   const latest = forEdge[forEdge.length - 1];
   if (latest.output === undefined) return { ok: false, reason: "no-output" };
-  return { ok: true, output: latest.output, kind: latest.kind };
+  return { ok: true, output: latest.output, kind: latest.kind, action: latest.action, at: latest.at };
 }

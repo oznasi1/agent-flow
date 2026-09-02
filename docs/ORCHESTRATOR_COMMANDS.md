@@ -252,10 +252,15 @@ any other flow. The names never appear in the source: the code keeps `Flow`,
   editor tab — never back across the wire to the drawer, since output can be
   far larger than any receipt sentence and the drawer is a fixed 620px.
   Offered on a workflow's `done` or `fail` step whenever its rule runs a
-  command; every other rule kind (launch, seed, notify) has no output to
-  read, so the button never appears for one. A flow or edge the journal has
+  command; every other rule kind (launch, seed, notify, a gate's `ask`) has
+  no output to read, so the button never appears for one. The opened tab is
+  headed with a one-line pointer back to the journal line it came from —
+  `fired`/`errored`, the action, the edge, and when — so two Output tabs
+  don't read as the same undifferentiated blob. A flow or edge the journal has
   nothing for is a toast naming which of three things is true — nothing
-  journaled at all, this edge never ran, or it ran without capturing
+  journaled at all (which reads the same as a journal that failed to read —
+  see [FLOW_JOURNAL.md](FLOW_JOURNAL.md)), this edge never ran, or it ran
+  without capturing
   output — never a blank tab.
 
 ## Boundaries

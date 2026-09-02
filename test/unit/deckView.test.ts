@@ -10530,21 +10530,45 @@ describe("arm, disarm and reset", () => {
   });
 
   describe("flow:openOutput", () => {
-    it("opens a fired edge's captured output in a plain-text editor tab", async () => {
+    // `1_000` and `1_002`ms both fall in the same whole second, so the header's
+    // timestamp is identical across these fixtures — the point is that the
+    // header's PRESENCE, `kind` and `action` are asserted, not that the clock
+    // resolution matters here.
+    const WHEN = "1970-01-01T00:00:01Z";
+
+    it("opens a fired edge's captured output in a plain-text editor tab, headed with its provenance", async () => {
       setConfig({ orchestrator: true });
       seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "deployed ok" }, 1_000);
       const { send } = await openPanel();
       await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
-      expect(workspace.openTextDocument).toHaveBeenCalledWith({ content: "deployed ok", language: "plaintext" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({
+        content: `# fired · run · e1 · ${WHEN}\n\ndeployed ok`, language: "plaintext",
+      });
       expect(window.showTextDocument).toHaveBeenCalledWith(expect.anything(), { preview: true });
     });
 
-    it("opens an errored edge's captured output too", async () => {
+    it("echoes the journaled action verbatim in the header, not a hardcoded one", async () => {
+      // Every other fixture in this block happens to use action "run" — since
+      // that is the only kind the UI ever offers Output for — so this pins
+      // the header actually READS `result.action` off the journal line rather
+      // than a literal that would coincidentally match every other test here.
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "notify", note: "", output: "told you" }, 1_000);
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({
+        content: `# fired · notify · e1 · ${WHEN}\n\ntold you`, language: "plaintext",
+      });
+    });
+
+    it("opens an errored edge's captured output too, headed as errored", async () => {
       setConfig({ orchestrator: true });
       seedJournal("f1", { kind: "errored", edge: "e1", from: "a", to: "z", action: "run", error: "boom", output: "stack trace" }, 1_000);
       const { send } = await openPanel();
       await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
-      expect(workspace.openTextDocument).toHaveBeenCalledWith({ content: "stack trace", language: "plaintext" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({
+        content: `# errored · run · e1 · ${WHEN}\n\nstack trace`, language: "plaintext",
+      });
     });
 
     it("shows the LATEST run's output, not an earlier one, when a Reset separates two runs", async () => {
@@ -10554,10 +10578,16 @@ describe("arm, disarm and reset", () => {
       seedJournal("f1", { kind: "errored", edge: "e1", from: "a", to: "z", action: "run", error: "boom", output: "new run" }, 1_002);
       const { send } = await openPanel();
       await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
-      expect(workspace.openTextDocument).toHaveBeenCalledWith({ content: "new run", language: "plaintext" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({
+        content: `# errored · run · e1 · ${WHEN}\n\nnew run`, language: "plaintext",
+      });
     });
 
-    it("toasts honestly when nothing has been journaled for this workflow", async () => {
+    it("toasts honestly when nothing has been journaled for this workflow, admitting a read failure reads the same", async () => {
+      // `nodeJournalIo().readFile` swallows an unreadable file to `null`
+      // exactly like a missing one — `JournalIo`'s own contract — so an
+      // EACCES journal and an empty one both land here. The message must not
+      // claim more certainty than the code actually has.
       setConfig({ orchestrator: true });
       const { p, send } = await openPanel();
       await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
@@ -10565,6 +10595,7 @@ describe("arm, disarm and reset", () => {
       const toast = posts(p).find((m) => m.type === "toast");
       expect(toast).toMatchObject({ level: "info" });
       expect(toast.message).toMatch(/nothing.*recorded/i);
+      expect(toast.message).toMatch(/could not be read/i);
     });
 
     it("toasts honestly when this step hasn't run yet, distinct from nothing journaled at all", async () => {

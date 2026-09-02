@@ -167,7 +167,7 @@ and it follows relative imports only).
 | disarmed | `flow.armed === false` | steps greyed, `Arm` |
 | advancing | `previewFlow` verdict per rule | current step ringed, its reason as the receipt |
 | waiting on you | `BlockedNote.reason === "awaiting-answer"` | amber gate step, `Approve` / `Reject` inline |
-| stopped | any edge carries `error` | red step, `Output` / `Reset` inline |
+| stopped | any edge carries `error` | red step, `Reset` inline, plus `Output` when the failed rule ran a command |
 | done | no rule left in play | all ticks, `Detach` offered, `Output` on any `run` step |
 
 `done` is the absence of a pending rule, not a stored flag — same reasoning as attachment.
@@ -273,12 +273,16 @@ pass on this same branch: command output lived only in the flow journal and
 the Deck's output channel, and reading the journal back needed a host round
 trip (`flow:openOutput`) that did not exist when this document was first
 written. It opens the edge's most recent `fired`/`errored` output in its own
-editor tab — never back across the wire, since output can exceed the 620px
-drawer many times over — and refuses honestly (a toast, never a blank tab)
-when nothing was journaled, the step never ran, or it ran without capturing
-output. Shipped wider than §5 promised: also offered on a *succeeded*
-`run` step, not only a failed one, since a command's own output is exactly as
-often worth reading back after success as after failure.
+editor tab, headed with a one-line pointer back to that journal line — kind,
+action, edge, timestamp — so two Output tabs never read as the same
+undifferentiated blob. Never back across the wire, since output can exceed
+the 620px drawer many times over; and it refuses honestly (a toast, never a
+blank tab) when nothing was journaled, the step never ran, or it ran without
+capturing output. Offered only where output can exist at all — a `run` rule,
+never a launch, seed, notify, or a gate's `ask`. Shipped wider than §5
+promised too: also offered on a *succeeded* `run` step, not only a failed
+one, since a command's own output is exactly as often worth reading back
+after success as after failure.
 
 ## File structure
 

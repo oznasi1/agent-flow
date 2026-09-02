@@ -19,8 +19,8 @@ const notify = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "
 const edge = (id: string): FlowEdge => ({ id, from: "n1", to: "n2", cond: { kind: "pr-merged" } });
 
 // A run-action fixture, for the Output button: it is offered only on a `run`
-// rule (see `WorkflowBlock`'s own `showOutput`), so the shared `flow` above —
-// every edge into a notify terminal — can never exercise it.
+// rule (see `WorkflowBlock`'s own `canShowOutput`), so the shared `flow`
+// above — every edge into a notify terminal — can never exercise it.
 const command = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "command", run: "deploy.sh" });
 const runFlow: Flow = {
   id: "f1",
@@ -200,10 +200,11 @@ describe("WorkflowBlock", () => {
   });
 
   it("does not offer Output on a run rule that hasn't fired yet", () => {
-    // `showOutput` gates on `step.state` being `done` or `fail`, not merely on
-    // the target being a `run` rule — a step still `now`/`waiting` has no
-    // journal line at all, and offering the button would only ever earn the
-    // user a "hasn't run yet" refusal.
+    // The JSX only renders Output inside its `step.state === "done"` and
+    // `step.state === "fail"` branches — `canShowOutput` itself only checks
+    // the TARGET (a `run` rule), not the state — so a step still `now`/
+    // `waiting` has no journal line at all, and offering the button would
+    // only ever earn the user a "hasn't run yet" refusal.
     const base = makeBase();
     render(<WorkflowBlock {...base} flow={runFlow} state={{
       status: "advancing", done: 0, total: 2,
@@ -241,7 +242,20 @@ describe("WorkflowBlock", () => {
     }} />);
     const outputs = screen.getAllByRole("button", { name: "Output" });
     expect(outputs).toHaveLength(2);
-    expect(outputs[0].getAttribute("aria-describedby")).not.toBe(outputs[1].getAttribute("aria-describedby"));
+    // Resolved through the DOM, not just compared as raw attribute strings —
+    // the sibling Approve test above (`document.getElementById(descId)?.
+    // textContent`) is what actually proves each `aria-describedby` points at
+    // a REAL, DIFFERENT description; two different-looking ids that both
+    // point at nothing (or at the same node) would pass a bare string
+    // comparison and still leave a screen reader with nothing to tell the
+    // two buttons apart.
+    const descriptions = outputs.map((btn) => {
+      const descId = btn.getAttribute("aria-describedby");
+      return descId ? document.getElementById(descId)?.textContent : undefined;
+    });
+    expect(descriptions[0]).toBeTruthy();
+    expect(descriptions[1]).toBeTruthy();
+    expect(descriptions[0]).not.toBe(descriptions[1]);
   });
 
   it("offers Detach when every rule has settled", () => {

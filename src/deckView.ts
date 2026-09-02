@@ -4415,7 +4415,12 @@ export class DeckPanel {
           // Output on.
           switch (result.reason) {
             case "no-journal":
-              this.toast("info", "Nothing has been recorded for this workflow yet.");
+              // Honest about the one thing `readJournal` cannot tell apart
+              // from its own contract: a missing/empty journal and one that
+              // failed to read both come back as `[]` — see `JournalIo`'s own
+              // doc comment. Claiming certainty here would be the dishonest
+              // half of the very posture this handler otherwise respects.
+              this.toast("info", "Nothing has been recorded for this workflow yet, or its journal could not be read.");
               return;
             case "no-event":
               this.toast("info", "This step hasn't run yet, so there's no output to show.");
@@ -4428,7 +4433,17 @@ export class DeckPanel {
               return;
           }
         }
-        const doc = await vscode.workspace.openTextDocument({ content: result.output, language: "plaintext" });
+        // A short provenance header — what happened, on which rule, when —
+        // so two Output tabs (`Untitled-1`, `Untitled-2`; VS Code gives an
+        // opened-with-content document no better title) don't read as the
+        // same undifferentiated blob, and `preview: true` replacing one tab
+        // with another doesn't silently swap what a reader thinks they're
+        // looking at. One line, not a report: this is a pointer back to the
+        // journal line it came from, not a restatement of the receipt already
+        // on screen in the drawer.
+        const when = new Date(result.at).toISOString().slice(0, 19) + "Z";
+        const header = `# ${result.kind} · ${result.action} · ${m.edgeId} · ${when}\n\n`;
+        const doc = await vscode.workspace.openTextDocument({ content: header + result.output, language: "plaintext" });
         await vscode.window.showTextDocument(doc, { preview: true });
         trackEvent({ name: "flow_action", action: "open_output" });
         return;

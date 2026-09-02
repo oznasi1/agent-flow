@@ -291,12 +291,14 @@ describe("findEdgeOutput", () => {
     expect(findEdgeOutput([fired("e1")], "e1")).toEqual({ ok: false, reason: "no-output" });
   });
 
-  it("returns a fired edge's output, labelled fired", () => {
-    expect(findEdgeOutput([fired("e1", "deployed ok")], "e1")).toEqual({ ok: true, output: "deployed ok", kind: "fired" });
+  it("returns a fired edge's output, labelled fired, with its action and timestamp", () => {
+    expect(findEdgeOutput([fired("e1", "deployed ok")], "e1"))
+      .toEqual({ ok: true, output: "deployed ok", kind: "fired", action: "run", at: 1 });
   });
 
-  it("returns an errored edge's output, labelled errored", () => {
-    expect(findEdgeOutput([errored("e1", "stack trace")], "e1")).toEqual({ ok: true, output: "stack trace", kind: "errored" });
+  it("returns an errored edge's output, labelled errored, with its action and timestamp", () => {
+    expect(findEdgeOutput([errored("e1", "stack trace")], "e1"))
+      .toEqual({ ok: true, output: "stack trace", kind: "errored", action: "run", at: 2 });
   });
 
   it("prefers the edge's LATEST fired/errored line even when an earlier one is the only one carrying output", () => {
@@ -314,15 +316,30 @@ describe("findEdgeOutput", () => {
 
   it("returns the latest event's own output when a Reset separates two runs that both captured one", () => {
     const events = [fired("e1", "old"), errored("e1", "new")];
-    expect(findEdgeOutput(events, "e1")).toEqual({ ok: true, output: "new", kind: "errored" });
+    expect(findEdgeOutput(events, "e1")).toEqual({ ok: true, output: "new", kind: "errored", action: "run", at: 2 });
   });
 
-  it("ignores other edges and non-fired/errored kinds when picking the latest", () => {
+  it("ignores other edges when picking the latest", () => {
     const events = [
       fired("e2", "unrelated"),
       { id: "a", at: 1, flow: "f1", kind: "armed" as const, armed: true, source: "toggle" },
       fired("e1", "mine"),
     ];
-    expect(findEdgeOutput(events, "e1")).toEqual({ ok: true, output: "mine", kind: "fired" });
+    expect(findEdgeOutput(events, "e1")).toEqual({ ok: true, output: "mine", kind: "fired", action: "run", at: 1 });
+  });
+
+  it("ignores a LATER non-fired/errored line for the SAME edge when picking the latest", () => {
+    // The weak version of this test planted its non-matching kind on a
+    // DIFFERENT edge, so the `edge` half of the predicate excluded it on its
+    // own and the `kind` half was never actually exercised — mutating
+    // `e.kind === "fired" || e.kind === "errored"` to `true` still passed.
+    // `reset` carries a real `edge` field, same as `fired`/`errored` do, and
+    // sits LAST, so only the kind check can keep it from becoming "latest".
+    const events = [
+      fired("e2", "unrelated"),
+      fired("e1", "mine"),
+      { id: "r", at: 3, flow: "f1", kind: "reset" as const, edge: "e1" },
+    ];
+    expect(findEdgeOutput(events, "e1")).toEqual({ ok: true, output: "mine", kind: "fired", action: "run", at: 1 });
   });
 });
