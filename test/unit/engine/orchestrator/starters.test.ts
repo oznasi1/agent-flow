@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { BUILTIN_PREFIX, STARTERS, isBuiltinTemplateId } from "../../../../src/engine/orchestrator/starters";
-import { canBindTicket, validTemplate } from "../../../../src/engine/orchestrator/templates";
+import { canBindTicket, instantiate, validTemplate } from "../../../../src/engine/orchestrator/templates";
 import { isPlanned } from "../../../../src/engine/orchestrator/model";
 
 describe("built-in starters", () => {
@@ -50,6 +50,45 @@ describe("built-in starters", () => {
       for (const e of t.flow.edges) {
         expect(ids.has(e.from)).toBe(true);
         expect(ids.has(e.to)).toBe(true);
+      }
+    }
+  });
+});
+
+describe("every starter survives a real attach", () => {
+  const ctx = { repos: ["portal"], modes: ["plan", "build"] };
+
+  it("instantiates each starter against a card", () => {
+    for (const t of STARTERS) {
+      const f = instantiate(t, "PROJ-42", "f1", 1756200000000, ctx);
+      expect(f.nodes).toHaveLength(t.flow.nodes.length);
+      expect(f.edges).toHaveLength(t.flow.edges.length);
+      expect(f.fromTemplate).toBe(t.id);
+      expect(f.armed).toBe(false);
+    }
+  });
+
+  it("binds the ticket, repos and mode on every planned node", () => {
+    for (const t of STARTERS) {
+      const f = instantiate(t, "PROJ-42", "f1", 1, ctx);
+      const planned = f.nodes.filter(isPlanned);
+      expect(planned.length).toBeGreaterThan(0);
+      for (const n of planned) {
+        expect(n.ticketKey).toBe("PROJ-42");
+        expect(n.repos).toEqual(["portal"]);
+        expect(n.mode).toBe("plan");
+      }
+    }
+  });
+
+  it("carries no consent stamp into the instance", () => {
+    // The rule #63 established: consent never travels with a template, or one
+    // approved click becomes twenty machines running a command unattended.
+    for (const t of STARTERS) {
+      const f = instantiate(t, "PROJ-42", "f1", 1, ctx);
+      for (const e of f.edges) {
+        expect(e).not.toHaveProperty("launchConfirmedAt");
+        expect(e).not.toHaveProperty("commandConfirmedAt");
       }
     }
   });
