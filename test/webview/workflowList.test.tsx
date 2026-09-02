@@ -55,6 +55,19 @@ describe("WorkflowList", () => {
     expect(screen.getByRole("listitem").getAttribute("data-status")).toBe("stopped");
   });
 
+  it("shows the humanized status label, not the raw status string", () => {
+    // Pins the reuse decision this task was built around: the chip must show
+    // WorkflowBlock's own STATUS_LABEL wording ("waiting on you"), never the
+    // raw WorkflowStatus id ("waiting-on-you") a careless rewrite could print
+    // instead. data-status on the <li> is a separate hook for the stylesheet
+    // and is asserted elsewhere -- this is the one test on the VISIBLE text.
+    render(<WorkflowList onOpen={() => {}} rows={[
+      row("c1", "PROJ-1", "x", wf("Ship it", "waiting-on-you")),
+    ]} />);
+    expect(screen.getByText("waiting on you")).toBeTruthy();
+    expect(screen.queryByText("waiting-on-you")).toBeNull();
+  });
+
   it("opens the card the row belongs to", async () => {
     const onOpen = vi.fn();
     render(<WorkflowList onOpen={onOpen} rows={[
