@@ -9,7 +9,7 @@ import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
 import { prSignals, type MergeTarget } from "../engine/bucket";
-import { DRAG_SEP, OrchestratorDrawer, OrchTarget } from "./OrchestratorDrawer";
+import { DRAG_SEP, OrchestratorDrawer, OrchTarget, OrchView } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
 import { LoadingMark } from "./LoadingMark";
 import { CardKindIcon } from "./icons";
@@ -581,6 +581,16 @@ export function DeckApp(): JSX.Element {
   const [templates, setTemplates] = React.useState<FlowTemplate[]>([]);
   const [orchEnabled, setOrchEnabled] = React.useState(false);
   const [openFlowId, setOpenFlowId] = React.useState<OrchTarget | null>(null);
+  /** Which of the Orchestrator drawer's three top-level screens is showing —
+   * see `OrchView`'s own doc comment for why this lives here rather than as
+   * the drawer's own local state: a later task adds two header buttons
+   * (Workflows / Templates) that set this from outside the drawer, so
+   * `DeckApp` has to be the one holding it already. Defaults to "active"
+   * (harmless either way today — nothing can open the drawer without also
+   * setting this: the existing single header button always forces "canvas"
+   * on open, see its own comment below, and the `deck:flows` auto-open does
+   * the same). */
+  const [orchView, setOrchView] = React.useState<OrchView>("active");
   /** The selected card's `DeckCard.id`, not a run key: the Sessions lens renders
    * one card per session, so two cards can share a run and a key could not tell
    * them apart. */
@@ -757,6 +767,15 @@ export function DeckApp(): JSX.Element {
         // when `boundToOpenCard`: then nothing is about to open BUT the card
         // drawer already showing, so nothing needs to close under it.
         if (autoOpen) setSelId(null);
+        // An auto-opened fresh flow must land on the Canvas screen, not
+        // whichever of the three top-level views happened to be showing —
+        // "+ New flow" (or the header chip's own zero-flows path, below)
+        // means "start drawing", never "go look at the Active list". Plain,
+        // unnested `setView` beside `setSelId` above for the identical
+        // reason that one is not folded into the `setOpenFlowId` updater:
+        // React may replay a pure updater, and a side effect belongs beside
+        // it, not inside it.
+        if (autoOpen) setOrchView("canvas");
         // `retainedOpenTarget` is the kind-aware guard — see its own doc
         // comment for why a `flow` and a `template` target cannot be treated
         // alike here. `null` means nothing survived, which is exactly when
@@ -968,8 +987,18 @@ export function DeckApp(): JSX.Element {
             className={`ctl orch-chip${armedCount > 0 ? " armed" : ""}`}
             onClick={() => {
               setSelId(null);
-              if (flows.length === 0) send({ type: "flow:create" });
-              else setOpenFlowId((cur) => (cur ? null : { kind: "flow", id: flows[0].id }));
+              // A later task replaces this one button with two (Workflows /
+              // Templates), each setting `orchView` to its own destination.
+              // Until then this single button keeps its released behavior
+              // exactly — zero flows mints one (the `deck:flows` handler's
+              // own auto-open already lands that on "canvas"), otherwise it
+              // toggles the drawer — and forces "canvas" on the way IN only:
+              // this button has only ever opened straight onto the flow
+              // graph, and closing is not a view change to make.
+              if (flows.length === 0) { send({ type: "flow:create" }); return; }
+              if (openFlowId) { setOpenFlowId(null); return; }
+              setOrchView("canvas");
+              setOpenFlowId({ kind: "flow", id: flows[0].id });
             }}
           >
             <OrchestratorIcon />
@@ -1227,6 +1256,17 @@ export function DeckApp(): JSX.Element {
           commands={commands}
           branchCi={branchCi}
           templates={templates}
+          view={orchView}
+          onView={setOrchView}
+          // Deliberately empty: a later task derives the real rows from the
+          // board (one per card carrying a workflow, `cardWorkflow`'s own
+          // derivation) — this one only builds the Active screen's shell.
+          rows={[]}
+          // Mirrors `DeckDetail`'s own `onOpenWorkflow` the other way: that
+          // one opens a workflow FROM a card (closes the card, opens the
+          // drawer); this one opens a card FROM its workflow row (closes the
+          // drawer, opens the card), so the workflow is read where it lives.
+          onOpenCard={(cardId) => { setOpenFlowId(null); setSelId(cardId); }}
           onClose={() => setOpenFlowId(null)}
           onCreate={() => send({ type: "flow:create" })}
           onOpen={(id) => setOpenFlowId({ kind: "flow", id })}
@@ -1263,7 +1303,7 @@ export function DeckApp(): JSX.Element {
           // Orchestrator, close the card): the two drawers share one slot, so
           // opening one here has to close the other explicitly rather than
           // trusting a render order.
-          onOpenWorkflow={(id) => { setOpenFlowId({ kind: "flow", id }); setSelId(null); }}
+          onOpenWorkflow={(id) => { setOrchView("canvas"); setOpenFlowId({ kind: "flow", id }); setSelId(null); }}
         />
       )}
     </>

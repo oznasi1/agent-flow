@@ -2263,16 +2263,18 @@ describe("the drawer's callbacks", () => {
     expect(drawer()).toBeNull();
   });
 
+  // The switcher is always visible on the Canvas screen now — no "Flows ·
+  // N ▾" disclosure to open first (Task 9 replaced it with a top-level
+  // Active/Templates/Canvas tablist; the switcher itself moved into Canvas's
+  // own header rather than behind a click).
   it("onCreate posts flow:create from the drawer's own switcher", () => {
     open();
-    fireEvent.click(screen.getByRole("button", { name: /^Flows/ }));
     fireEvent.click(screen.getByRole("button", { name: "+ New flow" }));
     expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
   });
 
   it("onOpen switches flows locally, with no message to the host", () => {
     open([mkFlow("f1", "One"), mkFlow("f2", "Two")]);
-    fireEvent.click(screen.getByRole("button", { name: /^Flows/ }));
     fireEvent.click(screen.getByRole("button", { name: "Two" }));
     expect(screen.getByLabelText("Flow name")).toHaveValue("Two");
     expect(sent).not.toHaveBeenCalled();
@@ -2360,6 +2362,54 @@ describe("the drawer's callbacks", () => {
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     fireEvent.click(screen.getByRole("button", { name: /reset/i }));
     expect(sent).toHaveBeenCalledWith({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+  });
+});
+
+// Task 9: `DeckApp` now owns which of the drawer's three top-level screens is
+// showing (`orchView`, passed through as `view`/`onView`). Every existing
+// entry point that opens the drawer targeting a specific flow must land on
+// Canvas — that is what the "Flow name" assertions below actually pin, since
+// only the Canvas screen renders that field (see `WorkflowList`'s own test
+// file, and the Active/Templates section of OrchestratorDrawer.test.tsx, for
+// the screens that would show instead if this regressed).
+describe("the Orchestrator's top-level view", () => {
+  it("the header chip opens straight onto Canvas when flows already exist", () => {
+    render(<DeckApp />);
+    host(flowsMsg([mkFlow("f1", "Ship the migration")]));
+    fireEvent.click(chip());
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship the migration");
+  });
+
+  it("a freshly created flow (zero-flows path) also lands on Canvas", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    fireEvent.click(chip()); // no flows yet — this posts flow:create instead of opening
+    expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
+    // The host's answering post is the auto-open path in the `deck:flows`
+    // handler, not the chip's own click — same as every existing fresh-flow
+    // fixture in this file.
+    host(flowsMsg([mkFlow("f1", "Untitled flow")]));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Untitled flow");
+  });
+
+  it("opening a workflow from the card drawer also lands on Canvas, not wherever the Orchestrator was last left", () => {
+    // Distinct from the "opening a workflow from the card drawer closes the
+    // card..." test elsewhere in this file (which pins the mutual-exclusion
+    // contract with `selId`): this one is specifically about `orchView`, and
+    // is the regression a naive `onOpenWorkflow` — one that forgot to force
+    // the view — would not be caught by that other test, since both would
+    // show SOME open drawer either way.
+    render(<DeckApp />);
+    const bound: Flow = {
+      id: "f9", name: "Ship it", armed: true, createdAt: 1,
+      nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "svc" }],
+      edges: [],
+    };
+    host(flowsMsg([bound]));
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(document.querySelector(".card")!);
+    fireEvent.click(screen.getByRole("button", { name: "Open in Workflows ↗" }));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it");
   });
 });
 
