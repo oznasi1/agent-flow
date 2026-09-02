@@ -13,6 +13,10 @@ const auth = (secrets = fakeSecrets()) => ({
   secrets,
 });
 
+/** The titles of the boxes shown, in order. */
+const titles = () =>
+  vi.mocked(window.showInputBox).mock.calls.map((c) => (c[0] as { title: string }).title);
+
 describe("getAuthHeader / isAuthenticated", () => {
   it("builds Basic auth from base64(email:token)", async () => {
     const { auth: a } = auth(fakeSecrets({ [EMAIL_KEY]: "me@example.com", [TOKEN_KEY]: "tok123" }));
@@ -74,6 +78,35 @@ describe("signIn", () => {
     };
     expect(opts.validateInput("not-an-email")).toBe("Enter a valid email");
     expect(opts.validateInput("has@at")).toBeUndefined();
+  });
+  it("numbers the prompts as its own two steps when no wizard is around it", async () => {
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("me@example.com").mockResolvedValueOnce("tok");
+    const { auth: a } = auth();
+    await a.signIn();
+    expect(titles()).toEqual(["Jira sign-in (1/2)", "Jira sign-in (2/2)"]);
+  });
+
+  it("continues the wizard's own numbering when given a step position", async () => {
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("me@example.com").mockResolvedValueOnce("tok");
+    const { auth: a } = auth();
+    await a.signIn({ from: 4, total: 5 });
+    expect(titles()).toEqual(["Agent Flow Deck Setup (4/5)", "Agent Flow Deck Setup (5/5)"]);
+  });
+
+  it("tells the user the API token stays on this machine, and where to make one", async () => {
+    vi.mocked(window.showInputBox).mockResolvedValueOnce("me@example.com").mockResolvedValueOnce("tok");
+    const { auth: a } = auth();
+    await a.signIn();
+    const opts = vi.mocked(window.showInputBox).mock.calls[1][0] as {
+      prompt: string; placeHolder?: string; password?: boolean;
+    };
+    expect(opts.prompt).toContain("this machine only");
+    expect(opts.prompt).toContain("secret storage");
+    // The token box still says what to type, and still hides what is typed.
+    expect(opts.prompt).toContain("Atlassian API token");
+    expect(opts.password).toBe(true);
+    // Moved off the prompt so the reassurance fits without the line being clipped.
+    expect(opts.placeHolder).toContain("id.atlassian.com/manage-profile/security/api-tokens");
   });
 });
 

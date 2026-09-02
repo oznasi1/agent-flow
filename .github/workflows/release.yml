@@ -41,7 +41,7 @@ jobs:
     env:
       VSCE_PAT: ${{ secrets.VSCE_PAT }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # The exact commit CI proved green, not whatever main has drifted to
           # since. Depth 2 is what the version-diff below needs.
@@ -65,7 +65,7 @@ jobs:
           fi
 
       - if: steps.version.outputs.changed == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 20
           cache: npm
@@ -93,7 +93,7 @@ jobs:
 
       - name: Keep the .vsix
         if: steps.version.outputs.changed == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: agent-flow-${{ steps.version.outputs.version }}
           path: "*.vsix"

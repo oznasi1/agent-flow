@@ -677,6 +677,7 @@ function fakeConnector(authed = false, label = "Jira"): TaskConnector {
   return {
     id: "jira",
     setupSteps: 2,
+    signInSteps: 2,
     info: () => ({
       label, scopeNoun: "project", scopeValue: "PROJ", endpoint: "https://jira",
       exampleKey: "PROJ-1234", endpointSetting: "agentFlow.jira.baseUrl", scopeSetting: "agentFlow.jira.project",

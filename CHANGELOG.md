@@ -24,6 +24,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   workspace, Open PR, Diff, Address PR — promoted to the top and everything else moved
   behind **More** rather than laid out as a flat list of buttons.
 
+## [0.66.0] — 2026-09-01
+
+### Added
+
+- **The task list can refresh itself.** Set `agentFlow.refetchIntervalMinutes`
+  and the sidebar refetches in the background on that cadence, so a panel you
+  opened this morning is not still showing this morning's sprint. It refreshes
+  whichever lens you are on — not the configured default — and does it quietly:
+  no spinner, and your drag order is left exactly as you arranged it. Polling
+  stops while the sidebar is hidden, and a failed poll changes nothing on screen
+  and simply tries again. Off by default (`0`).
+
+## [0.65.0] — 2026-09-01
+
+### Changed
+
+- **First-run setup counts to one total.** Every box in the wizard is numbered
+  against the same denominator, credential prompts included — a Jira setup now
+  runs `Setup (1/5)` through `Setup (5/5)` instead of stopping at `(3/3)` and
+  then starting a fresh-looking `Jira sign-in (1/2)`. The standalone
+  "Sign in to Jira" command keeps its own `(1/2)` numbering; there is no wizard
+  around it to be part of.
+- **The API-token step says where the token goes.** It now reads "kept on this
+  machine only, in this editor's encrypted secret storage" — Agent Flow Deck
+  sends it nowhere but the Jira site you just named. The link for creating a
+  token moved to the placeholder so both fit unclipped.
+
 ## [0.64.0] — 2026-09-01
 
 ### Changed

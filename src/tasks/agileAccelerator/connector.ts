@@ -33,6 +33,7 @@ const SF_INSTALL_URL = "https://developer.salesforce.com/tools/salesforcecli";
 class AgileAcceleratorConnector implements TaskConnector {
   readonly id = "agileAccelerator";
   readonly setupSteps = 3;
+  readonly signInSteps = 0; // `sf org login web` owns the round-trip; we prompt for nothing
 
   /** `makeCli` defaults to the real constructor; tests inject a fake so
    *  `probe()`, `statusOf`'s coalescing, and `schema()`'s retry can be exercised

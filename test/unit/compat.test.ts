@@ -233,6 +233,7 @@ describe("compatibility surface (frozen)", () => {
       "agentFlow.stampLabelOnWrite",
       "agentFlow.provenanceLabel",
       "agentFlow.telemetry.enabled",
+      "agentFlow.refetchIntervalMinutes",
     ]) {
       expect(props).toContain(id);
     }

@@ -88,6 +88,7 @@ export function makeFixtureConnector(over: Partial<FixtureOptions> = {}): TaskCo
   return {
     id: "fixture",
     setupSteps: 1,
+    signInSteps: 0,
     info(): SourceInfo {
       return {
         label: "Fixture", scopeNoun: "board", scopeValue: "FX",

@@ -89,6 +89,7 @@ export function makeFixtureConnector(dir: string): TaskConnector {
   return {
     id: "fixture",
     setupSteps: 0,
+    signInSteps: 0,
     info: (): SourceInfo => ({
       label: "Fixture",
       scopeNoun: "file",
