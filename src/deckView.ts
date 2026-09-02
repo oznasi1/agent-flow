@@ -4591,7 +4591,14 @@ export class DeckPanel {
           // nothing to bind the ticket to. Caught here, rather than left to
           // escape into the Deck's refresh, because the message is written for
           // a human to read.
-          fresh = instantiate(t, ticketKey, id, now);
+          fresh = instantiate(t, ticketKey, id, now, {
+            // `run.repos[].name` is the same identifier `PlannedNode.repos` holds — a
+            // CHECKOUT name, not a GitHub owner/name. A card the panel has no record of
+            // contributes no repos, and `instantiate` refuses rather than launching
+            // nowhere.
+            repos: run ? run.repos.map((r) => r.name) : [],
+            modes: getConfig().promptModes.map((m) => m.id),
+          });
         } catch (e) {
           this.post({ type: "toast", level: "error", message: (e as Error).message });
           return;

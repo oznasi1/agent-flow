@@ -40,15 +40,20 @@ const fakeIo = (files: Record<string, string> = {}) => {
 };
 const memIo = () => fakeIo().io;
 
+// A context that never triggers the fallback: every fixture's planned node
+// already carries a non-empty repos and mode "plan", so this only needs to
+// satisfy the type and the two refusal guards.
+const defaultCtx = { repos: ["ingest-worker"], modes: ["plan"] };
+
 describe("instantiate", () => {
   it("binds the chosen ticket to EVERY planned node", () => {
-    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000);
+    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000, defaultCtx);
     const keys = f.nodes.filter((n) => n.kind === "planned").map((n) => (n as { ticketKey: string }).ticketKey);
     expect(keys).toEqual(["PROJ-142", "PROJ-142"]);
   });
 
   it("mints ids unique within the instantiated flow", () => {
-    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000);
+    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000, defaultCtx);
     expect(new Set(f.nodes.map((n) => n.id)).size).toBe(f.nodes.length);
     expect(new Set(f.edges.map((e) => e.id)).size).toBe(f.edges.length);
   });
@@ -57,13 +62,13 @@ describe("instantiate", () => {
     // Ids are flow-local: `outcomes` is per-flow, the journal is per-flow, and
     // Reset is flow-scoped. So there is nothing to avoid colliding with, and an
     // instance numbered n1, n2, … is exactly what every other flow looks like.
-    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000);
+    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000, defaultCtx);
     expect(f.nodes.map((n) => n.id)).toEqual(["n1", "n2", "n3"]);
     expect(f.edges.map((e) => e.id)).toEqual(["e1", "e2"]);
   });
 
   it("keeps the wiring after re-minting ids", () => {
-    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000);
+    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000, defaultCtx);
     const byId = new Map(f.nodes.map((n) => [n.id, n]));
     // Both planned nodes still point at the one notify node.
     const targets = f.edges.map((e) => byId.get(e.to)?.kind);
@@ -76,7 +81,7 @@ describe("instantiate", () => {
     t.flow.edges[0] = { ...t.flow.edges[0], firedAt: 1, firedNote: "x", error: "y", performed: true };
     t.flow.launchConfirmedAt = 1;
     t.flow.commandConfirmedAt = 2;
-    const f = instantiate(t, "PROJ-142", "f-new", 1756300000000);
+    const f = instantiate(t, "PROJ-142", "f-new", 1756300000000, defaultCtx);
     expect(f.edges.every((e) => e.firedAt === undefined && e.error === undefined)).toBe(true);
     expect(f.edges.every((e) => e.firedNote === undefined && e.performed === undefined)).toBe(true);
     expect(f.launchConfirmedAt).toBeUndefined();
@@ -84,14 +89,14 @@ describe("instantiate", () => {
   });
 
   it("is disarmed, freshly stamped, and takes the given id", () => {
-    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000);
+    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000, defaultCtx);
     expect(f.armed).toBe(false);
     expect(f.createdAt).toBe(1756300000000);
     expect(f.id).toBe("f-new");
   });
 
   it("keeps the template's name verbatim — no {ticket} substitution", () => {
-    const f = instantiate(template({ name: "Ship {ticket}" }), "PROJ-142", "f-new", 0);
+    const f = instantiate(template({ name: "Ship {ticket}" }), "PROJ-142", "f-new", 0, defaultCtx);
     expect(f.name).toBe("Ship {ticket}");
   });
 
@@ -99,11 +104,11 @@ describe("instantiate", () => {
     const t = template();
     t.flow.nodes = [notify("n3")];
     t.flow.edges = [];
-    expect(() => instantiate(t, "PROJ-142", "f-new", 0)).toThrow(/nothing to bind/i);
+    expect(() => instantiate(t, "PROJ-142", "f-new", 0, defaultCtx)).toThrow(/nothing to bind/i);
   });
 
   it("records which template it came from", () => {
-    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000);
+    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000, defaultCtx);
     expect(f.fromTemplate).toBe("k3f9-ship");
   });
 
@@ -114,7 +119,7 @@ describe("instantiate", () => {
     // that element, the same posture the flow store takes.
     const t = template();
     t.flow.edges = [edge("e1", "n1", "n3"), edge("e2", "n1", "n-gone")];
-    const f = instantiate(t, "PROJ-142", "f-new", 1756300000000);
+    const f = instantiate(t, "PROJ-142", "f-new", 1756300000000, defaultCtx);
     expect(f.edges).toHaveLength(1);
     const byId = new Map(f.nodes.map((n) => [n.id, n]));
     expect(byId.get(f.edges[0].to)?.kind).toBe("notify");
@@ -128,7 +133,7 @@ describe("instantiate", () => {
     // along — this test is what stops either growing a field allow-list later
     // and silently dropping it.
     const io = memIo();
-    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000);
+    const f = instantiate(template(), "PROJ-142", "f-new", 1756300000000, defaultCtx);
     writeFlow(io, "/flows", f);
     expect(readFlows(io, "/flows")[0].fromTemplate).toBe("k3f9-ship");
   });
@@ -222,7 +227,7 @@ describe("toTemplate", () => {
 
   it("round trips: toTemplate then instantiate keeps the counts and the wiring", () => {
     const t = toTemplate(ranFlow(), "Ship it", "k1", 999, choices);
-    const f = instantiate(t, "PROJ-9", "f-new", 1000);
+    const f = instantiate(t, "PROJ-9", "f-new", 1000, { repos: ["ingest-worker", "api"], modes: ["plan", "review"] });
     expect(f.nodes).toHaveLength(3);
     expect(f.edges).toHaveLength(2);
     const byId = new Map(f.nodes.map((n) => [n.id, n]));
@@ -293,5 +298,75 @@ describe("validTemplate", () => {
   it("rejects a missing name or flow", () => {
     expect(validTemplate({ ...template(), name: 42 })).toBeNull();
     expect(validTemplate({ ...template(), flow: null })).toBeNull();
+  });
+});
+
+describe("instantiate resolving repos and mode", () => {
+  const bare = (id: string): FlowNode => ({
+    id, x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: [], mode: "", dest: "worktree",
+  });
+  const bareTemplate = (): FlowTemplate => template({
+    flow: {
+      id: "unused", name: "Starter", armed: false, createdAt: 0,
+      nodes: [bare("n1"), notify("n2")], edges: [edge("e1", "n1", "n2")],
+    },
+  });
+  const ctx = { repos: ["portal", "worker"], modes: ["plan", "build"] };
+
+  it("fills an empty repos list from the card", () => {
+    const f = instantiate(bareTemplate(), "PROJ-1", "f1", 1, ctx);
+    const n = f.nodes.find((x) => x.kind === "planned")!;
+    expect((n as { repos: string[] }).repos).toEqual(["portal", "worker"]);
+  });
+
+  it("fills an empty mode from the first configured prompt mode", () => {
+    const f = instantiate(bareTemplate(), "PROJ-1", "f1", 1, ctx);
+    const n = f.nodes.find((x) => x.kind === "planned")!;
+    expect((n as { mode: string }).mode).toBe("plan");
+  });
+
+  it("leaves a populated repos list alone, so a saved template is unchanged", () => {
+    // The backward-compatibility guarantee: every template saved before this
+    // change must instantiate exactly as it did.
+    const t = template(); // its planned nodes carry repos ["ingest-worker"], mode "plan"
+    const f = instantiate(t, "PROJ-1", "f1", 1, { repos: ["other"], modes: ["build"] });
+    for (const n of f.nodes.filter((x) => x.kind === "planned")) {
+      expect((n as { repos: string[] }).repos).toEqual(["ingest-worker"]);
+    }
+  });
+
+  it("leaves a mode the user has configured alone", () => {
+    const t = template(); // mode "plan"
+    const f = instantiate(t, "PROJ-1", "f1", 1, { repos: ["x"], modes: ["plan", "build"] });
+    const n = f.nodes.find((x) => x.kind === "planned")!;
+    expect((n as { mode: string }).mode).toBe("plan");
+  });
+
+  it("replaces a mode the user no longer has configured", () => {
+    // A template saved against a prompt mode since deleted from settings would
+    // otherwise launch with an id nothing resolves.
+    const t = template(); // mode "plan"
+    const f = instantiate(t, "PROJ-1", "f1", 1, { repos: ["x"], modes: ["build"] });
+    const n = f.nodes.find((x) => x.kind === "planned")!;
+    expect((n as { mode: string }).mode).toBe("build");
+  });
+
+  it("refuses rather than guessing when no prompt mode is configured at all", () => {
+    expect(() => instantiate(bareTemplate(), "PROJ-1", "f1", 1, { repos: ["x"], modes: [] }))
+      .toThrow(/prompt mode/i);
+  });
+
+  it("refuses rather than guessing when the card has no repos", () => {
+    expect(() => instantiate(bareTemplate(), "PROJ-1", "f1", 1, { repos: [], modes: ["plan"] }))
+      .toThrow(/repo/i);
+  });
+
+  it("still refuses a template with no planned step", () => {
+    // The pre-existing guard, re-asserted: the new parameter must not have
+    // moved the order of the checks.
+    const t = template({
+      flow: { id: "u", name: "n", armed: false, createdAt: 0, nodes: [notify("n1")], edges: [] },
+    });
+    expect(() => instantiate(t, "PROJ-1", "f1", 1, ctx)).toThrow(/no planned step/);
   });
 });

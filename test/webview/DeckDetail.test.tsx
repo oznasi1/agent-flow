@@ -999,7 +999,7 @@ describe("DeckDetail — Workflow section", () => {
     const hostKey = ticketKeyFor(run, jiraish);
     // A template carries no place nodes, so this planned node's ticket key is
     // the ONLY thing binding the flow to the card.
-    const attached = instantiate(shipItTemplate, hostKey, "f-new", 100);
+    const attached = instantiate(shipItTemplate, hostKey, "f-new", 100, { repos: ["svc"], modes: ["plan"] });
     expect(attached.nodes.filter((n) => n.kind === "place")).toEqual([]);
     renderWf(localCard("PROJ-9"), { flows: [attached], orchEnabled: true });
     expect(screen.getByText("Ship it")).toBeTruthy();
