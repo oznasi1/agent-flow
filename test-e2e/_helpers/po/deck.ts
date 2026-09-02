@@ -51,6 +51,32 @@ export class Deck {
     return this.frame.locator(".dd");
   }
 
+  /** Opens the drawer's `More` disclosure — `<details className="dd-more">`
+   *  whose `<summary role="button">` reads "More — copy, per-repo diffs, spend
+   *  breakdown, forget" (DeckDetail.tsx:598-599). The drawer rebuild moved
+   *  every Copy row, the per-repo diffs, the spend table and Track it/Forget
+   *  behind this disclosure, closed by default — a caller after any of those
+   *  (`forget()` in `deck-lifecycle.e2e.ts` included) must call this first or
+   *  the target is not in the accessibility tree to click.
+   *
+   *  Waits for "Spend" (`.dd-lbl` text, unconditional inside the body) rather
+   *  than the `<details>` element's own `open` attribute — the same reasoning
+   *  `DeckDetail.test.tsx`'s own `openMore` helper states: the browser flips
+   *  `open` as part of the click's default action, a tick BEFORE the `toggle`
+   *  event that actually renders the body fires, so asserting on `open` alone
+   *  can resolve before the content exists. Spend's heading is present the
+   *  instant the body renders at all, whatever the card's PR/local/tracked
+   *  state, so it is a stable thing to wait on here too. */
+  async openMore(): Promise<void> {
+    const dd = this.detail();
+    await dd.getByRole("button", { name: /^More/ }).click();
+    // `exact: true` matters: the summary's own label text ("...spend
+    // breakdown, forget") also contains "spend" case-insensitively, so a
+    // loose match resolves to two elements (the summary plus this heading)
+    // and Playwright's strict mode rejects it.
+    await expect(dd.getByText("Spend", { exact: true })).toBeVisible({ timeout: 15_000 });
+  }
+
   /** Every row in the PR-review rail. `.rv-row` is the row itself
    *  (ReviewStrip.tsx:103); `.rv-box` is NOT the row — it is the optional
    *  comment textarea's wrapper, rendered only when a row is both expanded and
