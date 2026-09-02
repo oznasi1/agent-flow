@@ -11,6 +11,7 @@ import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow,
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, findEdgeOutput, readJournal, JournalEvent, JournalEventInput } from "./engine/orchestrator/journal";
 import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, toTemplate } from "./engine/orchestrator/templates";
+import { STARTERS } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
@@ -701,8 +702,14 @@ export class DeckPanel {
     const flows: Flow[] = enabled ? readFlows(this.flowIo, this.flowsDir) : [];
     // Emptied alongside `flows`, for the same reason `pendingResume` below is:
     // with the setting off there is nothing to attach, and silence must not read
-    // as "not loaded yet".
-    const templates: FlowTemplate[] = enabled ? readTemplates(this.flowIo, this.templatesDir) : [];
+    // as "not loaded yet". Starters are prepended, not appended: they are the
+    // shapes a first-time user reads before they have any of their own, and a
+    // list that puts three built-ins after twenty user templates has hidden
+    // them again. `readTemplates` already skips any on-disk file claiming a
+    // `builtin-` id (store.ts), so disk and built-ins cannot collide by id.
+    const templates: FlowTemplate[] = enabled
+      ? [...STARTERS, ...readTemplates(this.flowIo, this.templatesDir)]
+      : [];
     // Emptied alongside `flows` when the setting is off, for the same reason:
     // silence must not be mistaken for "not loaded yet", and a stale hold from
     // before the setting was switched off has nothing left to be approved.

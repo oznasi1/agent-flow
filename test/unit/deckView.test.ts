@@ -10,6 +10,7 @@ import type { ForgeGap } from "../../src/engine/forge/types";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
 import type { CommandNode, Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
 import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branchCi";
+import { STARTERS } from "../../src/engine/orchestrator/starters";
 import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
 import type { AgentProvider, AgentProviderSetting } from "../../src/config";
 import type { DemotionChoice, FlowCommand, FlowTemplate } from "../../src/types";
@@ -6045,12 +6046,40 @@ describe("orchestrator flows", () => {
     h.templates = [mkTemplate("k1", "Ship it")];
     const { p } = await openPanel();
     const msg = posts(p).find((m) => m.type === "deck:flows") as { templates: FlowTemplate[] };
-    expect(msg.templates.map((t) => t.name)).toEqual(["Ship it"]);
+    // Was `.map((t) => t.name)).toEqual(["Ship it"])` before the built-in
+    // starters (Task 5) were prepended to this list. That assertion is now
+    // ambiguous two ways over: it would also pass with three starters plus
+    // this disk template counted wrong, and the built-in named "Ship it"
+    // (starters.ts) collides by name with this fixture's own "Ship it" — so a
+    // name-based list no longer identifies which "Ship it" is which. Asserting
+    // on ids instead disambiguates the collision and still pins the on-disk
+    // template's presence (and position, last) exactly, the same way the old
+    // assertion pinned `["Ship it"]` exactly.
+    expect(msg.templates.map((t) => t.id)).toEqual([...STARTERS.map((s) => s.id), "k1"]);
   });
 
   it("empties templates alongside flows when the setting is off", async () => {
     setConfig({ orchestrator: false });
     h.templates = [mkTemplate("k1", "Ship it")];
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { templates: FlowTemplate[] };
+    expect(msg.templates).toEqual([]);
+  });
+
+  it("serves the built-in starters alongside the user's own templates", async () => {
+    setConfig({ orchestrator: true });
+    h.templates = [mkTemplate("k1", "Ship it")];
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { templates: FlowTemplate[] };
+    expect(msg.templates.map((t) => t.id)).toEqual(
+      expect.arrayContaining(["builtin-ship-it", "builtin-test-and-merge", "builtin-review-only"]),
+    );
+  });
+
+  it("serves no starters at all when the orchestrator setting is off", async () => {
+    // Starters follow `flows` and `pendingResume`: with the setting off there
+    // is nothing to attach, and silence must not read as "not loaded yet".
+    setConfig({ orchestrator: false });
     const { p } = await openPanel();
     const msg = posts(p).find((m) => m.type === "deck:flows") as { templates: FlowTemplate[] };
     expect(msg.templates).toEqual([]);
