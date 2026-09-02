@@ -9,7 +9,7 @@ import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
 import { prSignals, type MergeTarget } from "../engine/bucket";
-import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
+import { DRAG_SEP, OrchestratorDrawer, OrchTarget } from "./OrchestratorDrawer";
 import { ReviewStrip } from "./ReviewStrip";
 import { LoadingMark } from "./LoadingMark";
 import { CardKindIcon } from "./icons";
@@ -224,6 +224,37 @@ export function workflowChipTrailer(flow: Flow, state: WorkflowState): string | 
     return gate.question || undefined;
   }
   return undefined;
+}
+
+/** Whether the currently open Orchestrator target survives an ordinary
+ * `deck:flows` post — decided in the `deck:flows` handler before any
+ * fresh-flow auto-open is considered (see that call site: a `null` here falls
+ * through to the auto-open check, exactly like today's flow-only version
+ * did).
+ *
+ * Kind-aware, deliberately — this is the one branch that must NOT treat a
+ * `flow` and a `template` target alike:
+ *  - A `flow` target's only evidence of still existing is `posted` (this very
+ *    message), so it is dropped the moment its id falls out of that list — a
+ *    flow deleted in another window must close the drawer. This is today's
+ *    exact, unchanged behaviour.
+ *  - A `template` target has no such evidence here: templates ride
+ *    `m.templates`, a different field of the same message, never `posted`.
+ *    A later task adds an unsaved draft template that exists on disk
+ *    nowhere at all — for that draft, and for any template, there is no
+ *    "was it in the list" check that means anything. The Deck posts
+ *    `deck:flows` on every refresh (roughly every 6s), so applying `posted`
+ *    membership to a template would close the drawer moments after it opened
+ *    and silently discard an in-progress draft. So a template target is
+ *    retained unconditionally: its presence is not `posted`'s to vouch for.
+ *
+ * Exported so the kind-aware branch can be pinned directly — see
+ * `DeckApp.test.tsx`'s own `retainedOpenTarget` describe block, including the
+ * mutation check that confirms this test fails without the `kind` guard. */
+export function retainedOpenTarget(cur: OrchTarget | null, posted: Flow[]): OrchTarget | null {
+  if (cur?.kind === "template") return cur;
+  if (cur && posted.some((f) => f.id === cur.id)) return cur;
+  return null;
 }
 
 function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, selected, onSelect, workflow }: {
@@ -549,7 +580,7 @@ export function DeckApp(): JSX.Element {
    * and this is emptied on the same beat as `pendingResume`/`promptModes`. */
   const [templates, setTemplates] = React.useState<FlowTemplate[]>([]);
   const [orchEnabled, setOrchEnabled] = React.useState(false);
-  const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
+  const [openFlowId, setOpenFlowId] = React.useState<OrchTarget | null>(null);
   /** The selected card's `DeckCard.id`, not a run key: the Sessions lens renders
    * one card per session, so two cards can share a run and a key could not tell
    * them apart. */
@@ -726,10 +757,11 @@ export function DeckApp(): JSX.Element {
         // when `boundToOpenCard`: then nothing is about to open BUT the card
         // drawer already showing, so nothing needs to close under it.
         if (autoOpen) setSelId(null);
-        setOpenFlowId((cur) => {
-          if (cur && posted.some((f) => f.id === cur)) return cur;
-          return autoOpen ? fresh!.id : null;
-        });
+        // `retainedOpenTarget` is the kind-aware guard — see its own doc
+        // comment for why a `flow` and a `template` target cannot be treated
+        // alike here. `null` means nothing survived, which is exactly when
+        // the ordinary fresh-flow auto-open gets to decide instead.
+        setOpenFlowId((cur) => retainedOpenTarget(cur, posted) ?? (autoOpen ? { kind: "flow", id: fresh!.id } : null));
         setOrchEnabled(m.enabled);
         setPendingResume(m.pendingResume ?? []);
         setPromptModes(m.promptModes ?? []);
@@ -937,7 +969,7 @@ export function DeckApp(): JSX.Element {
             onClick={() => {
               setSelId(null);
               if (flows.length === 0) send({ type: "flow:create" });
-              else setOpenFlowId((cur) => (cur ? null : flows[0].id));
+              else setOpenFlowId((cur) => (cur ? null : { kind: "flow", id: flows[0].id }));
             }}
           >
             <OrchestratorIcon />
@@ -1197,7 +1229,7 @@ export function DeckApp(): JSX.Element {
           templates={templates}
           onClose={() => setOpenFlowId(null)}
           onCreate={() => send({ type: "flow:create" })}
-          onOpen={(id) => setOpenFlowId(id)}
+          onOpen={(id) => setOpenFlowId({ kind: "flow", id })}
           onRename={(id, name) => send({ type: "flow:rename", id, name })}
           onSave={(flow) => send({ type: "flow:save", flow })}
           onDelete={(id) => send({ type: "flow:delete", id })}
@@ -1231,7 +1263,7 @@ export function DeckApp(): JSX.Element {
           // Orchestrator, close the card): the two drawers share one slot, so
           // opening one here has to close the other explicitly rather than
           // trusting a render order.
-          onOpenWorkflow={(id) => { setOpenFlowId(id); setSelId(null); }}
+          onOpenWorkflow={(id) => { setOpenFlowId({ kind: "flow", id }); setSelId(null); }}
         />
       )}
     </>

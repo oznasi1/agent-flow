@@ -5,7 +5,7 @@ import { render, screen, fireEvent, act, within, waitFor } from "@testing-librar
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
-import { DeckApp, workflowChipTrailer } from "../../src/webview/DeckApp";
+import { DeckApp, retainedOpenTarget, workflowChipTrailer } from "../../src/webview/DeckApp";
 import { DECK_CSS, DRAWER_ANIM_MS } from "../../src/webview/deckStyles";
 import { DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { send } from "../../src/webview/vscodeApi";
@@ -2187,6 +2187,43 @@ describe("the deck:flows handler", () => {
     expect(document.querySelector(".dd")).not.toBeNull();
     expect(document.querySelector(".dd.closing")).toBeNull();
     expect(document.querySelector(".orch")).toBeNull();
+  });
+});
+
+// `retainedOpenTarget` is the kind-aware guard inside the `deck:flows`
+// handler above, tested directly rather than only through a rendered board:
+// no button in this webview can yet open the drawer on a TEMPLATE (a later
+// task adds that navigation), so there is no way to drive a template target
+// through `render(<DeckApp />)` alone. Direct testing is also what keeps this
+// pinned against a regression that a rendered-board test would only catch by
+// accident, six seconds later, on whichever `deck:flows` post happened to
+// land during the test.
+describe("retainedOpenTarget", () => {
+  it("keeps a flow target only while its id is still in the posted list", () => {
+    expect(retainedOpenTarget({ kind: "flow", id: "f1" }, [mkFlow("f1", "One")]))
+      .toEqual({ kind: "flow", id: "f1" });
+    // Today's exact, unchanged behaviour: a flow that fell out of `posted`
+    // (deleted in another window) is not retained.
+    expect(retainedOpenTarget({ kind: "flow", id: "f1" }, [mkFlow("f2", "Two")])).toBeNull();
+  });
+
+  // The guard this whole task turns on. A template target rides no evidence
+  // in `posted` at all — templates ride `m.templates`, a different field of
+  // the same message — and a later task's unsaved draft template exists on
+  // disk nowhere. A `posted`-membership check applied to a template would
+  // close the drawer on the very next `deck:flows` post (roughly every 6s)
+  // and silently discard an in-progress draft. This is the test that would
+  // fail under a naive widening that dropped the `kind` guard and checked
+  // `posted` membership for both kinds alike.
+  it("keeps a template target open even when a deck:flows post does not mention it", () => {
+    expect(retainedOpenTarget({ kind: "template", id: "draft-1" }, []))
+      .toEqual({ kind: "template", id: "draft-1" });
+    expect(retainedOpenTarget({ kind: "template", id: "draft-1" }, [mkFlow("f1", "One")]))
+      .toEqual({ kind: "template", id: "draft-1" });
+  });
+
+  it("returns null for nothing surviving, letting the caller's own fresh-flow auto-open decide", () => {
+    expect(retainedOpenTarget(null, [mkFlow("f1", "One")])).toBeNull();
   });
 });
 

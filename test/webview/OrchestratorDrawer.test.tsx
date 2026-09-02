@@ -2,7 +2,7 @@
 import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
+import { OrchestratorDrawer, DRAG_SEP, OrchTarget } from "../../src/webview/OrchestratorDrawer";
 import { ORCH_ANIM_MS, ORCH_CSS, ORCH_EDGE_PAINT_DY } from "../../src/webview/orchestratorStyles";
 import type { Flow, FlowEdge } from "../../src/engine/orchestrator/model";
 import { TEMPLATE_SCHEMA, type FlowTemplate } from "../../src/engine/orchestrator/templates";
@@ -82,6 +82,18 @@ const flow = (over: Partial<Flow> = {}): Flow => ({
   id: "f1", name: "Ship the migration", armed: false, createdAt: 1_000, nodes: [], edges: [], ...over,
 });
 
+/** A minimal template fixture for the `OrchTarget` addressing tests below —
+ * distinct from `shipItTemplate` further down (the Templates-tab fixtures),
+ * which this file's early tests should not need to reach past to use. Its
+ * `flow.name` is deliberately unlike any `flow()` fixture's name, so a test
+ * asserting "the template's own graph rendered" cannot pass against a flow
+ * that merely happened to be open already. */
+const template = (over: Partial<FlowTemplate> = {}): FlowTemplate => ({
+  schema: TEMPLATE_SCHEMA, id: "builtin-ship-it", name: "Ship it (template)", params: {}, savedAt: 1_000,
+  flow: { id: "", name: "Ship it template flow", armed: false, createdAt: 0, nodes: [], edges: [] },
+  ...over,
+});
+
 /** Two modes, distinct ids and labels, so a test asserting "the option list is
  * the one the host sent" cannot pass against a coincidence with some other
  * hardcoded default. */
@@ -99,7 +111,7 @@ const COMMANDS = [
 ];
 
 const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => ({
-  flows: [flow()], openId: "f1", runs: [], pendingResume: [], promptModes: MODES, commands: COMMANDS, branchCi: {},
+  flows: [flow()], openId: { kind: "flow", id: "f1" } as OrchTarget, runs: [], pendingResume: [], promptModes: MODES, commands: COMMANDS, branchCi: {},
   templates: [],
   onClose: vi.fn(), onCreate: vi.fn(), onOpen: vi.fn(),
   onRename: vi.fn(), onSave: vi.fn(), onDelete: vi.fn(),
@@ -110,6 +122,36 @@ const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = 
 describe("OrchestratorDrawer", () => {
   it("renders nothing when no flow is open", () => {
     const { container } = render(<OrchestratorDrawer {...props({ openId: null })} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  // OrchTarget addressing (Task 8): the drawer can be opened on either a
+  // saved flow or a template, and the two kinds resolve through different
+  // props (`flows` vs. `templates`) to the same kind of thing — a `Flow` the
+  // canvas can render.
+  it("opens on a flow when the target names one", () => {
+    render(<OrchestratorDrawer {...props({ openId: { kind: "flow", id: "f1" } })} />);
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship the migration");
+  });
+
+  it("opens on a template's own graph when the target names a template", () => {
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "builtin-ship-it" }, templates: [template()],
+    })} />);
+    // The template's OWN flow renders — not a coincidence with some `flows`
+    // entry, since `flows` is empty here — and its name shows the same way an
+    // ordinary flow's does.
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it template flow");
+  });
+
+  it("renders nothing for a target naming a template that is not in the list", () => {
+    // The same tolerance the flow path already has for a missing id: an
+    // `OrchTarget` naming something absent from its own list resolves to no
+    // flow, and the drawer stays closed rather than throwing or showing a
+    // stale graph.
+    const { container } = render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "no-such-template" }, templates: [template()],
+    })} />);
     expect(container.firstChild).toBeNull();
   });
 
@@ -4529,7 +4571,7 @@ describe("Save as template", () => {
     fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ship it" } });
     expect(screen.getByLabelText("Name")).toHaveValue("Ship it");
 
-    rerender(<OrchestratorDrawer {...props({ flows: [flowA, flowB], openId: "f2" })} />);
+    rerender(<OrchestratorDrawer {...props({ flows: [flowA, flowB], openId: { kind: "flow", id: "f2" } })} />);
     expect(screen.queryByLabelText("Name")).toBeNull();
     expect(send).not.toHaveBeenCalled();
 

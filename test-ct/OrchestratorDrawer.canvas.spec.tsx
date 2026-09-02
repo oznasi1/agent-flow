@@ -29,7 +29,7 @@ const noop = () => {};
 const DRAG_SEP = "\0";
 
 const props = {
-  flows: [flow()], openId: "f1", runs: [], pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [],
+  flows: [flow()], openId: { kind: "flow" as const, id: "f1" }, runs: [], pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [],
   onClose: noop, onCreate: noop, onOpen: noop, onRename: noop, onDelete: noop,
   onArm: noop, onResumeApprove: noop, onResumeDisarm: noop, onResetEdge: noop,
 };

@@ -299,6 +299,11 @@ const FLOW_LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "pre-existing rename field on the flow-graph canvas (predates this feature)" },
   { location: "src/webview/OrchestratorDrawer.tsx", text: "+ New flow",
     why: "pre-existing Running-tab button (predates this feature) — creates a bare Flow, not a card workflow" },
+  // src/webview/OrchestratorDrawer.tsx: new for Task 8 (OrchTarget addressing).
+  // `target.kind === "flow"` compares OrchTarget's own discriminant tag — the
+  // same class of hit as the flow: message types above, not UI copy at all.
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow",
+    why: "OrchTarget's own kind discriminant, compared against — an internal tag, not user-facing copy" },
 ];
 
 describe("the template/workflow gate", () => {

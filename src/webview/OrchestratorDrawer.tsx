@@ -338,10 +338,15 @@ const STATE_HUE: Record<AgentState, string> = {
  * danger tint — colour here is attention debt, not decoration. */
 const BAD_CONDS = new Set<Condition["kind"]>(["ci-failed", "changes-requested", "pr-conflicting"]);
 
+/** What the drawer is addressed at: a saved `Flow` by id, or a `FlowTemplate`
+ * by id. A template's payload IS a `Flow` (`FlowTemplate.flow`), which is what
+ * lets one canvas serve both — see `openFlow` below. */
+export type OrchTarget = { kind: "flow"; id: string } | { kind: "template"; id: string };
+
 export interface OrchestratorDrawerProps {
   flows: Flow[];
-  /** Which flow is open. `null` closes the drawer. */
-  openId: string | null;
+  /** Which flow or template is open. `null` closes the drawer. */
+  openId: OrchTarget | null;
   /** Every card on the board, so the tray and canvas can resolve a node's live
    * state and the inspector can say what a condition is currently waiting on. */
   runs: RunStatus[];
@@ -389,7 +394,23 @@ export interface OrchestratorDrawerProps {
 }
 
 export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | null {
-  const openFlow = p.flows.find((f) => f.id === p.openId);
+  const target = p.openId;
+  /** Stable string form of `target`, for every hook below that needs a value
+   * to key an effect or `useDrawerExit` on rather than the target object's own
+   * identity — `DeckApp` has no reason to hand back the same object reference
+   * across renders for "the same" flow or template. */
+  const openKey = target && `${target.kind}:${target.id}`;
+  /** The flow the canvas is editing, whichever kind of thing the target names.
+   *
+   * A template's payload IS a `Flow` (`FlowTemplate.flow`), which is what makes
+   * one editor enough for both: the canvas never learns there are two kinds of
+   * target, and only the VERBS around it change (see `editingTemplate`, Task 12). */
+  const openFlow =
+    target === null
+      ? undefined
+      : target.kind === "flow"
+        ? p.flows.find((f) => f.id === target.id)
+        : p.templates.find((t) => t.id === target.id)?.flow;
   /** The flow the drawer keeps painting while it slides back out, and whether it
    * is doing that — both from the shared drawer seam, so this drawer and the
    * card detail leave the board the same way. Frozen and unreachable for that
@@ -397,7 +418,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * reader, or a Tab. The click that closed it has already sent focus back to
    * the chip. `Drawer.tsx` holds the reasoning, including why the hook needs
    * both `openId` and the flow it resolves to. */
-  const { shown: flow, closing } = useDrawerExit(p.openId, openFlow);
+  const { shown: flow, closing } = useDrawerExit(openKey, openFlow);
   /** Canvas ⇄ list. The canvas is a board built from divs and pointer events —
    * no usable keyboard story — so `FlowList` (flowList.tsx) exists as the
    * keyboard path onto the exact same `Flow`. Canvas stays the default: this
@@ -432,7 +453,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * the dialog and pressing Save (the flow prop is live, same as everywhere
    * else in this file) cannot silently shift which row a stray edit lands on.
    * Cleared and reseeded every time the dialog opens (`openSaveTemplate`
-   * below), and also force-closed the moment `p.openId` changes (the effect
+   * below), and also force-closed the moment `openKey` changes (the effect
    * just below) — the switcher stays reachable while this dialog is open, and
    * without that second clear, switching to another flow mid-type would leave
    * the dialog open over the NEW flow: same typed name, now describing a
@@ -444,15 +465,17 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const [savingTemplate, setSavingTemplate] = React.useState(false);
   const [templateName, setTemplateName] = React.useState("");
   const [templateChoices, setTemplateChoices] = React.useState<Record<string, { mode: string; dest: LaunchDest }>>({});
-  // Keyed on `p.openId` alone, deliberately: this exists to catch the ID
+  // Keyed on `openKey` alone, deliberately: this exists to catch the target
   // itself changing under an open dialog, not to react to anything else
   // about the flow (an edit to the SAME flow while the dialog is open must
-  // not close it).
+  // not close it). A string key rather than `p.openId` itself, so a caller
+  // that hands back a fresh `OrchTarget` object for "the same" flow or
+  // template on every render cannot fire this spuriously.
   React.useEffect(() => {
     setSavingTemplate(false);
     setTemplateName("");
     setTemplateChoices({});
-  }, [p.openId]);
+  }, [openKey]);
   const [over, setOver] = React.useState(false);
   const [overGraph, setOverGraph] = React.useState(false);
   const graphRef = React.useRef<HTMLDivElement | null>(null);
