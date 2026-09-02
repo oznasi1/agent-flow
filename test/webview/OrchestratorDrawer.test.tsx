@@ -2,7 +2,8 @@
 import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { OrchestratorDrawer, DRAG_SEP, OrchTarget } from "../../src/webview/OrchestratorDrawer";
+import { OrchestratorDrawer, DRAG_SEP, OrchTarget, OrchView } from "../../src/webview/OrchestratorDrawer";
+import type { WorkflowRow } from "../../src/webview/WorkflowList";
 import { ORCH_ANIM_MS, ORCH_CSS, ORCH_EDGE_PAINT_DY } from "../../src/webview/orchestratorStyles";
 import type { Flow, FlowEdge } from "../../src/engine/orchestrator/model";
 import { TEMPLATE_SCHEMA, type FlowTemplate } from "../../src/engine/orchestrator/templates";
@@ -113,6 +114,12 @@ const COMMANDS = [
 const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => ({
   flows: [flow()], openId: { kind: "flow", id: "f1" } as OrchTarget, runs: [], pendingResume: [], promptModes: MODES, commands: COMMANDS, branchCi: {},
   templates: [],
+  // Canvas by default: the whole pre-existing suite below asserts against the
+  // flow-graph editor, and defaulting here keeps every one of those tests
+  // exercising exactly what it did before `view` existed as a prop at all.
+  // Task 9's own tests (`describe("the three top-level views")`) are what
+  // override this to see Active/Templates content instead.
+  view: "canvas" as OrchView, onView: vi.fn(), rows: [], onOpenCard: vi.fn(),
   onClose: vi.fn(), onCreate: vi.fn(), onOpen: vi.fn(),
   onRename: vi.fn(), onSave: vi.fn(), onDelete: vi.fn(),
   onArm: vi.fn(), onResumeApprove: vi.fn(), onResumeDisarm: vi.fn(), onResetEdge: vi.fn(),
@@ -196,10 +203,11 @@ describe("OrchestratorDrawer", () => {
     expect(screen.getByText(/add a node/i)).toBeTruthy();
   });
 
+  // The switcher is always visible on Canvas now — no disclosure to open
+  // first — since Templates moved off this panel onto its own top-level view.
   it("lets you switch to another flow", () => {
     const onOpen = vi.fn();
     render(<OrchestratorDrawer {...props({ onOpen, flows: [flow(), flow({ id: "f2", name: "Second" })] })} />);
-    fireEvent.click(screen.getByRole("button", { name: /flows/i }));
     fireEvent.click(screen.getByRole("button", { name: "Second" }));
     expect(onOpen).toHaveBeenCalledWith("f2");
   });
@@ -207,7 +215,6 @@ describe("OrchestratorDrawer", () => {
   it("creates a flow from the switcher", () => {
     const onCreate = vi.fn();
     render(<OrchestratorDrawer {...props({ onCreate })} />);
-    fireEvent.click(screen.getByRole("button", { name: /flows/i }));
     fireEvent.click(screen.getByRole("button", { name: "+ New flow" }));
     expect(onCreate).toHaveBeenCalled();
   });
@@ -240,6 +247,84 @@ describe("OrchestratorDrawer", () => {
     const del = screen.getByRole("button", { name: "Delete flow" });
     expect(del.className).toBe("orch-mini");
     expect(del.getAttribute("style")).toBeNull();
+  });
+});
+
+// Task 9: the old "Flows · N ▾" disclosure (a click-to-reveal panel with its
+// own Running/Templates sub-tablist) is gone, replaced by three top-level
+// screens — Active, Templates, Canvas — controlled by `view`/`onView`
+// (`DeckApp`'s state, not local: see `OrchView`'s own doc comment). This is
+// the shell only; a later task derives real `rows` from the board and adds
+// the two header buttons that set `view` from outside the drawer.
+describe("the three top-level views", () => {
+  it("offers Active, Templates and Canvas as top-level tabs, and no more", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Active", "Templates", "Canvas"]);
+  });
+
+  it("reflects `view` on aria-selected, and reflects it alone — not local state", () => {
+    render(<OrchestratorDrawer {...props({ view: "templates" })} />);
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Active" })).toHaveAttribute("aria-selected", "false");
+    expect(within(nav).getByRole("tab", { name: "Templates" })).toHaveAttribute("aria-selected", "true");
+    expect(within(nav).getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("asks the caller to change the view rather than changing it itself", () => {
+    // `onView` is a plain mock here, wired to nothing — so clicking a tab
+    // must NOT change what renders (that would mean this component holds its
+    // own view state after all, defeating the whole point: a later task's
+    // header buttons set this from outside, and a control this component
+    // could override on its own click could disagree with them).
+    const onView = vi.fn();
+    render(<OrchestratorDrawer {...props({ view: "canvas", onView })} />);
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    fireEvent.click(within(nav).getByRole("tab", { name: "Active" }));
+    expect(onView).toHaveBeenCalledWith("active");
+    expect(screen.getByTestId("orch-canvas")).toBeTruthy(); // still Canvas — `view` prop never moved
+
+    fireEvent.click(within(nav).getByRole("tab", { name: "Templates" }));
+    expect(onView).toHaveBeenCalledWith("templates");
+    expect(screen.getByTestId("orch-canvas")).toBeTruthy();
+  });
+
+  it("no longer offers a Flows disclosure", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    expect(screen.queryByText(/Flows ·/)).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Workflow list" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Running" })).toBeNull();
+  });
+
+  it("mounts WorkflowList on Active, passing rows and wiring a click through onOpenCard", () => {
+    const onOpenCard = vi.fn();
+    const rows: WorkflowRow[] = [{
+      cardId: "c1", ticketKey: "PROJ-1", title: "Ship the migration",
+      workflow: {
+        flow: flow(),
+        state: { status: "advancing", done: 1, total: 3, steps: [] },
+        extraCount: 0,
+      },
+    }];
+    render(<OrchestratorDrawer {...props({ view: "active", rows, onOpenCard })} />);
+    expect(screen.getByText("PROJ-1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /PROJ-1/ }));
+    expect(onOpenCard).toHaveBeenCalledWith("c1");
+  });
+
+  it("renders WorkflowList's own empty state when there are no rows yet", () => {
+    render(<OrchestratorDrawer {...props({ view: "active", rows: [] })} />);
+    expect(screen.getByText(/No workflows attached anywhere/)).toBeTruthy();
+    // And nothing of the Canvas or Templates screens leaks through alongside it.
+    expect(screen.queryByLabelText("Flow name")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Duplicate" })).toBeNull();
+  });
+
+  it("shows only the Templates screen's own content when view is templates — no Canvas controls leak through", () => {
+    render(<OrchestratorDrawer {...props({ view: "templates" })} />);
+    expect(screen.queryByLabelText("Flow name")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save as template…" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Arm" })).toBeNull();
   });
 });
 
@@ -290,12 +375,20 @@ const pickFreeTextCommand = (): void => {
 // part of the drawer's own header, not flowList.tsx's concern); flowList.tsx
 // and its own test file cover what the list view renders and how its rows
 // behave once it is showing.
+//
+// Task 9 added a top-level tab ALSO named "Canvas" (Active/Templates/Canvas,
+// the drawer's own three screens), so a bare `getByRole("tab", { name:
+// "Canvas" })` now matches two elements. `canvasTab` scopes to this toggle's
+// own tablist (`aria-label="Flow view"`, pre-existing) so these assertions
+// keep meaning exactly what they always did.
+const canvasTab = () => within(screen.getByRole("tablist", { name: "Flow view" })).getByRole("tab", { name: "Canvas" });
+
 describe("the canvas/list view toggle", () => {
   it("defaults to the canvas — the toggle only ever narrows what a mouse user already had", () => {
     render(<OrchestratorDrawer {...props()} />);
     expect(screen.getByTestId("orch-canvas")).toBeTruthy();
     expect(screen.queryByTestId("orch-list")).toBeNull();
-    expect(screen.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
+    expect(canvasTab()).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "List" })).toHaveAttribute("aria-selected", "false");
   });
 
@@ -304,7 +397,7 @@ describe("the canvas/list view toggle", () => {
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
     expect(screen.queryByTestId("orch-canvas")).toBeNull();
     expect(screen.getByRole("tab", { name: "List" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "false");
+    expect(canvasTab()).toHaveAttribute("aria-selected", "false");
   });
 
   it("renders the same flow's rules in the list — one model, two presentations", () => {
@@ -316,7 +409,7 @@ describe("the canvas/list view toggle", () => {
   it("switches back to the canvas", () => {
     render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Canvas" }));
+    fireEvent.click(canvasTab());
     expect(screen.getByTestId("orch-canvas")).toBeTruthy();
     expect(screen.queryByTestId("orch-list")).toBeNull();
   });
@@ -359,7 +452,7 @@ describe("the canvas/list view toggle", () => {
     const row1 = screen.getByTestId("flowlist-row-e1");
     row1.focus();
     fireEvent.keyDown(row1, { key: "Delete" });
-    fireEvent.click(screen.getByRole("tab", { name: "Canvas" }));
+    fireEvent.click(canvasTab());
     expect(screen.getByText(/select a connection/i)).toBeTruthy();
   });
 });
@@ -4306,25 +4399,19 @@ const shipItTemplate = (over: Partial<FlowTemplate> = {}): FlowTemplate => ({
   ...over,
 });
 
-/** Open the switcher and land on the Templates tab — the same two clicks a
- * real user makes (the "Flows · N" trigger, then the tab), rather than a
- * shortcut that could pass against a Templates tab rendered open by default. */
+/** Renders straight onto the Templates screen. Task 9 promoted Templates from
+ * a sub-tab behind the old "Flows · N ▾" disclosure to one of the drawer's
+ * three top-level, `DeckApp`-controlled views (see `OrchView`) — a real user
+ * now reaches it with a single click on the top-level "Templates" tab, and
+ * `view` is a controlled prop with no internal state backing it in this test
+ * file's plain `onView: vi.fn()`, so a click here would call the mock without
+ * changing what renders. Passing `view: "templates"` directly is what actually
+ * shows the screen these tests assert on. */
 const openTemplatesTab = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
-  render(<OrchestratorDrawer {...props(over)} />);
-  fireEvent.click(screen.getByRole("button", { name: /flows/i }));
-  fireEvent.click(screen.getByRole("tab", { name: "Templates" }));
+  render(<OrchestratorDrawer {...props({ view: "templates", ...over })} />);
 };
 
 describe("the Templates tab", () => {
-  it("opens on Running, not Templates — nothing the switcher does today should cost an extra click", () => {
-    render(<OrchestratorDrawer {...props({ flows: [flow(), flow({ id: "f2", name: "Second" })], templates: [shipItTemplate()] })} />);
-    fireEvent.click(screen.getByRole("button", { name: /flows/i }));
-    expect(screen.getByRole("tab", { name: "Running" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByRole("tab", { name: "Templates" }).getAttribute("aria-selected")).toBe("false");
-    // The Running tab's own list, unchanged: the flow switcher's existing job.
-    expect(screen.getByRole("button", { name: "Second" })).toBeTruthy();
-  });
-
   it("lists templates on the Templates tab with their rule counts", async () => {
     openTemplatesTab({ templates: [shipItTemplate()] });
     expect(await screen.findByText("Ship it")).toBeTruthy();
@@ -4414,10 +4501,6 @@ describe("the Templates tab", () => {
   });
 
   it("explains where a template comes from when there are none yet", () => {
-    // The header's own "Save as template…" button is ALSO on screen (the
-    // default open flow always has one) — matched with a text unique to the
-    // empty-state copy, never the button's own label, so this cannot pass
-    // against the wrong element.
     openTemplatesTab({ templates: [] });
     expect(screen.getByText(/No templates yet/)).toBeTruthy();
   });

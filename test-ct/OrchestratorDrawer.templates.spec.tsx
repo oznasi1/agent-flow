@@ -89,6 +89,10 @@ const flow: Flow = {
 
 const props = {
   flows: [flow], openId: { kind: "flow" as const, id: "f1" }, runs: [], pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [],
+  // Canvas by default: the third test below (the Save-as-template dialog) is
+  // a Canvas-only control. The first two override this to "templates" — see
+  // `openTemplatesTab`'s own comment for why a click can no longer get there.
+  view: "canvas" as const, onView: noop, rows: [], onOpenCard: noop,
   onClose: noop, onCreate: noop, onOpen: noop, onRename: noop, onSave: noop, onDelete: noop,
   onArm: noop, onResumeApprove: noop, onResumeDisarm: noop, onResetEdge: noop,
 };
@@ -108,14 +112,19 @@ async function settled(page: Page, selector: string) {
   throw new Error(`${selector} never stopped moving`);
 }
 
+// Templates is now a top-level view controlled by `view`/`onView` (Task 9),
+// not a sub-tab behind the old "Flows · N ▾" disclosure — so nothing needs
+// clicking to reach it any more. `onView` is a plain `noop` here with no
+// state feeding back into `view`, so a click would call it without changing
+// what renders; the caller mounts with `view="templates"` directly instead
+// (see the two mounts below), and this only waits for the header's slide-in
+// to settle before anything measures a bounding box against it.
 async function openTemplatesTab(page: Page) {
   await settled(page, ".orch-hd");
-  await page.getByRole("button", { name: /^Flows/ }).click();
-  await page.getByRole("tab", { name: "Templates" }).click();
 }
 
 test("a template row keeps its name and rule count on one line, with a real gap between them", async ({ mount, page }) => {
-  await mount(<OrchestratorDrawer {...props} templates={[templateFrom(flow, "Ship it")]} />);
+  await mount(<OrchestratorDrawer {...props} view="templates" templates={[templateFrom(flow, "Ship it")]} />);
   await openTemplatesTab(page);
 
   const name = page.locator(".orch-tmpl-row .t", { hasText: "Ship it" });
@@ -136,7 +145,7 @@ test("a template row keeps its name and rule count on one line, with a real gap 
 });
 
 test("the delete confirmation keeps Cancel and Confirm on the same line as the sentence", async ({ mount, page }) => {
-  await mount(<OrchestratorDrawer {...props} templates={[templateFrom(flow, "Ship it")]} />);
+  await mount(<OrchestratorDrawer {...props} view="templates" templates={[templateFrom(flow, "Ship it")]} />);
   await openTemplatesTab(page);
 
   await page.getByRole("button", { name: "Delete", exact: true }).click();

@@ -11,6 +11,7 @@ import { createDrawerResize, RESIZE_STEP } from "./drawerResize";
 import { Drawer, useDrawerExit } from "./Drawer";
 import { FlowList } from "./flowList";
 import { ORCH_EDGE_PAINT_DY } from "./orchestratorStyles";
+import { WorkflowList, WorkflowRow } from "./WorkflowList";
 import {
   ACTION_LABEL,
   addCommandNode,
@@ -343,10 +344,32 @@ const BAD_CONDS = new Set<Condition["kind"]>(["ci-failed", "changes-requested", 
  * lets one canvas serve both — see `openFlow` below. */
 export type OrchTarget = { kind: "flow"; id: string } | { kind: "template"; id: string };
 
+/** The drawer's three top-level screens. Active is every card carrying a
+ * workflow (`WorkflowList`, below); Templates is every reusable shape,
+ * starters included; Canvas is the flow-graph editor this drawer has always
+ * been. Owned by `DeckApp`, not local state — a later task adds two header
+ * buttons that set this from outside the drawer, and a screen only this
+ * component could change could never be reached from there. */
+export type OrchView = "active" | "templates" | "canvas";
+
 export interface OrchestratorDrawerProps {
   flows: Flow[];
   /** Which flow or template is open. `null` closes the drawer. */
   openId: OrchTarget | null;
+  /** Which of the three top-level screens is showing. See `OrchView`. */
+  view: OrchView;
+  onView: (v: OrchView) => void;
+  /** The Active screen's own rows — one per card carrying a workflow,
+   * already sorted by the caller (see `WorkflowList`'s own contract: it
+   * renders what it is handed and does not sort). Empty until a later task
+   * derives the real rows from the board; this one only builds the shell
+   * that renders them. */
+  rows: WorkflowRow[];
+  /** Opens the card a workflow row named — closes this drawer and selects
+   * that card, the mirror image of `DeckDetail`'s own `onOpenWorkflow` (that
+   * one opens a workflow FROM a card; this one opens a card FROM its
+   * workflow, so the workflow is read where it lives). */
+  onOpenCard: (cardId: string) => void;
   /** Every card on the board, so the tray and canvas can resolve a node's live
    * state and the inspector can say what a condition is currently waiting on. */
   runs: RunStatus[];
@@ -426,7 +449,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * change it. Never persisted alongside `width` — reopening the drawer in a
    * fresh session should land on the canvas, not silently reopen on whichever
    * view a past session happened to be reading. */
-  const [view, setView] = React.useState<"canvas" | "list">("canvas");
+  const [canvasView, setCanvasView] = React.useState<"canvas" | "list">("canvas");
   // The dry run is a READ, so it is component state and nothing else: never
   // persisted, never posted, and deliberately not remembered across a reopen —
   // a verdict is about the board as it is right now, and one restored from a
@@ -441,12 +464,6 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // fresh clock (`observationOf`, below) is two answers about one rule.
   const dry = dryRun && flow ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : [];
   const firing = dry.filter((v) => v.verdict === "fire").length;
-  const [picking, setPicking] = React.useState(false);
-  /** Which half of the switcher panel is showing. Running is the default on
-   * every open — never persisted, never remembered across a reopen — because
-   * the switcher's whole existing job (open another flow, or start one) must
-   * not cost a click just because Templates now shares the panel with it. */
-  const [pickTab, setPickTab] = React.useState<"running" | "templates">("running");
   /** The Save-as-template dialog's own state: whether it is open, the name
    * typed so far, and one {mode, dest} choice per place node being demoted.
    * Keyed by node id rather than array index, so a re-render between opening
@@ -1194,7 +1211,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               // must not offer a second, simultaneous pair for the same gate in
               // canvas view. List has no graph node to click, so the tray chip
               // is its only route to answering at all.
-              if (n.kind !== "gate" || view !== "list" || !st?.asked || st.answer || !st.edgeId) return null;
+              if (n.kind !== "gate" || canvasView !== "list" || !st?.asked || st.answer || !st.edgeId) return null;
               const edgeId = st.edgeId;
               return (
                 <>
@@ -1441,26 +1458,29 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
         />
       )}
       <div className="orch-hd">
+        {/* The three top-level screens, replacing the old "Flows · N ▾"
+            disclosure: Active (every card carrying a workflow), Templates
+            (every reusable shape, starters included) and Canvas (the
+            flow-graph editor further down). `role="tablist"`/`role="tab"`/
+            `aria-selected` is this file's own idiom (see the Canvas/List
+            toggle below, which predates this) — followed here rather than
+            invented fresh. `view` is `DeckApp`'s state, not local: a later
+            task adds two header buttons that land here from outside the
+            drawer, and a tab click only this component could see could
+            never agree with them. */}
         <div className="row">
-          <span className="eyebrow">Orchestrator</span>
+          <span role="tablist" aria-label="Orchestrator" style={{ display: "flex", gap: 6 }}>
+            <button type="button" role="tab" aria-selected={p.view === "active"} className="orch-mini" onClick={() => p.onView("active")}>
+              Active
+            </button>
+            <button type="button" role="tab" aria-selected={p.view === "templates"} className="orch-mini" onClick={() => p.onView("templates")}>
+              Templates
+            </button>
+            <button type="button" role="tab" aria-selected={p.view === "canvas"} className="orch-mini" onClick={() => p.onView("canvas")}>
+              Canvas
+            </button>
+          </span>
           <div className="sp" />
-          <button type="button" className="orch-mini" onClick={() => setPicking((v) => !v)}>
-            Flows · {p.flows.length} ▾
-          </button>
-          {/* Same quiet `orch-mini` as its neighbour, deliberately: a filled or
-              accented control is reserved for Arm — the drawer's one filled control,
-              shipped in this phase — and red is reserved for a real failure (an
-              errored rule, in the inspector below). Deleting closes the drawer rather than
-              leaving it aimed at a flow that is gone — the host's `deck:flows` post
-              would arrive and close it a round trip later anyway, and a drawer
-              rendering a deleted flow in the meantime is a lie. */}
-          <button
-            type="button"
-            className="orch-mini"
-            onClick={() => { p.onDelete(flow.id); p.onClose(); }}
-          >
-            Delete flow
-          </button>
           {/* Same quiet `orch-mini` as its neighbours — Arm stays the surface's
               only filled control (see its own comment below). aria-pressed
               is the App.tsx idiom (its filter/size/status `.seg` groups use
@@ -1469,219 +1489,226 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               never a fill") is the visual language this borrows, even though
               this button lives in a different sheet. The label stays
               "Expand" in both states, the same way those `.seg` buttons never
-              rewrite their own text when pressed. */}
+              rewrite their own text when pressed. Lives on every screen, not
+              only Canvas — the drawer's own width is not a Canvas concern. */}
           <button type="button" className="orch-mini" aria-pressed={expanded} onClick={toggleExpanded}>
             Expand
           </button>
           <button type="button" className="orch-x" aria-label="Close" onClick={p.onClose}>✕</button>
         </div>
-        {/* The keyboard path onto this same flow: a canvas built from divs and
-            pointer events has no usable keyboard story on its own (see
-            flowList.tsx's own header comment), so List is not a second editor,
-            it is the other way to reach the one this drawer already has.
-            `role="tablist"`/`role="tab"`/`aria-selected` is App.tsx's own idiom
-            for exactly this shape (see its Tasks/Notepad tabbar) — followed
-            here rather than invented fresh. Quiet `orch-mini` styling, same as
-            every neighbouring control on this header: Arm alone is filled. */}
-        <div className="row" style={{ marginTop: 6 }}>
-          <span role="tablist" aria-label="Flow view" style={{ display: "flex", gap: 6 }}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === "canvas"}
-              className="orch-mini"
-              onClick={() => setView("canvas")}
-            >
-              Canvas
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === "list"}
-              className="orch-mini"
-              onClick={() => setView("list")}
-            >
-              List
-            </button>
-          </span>
-        </div>
-        {/* Rename on blur, not per keystroke: every keystroke would be a disk
-            write and a re-post, and the field would fight the re-render. */}
-        <input
-          className="orch-name"
-          aria-label="Flow name"
-          defaultValue={flow.name}
-          key={flow.id}
-          onBlur={(e) => {
-            const next = e.currentTarget.value.trim();
-            if (next && next !== flow.name) p.onRename(flow.id, next);
-          }}
-        />
-        <div className="row" style={{ marginTop: 8 }}>
-          <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>
-            {nodeCount} {nodeCount === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
-            {flow.edges.length === 1 ? "rule" : "rules"}
-          </span>
-          <div className="sp" />
-          {/* Beside the flow's own Arm/Delete controls, because saving a
-              template is a thing the OPEN WORKFLOW does — the same reasoning
-              that keeps "Delete flow" and Arm on this header rather than in
-              a menu. Quiet `orch-mini`, same as every neighbour: Arm alone is
-              filled. Disabled whenever `canBindTicket` says the saved
-              template could never be attached — an empty flow (`toTemplate`
-              itself refuses that one), or one built only of command / gate /
-              notify nodes, which `toTemplate` would save cleanly but
-              `instantiate` would then refuse at every attach forever. A
-              disabled control with a `title` is a clearer no, before the
-              click, than a toast the user has to read to learn the same
-              thing after it. */}
-          <button
-            type="button"
-            className="orch-mini"
-            disabled={!canBindTicket(flow)}
-            title={canBindTicket(flow) ? undefined : "Add a step (or a place) this template can bind a ticket to first"}
-            onClick={openSaveTemplate}
-          >
-            Save as template…
-          </button>
-          {/* The drawer's one filled control. Arm is the consent point for
-              everything a flow does, so it is the only thing here allowed to
-              be filled — armed is a state, not an invitation, so the fill goes
-              away and this becomes the quiet way back out (see .orch-arm.on). */}
-          {/* The dry run sits immediately before Arm because that is the decision
-              it serves: arming is the consent point for everything a flow does,
-              and until now the only thing standing behind it was a hold-on-first-
-              look. Quiet `orch-mini` like every other control on this header —
-              Arm stays the surface's one filled control (see below) — and
-              `aria-pressed` for its on/off state, the App.tsx idiom the Expand
-              button beside it already follows. */}
-          <button
-            type="button"
-            className="orch-mini"
-            aria-pressed={dryRun}
-            onClick={() => {
-              // Told to the host on the way IN, once, and never on the way out:
-              // closing the panel is not a dry run. Deliberately not posted from
-              // the `dry` computation above either — that recomputes on every
-              // render (see its comment), so a post from there would be a message
-              // per frame for as long as the panel stays open. `previewFlow` is
-              // pure and cheap enough to call a second time here rather than
-              // reach for a render-order dependency to reuse the first result.
-              //
-              // Counts only, and no telemetry import: the webview cannot reach
-              // the host's event catalog and has no business deciding what is
-              // recorded — it reports what it did, the host decides. `blocked` is
-              // every PENDING rule that would not fire on this pass — waiting,
-              // held by the cap, unobservable or blank alike — which is why it and
-              // `fired` need not add up to `edges`: a settled rule is in neither.
-              if (!dryRun) {
-                const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi);
-                send({
-                  type: "flow:dryRun",
-                  edges: flow.edges.length,
-                  fired: rows.filter((r) => r.verdict === "fire").length,
-                  blocked: rows.filter((r) => r.verdict !== "fire").length,
-                });
-              }
-              setDryRun((v) => !v);
-            }}
-          >
-            What would fire?
-          </button>
-          <button
-            type="button"
-            className={`orch-arm${flow.armed ? " on" : ""}`}
-            onClick={() => p.onArm(flow.id, !flow.armed)}
-          >
-            {flow.armed ? "Armed · disarm" : "Arm"}
-          </button>
-        </div>
-        {picking && (
-          <div className="orch-flows">
-            {/* Running is the default and MUST stay it: this panel is the one
-                and only way to switch flows or start a new one, and that job
-                predates Templates entirely — a user reopening it to do what
-                it always did must not land on an empty Templates tab first.
-                `role="tablist"`/`role="tab"`/`aria-selected` is this file's
-                own idiom (see the Canvas/List toggle above), not invented
-                fresh for this panel. */}
-            {/* "Workflow", not "Flow": the UI never says Flow or Orchestrator —
-                only the code keeps those names (see this task's own
-                vocabulary rule). The pre-existing "Flow view" label on the
-                Canvas/List toggle above predates that rule and is left alone;
-                this is a NEW screen-reader string, so it gets it right from
-                the start. */}
-            <div role="tablist" aria-label="Workflow list" className="orch-tabs">
+        {p.view === "canvas" && (
+          <>
+            {/* The keyboard path onto this same flow: a canvas built from divs and
+                pointer events has no usable keyboard story on its own (see
+                flowList.tsx's own header comment), so List is not a second editor,
+                it is the other way to reach the one this drawer already has.
+                `role="tablist"`/`role="tab"`/`aria-selected` is App.tsx's own idiom
+                for exactly this shape (see its Tasks/Notepad tabbar) — followed
+                here rather than invented fresh. Quiet `orch-mini` styling, same as
+                every neighbouring control on this header: Arm alone is filled. */}
+            <div className="row" style={{ marginTop: 6 }}>
+              <span role="tablist" aria-label="Flow view" style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={canvasView === "canvas"}
+                  className="orch-mini"
+                  onClick={() => setCanvasView("canvas")}
+                >
+                  Canvas
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={canvasView === "list"}
+                  className="orch-mini"
+                  onClick={() => setCanvasView("list")}
+                >
+                  List
+                </button>
+              </span>
+            </div>
+            {/* The flow switcher: pick another open flow, start a new one, or
+                delete this one — the old "Flows · N ▾" disclosure's own job,
+                moved here and left open rather than behind a click, now that
+                Templates has its own top-level screen and no longer shares
+                this panel with it. Deleting closes the WHOLE drawer rather
+                than merely leaving Canvas, same as it always has: the host's
+                `deck:flows` post would arrive and close it a round trip later
+                anyway, and a drawer painting a deleted flow in the meantime
+                is a lie. A separate row from Save-as-template/Arm below on
+                purpose — see that row's own test for why sharing a parent
+                with either would be the wrong claim. */}
+            <div className="row" style={{ marginTop: 6 }}>
+              {p.flows.map((f) => (
+                <button
+                  type="button"
+                  key={f.id}
+                  className="orch-mini"
+                  aria-pressed={f.id === flow.id}
+                  onClick={() => p.onOpen(f.id)}
+                >
+                  {f.name}
+                </button>
+              ))}
+              <button type="button" className="orch-mini" onClick={p.onCreate}>+ New flow</button>
+              <div className="sp" />
               <button
                 type="button"
-                role="tab"
-                aria-selected={pickTab === "running"}
                 className="orch-mini"
-                onClick={() => setPickTab("running")}
+                onClick={() => { p.onDelete(flow.id); p.onClose(); }}
               >
-                Running
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={pickTab === "templates"}
-                className="orch-mini"
-                onClick={() => setPickTab("templates")}
-              >
-                Templates
+                Delete flow
               </button>
             </div>
-            {pickTab === "running" ? (
-              <>
-                {p.flows.map((f) => (
-                  <button type="button" key={f.id} onClick={() => { setPicking(false); p.onOpen(f.id); }}>
-                    {f.name}
-                  </button>
-                ))}
-                <button type="button" onClick={() => { setPicking(false); p.onCreate(); }}>+ New flow</button>
-              </>
-            ) : (
-              <div className="orch-tmpl-list">
-                {/* A template is never attached from here — one entry point,
-                    the card that needs a workflow, and this panel offering a
-                    second, worse way to do what the card already does would
-                    be a category error this task's own brief calls out by
-                    name: this tab offers Duplicate/Rename/Delete and nothing
-                    that arms, disarms, or attaches anything. */}
-                {p.templates.map((t) => (
-                  <TemplateRow
-                    key={t.id}
-                    t={t}
-                    onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
-                    onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
-                    onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
-                    onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
-                  />
-                ))}
-                {/* A template is made by SAVING a workflow, never by a button
-                    on this tab — there used to be one here (＋ New template)
-                    that called `onCreate`, which builds an ordinary WORKFLOW:
-                    the panel would close, this tab would still be empty, and
-                    a new untitled entry would appear on Running instead. That
-                    is exactly the wrong verb for what a first-time user on an
-                    empty Templates tab is trying to do, so it is gone rather
-                    than fixed to do something else — creating a workflow
-                    already lives on the Running tab's own "+ New flow", and
-                    nothing is lost by not duplicating it here. `.orch-empty`
-                    is the same empty-state treatment the canvas itself uses. */}
-                {p.templates.length === 0 && (
-                  <div className="orch-empty">
-                    No templates yet. Build a workflow, then use its own
-                    &ldquo;Save as template&hellip;&rdquo; to keep the shape.
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+            {/* Rename on blur, not per keystroke: every keystroke would be a disk
+                write and a re-post, and the field would fight the re-render. */}
+            <input
+              className="orch-name"
+              aria-label="Flow name"
+              defaultValue={flow.name}
+              key={flow.id}
+              onBlur={(e) => {
+                const next = e.currentTarget.value.trim();
+                if (next && next !== flow.name) p.onRename(flow.id, next);
+              }}
+            />
+            <div className="row" style={{ marginTop: 8 }}>
+              <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>
+                {nodeCount} {nodeCount === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
+                {flow.edges.length === 1 ? "rule" : "rules"}
+              </span>
+              <div className="sp" />
+              {/* Beside the flow's own Arm control, because saving a
+                  template is a thing the OPEN WORKFLOW does. Quiet
+                  `orch-mini`, same as every neighbour: Arm alone is
+                  filled. Disabled whenever `canBindTicket` says the saved
+                  template could never be attached — an empty flow (`toTemplate`
+                  itself refuses that one), or one built only of command / gate /
+                  notify nodes, which `toTemplate` would save cleanly but
+                  `instantiate` would then refuse at every attach forever. A
+                  disabled control with a `title` is a clearer no, before the
+                  click, than a toast the user has to read to learn the same
+                  thing after it. */}
+              <button
+                type="button"
+                className="orch-mini"
+                disabled={!canBindTicket(flow)}
+                title={canBindTicket(flow) ? undefined : "Add a step (or a place) this template can bind a ticket to first"}
+                onClick={openSaveTemplate}
+              >
+                Save as template…
+              </button>
+              {/* The drawer's one filled control. Arm is the consent point for
+                  everything a flow does, so it is the only thing here allowed to
+                  be filled — armed is a state, not an invitation, so the fill goes
+                  away and this becomes the quiet way back out (see .orch-arm.on). */}
+              {/* The dry run sits immediately before Arm because that is the decision
+                  it serves: arming is the consent point for everything a flow does,
+                  and until now the only thing standing behind it was a hold-on-first-
+                  look. Quiet `orch-mini` like every other control on this header —
+                  Arm stays the surface's one filled control (see below) — and
+                  `aria-pressed` for its on/off state, the App.tsx idiom the Expand
+                  button beside it already follows. */}
+              <button
+                type="button"
+                className="orch-mini"
+                aria-pressed={dryRun}
+                onClick={() => {
+                  // Told to the host on the way IN, once, and never on the way out:
+                  // closing the panel is not a dry run. Deliberately not posted from
+                  // the `dry` computation above either — that recomputes on every
+                  // render (see its comment), so a post from there would be a message
+                  // per frame for as long as the panel stays open. `previewFlow` is
+                  // pure and cheap enough to call a second time here rather than
+                  // reach for a render-order dependency to reuse the first result.
+                  //
+                  // Counts only, and no telemetry import: the webview cannot reach
+                  // the host's event catalog and has no business deciding what is
+                  // recorded — it reports what it did, the host decides. `blocked` is
+                  // every PENDING rule that would not fire on this pass — waiting,
+                  // held by the cap, unobservable or blank alike — which is why it and
+                  // `fired` need not add up to `edges`: a settled rule is in neither.
+                  if (!dryRun) {
+                    const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi);
+                    send({
+                      type: "flow:dryRun",
+                      edges: flow.edges.length,
+                      fired: rows.filter((r) => r.verdict === "fire").length,
+                      blocked: rows.filter((r) => r.verdict !== "fire").length,
+                    });
+                  }
+                  setDryRun((v) => !v);
+                }}
+              >
+                What would fire?
+              </button>
+              <button
+                type="button"
+                className={`orch-arm${flow.armed ? " on" : ""}`}
+                onClick={() => p.onArm(flow.id, !flow.armed)}
+              >
+                {flow.armed ? "Armed · disarm" : "Arm"}
+              </button>
+            </div>
+          </>
         )}
       </div>
 
       <div className="orch-body">
+        {/* The Active screen: every card carrying a workflow, in one place.
+            Pure presentation — `WorkflowList` renders exactly the rows it is
+            handed and does not sort them (see its own contract) — so this
+            component's only job is to hand it `p.rows` and wire a click back
+            through `p.onOpenCard`. `p.rows` is `[]` until a later task derives
+            the real rows from the board; this one only builds the shell. */}
+        {p.view === "active" && (
+          <div className="orch-active">
+            <WorkflowList rows={p.rows} onOpen={p.onOpenCard} />
+          </div>
+        )}
+        {/* The Templates screen: every reusable shape, starters included.
+            `.orch-tmpl-list` is the same wrapper class the old Templates tab
+            used, kept unchanged so the template/workflow vocabulary gate's
+            own region scan (`jsxBlockAround(..., "orch-tmpl-list")`) still
+            finds this exact content. */}
+        {p.view === "templates" && (
+          <div className="orch-tmpl-list">
+            {/* A template is never attached from here — one entry point,
+                the card that needs a workflow, and this screen offering a
+                second, worse way to do what the card already does would be
+                a category error this feature's own naming rule calls out by
+                name: this screen offers Duplicate/Rename/Delete and nothing
+                that arms, disarms, or attaches anything. */}
+            {p.templates.map((t) => (
+              <TemplateRow
+                key={t.id}
+                t={t}
+                onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
+                onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
+                onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
+                onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
+              />
+            ))}
+            {/* A template is made by SAVING a workflow, never by a button on
+                this screen — there used to be one here (＋ New template) that
+                called `onCreate`, which builds an ordinary WORKFLOW: the
+                screen would still be empty, and a new untitled entry would
+                appear on the Active list instead. That is exactly the wrong
+                verb for what a first-time user here is trying to do, so
+                there is no such button, and no path from this screen calls
+                `onCreate` at all. `.orch-empty` is the same empty-state
+                treatment the canvas itself uses. */}
+            {p.templates.length === 0 && (
+              <div className="orch-empty">
+                No templates yet. Build a workflow, then use its own
+                &ldquo;Save as template&hellip;&rdquo; to keep the shape.
+              </div>
+            )}
+          </div>
+        )}
+        {p.view === "canvas" && (
+          <>
         {savingTemplate && (
           // Same slot the resume banner and the dry-run panel below use for a
           // thing that briefly takes over this body without leaving the
@@ -1819,7 +1846,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             <div className="ft">Arming re-checks this every 6s. The first spend still asks.</div>
           </div>
         )}
-        {view === "list" ? (
+        {canvasView === "list" ? (
           <>
             {/* Add a node, from the keyboard. Notify and planned work already had
                 an ordinary button each (see the identical bar in the canvas
@@ -2417,8 +2444,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
         )}
           </>
         )}
+          </>
+        )}
       </div>
 
+      {p.view === "canvas" && (
       <div className="orch-ft">
         {/* An armed flow with an errored rule must not claim it is watching: that
             rule is settled and will never be evaluated again until Reset. It says
@@ -2448,6 +2478,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           {flow.edges.length === 1 ? "rule" : "rules"}
         </span>
       </div>
+      )}
     </Drawer>
   );
 }

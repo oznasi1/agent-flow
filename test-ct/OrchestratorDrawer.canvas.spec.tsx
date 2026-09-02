@@ -30,6 +30,7 @@ const DRAG_SEP = "\0";
 
 const props = {
   flows: [flow()], openId: { kind: "flow" as const, id: "f1" }, runs: [], pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [],
+  view: "canvas" as const, onView: noop, rows: [], onOpenCard: noop,
   onClose: noop, onCreate: noop, onOpen: noop, onRename: noop, onDelete: noop,
   onArm: noop, onResumeApprove: noop, onResumeDisarm: noop, onResetEdge: noop,
 };

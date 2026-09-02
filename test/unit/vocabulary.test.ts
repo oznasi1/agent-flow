@@ -285,10 +285,16 @@ const FLOW_LEGITIMATE: { location: string; text: string; why: string }[] = [
   // pre-existing copy, confirmed present at this branch's merge-base with
   // main — none of it was touched by this feature, and none of it is the
   // card-facing "workflow" surface the new vocabulary rule governs.
-  { location: "src/webview/OrchestratorDrawer.tsx", text: "orch-flows",
-    why: "CSS class name, an identifier in the stylesheet — renaming it is a style change, not a copy change" },
-  { location: "src/webview/OrchestratorDrawer.tsx", text: " Flows · ",
-    why: "pre-existing eyebrow toggle on the flow-graph canvas (predates this feature), not the card's workflow block" },
+  //
+  // Task 9 (navigation) deleted the old "Flows · N ▾" disclosure and its
+  // `orch-flows` popover class entirely — replaced by a top-level tablist
+  // controlled by `view`/`onView` — so their allowlist entries are gone with
+  // them, not merely left here unused (the gate's own "no dead entry" check
+  // would fail on exactly that). Everything below still renders, unchanged
+  // in text, just relocated: the flow switcher (still "+ New flow") and
+  // "Delete flow" moved from the header's top row into the Canvas view's own
+  // flow-switcher row, and the Canvas/List toggle ("Flow view") and the
+  // rename field ("Flow name") are untouched.
   { location: "src/webview/OrchestratorDrawer.tsx", text: " Delete flow ",
     why: "pre-existing canvas header button (predates this feature) — deletes a Flow object, the canvas's own noun" },
   { location: "src/webview/OrchestratorDrawer.tsx", text: "Flow view",
@@ -298,7 +304,7 @@ const FLOW_LEGITIMATE: { location: string; text: string; why: string }[] = [
   { location: "src/webview/OrchestratorDrawer.tsx", text: "Flow name",
     why: "pre-existing rename field on the flow-graph canvas (predates this feature)" },
   { location: "src/webview/OrchestratorDrawer.tsx", text: "+ New flow",
-    why: "pre-existing Running-tab button (predates this feature) — creates a bare Flow, not a card workflow" },
+    why: "pre-existing flow-switcher button (predates this feature) — creates a bare Flow, not a card workflow" },
   // src/webview/OrchestratorDrawer.tsx: new for Task 8 (OrchTarget addressing).
   // `target.kind === "flow"` compares OrchTarget's own discriminant tag — the
   // same class of hit as the flow: message types above, not UI copy at all.
