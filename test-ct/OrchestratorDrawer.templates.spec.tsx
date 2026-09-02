@@ -47,6 +47,26 @@ import type { FlowTemplate } from "../src/engine/orchestrator/templates";
 
 const noop = () => {};
 
+type Box = { x: number; y: number; width: number; height: number };
+
+/** Two boxes are on the same visual line iff their vertical ranges overlap.
+ *  Stacked boxes — one below the other, the actual failure mode a "same
+ *  line" assertion in this file exists to catch — have disjoint vertical
+ *  ranges (zero overlap) no matter the font stack. Top-edge proximity
+ *  (`Math.abs(a.y - b.y) < N`) is a proxy for that, and a bad one: a text
+ *  span and a `<button>` on the same line legitimately have different box
+ *  tops, by an amount that depends on font metrics. That proxy measured
+ *  4.5px on GitHub's ubuntu runner for a sentence/button pair that was
+ *  genuinely on one line, while measuring under 4px for the same DOM on
+ *  macOS — a real font-stack difference, not a layout regression — so it
+ *  failed CI on Linux while passing locally. Overlap has no such tolerance
+ *  to tune and still fails hard on the regression these tests guard: no
+ *  `display: flex` → the block `.sp` breaks the line → the two elements end
+ *  up on disjoint vertical ranges. */
+function sameLine(a: Box, b: Box): boolean {
+  return a.y < b.y + b.height && b.y < a.y + a.height;
+}
+
 function templateFrom(flow: Flow, name: string): FlowTemplate {
   return { schema: 1, id: `${flow.id}-tmpl`, name, params: {}, savedAt: 1_000, flow };
 }
@@ -105,8 +125,10 @@ test("a template row keeps its name and rule count on one line, with a real gap 
 
   const nameBox = (await name.boundingBox())!;
   const countBox = (await count.boundingBox())!;
-  // Same line: within half a line-height of each other vertically.
-  expect(Math.abs(nameBox.y - countBox.y)).toBeLessThan(4);
+  // Same line: vertical ranges overlap (see `sameLine`'s own comment for why
+  // this isn't top-edge proximity). Stacked — the regression this guards —
+  // would leave them with zero overlap.
+  expect(sameLine(nameBox, countBox)).toBe(true);
   // A real gap, not merely non-overlapping: `.row`'s own `gap: 6px` plus
   // `.sp`'s `flex: 1` is what pushes the count to the row's far end rather
   // than letting it sit flush against the name.
@@ -126,8 +148,14 @@ test("the delete confirmation keeps Cancel and Confirm on the same line as the s
   const sentenceBox = (await sentence.boundingBox())!;
   const cancelBox = (await cancel.boundingBox())!;
   const confirmBox = (await confirm.boundingBox())!;
-  expect(Math.abs(sentenceBox.y - cancelBox.y)).toBeLessThan(4);
-  expect(Math.abs(cancelBox.y - confirmBox.y)).toBeLessThan(4);
+  // Same line: vertical ranges overlap, not top-edge proximity — see
+  // `sameLine`'s own comment. This is the assertion that actually flaked:
+  // it measured 4.5px of top-edge offset on GitHub's ubuntu runner for a
+  // sentence/Cancel pair that was genuinely on one line (a font-metrics
+  // difference between a text span and a `<button>`, not a stacking
+  // regression), while measuring under 4px on macOS for the same DOM.
+  expect(sameLine(sentenceBox, cancelBox)).toBe(true);
+  expect(sameLine(cancelBox, confirmBox)).toBe(true);
   // Reading order left to right, each with daylight between it and the next —
   // the failure mode this guards is EVERYTHING landing at x=0 on its own row.
   expect(cancelBox.x).toBeGreaterThan(sentenceBox.x + sentenceBox.width - 4);
