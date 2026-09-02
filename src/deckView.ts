@@ -11,7 +11,7 @@ import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow,
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, findEdgeOutput, readJournal, JournalEvent, JournalEventInput } from "./engine/orchestrator/journal";
 import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, toTemplate } from "./engine/orchestrator/templates";
-import { STARTERS } from "./engine/orchestrator/starters";
+import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
@@ -694,6 +694,16 @@ export class DeckPanel {
     this.post({ type: "toast", level, message });
   }
 
+  /** Every template this build can resolve by id: the built-in starters plus
+   * whatever is on disk. Read paths (`postFlows`, `flow:attach`,
+   * `flow:duplicateTemplate`) use this — a starter is exactly as attachable or
+   * duplicable as a user template. WRITE paths (`flow:renameTemplate`,
+   * `flow:deleteTemplate`) must NOT use this: a starter has no file to write,
+   * so they guard on `isBuiltinTemplateId` and refuse instead. */
+  private allTemplates(): FlowTemplate[] {
+    return [...STARTERS, ...readTemplates(this.flowIo, this.templatesDir)];
+  }
+
   /** Read the flows store and post it. Cheap — a handful of small JSON files —
    * so it rides the same refresh as everything else rather than owning a cache. */
   private postFlows(): void {
@@ -707,9 +717,7 @@ export class DeckPanel {
     // list that puts three built-ins after twenty user templates has hidden
     // them again. `readTemplates` already skips any on-disk file claiming a
     // `builtin-` id (store.ts), so disk and built-ins cannot collide by id.
-    const templates: FlowTemplate[] = enabled
-      ? [...STARTERS, ...readTemplates(this.flowIo, this.templatesDir)]
-      : [];
+    const templates: FlowTemplate[] = enabled ? this.allTemplates() : [];
     // Emptied alongside `flows` when the setting is off, for the same reason:
     // silence must not be mistaken for "not loaded yet", and a stale hold from
     // before the setting was switched off has nothing left to be approved.
@@ -4562,7 +4570,7 @@ export class DeckPanel {
         // to, so there is nothing more accurate to fall back to here either.
         const run = this.run(m.runKey);
         const ticketKey = run ? ticketKeyFor(run, this.connector) : m.runKey;
-        const t = readTemplates(this.flowIo, this.templatesDir).find((x) => x.id === m.templateId);
+        const t = this.allTemplates().find((x) => x.id === m.templateId);
         if (!t) {
           this.post({ type: "toast", level: "error", message: "That template is no longer on disk." });
           return;
@@ -4633,6 +4641,18 @@ export class DeckPanel {
       }
       case "flow:renameTemplate": {
         if (!getConfig().orchestrator) return;
+        // A stale drawer — open from before this shipped, or simply not
+        // re-rendered since — can still send a rename for a built-in even
+        // though the button is disabled (Task 14). Refuse here too, the same
+        // discipline `flow:saveTemplate`'s `canBindTicket` recheck follows: a
+        // starter has no file on disk to overwrite.
+        if (isBuiltinTemplateId(m.templateId)) {
+          this.post({
+            type: "toast", level: "error",
+            message: "That is a built-in template. Duplicate it to make a version you can change.",
+          });
+          return;
+        }
         const existing = readTemplates(this.flowIo, this.templatesDir).find((t) => t.id === m.templateId);
         if (!existing) return;
         writeTemplate(this.flowIo, this.templatesDir, { ...existing, name: m.name });
@@ -4648,6 +4668,13 @@ export class DeckPanel {
         // in `Flow.fromTemplate` (the Templates tab's "on N cards" count reads
         // it), so a delete leaves that id dangling — a count nobody asks for any
         // more, never a broken workflow.
+        if (isBuiltinTemplateId(m.templateId)) {
+          this.post({
+            type: "toast", level: "error",
+            message: "That is a built-in template. Duplicate it to make a version you can change.",
+          });
+          return;
+        }
         const existing = readTemplates(this.flowIo, this.templatesDir).some((t) => t.id === m.templateId);
         if (!existing) return;
         removeTemplate(this.flowIo, this.templatesDir, m.templateId);
@@ -4657,14 +4684,18 @@ export class DeckPanel {
       }
       case "flow:duplicateTemplate": {
         if (!getConfig().orchestrator) return;
-        const templates = readTemplates(this.flowIo, this.templatesDir);
-        const existing = templates.find((t) => t.id === m.templateId);
+        // Deliberately NOT guarded on `isBuiltinTemplateId`: duplicating a
+        // built-in is the supported path to owning one, so the lookup must
+        // resolve a starter as well as an on-disk template.
+        const existing = this.allTemplates().find((t) => t.id === m.templateId);
         if (!existing) return;
         // The same re-mint-past-a-collision discipline `flow:create` uses:
         // `newFlowId` is probabilistic, and a collision here must not silently
-        // overwrite an unrelated template instead of creating a copy.
+        // overwrite an unrelated template instead of creating a copy. Collision
+        // is checked against disk only — `newFlowId` always starts with "f",
+        // never `BUILTIN_PREFIX`, so it cannot collide with a starter id.
         const now = Date.now();
-        const taken = new Set(templates.map((t) => t.id));
+        const taken = new Set(readTemplates(this.flowIo, this.templatesDir).map((t) => t.id));
         let id = newFlowId(now);
         for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
         if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky

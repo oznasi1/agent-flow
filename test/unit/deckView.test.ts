@@ -5884,6 +5884,33 @@ describe("orchestrator flows", () => {
       const toast = posts(p).find((m) => m.type === "toast");
       expect(toast?.message).toMatch(/no planned step/i);
     });
+
+    // The bug this task fixes: a built-in starter is never on disk
+    // (`readTemplates` skips a file claiming a `builtin-` id, store.ts), and
+    // this handler used to look the template up ONLY on disk — so attaching
+    // any of the three starters the drawer offers always hit the "no longer
+    // on disk" refusal above. `allTemplates()` (deckView.ts) is what makes a
+    // starter resolvable here. The starter's own planned node carries no
+    // `repos`/`mode` (starters.ts, deliberately), so this also exercises
+    // `instantiate`'s fallback onto the card's repos and the config's prompt
+    // modes — h.runs supplies the former, the config mock's default
+    // `promptModes` the latter.
+    it("attaches a built-in starter onto a card", async () => {
+      setConfig({ orchestrator: true });
+      h.runs = [mkRun()];
+      const { send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-1", templateId: "builtin-ship-it" });
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      expect(written.fromTemplate).toBe("builtin-ship-it");
+      const planned = written.nodes.find((n) => n.kind === "planned") as
+        { ticketKey: string; repos: string[] } | undefined;
+      expect(planned?.ticketKey).toBe("PROJ-1");
+      // The starter's planned node ships with `repos: []` on purpose
+      // (starters.ts) — `instantiate` falls back to the card's own repos,
+      // which is `mkRun()`'s single "svc" checkout.
+      expect(planned?.repos).toEqual(["svc"]);
+    });
   });
 
   describe("flow:detach — removing an attached workflow (Task 8)", () => {
@@ -5984,6 +6011,26 @@ describe("orchestrator flows", () => {
       expect(h.writeTemplate).not.toHaveBeenCalled();
     });
 
+    // A built-in has no file on disk to overwrite, so "ignores an unknown id"
+    // (above) is not the same refusal as "recognized this as a built-in and
+    // refused on purpose" — both leave `writeTemplate` uncalled. Asserting the
+    // specific toast is what tells them apart: without the
+    // `isBuiltinTemplateId` guard in the handler, this would fall through to
+    // the ordinary not-found path (`existing` is undefined for a builtin- id,
+    // since `readTemplates` never returns one) and post no toast at all, so
+    // this test fails the moment the guard is removed.
+    it("refuses to rename a built-in starter, with the specific built-in toast", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:renameTemplate", templateId: "builtin-ship-it", name: "My ship it" });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast).toMatchObject({
+        level: "error",
+        message: "That is a built-in template. Duplicate it to make a version you can change.",
+      });
+    });
+
     it("flow:deleteTemplate leaves workflows already made from it alone", async () => {
       setConfig({ orchestrator: true });
       h.templates = [mkTemplate("k1", "Ship it")];
@@ -6000,6 +6047,22 @@ describe("orchestrator flows", () => {
       const { send } = await openPanel();
       await send({ type: "flow:deleteTemplate", templateId: "nope" });
       expect(h.removeTemplate).not.toHaveBeenCalled();
+    });
+
+    // Same reasoning as the rename refusal above: a built-in is not on disk,
+    // so "ignores an unknown id" and "refused because it is a built-in" both
+    // leave `removeTemplate` uncalled — only the specific toast tells them
+    // apart, and only that assertion fails when the guard is removed.
+    it("refuses to delete a built-in starter, with the specific built-in toast", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:deleteTemplate", templateId: "builtin-ship-it" });
+      expect(h.removeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast).toMatchObject({
+        level: "error",
+        message: "That is a built-in template. Duplicate it to make a version you can change.",
+      });
     });
 
     it("flow:duplicateTemplate writes a copy whose name is derived from, but different from, the original", async () => {
@@ -6023,6 +6086,26 @@ describe("orchestrator flows", () => {
       const { send } = await openPanel();
       await send({ type: "flow:duplicateTemplate", templateId: "nope" });
       expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+
+    // The other half of the bug this task fixes: `flow:duplicateTemplate` used
+    // the same disk-only lookup `flow:attach` did, so "Duplicate it to make a
+    // version you can change" — the very message the refusal toasts above
+    // advertise — silently did nothing for a built-in. `allTemplates()` is
+    // deliberately NOT guarded on `isBuiltinTemplateId` here: duplicating a
+    // built-in is the supported path to owning one, not a refusal.
+    it("duplicates a built-in starter into an ordinary user template with a fresh, non-builtin id", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:duplicateTemplate", templateId: "builtin-ship-it" });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const written = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      // Not the built-in's own id — `newFlowId` mints a fresh one, always
+      // prefixed "f…", never `builtin-` (flowIo.ts).
+      expect(written.id).not.toMatch(/^builtin-/);
+      expect(written.id).not.toBe("builtin-ship-it");
+      expect(written.name).not.toBe("Ship it");
+      expect(written.name).toContain("Ship it");
     });
 
     it("flow:duplicateTemplate refuses to write rather than clobber when every re-mint collides", async () => {
