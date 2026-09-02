@@ -3668,6 +3668,42 @@ describe("the card's workflow chip", () => {
     renderBoard({ flows: [shipItOn("PROJ-142")], orchEnabled: false });
     expect(screen.queryByTitle(/Ship it/)).toBeNull();
   });
+
+  // The anti-drift test the whole `workflowByCard` design rests on: one board,
+  // one card carrying a workflow, and both the board's own chip and the
+  // Active list's row for that same card must name the identical flow and the
+  // identical state — because both are read off the one map DeckApp builds,
+  // never a second hand-rolled derivation. `gateOn` gives a "waiting-on-you"
+  // card rather than the default "advancing" one, so the state half of this
+  // assertion is not the one status every fixture in this file already
+  // defaults to.
+  it("shows the same workflow on a card's chip and in the Active list", () => {
+    renderBoard({ flows: [gateOn("PROJ-142", "approve deploy")] });
+
+    // The board's own chip: name and status class, exactly as the "says what
+    // a waiting workflow wants" and "hues a %s card's chip" tests above read
+    // them.
+    expect(screen.getByText(/Ship it — approve deploy/)).toBeTruthy();
+    expect(document.querySelector(".c-wf")!.className).toBe("c-wf waiting-on-you");
+
+    // Into the drawer's Active screen: the header button always opens onto
+    // Canvas (a later task adds the two buttons that go straight to a named
+    // screen), so this switches tabs the same way OrchestratorDrawer's own
+    // test suite does.
+    fireEvent.click(chip());
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    fireEvent.click(within(nav).getByRole("tab", { name: "Active" }));
+
+    // Scoped to the drawer alone: the board's own tracked-key button for this
+    // same run also carries the text "PROJ-142", and an unscoped query would
+    // match both.
+    const row = within(drawer()!).getByRole("button", { name: /PROJ-142/ });
+    // The same flow name, and the same state — the two facts a chip and a row
+    // could disagree about if either read its own, separate derivation.
+    expect(within(row).getByText("Ship it")).toBeTruthy();
+    expect(within(row).getByText("waiting on you")).toBeTruthy();
+    expect(row.closest("li")).toHaveAttribute("data-status", "waiting-on-you");
+  });
 });
 
 // `workflowChipTrailer`'s own defensive branch, tested directly rather than

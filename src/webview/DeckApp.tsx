@@ -4,12 +4,13 @@ import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromp
 import type { AccountSlot } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
-import { bindsRun, boundTicketKeyOf, cardWorkflow, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
+import { bindsRun, boundTicketKeyOf, cardWorkflow, rankByState, type CardWorkflow, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
 import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
 import { prSignals, type MergeTarget } from "../engine/bucket";
 import { DRAG_SEP, OrchestratorDrawer, OrchTarget, OrchView } from "./OrchestratorDrawer";
+import type { WorkflowRow } from "./WorkflowList";
 import { ReviewStrip } from "./ReviewStrip";
 import { LoadingMark } from "./LoadingMark";
 import { CardKindIcon } from "./icons";
@@ -255,6 +256,19 @@ export function retainedOpenTarget(cur: OrchTarget | null, posted: Flow[]): Orch
   if (cur?.kind === "template") return cur;
   if (cur && posted.some((f) => f.id === cur.id)) return cur;
   return null;
+}
+
+/** The identifier text the board's own key chip prints for this run — the
+ * inferred ticket key on a local card that has one, the tracked key
+ * otherwise, and `keyLabel`'s short word for anything untracked. Mirrors
+ * `Card`'s own three-way branch (below) so the Active list names a card by
+ * the exact text the board itself already shows for it, rather than a second
+ * hand-written guess at the same rule. */
+function boardKeyLabel(r: RunStatus): string {
+  const inferredKey = runKind(r.run) === "local" ? (r.inferredTicketKey ?? "") : "";
+  if (inferredKey) return inferredKey;
+  if (isTicketRun(r.run)) return r.run.key;
+  return keyLabel(r.run);
 }
 
 function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, selected, onSelect, workflow }: {
@@ -918,10 +932,14 @@ export function DeckApp(): JSX.Element {
   // function, not a second hand-written copy of the same three-step chain: a
   // ticket-key rule that changed in one call site and not the other would let
   // a card's own chip and its own drawer disagree about which workflow it
-  // carries, with nothing failing to say so. Called once per card, per board
-  // pass, from THIS closure — not from `Card` itself, which re-renders
+  // carries, with nothing failing to say so. Computed ONCE per card, per board
+  // pass, into the map below — not from `Card` itself, which re-renders
   // independently and would otherwise repeat the derivation on every one of
-  // ITS OWN re-renders rather than once per pass over the board.
+  // ITS OWN re-renders rather than once per pass over the board, and not a
+  // second time for the Active list: that list's rows are built FROM this same
+  // map (below), which is what makes a card's chip and its own row in that
+  // list structurally unable to disagree — there is only one place either of
+  // them could have come from.
   //
   // The cost actually measured: `workflowState` runs `previewFlow` internally,
   // which runs `evaluateFlow` twice, each rebuilding a `Map` over every run on
@@ -938,8 +956,50 @@ export function DeckApp(): JSX.Element {
   // of this task's files), not of computing it once per card instead of once
   // per card per `Card` re-render — this fix removes the latter multiplier; it
   // does not remove the former.
-  const chipWorkflow = (c: DeckCard): { flow: Flow; state: WorkflowState } | undefined =>
-    orchEnabled ? cardWorkflow(flows, c.status, runs, now, branchCi) : undefined;
+  //
+  // `now` is in the dep list for correctness, not for a cache hit: it is
+  // deliberately unmemoized above (see that line's own comment) and
+  // `forceTick`'s 1s interval is only one of several things that re-render
+  // this component, so in practice this recomputes on nearly every render —
+  // about as often as the old per-card call did. The memo is not buying a
+  // cache here; the property it buys is the one paragraph up (one derivation,
+  // not two), which holds regardless of how often the effect body reruns.
+  const workflowByCard = React.useMemo(() => {
+    const m = new Map<string, CardWorkflow>();
+    if (!orchEnabled) return m;
+    for (const c of cards) {
+      const w = cardWorkflow(flows, c.status, runs, now, branchCi);
+      if (w) m.set(c.id, w);
+    }
+    return m;
+  }, [orchEnabled, cards, flows, runs, now, branchCi]);
+
+  // The Active screen's rows — one per card carrying a workflow, read from the
+  // exact same map the board's own chip reads below, so the two can never name
+  // a different workflow or a different state for the same card. Ranked with
+  // `rankByState` itself (not a second hand-written copy of `attach.ts`'s RANK
+  // table): sorting the entries by where their own flow lands in that
+  // function's own output keeps this list's precedence and the drawer's
+  // canvas-screen precedence (which also calls `rankByState`) the same rule,
+  // read once.
+  const activeRows: WorkflowRow[] = React.useMemo(() => {
+    const entries: { card: DeckCard; w: CardWorkflow }[] = [];
+    for (const c of cards) {
+      const w = workflowByCard.get(c.id);
+      if (w) entries.push({ card: c, w });
+    }
+    const order = rankByState(entries.map((e) => e.w.flow), runs, now, branchCi);
+    const rank = new Map(order.map((f, i) => [f, i]));
+    return entries
+      .slice()
+      .sort((a, b) => (rank.get(a.w.flow) ?? 0) - (rank.get(b.w.flow) ?? 0))
+      .map((e) => ({
+        cardId: e.card.id,
+        ticketKey: boardKeyLabel(e.card.status),
+        title: e.card.status.run.summary,
+        workflow: e.w,
+      }));
+  }, [cards, workflowByCard, runs, now, branchCi]);
 
   // One card, wherever it lands — a lane renders exactly what an unlaned column
   // does, so a lane can never quietly grow its own kind of card.
@@ -952,7 +1012,7 @@ export function DeckApp(): JSX.Element {
       }}
       selected={c.id === selId}
       onSelect={() => { setOpenFlowId(null); setSelId((cur) => (cur === c.id ? null : c.id)); }}
-      workflow={chipWorkflow(c)} />
+      workflow={workflowByCard.get(c.id)} />
   );
 
   return (
@@ -1258,10 +1318,11 @@ export function DeckApp(): JSX.Element {
           templates={templates}
           view={orchView}
           onView={setOrchView}
-          // Deliberately empty: a later task derives the real rows from the
-          // board (one per card carrying a workflow, `cardWorkflow`'s own
-          // derivation) — this one only builds the Active screen's shell.
-          rows={[]}
+          // One row per card carrying a workflow, read from `workflowByCard` —
+          // the SAME map the board's own chip reads above, so this list and
+          // the board can never name a different workflow, or a different
+          // state, for the same card.
+          rows={activeRows}
           // Mirrors `DeckDetail`'s own `onOpenWorkflow` the other way: that
           // one opens a workflow FROM a card (closes the card, opens the
           // drawer); this one opens a card FROM its workflow row (closes the
