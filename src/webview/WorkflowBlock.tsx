@@ -50,8 +50,13 @@ export interface WorkflowBlockProps {
 }
 
 /** The block header's status chip. Prose, not a re-spelling of the status id —
- * `waiting-on-you` reads as a class name, not a sentence a reader should see. */
-const STATUS_LABEL: Record<WorkflowStatus, string> = {
+ * `waiting-on-you` reads as a class name, not a sentence a reader should see.
+ *
+ * Exported so `WorkflowList.tsx` (the Active list's row) reads the same
+ * mapping rather than writing a second English spelling of the same five
+ * statuses — the wording drift this file's own header warns about applies to
+ * a status label exactly as much as to a step's receipt. */
+export const STATUS_LABEL: Record<WorkflowStatus, string> = {
   disarmed: "disarmed",
   advancing: "advancing",
   "waiting-on-you": "waiting on you",

@@ -1179,4 +1179,25 @@ export const DECK_CSS = `
     font: inherit; padding: 5px 7px; border-radius: var(--r-chip); cursor: pointer; }
   .wf-picker-opt:hover { background: var(--vscode-list-hoverBackground); }
   .wf-picker-empty { padding: 7px; font-size: var(--t-body); color: var(--dim); }
+
+  /* WorkflowList — the Active list: every card carrying a workflow, one row
+     each, so a reader does not have to open each drawer to see where its
+     workflow stands. Reuses \`.wf-name\`, \`.wf-chip.wf-*\` and \`.wf-count\`
+     verbatim from \`WorkflowBlock\` above rather than a second copy of the
+     same three rules — same words, same hues, in a new place. The row itself
+     is one big button (the whole row opens the card, not just the ticket
+     key), styled to disappear into a plain list line until hovered. */
+  .wfl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .wfl-row { border-bottom: 1px solid var(--hair); }
+  .wfl-row:last-child { border-bottom: 0; }
+  .wfl-open { display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 8px 4px; border: 0; background: transparent; color: inherit;
+    font: inherit; text-align: left; cursor: pointer; }
+  .wfl-open:hover { background: var(--vscode-list-hoverBackground); }
+  /* A ticket key is an identifier, so mono; the title beside it is a sentence
+     fragment and stays in the UI font, matching the deck's standing rule. */
+  .wfl-ticket { flex: none; font-family: var(--mono); color: var(--dim); }
+  .wfl-title { flex: 1 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .wfl-empty { color: var(--dim); padding: 8px 4px; }
 `;
