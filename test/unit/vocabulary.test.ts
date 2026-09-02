@@ -248,8 +248,8 @@ const FLOW_LEGITIMATE: { location: string; text: string; why: string }[] = [
   // src/webview/DeckDetail.tsx: message-type wire values sent to the host.
   // Same class of hit as the orchestrator condition keys in LEGITIMATE above —
   // a value the code and the host must agree on byte-for-byte, not copy a
-  // reader sees. `flow:attach`/`flow:detach` are new to this feature;
-  // `flow:arm`/`flow:answerGate`/`flow:resetEdge` predate it.
+  // reader sees. `flow:attach`/`flow:detach`/`flow:openOutput` are new to this
+  // feature; `flow:arm`/`flow:answerGate`/`flow:resetEdge` predate it.
   { location: "src/webview/DeckDetail.tsx", text: "flow:arm", why: "message type sent to the host, a wire value" },
   { location: "src/webview/DeckDetail.tsx", text: "flow:detach", why: "message type sent to the host, a wire value" },
   { location: "src/webview/DeckDetail.tsx", text: "flow:answerGate",
@@ -257,6 +257,8 @@ const FLOW_LEGITIMATE: { location: string; text: string; why: string }[] = [
   { location: "src/webview/DeckDetail.tsx", text: "flow:resetEdge",
     why: "message type sent to the host, a wire value" },
   { location: "src/webview/DeckDetail.tsx", text: "flow:attach", why: "message type sent to the host, a wire value" },
+  { location: "src/webview/DeckDetail.tsx", text: "flow:openOutput",
+    why: "message type sent to the host, a wire value" },
   // src/webview/OrchestratorDrawer.tsx: message-type wire values, same class
   // as above. `flow:saveTemplate`/`flow:duplicateTemplate`/`flow:renameTemplate`/
   // `flow:deleteTemplate` are new to this feature; the rest predate it.

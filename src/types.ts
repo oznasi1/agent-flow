@@ -710,6 +710,16 @@ export type InboundMessage =
    * because that is where `gateAnswer` lives. First answer wins; see the
    * handler in deckView.ts. */
   | { type: "flow:answerGate"; id: string; edgeId: string; answer: "approved" | "rejected" }
+  /** Open one edge's command output in an editor tab. `edgeId` names the rule
+   * whose `fired`/`errored` journal line the host should read, most recent
+   * first — never a payload the webview builds itself: output can exceed the
+   * journal's own truncation window (see `OUTPUT_HEAD_BYTES`/`OUTPUT_TAIL_BYTES`
+   * in journal.ts) and the drawer is 620px wide, so the text goes straight from
+   * the journal to a document the host opens, never back across the wire to
+   * this message's sender. A flow/edge naming nothing on disk, or an edge that
+   * never captured output, is a silent refusal reported as a toast — see
+   * `findEdgeOutput` (journal.ts) and its handler in deckView.ts. */
+  | { type: "flow:openOutput"; id: string; edgeId: string }
   // The resume gate (Task 4): approving clears the gate so the next pass fires
   // normally; disarming turns the flow off instead. Neither message performs
   // anything itself — see DeckPanel.advanceArmedFlows.

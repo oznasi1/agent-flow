@@ -482,6 +482,7 @@ export function DeckDetail({
               onDetach={() => wf && send({ type: "flow:detach", id: wf.id })}
               onAnswerGate={(edgeId, answer) => wf && send({ type: "flow:answerGate", id: wf.id, edgeId, answer })}
               onResetEdge={(edgeId) => wf && send({ type: "flow:resetEdge", id: wf.id, edgeId })}
+              onOutput={(edgeId) => wf && send({ type: "flow:openOutput", id: wf.id, edgeId })}
               onOpenInWorkflows={() => wf && onOpenWorkflow(wf.id)}
             />
             {pickerOpen && (

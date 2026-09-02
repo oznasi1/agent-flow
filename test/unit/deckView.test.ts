@@ -482,7 +482,13 @@ vi.mock("../../src/engine/orchestrator/flowIo", () => ({
       h.journalLines.push(text.trimEnd());
     },
     size: () => null,
-    readFile: () => null,
+    // Reflects back whatever `h.journalLines` holds — real lines, checksum and
+    // all, whether they arrived via this same `append` or were seeded directly
+    // by a test with the real `appendEvent` (see `seedJournal` below) — so
+    // `flow:openOutput`'s real `readJournal` call has something honest to
+    // read. `null` (not `""`) when there is nothing, matching `JournalIo`'s own
+    // contract that a missing journal reads as empty, never as an error.
+    readFile: () => (h.journalLines.length > 0 ? `${h.journalLines.join("\n")}\n` : null),
     replace: () => {},
   }),
 }));
@@ -617,7 +623,7 @@ import { COMMAND_TIMEOUT_MS } from "../../src/engine/orchestrator/command";
 // a test that restated the number could not catch the call site passing a literal.
 // The real thresholds `truncateOutput` elides at — restating them here could not
 // catch the call site dropping the call.
-import { OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES } from "../../src/engine/orchestrator/journal";
+import { OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES, appendEvent, JournalEventInput } from "../../src/engine/orchestrator/journal";
 import { LOCK_TTL_MS } from "../../src/engine/orchestrator/lock";
 import { ACTION_MISMATCH_PREFIX } from "../../src/engine/orchestrator/model";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
@@ -706,6 +712,19 @@ const settled = () => new Promise<void>((r) => setTimeout(r, 0));
 
 /** The journal events this pass recorded, parsed. Order is write order. */
 const journal = () => h.journalLines.map((l) => JSON.parse(l) as Record<string, unknown>);
+
+/** Seeds `h.journalLines` with a real, correctly checksummed line — through the
+ * REAL `appendEvent`, not a hand-built JSON string — so `flow:openOutput`'s own
+ * `readJournal` call (also the real function, via the mocked `nodeJournalIo`
+ * above) has genuine lines to parse rather than something only shaped like
+ * one. `dir` and `mint` do not matter here: the mocked `append` ignores its
+ * path argument, and this suite does not assert on ids. */
+const seedJournal = (flowId: string, ev: JournalEventInput, nowMs: number): void => {
+  appendEvent(
+    { append: (_p, text) => h.journalLines.push(text.trimEnd()), size: () => null, readFile: () => null, replace: () => {} },
+    "/unused", flowId, ev, nowMs,
+  );
+};
 
 /** The gh probe is kicked off inside the very tick that reads it, so it can
  * never be resolved by the time that same tick's `ghReady()` call returns —
@@ -10508,6 +10527,119 @@ describe("arm, disarm and reset", () => {
     expect(e.gateAnswer).toBeUndefined();
     expect(e.firedAt).toBeUndefined();
     expect(e.performed).toBeUndefined();
+  });
+
+  describe("flow:openOutput", () => {
+    it("opens a fired edge's captured output in a plain-text editor tab", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "deployed ok" }, 1_000);
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({ content: "deployed ok", language: "plaintext" });
+      expect(window.showTextDocument).toHaveBeenCalledWith(expect.anything(), { preview: true });
+    });
+
+    it("opens an errored edge's captured output too", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "errored", edge: "e1", from: "a", to: "z", action: "run", error: "boom", output: "stack trace" }, 1_000);
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({ content: "stack trace", language: "plaintext" });
+    });
+
+    it("shows the LATEST run's output, not an earlier one, when a Reset separates two runs", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "old run" }, 1_000);
+      seedJournal("f1", { kind: "reset", edge: "e1" }, 1_001);
+      seedJournal("f1", { kind: "errored", edge: "e1", from: "a", to: "z", action: "run", error: "boom", output: "new run" }, 1_002);
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({ content: "new run", language: "plaintext" });
+    });
+
+    it("toasts honestly when nothing has been journaled for this workflow", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast).toMatchObject({ level: "info" });
+      expect(toast.message).toMatch(/nothing.*recorded/i);
+    });
+
+    it("toasts honestly when this step hasn't run yet, distinct from nothing journaled at all", async () => {
+      setConfig({ orchestrator: true });
+      // The journal is not empty — a SIBLING edge fired — but e1 itself never has.
+      seedJournal("f1", { kind: "fired", edge: "e2", from: "a", to: "z", action: "run", note: "", output: "sibling output" }, 1_000);
+      const { p, send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast.message).toMatch(/hasn't run yet/i);
+    });
+
+    it("toasts honestly when the run captured no output, distinct from never having run", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "" }, 1_000);
+      const { p, send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast.message).toMatch(/no output was recorded/i);
+    });
+
+    it("toasts an ERROR, distinct from the three info refusals, when the journal itself cannot be read", async () => {
+      // `readJournal` never throws for a missing or unreadable FILE — see
+      // `JournalIo`'s own doc comment — so the one path left that can throw is
+      // `journalPath` rejecting a flow id that fails `VALID_FLOW_ID`. Every
+      // other id this suite sends comes off disk; this one is deliberately
+      // shaped like something a webview payload could carry that no reader
+      // upstream has validated yet.
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "../evil", edgeId: "e1" });
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast).toMatchObject({ level: "error" });
+      expect(toast.message).toMatch(/couldn't read this workflow's journal/i);
+    });
+
+    it("does nothing when the orchestrator setting is off", async () => {
+      setConfig({ orchestrator: false });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "deployed ok" }, 1_000);
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+    });
+
+    it("emits flow_action open_output only once the editor actually opened", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "deployed ok" }, 1_000);
+      const { send } = await openPanel();
+      trackSpy.mockClear();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      const flowActions = trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action");
+      expect(flowActions.map((e: any) => e.action)).toEqual(["open_output"]);
+    });
+
+    it("emits nothing for a refusal — no editor opened, nothing to report", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      trackSpy.mockClear();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      const flowActions = trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action");
+      expect(flowActions).toEqual([]);
+    });
+
+    it("never writes anything — a read, not a mutation", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "deployed ok" }, 1_000);
+      const linesBefore = h.journalLines.length;
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      expect(h.journalLines).toHaveLength(linesBefore);
+    });
   });
 
   it("flow:save preserves the host's own firedAt when the drawer's copy is stale", async () => {

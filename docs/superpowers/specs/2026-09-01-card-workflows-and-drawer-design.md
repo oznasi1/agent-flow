@@ -168,7 +168,7 @@ and it follows relative imports only).
 | advancing | `previewFlow` verdict per rule | current step ringed, its reason as the receipt |
 | waiting on you | `BlockedNote.reason === "awaiting-answer"` | amber gate step, `Approve` / `Reject` inline |
 | stopped | any edge carries `error` | red step, `Output` / `Reset` inline |
-| done | no rule left in play | all ticks, `Detach` offered |
+| done | no rule left in play | all ticks, `Detach` offered, `Output` on any `run` step |
 
 `done` is the absence of a pending rule, not a stored flag — same reasoning as attachment.
 
@@ -242,17 +242,11 @@ in v1.
 
 ## Not in this build
 
-Three things this document promises that shipped without.
+Two things this document promises that shipped without. (A third,
+`Output` on a failed step, shipped after this document was first written —
+see below.)
 
-1. **`Output` on a failed step.** §5's table promises "Output / Reset inline"
-   for the `stopped` state. Only Reset shipped. Command output goes to the
-   Deck's own output channel and nowhere else — reading it back into the
-   drawer needs a host round trip that does not exist, and building one is
-   deferred alongside the journal-backed History tab §9 already defers. What
-   the user gets instead: the failed edge's own `error` stamp surfaces as the
-   step's receipt (`WorkflowBlock.tsx`'s `stepText`), so the reason the rule
-   failed is on screen — just not the command's stdout/stderr.
-2. **One-step Replace.** §2 promises that `Attach workflow…` on a card that
+1. **One-step Replace.** §2 promises that `Attach workflow…` on a card that
    already carries one "offers Replace". The host supports `flow:attach`'s
    `replace: true` and it is tested, but no UI ever sends it: the picker only
    opens while the block shows `flow === undefined` (nothing attached), and
@@ -263,7 +257,7 @@ Three things this document promises that shipped without.
    Attach — and on an *advancing* workflow the block's header offers Disarm,
    not Detach (only `done`/`stopped` offer it), so swapping an advancing
    workflow means opening the Workflows drawer and deleting the flow there.
-3. **The Templates tab is unreachable with zero workflows.**
+2. **The Templates tab is unreachable with zero workflows.**
    `OrchestratorDrawer.tsx` returns `null` whenever no flow is open
    (`if (!flow) return null`), and the picker holding the Running/Templates
    tabs renders only past that point. A user who deletes their last workflow
@@ -273,6 +267,18 @@ Three things this document promises that shipped without.
    workflow…` picker still lists every template by name — attaching one still
    works — it is only template *management* (§8) that is unreachable in this
    state.
+
+**`Output` on a stopped step**, promised by §5's table, shipped in a later
+pass on this same branch: command output lived only in the flow journal and
+the Deck's output channel, and reading the journal back needed a host round
+trip (`flow:openOutput`) that did not exist when this document was first
+written. It opens the edge's most recent `fired`/`errored` output in its own
+editor tab — never back across the wire, since output can exceed the 620px
+drawer many times over — and refuses honestly (a toast, never a blank tab)
+when nothing was journaled, the step never ran, or it ran without capturing
+output. Shipped wider than §5 promised: also offered on a *succeeded*
+`run` step, not only a failed one, since a command's own output is exactly as
+often worth reading back after success as after failure.
 
 ## File structure
 

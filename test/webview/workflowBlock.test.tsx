@@ -18,6 +18,19 @@ const notify = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "
 
 const edge = (id: string): FlowEdge => ({ id, from: "n1", to: "n2", cond: { kind: "pr-merged" } });
 
+// A run-action fixture, for the Output button: it is offered only on a `run`
+// rule (see `WorkflowBlock`'s own `showOutput`), so the shared `flow` above —
+// every edge into a notify terminal — can never exercise it.
+const command = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "command", run: "deploy.sh" });
+const runFlow: Flow = {
+  id: "f1",
+  name: "Ship it",
+  armed: true,
+  createdAt: 0,
+  nodes: [place("n1", "PROJ-142"), command("n2")],
+  edges: [edge("e1"), edge("e2")],
+};
+
 // Five edges — enough for every fixture below (`twoDone`, `twoWaiting`, and the
 // single-step gate/fail cases) to name real edges without each test having to
 // mint its own flow. A `state.steps` array that omits some of these edges is
@@ -53,6 +66,7 @@ function makeBase(): WorkflowBlockProps {
     onDetach: vi.fn(),
     onAnswerGate: vi.fn(),
     onResetEdge: vi.fn(),
+    onOutput: vi.fn(),
     onOpenInWorkflows: vi.fn(),
   };
 }
@@ -148,6 +162,86 @@ describe("WorkflowBlock", () => {
     await waitFor(() => expect(screen.getByText("exit 1 · 3 assertions failed")).toBeTruthy());
     await userEvent.click(screen.getByRole("button", { name: "Reset" }));
     expect(base.onResetEdge).toHaveBeenCalledWith("e2");
+  });
+
+  it("does not offer Output on a failed step whose target isn't a run rule", () => {
+    // `flow`'s edges all point at a notify terminal — only a `run` rule ever
+    // captures command output, so a click here could only ever be met with a
+    // refusal. The Reset test above already covers this exact fixture; this
+    // pins the absence the Output feature must not disturb.
+    const base = makeBase();
+    render(<WorkflowBlock {...base} state={{
+      status: "stopped", done: 1, total: 2,
+      steps: [{ edgeId: "e2", state: "fail", receipt: "exit 1 · 3 assertions failed" }],
+    }} />);
+    expect(screen.queryByRole("button", { name: "Output" })).toBeNull();
+  });
+
+  it("offers Output alongside Reset on a failed run rule, and calls back with the edge id", async () => {
+    const base = makeBase();
+    render(<WorkflowBlock {...base} flow={runFlow} state={{
+      status: "stopped", done: 0, total: 2,
+      steps: [{ edgeId: "e1", state: "fail", receipt: "exit 1" }],
+    }} />);
+    await userEvent.click(screen.getByRole("button", { name: "Output" }));
+    expect(base.onOutput).toHaveBeenCalledWith("e1");
+    // Reset survives right beside it — Output is additive, not a replacement.
+    expect(screen.getByRole("button", { name: "Reset" })).toBeTruthy();
+  });
+
+  it("offers Output on a run rule that succeeded, not just one that failed", async () => {
+    const base = makeBase();
+    render(<WorkflowBlock {...base} flow={runFlow} state={{
+      status: "done", done: 1, total: 1,
+      steps: [{ edgeId: "e1", state: "done", receipt: "ran · exit 0 · 12s" }],
+    }} />);
+    await userEvent.click(screen.getByRole("button", { name: "Output" }));
+    expect(base.onOutput).toHaveBeenCalledWith("e1");
+  });
+
+  it("does not offer Output on a run rule that hasn't fired yet", () => {
+    // `showOutput` gates on `step.state` being `done` or `fail`, not merely on
+    // the target being a `run` rule — a step still `now`/`waiting` has no
+    // journal line at all, and offering the button would only ever earn the
+    // user a "hasn't run yet" refusal.
+    const base = makeBase();
+    render(<WorkflowBlock {...base} flow={runFlow} state={{
+      status: "advancing", done: 0, total: 2,
+      steps: [{ edgeId: "e1", state: "now" }],
+    }} />);
+    expect(screen.queryByRole("button", { name: "Output" })).toBeNull();
+  });
+
+  it("does not offer Output on a done step whose target isn't a run rule", () => {
+    const base = makeBase();
+    render(<WorkflowBlock {...base} state={{ status: "done", done: 2, total: 2, steps: twoDone }} />);
+    expect(screen.queryByRole("button", { name: "Output" })).toBeNull();
+  });
+
+  it("keeps two Output buttons distinguishable when a done and a failed run step are both on screen", async () => {
+    // Same reasoning `WorkflowStep`'s own `aria-describedby` comment gives for
+    // Approve/Reject: several identically-named buttons on one screen need a
+    // per-step DESCRIPTION, not a different accessible NAME, or a screen
+    // reader announces "Output" twice with nothing to tell them apart.
+    const twoRuns: Flow = {
+      id: "f2", name: "Two runs", armed: true, createdAt: 0,
+      nodes: [place("n1", "PROJ-1"), command("n2"), command("n3")],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "ci-passed" } },
+      ],
+    };
+    const base = makeBase();
+    render(<WorkflowBlock {...base} flow={twoRuns} state={{
+      status: "stopped", done: 1, total: 2,
+      steps: [
+        { edgeId: "e1", state: "done", receipt: "ran · exit 0 · 12s" },
+        { edgeId: "e2", state: "fail", receipt: "exit 1" },
+      ],
+    }} />);
+    const outputs = screen.getAllByRole("button", { name: "Output" });
+    expect(outputs).toHaveLength(2);
+    expect(outputs[0].getAttribute("aria-describedby")).not.toBe(outputs[1].getAttribute("aria-describedby"));
   });
 
   it("offers Detach when every rule has settled", () => {

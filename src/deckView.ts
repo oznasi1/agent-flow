@@ -9,7 +9,7 @@ import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps } from "./engine/orchestrator/model";
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
-import { appendEvent, truncateOutput, JournalEventInput } from "./engine/orchestrator/journal";
+import { appendEvent, truncateOutput, findEdgeOutput, readJournal, JournalEvent, JournalEventInput } from "./engine/orchestrator/journal";
 import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, toTemplate } from "./engine/orchestrator/templates";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
@@ -4382,6 +4382,55 @@ export class DeckPanel {
         this.journal(m.id, { kind: "answered", edge: m.edgeId, answer: m.answer }, Date.now());
         trackEvent({ name: "flow_action", action: "answer_gate" });
         this.postFlows();
+        return;
+      }
+      case "flow:openOutput": {
+        if (!getConfig().orchestrator) return;
+        // Host-ward, on purpose: output can be far larger than the receipt
+        // sentences that already ride `deck:flows`, and the drawer is 620px
+        // wide. Rather than shipping that payload back across the wire, this
+        // reads the journal here and opens an editor tab directly — the same
+        // shape `inspect`'s `diff` action already uses for a document nobody
+        // needs to keep once they've read it: `openTextDocument({ content })`
+        // with no `uri`, so nothing is written to the workspace and closing the
+        // tab is the whole cleanup.
+        let events: JournalEvent[];
+        try {
+          events = readJournal(this.journalIo, this.flowsDir, m.id);
+        } catch (e) {
+          // The one path `readJournal` does not swallow: `journalPath` throws
+          // for a flow id that fails `VALID_FLOW_ID`, and unlike every other
+          // reader of a flow id here, `m.id` comes straight off the wire rather
+          // than off disk. Every other failure to read — a missing file, an
+          // unreadable one — is deliberately NOT an error (see `JournalIo`'s
+          // own doc comment) and is indistinguishable from "nothing journaled
+          // yet" below, on purpose.
+          this.toast("error", `Couldn't read this workflow's journal — ${(e as Error).message}.`);
+          return;
+        }
+        const result = findEdgeOutput(events, m.edgeId);
+        if (!result.ok) {
+          // Three honest refusals, not one catch-all: which of them is true
+          // changes what the reader should conclude about the step they clicked
+          // Output on.
+          switch (result.reason) {
+            case "no-journal":
+              this.toast("info", "Nothing has been recorded for this workflow yet.");
+              return;
+            case "no-event":
+              this.toast("info", "This step hasn't run yet, so there's no output to show.");
+              return;
+            case "no-output":
+              this.toast(
+                "info",
+                "No output was recorded for this run — it may have printed nothing, or its output predates this build.",
+              );
+              return;
+          }
+        }
+        const doc = await vscode.workspace.openTextDocument({ content: result.output, language: "plaintext" });
+        await vscode.window.showTextDocument(doc, { preview: true });
+        trackEvent({ name: "flow_action", action: "open_output" });
         return;
       }
       case "flow:resumeApprove": {

@@ -262,3 +262,46 @@ export function readJournal(io: JournalIo, dir: string, flowId: string): Journal
   }
   return out;
 }
+
+/** Why `findEdgeOutput` has nothing to show. Three separate facts, not one
+ * catch-all "nothing here": a caller (the Deck's `flow:openOutput` handler)
+ * owes the user the true one, because they read very differently —
+ * "this flow has never run anything" is not "this step hasn't run", and
+ * neither is "it ran, but nothing was captured". A fourth fact — the journal
+ * itself failing to read — is deliberately NOT a member here: `readJournal`
+ * never throws for that (see `JournalIo`'s own doc comment, "a journal that is
+ * missing reads as empty, never as an error"), so a caller cannot tell a
+ * missing file from an empty one and must not pretend to. */
+export type EdgeOutputRefusal =
+  | "no-journal" // nothing at all has been journaled for this flow
+  | "no-event" // the journal has other lines, but none name this edge
+  | "no-output"; // this edge fired or errored, but that event carries no `output`
+
+export type EdgeOutputResult =
+  | { ok: true; output: string; kind: "fired" | "errored" }
+  | { ok: false; reason: EdgeOutputRefusal };
+
+/** What `flow:openOutput` shows for one edge: the OUTPUT half of its most
+ * recent `fired` or `errored` line, or the honest reason there is none.
+ *
+ * "Most recent" means the latest fired/errored event journaled for this edge —
+ * not the latest one that happens to carry output. An edge can carry several
+ * across its life (`fired` then, after a Reset, `errored`; or several rounds
+ * of Reset-and-retry), and the edge's CURRENT on-disk state (what the drawer's
+ * step already shows as done/fail) always corresponds to the latest of these,
+ * because a Reset clears the stamps a later write would otherwise re-derive
+ * from. Falling back to an OLDER event's output when the latest has none would
+ * show a previous run's evidence under the current run's step — exactly the
+ * kind of stale-but-plausible answer this function refuses to give; `no-output`
+ * is the honest one instead. */
+export function findEdgeOutput(events: JournalEvent[], edgeId: string): EdgeOutputResult {
+  if (events.length === 0) return { ok: false, reason: "no-journal" };
+  const forEdge = events.filter(
+    (e): e is JournalEvent & { kind: "fired" | "errored"; output?: string } =>
+      (e.kind === "fired" || e.kind === "errored") && e.edge === edgeId,
+  );
+  if (forEdge.length === 0) return { ok: false, reason: "no-event" };
+  const latest = forEdge[forEdge.length - 1];
+  if (latest.output === undefined) return { ok: false, reason: "no-output" };
+  return { ok: true, output: latest.output, kind: latest.kind };
+}

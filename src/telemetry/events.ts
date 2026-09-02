@@ -127,7 +127,7 @@ export type DeckAction =
  * and receipt messages are user strings and never appear here either. */
 export type FlowActionKind =
   | "create" | "rename" | "save" | "delete" | "add_planned" | "reset_edge"
-  | "resume_approve" | "resume_disarm" | "save_command" | "dry_run" | "answer_gate"
+  | "resume_approve" | "resume_disarm" | "save_command" | "dry_run" | "answer_gate" | "open_output"
   | "attach" | "detach" | "save_template" | "rename_template" | "delete_template" | "duplicate_template";
 
 export type WorkspaceModeProp = "multiroot" | "per-window";

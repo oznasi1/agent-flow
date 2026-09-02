@@ -99,7 +99,7 @@ test("a done card's chip is green", async ({ mount, page }) => {
 // entirely different stylesheets rules — `.wf-chip`/`.wf-mark` vs `.c-wf`).
 const noopBlock: Omit<WorkflowBlockProps, "flow" | "state"> = {
   extraCount: 0, onAttach: () => {}, onArm: () => {}, onDetach: () => {},
-  onAnswerGate: () => {}, onResetEdge: () => {}, onOpenInWorkflows: () => {},
+  onAnswerGate: () => {}, onResetEdge: () => {}, onOutput: () => {}, onOpenInWorkflows: () => {},
 };
 
 const blockFlow: Flow = {

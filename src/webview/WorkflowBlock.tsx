@@ -23,7 +23,7 @@
 // component sends no host message itself — wiring it into `DeckDetail` (which
 // message each callback posts) is the next task's job, not this one's.
 import * as React from "react";
-import { Flow, FlowEdge } from "../engine/orchestrator/model";
+import { Flow, FlowEdge, edgeAction } from "../engine/orchestrator/model";
 import { StepState, WorkflowState, WorkflowStatus } from "../engine/orchestrator/attach";
 import { reasonWhy, ruleOneLine } from "./orchestratorRule";
 
@@ -41,6 +41,11 @@ export interface WorkflowBlockProps {
   onDetach: () => void;
   onAnswerGate: (edgeId: string, answer: "approved" | "rejected") => void;
   onResetEdge: (edgeId: string) => void;
+  /** Open this edge's most recent captured command output in an editor tab.
+   * Offered only on a `run` rule that has actually fired — see `WorkflowStep`'s
+   * own gate on `edgeAction`. A missing or empty result is the host's refusal
+   * to report, as a toast; this component sends the click and nothing else. */
+  onOutput: (edgeId: string) => void;
   onOpenInWorkflows: () => void;
 }
 
@@ -82,12 +87,14 @@ function WorkflowStep({
   step,
   onAnswerGate,
   onResetEdge,
+  onOutput,
 }: {
   flow: Flow;
   edge: FlowEdge;
   step: StepState;
   onAnswerGate: (edgeId: string, answer: "approved" | "rejected") => void;
   onResetEdge: (edgeId: string) => void;
+  onOutput: (edgeId: string) => void;
 }): JSX.Element {
   const sentence = ruleOneLine(flow, edge);
   const text = stepText(step);
@@ -102,6 +109,17 @@ function WorkflowStep({
   // longer, per-step context as a DESCRIPTION, read right after the name,
   // without changing what the name is.
   const descId = `wf-rule-${step.edgeId}`;
+
+  // Whether this rule's TARGET can ever have captured output — only a `run`
+  // rule does (a launch, a seed, a notify have no command to capture), so
+  // gating on the target rather than on outcome keeps the button from
+  // appearing where a click could only ever be met with a refusal. Combined
+  // below with `step.state`, which is what actually decides whether the
+  // button renders: `done` and `fail` are the only states with a journal line
+  // to read at all, and a succeeded command is exactly as often worth reading
+  // back as a failed one — the design doc's own "Output on a failed step" was
+  // the smaller of the two asks, not the only one.
+  const canShowOutput = edgeAction(flow, edge) === "run";
 
   return (
     <li className={`wf-step wf-${step.state}`}>
@@ -130,8 +148,30 @@ function WorkflowStep({
           </button>
         </div>
       )}
+      {step.state === "done" && canShowOutput && (
+        <div className="wf-step-acts">
+          <button
+            type="button"
+            className="dd-pact"
+            aria-describedby={descId}
+            onClick={() => onOutput(step.edgeId)}
+          >
+            Output
+          </button>
+        </div>
+      )}
       {step.state === "fail" && (
         <div className="wf-step-acts">
+          {canShowOutput && (
+            <button
+              type="button"
+              className="dd-pact"
+              aria-describedby={descId}
+              onClick={() => onOutput(step.edgeId)}
+            >
+              Output
+            </button>
+          )}
           <button
             type="button"
             className="dd-pact"
@@ -155,6 +195,7 @@ export function WorkflowBlock({
   onDetach,
   onAnswerGate,
   onResetEdge,
+  onOutput,
   onOpenInWorkflows,
 }: WorkflowBlockProps): JSX.Element {
   if (flow === undefined || state === undefined) {
@@ -210,6 +251,7 @@ export function WorkflowBlock({
               step={step}
               onAnswerGate={onAnswerGate}
               onResetEdge={onResetEdge}
+              onOutput={onOutput}
             />
           );
         })}

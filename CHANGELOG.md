@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behind `agentFlow.orchestrator`, same as the rest of the Orchestrator.
 - **A Templates tab** in the Workflows drawer, alongside the existing Running tab: rename,
   duplicate and delete the shapes you've saved.
+- **Output on a workflow step.** A `run` rule that succeeded or failed now offers `Output`
+  right beside Reset in the card drawer: it reopens the command's captured stdout/stderr in
+  its own editor tab, read from the flow journal, so you don't have to have kept the Deck's
+  output channel scrolled back to the moment it ran. A step with nothing recorded says so
+  honestly instead of opening an empty tab.
 
 ### Changed
 

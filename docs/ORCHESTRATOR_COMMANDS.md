@@ -152,9 +152,14 @@ child_process.exec(command, {
 })
 ```
 
-stdout and stderr go to the Deck's output channel and **nowhere else** —
-that is the only place an unattended deploy's output can be read afterwards.
-The rule's own receipt carries the exit code and a sentence, not the output.
+stdout and stderr go to the Deck's output channel, and — for any armed flow —
+into [the flow journal](FLOW_JOURNAL.md) alongside the `fired`/`errored` line
+the rule stamps. When that flow is attached to a card as a workflow, the
+card drawer's Workflow block offers an **Output** button on the step, which
+reopens the journal's copy in its own editor tab — the way to read it back
+after the output channel itself has scrolled past it or the window has
+closed. The rule's own receipt carries the exit code and a sentence, not the
+output.
 
 ## The latch
 
@@ -242,6 +247,16 @@ any other flow. The names never appear in the source: the code keeps `Flow`,
   set once by `instantiate` and never re-read for shape — its only reader is
   the Templates tab's own `on N cards` count (`OrchestratorDrawer.tsx`), which
   is why that count is exact rather than a guess by name and rule count.
+- **`flow:openOutput`** reads [the flow journal](FLOW_JOURNAL.md) for the
+  named edge and opens its most recent `fired`/`errored` output in its own
+  editor tab — never back across the wire to the drawer, since output can be
+  far larger than any receipt sentence and the drawer is a fixed 620px.
+  Offered on a workflow's `done` or `fail` step whenever its rule runs a
+  command; every other rule kind (launch, seed, notify) has no output to
+  read, so the button never appears for one. A flow or edge the journal has
+  nothing for is a toast naming which of three things is true — nothing
+  journaled at all, this edge never ran, or it ran without capturing
+  output — never a blank tab.
 
 ## Boundaries
 
@@ -258,7 +273,17 @@ any other flow. The names never appear in the source: the code keeps `Flow`,
   becomes its own node in one write.
 - **Keep a one-off** — name it in the drawer and it lands in `settings.json`,
   in the right scope.
-- **Read the output** — full stdout and stderr in the Deck's output channel.
+- **Read the output** — full stdout and stderr in the Deck's output channel
+  while the window is open, or later from a workflow's own card drawer: a
+  `done` or `fail` step whose rule runs a command offers **Output**, which
+  reads the journal's `fired`/`errored` line for that edge and opens it in an
+  editor tab (`flow:openOutput`). It shows the LATEST such line for that
+  edge — the one the step's own done/fail state already reflects — and
+  refuses honestly rather than guess when there is nothing to show: nothing
+  journaled for the flow yet, this edge specifically hasn't run, or it ran
+  but captured no output (which reads the same whether the command printed
+  nothing or its output predates this build — the journal does not
+  distinguish the two).
 - **Recover a failed rule** — Reset clears the latch and keeps the note and
   mode.
 - **Refuse the whole thing** — the command gate is separate from the session

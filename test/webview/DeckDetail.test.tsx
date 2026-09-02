@@ -107,6 +107,11 @@ const notify = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "
 const edge = (over: Partial<FlowEdge> & { id: string }): FlowEdge =>
   ({ from: "n1", to: "n2", cond: { kind: "pr-merged" }, ...over });
 
+// A run-action target, for the Output wiring test below: Output is only
+// offered on a `run` rule (see `WorkflowBlock`'s own `canShowOutput`), and
+// every other fixture in this file points at a notify terminal.
+const command = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "command", run: "deploy.sh" });
+
 const shipItOn = (runKey: string, over: Partial<Flow> = {}): Flow => ({
   id: "f1", name: "Ship it", armed: true, createdAt: 100,
   nodes: [place("n1", runKey), notify("n2")],
@@ -1067,6 +1072,17 @@ describe("DeckDetail — Workflow section", () => {
     renderWf(cardWithKey("PROJ-142"), { flows: [stopped], orchEnabled: true });
     await userEvent.click(screen.getByRole("button", { name: "Reset" }));
     expect(sent).toHaveBeenCalledWith({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+  });
+
+  it("Output sends flow:openOutput for this card's own workflow id", async () => {
+    const stopped: Flow = {
+      id: "f1", name: "Ship it", armed: true, createdAt: 100,
+      nodes: [place("n1", "PROJ-142"), command("n2")],
+      edges: [edge({ id: "e1", error: "exit 1" })],
+    };
+    renderWf(cardWithKey("PROJ-142"), { flows: [stopped], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Output" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
   });
 
   it("Open in Workflows calls onOpenWorkflow with this card's own workflow id, sending no host message", async () => {

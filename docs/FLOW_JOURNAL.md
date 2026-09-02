@@ -18,7 +18,16 @@ which is the incident you wanted it for.
 
 ## Reading it
 
-One JSON object per line, so `jq` works directly:
+From the editor, without touching the file directly: a workflow's card
+drawer offers an **Output** button on a `done` or `fail` step whose rule runs
+a command (see [ORCHESTRATOR_COMMANDS.md](ORCHESTRATOR_COMMANDS.md)'s
+`flow:openOutput`). It opens the LATEST `fired`/`errored` line's `output` for
+that edge in its own editor tab, and refuses honestly — as a toast, never a
+blank tab — when there is nothing to show: no journal for the flow, no line
+for that edge, or a line with no `output` field at all (which reads the same
+whether the command printed nothing or the output was never captured).
+
+Or straight from the file — one JSON object per line, so `jq` works directly:
 
 ```bash
 # Everything a flow did, newest last
