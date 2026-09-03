@@ -15,28 +15,34 @@ export class Pool {
     this.frame = tasksFrame(page);
   }
 
-  /** Open the sidebar and wait for the pool to render `n` cards. Idempotent, so a
-   *  shared-host journey (`describeWithHost`) can call this once per test without
-   *  each call fighting the last: VS Code's activity bar TOGGLES a view
-   *  container's visibility when its own already-active icon is clicked again,
-   *  so unconditionally re-clicking it (as `openTasksView` does) would collapse
-   *  an already-open Agent Flow sidebar instead of confirming it's open, and
-   *  `pool.cards()` would then time out at 0. Checking first avoids ever sending
-   *  that second click. */
-  static async open(page: Page, n: number): Promise<Pool> {
+  /** Open the sidebar and, when `n` is given, wait for the pool to render `n`
+   *  cards. Idempotent, so a shared-host journey (`describeWithHost`) can call
+   *  this once per test without each call fighting the last: VS Code's activity
+   *  bar TOGGLES a view container's visibility when its own already-active icon
+   *  is clicked again, so unconditionally re-clicking it (as `openTasksView`
+   *  does) would collapse an already-open Agent Flow sidebar instead of
+   *  confirming it's open, and `pool.cards()` would then time out at 0.
+   *  Checking first avoids ever sending that second click.
+   *
+   *  "Already open" is read from the Tasks tab (App.tsx:565 `role="tab"` on
+   *  2026-09-03), not from the card count: a pool the journey itself has just
+   *  emptied (every card retired by a done-move) is still an open sidebar, and
+   *  counting cards there would send the collapsing click. Omit `n` for exactly
+   *  that state — the journey then asserts whatever count it expects itself. */
+  static async open(page: Page, n?: number): Promise<Pool> {
     const pool = new Pool(page);
     // Before the sidebar has ever been opened, the outer `iframe.webview` doesn't
-    // exist yet — resolving through it to count `.card` throws rather than
+    // exist yet — resolving through it to count the tab throws rather than
     // answering 0, so treat that failure the same as "not open yet".
-    const alreadyOpen = await pool
-      .cards()
+    const alreadyOpen = await pool.frame
+      .getByRole("tab", { name: "Tasks" })
       .count()
-      .then((n) => n > 0)
+      .then((c) => c > 0)
       .catch(() => false);
     if (!alreadyOpen) {
       await openTasksView(page);
     }
-    await expect(pool.cards()).toHaveCount(n, { timeout: 30_000 });
+    if (n !== undefined) await expect(pool.cards()).toHaveCount(n, { timeout: 30_000 });
     return pool;
   }
 
@@ -47,6 +53,51 @@ export class Pool {
   /** One card, addressed by ticket key (the key is rendered inside the card). */
   card(key: string): Locator {
     return this.frame.locator(".card", { hasText: key });
+  }
+
+  /** One lens button in the filter row — App.tsx:585 `role="group"
+   *  aria-label="Task filter"` on 2026-09-03. */
+  lens(name: string): Locator {
+    return this.frame.getByRole("group", { name: "Task filter" }).getByRole("button", { name });
+  }
+
+  /** Switch lens and wait for the refetch to settle on `n` cards. */
+  async selectLens(name: string, n: number): Promise<void> {
+    await this.lens(name).click();
+    await expect(this.cards()).toHaveCount(n, { timeout: 15_000 });
+  }
+
+  /** The card's status button, which opens the host's transition QuickPick —
+   *  App.tsx:903 `button.status.status-btn` on 2026-09-03. */
+  statusButton(key: string): Locator {
+    return this.card(key).locator("button.status");
+  }
+
+  /** "Add to my sprint" — App.tsx:913 `button.sprint-add`, visible text, gated
+   *  on `caps.sprints` and the card's assignee (App.tsx:823) on 2026-09-03. */
+  addToSprintButton(key: string): Locator {
+    return this.card(key).getByRole("button", { name: /add to my sprint/i });
+  }
+
+  /** The icon-only "Remove from sprint" button — App.tsx:922 `button.sprint-remove`,
+   *  addressed by its aria-label because it carries no visible text (2026-09-03). */
+  removeFromSprintButton(key: string): Locator {
+    return this.card(key).getByRole("button", { name: new RegExp(`Remove ${key} from your active sprint`) });
+  }
+
+  /** Every drag handle in the pool — App.tsx:886 `span.grip`, rendered only when
+   *  the lens can reorder (`canReorder`, App.tsx:498) on 2026-09-03. */
+  grips(): Locator {
+    return this.frame.locator(".grip");
+  }
+
+  /** The webview's own toasts — App.tsx:768 `.toast.toast--<level>` on 2026-09-03.
+   *  These are NOT workbench notifications: `tasksView.ts`'s `toast()` posts a
+   *  `{type:"toast", level}` message and the webview renders it. Only the
+   *  removal's Undo goes through `vscode.window.showInformationMessage`. Errors
+   *  stay until clicked; success/info vanish after 4.2s, so assert them promptly. */
+  toasts(level: "success" | "error" | "info", text?: string | RegExp): Locator {
+    return this.frame.locator(`.toast--${level}`, text === undefined ? {} : { hasText: text });
   }
 
   /** Drive the repo multiselect. Batch mode only surfaces once a repo is
