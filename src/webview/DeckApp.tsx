@@ -1540,6 +1540,11 @@ export function DeckApp(): JSX.Element {
           // opening one here has to close the other explicitly rather than
           // trusting a render order.
           onOpenWorkflow={(id) => { setOrchView("canvas"); setOpenFlowId({ kind: "flow", id }); setOrchOpen(true); setSelId(null); }}
+          // The attach picker's empty-state exit. Mirrors the Templates chip's
+          // own onClick above (setOrchView + setOrchOpen), not `onOpenWorkflow`'s
+          // shape: this screen isn't addressed at a flow, so `openFlowId` is
+          // left alone rather than set or cleared.
+          onOpenTemplates={() => { setOrchView("templates"); setOrchOpen(true); setSelId(null); }}
         />
       )}
     </>

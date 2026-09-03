@@ -1178,7 +1178,8 @@ export const DECK_CSS = `
   .wf-picker-opt { text-align: left; border: 0; background: transparent; color: inherit;
     font: inherit; padding: 5px 7px; border-radius: var(--r-chip); cursor: pointer; }
   .wf-picker-opt:hover { background: var(--vscode-list-hoverBackground); }
-  .wf-picker-empty { padding: 7px; font-size: var(--t-body); color: var(--dim); }
+  .wf-picker-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+    padding: 7px; font-size: var(--t-body); color: var(--dim); }
 
   /* WorkflowList — the Active list: every card carrying a workflow, one row
      each, so a reader does not have to open each drawer to see where its
