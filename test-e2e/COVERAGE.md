@@ -56,8 +56,9 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `prompt-modes` | SETTINGS § table | Taking a task asks how the session should start — Plan first, Implementation, Test-driven, Investigate & root-cause, Orchestrator, Refine the ticket; `agentFlow.promptModes` layers over the built-ins (reuse an `id` to override, `hidden: true` to drop one) and `agentFlow.taskMode` pins one | todo |
 | `per-task-worktrees` | SETTINGS § table | Worktree mode takes the task in a real git worktree at `.claude/worktrees/<KEY>` on a per-task branch, git-excluded automatically | e2e: in a real git worktree on a per-task branch |
 | `per-task-worktrees-ask` | SETTINGS § table | `agentFlow.worktree: "ask"` offers the choice per take | todo |
-| `remote-control` | SETTINGS § Remote Control | With `agentFlow.remoteControl` on, the panel is pre-filled with `/remote-control <KEY>` and the task prompt goes to the clipboard; a per-window multi-repo take and any shared-window launch skip it with a toast saying so | todo |
-| `remote-control-copilot` | SETTINGS § Remote Control | Under Copilot, `remoteControl: on` refuses the launch with an error toast before any worktree or window exists; `ask` simply skips the picker | todo |
+| `remote-control` | SETTINGS § Remote Control | With `agentFlow.remoteControl` on, the panel is pre-filled with `/remote-control <KEY>` and the task prompt goes to the clipboard; a per-window multi-repo take and any shared-window launch skip it with a toast saying so | e2e: pre-fills the slash command and puts the prompt on the clipboard |
+| `remote-control-copilot` | SETTINGS § Remote Control | Under Copilot, `remoteControl: on` refuses the launch with an error toast before any worktree or window exists; `ask` simply skips the picker | e2e: refuses the launch before any worktree exists |
+| `remote-control-multi-window-skip` | SETTINGS § Remote Control | A per-window Take across several repos keeps the normal single-Enter seeding — the prompt, not `/remote-control`, lands in each window — and the toast says Remote Control was skipped | e2e: skipped for a multi-repo per-window take and the toast says so |
 
 ## Notepad
 
@@ -359,7 +360,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `surface-copilot-batch` | SETTINGS § Where the session opens | A batch under Copilot's `extension` surface seeds no chat panel (Copilot Chat is single-instance), writes every brief and shows a notification pointing at them | todo |
 | `surface-all-launch-paths` | SETTINGS § Where the session opens | Both surfaces work for every launch path — take, batch, Explore, Notepad, Address PR | e2e: the opened window seeds the agent prompt |
 | `provider-x-live-cards` | SETTINGS § table | Neither Copilot nor Cursor sessions appear as live cards on the Deck, which reads Claude Code's session files | todo |
-| `provider-x-remote-control` | SETTINGS § Remote Control | Remote Control needs Claude Code; under Copilot, `on` refuses the launch and `ask` skips the picker | todo |
+| `provider-x-remote-control` | SETTINGS § Remote Control | Remote Control needs Claude Code; under Copilot, `on` refuses the launch and `ask` skips the picker | e2e: Copilot with Remote Control on refuses the launch |
 | `provider-x-marketplace` | GUIDE § The Marketplace | The Marketplace browses Claude Code's ecosystem whatever `agentFlow.agentProvider` says | todo |
 | `provider-x-review-button-label` | GUIDE § The Deck | The review button names the configured tool: Review with Claude Code / Cursor / Copilot | todo |
 | `provider-x-doctor-rows` | SETTINGS § table | Doctor reports rows for whichever provider is in play, every host tool under `ask` | todo |
@@ -399,7 +400,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-agent-surface` | SETTINGS § table | `agentFlow.agentSurface`: `extension` for the chat panel, `terminal` for the CLI | e2e: the opened window seeds the agent prompt into a real integrated terminal |
 | `set-task-mode` | SETTINGS § table | `agentFlow.taskMode` pins one prompt mode by `id` so no picker shows | e2e: taking a task opens a real window |
 | `set-prompt-modes` | SETTINGS § table | `agentFlow.promptModes` layers over the six built-ins: override by `id`, `hidden: true` drops one, a custom mode's prompt lands in the brief | todo |
-| `set-remote-control` | SETTINGS § Remote Control | `agentFlow.remoteControl`: `off`, `on` or `ask` | todo |
+| `set-remote-control` | SETTINGS § Remote Control | `agentFlow.remoteControl`: `off`, `on` or `ask` | e2e: Remote Control pre-fills the slash command |
 | `set-batch-launch-confirm-threshold` | GUIDE § What it does | `agentFlow.batchLaunchConfirmThreshold` (default 6): larger task or review batches confirm first | todo |
 | `set-explore-prompt` | package.json | `agentFlow.explorePrompt` is the legacy Explore prompt, migrated into the knowledge action when customized | unit: test/unit/config.test.ts |
 | `set-explore-mode` | SETTINGS § table | `agentFlow.exploreMode` pins one Explore action or `ask` shows the picker | todo |
