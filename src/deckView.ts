@@ -10,7 +10,7 @@ import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, Planned
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, findEdgeOutput, readJournal, JournalEvent, JournalEventInput } from "./engine/orchestrator/journal";
-import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
+import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, normalizedTemplateFlow, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
 import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
@@ -4587,12 +4587,16 @@ export class DeckPanel {
           return;
         }
         const now = Date.now();
-        // `flow.id` is not part of the shape — `toTemplate` writes `id: ""` for
-        // exactly this reason, and nothing resolves a template's inner flow id
-        // (`instantiate` mints a fresh one). Storing the canvas's live id would
-        // leak the identity of whatever on-disk flow it was last pointed at
-        // into a template that outlives it.
-        const flow: Flow = { ...m.flow, id: "" };
+        // The same normalization `toTemplate` applies when converting a flow
+        // into a template — shared as `normalizedTemplateFlow` so the two
+        // write paths for a template's inner flow cannot drift on what
+        // "normalized" means: id cleared (nothing resolves it — `instantiate`
+        // mints a fresh one), disarmed, createdAt zeroed, and every edge's
+        // host stamps (firedAt/firedNote/error, and the consent stamps
+        // launchConfirmedAt/commandConfirmedAt) stripped. Storing any of that
+        // verbatim would leak a live workflow's history — or a stale
+        // consent — into a template that outlives it.
+        const flow: Flow = normalizedTemplateFlow(m.flow, m.name, m.flow.nodes);
         const existing = m.templateId
           ? readTemplates(this.flowIo, this.templatesDir).find((t) => t.id === m.templateId)
           : undefined;

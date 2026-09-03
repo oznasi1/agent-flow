@@ -6023,6 +6023,47 @@ describe("orchestrator flows", () => {
       expect(t.flow.nodes).toEqual(okFlow.nodes);
     });
 
+    // `toTemplate` normalizes a whole set of fields on the inner flow, not just
+    // `id` (see `normalizedTemplateFlow`, templates.ts): a template's stored
+    // flow is a SHAPE, never a live workflow's history. Fix-round finding:
+    // the first cut of this handler only normalized `id`, so the same graph
+    // saved through `flow:saveTemplate` and through this new path produced two
+    // different stored templates. `launchConfirmedAt`/`commandConfirmedAt`
+    // live on `Flow` itself, not on an edge — `instantiate` still strips edge
+    // host stamps again on its own copy (`templates.ts:123`), so this is not a
+    // consent hole either way, but a stored template carrying any of this is
+    // meaningless or misleading state that should never have been written.
+    it("normalizes the inner flow like toTemplate does: armed, createdAt, flow-level consent stamps, and every edge's host stamps are all cleared", async () => {
+      setConfig({ orchestrator: true });
+      const dirtyFlow: Flow = {
+        id: "canvas-draft", name: "Ship it", armed: true, createdAt: 1_000,
+        launchConfirmedAt: 2_000, commandConfirmedAt: 3_000,
+        nodes: [
+          { id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["aws-ops"], mode: "plan", dest: "worktree" },
+        ],
+        edges: [
+          {
+            id: "e1", from: "n1", to: "n1", cond: { kind: "pr-merged" }, action: "launch",
+            firedAt: 5_000, firedNote: "done", error: "boom", performed: true,
+          },
+        ],
+      };
+      const { send } = await openPanel();
+      await send({ type: "flow:writeTemplate", name: "New template", flow: dirtyFlow });
+      const t = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(t.flow.armed).toBe(false);
+      expect(t.flow.createdAt).toBe(0);
+      expect(t.flow.launchConfirmedAt).toBeUndefined();
+      expect(t.flow.commandConfirmedAt).toBeUndefined();
+      const edge = t.flow.edges[0] as FlowEdge;
+      expect(edge.firedAt).toBeUndefined();
+      expect(edge.firedNote).toBeUndefined();
+      expect(edge.error).toBeUndefined();
+      expect(edge.performed).toBeUndefined();
+      // The condition itself is the user's graph, not host state — it survives.
+      expect(edge.cond).toEqual({ kind: "pr-merged" });
+    });
+
     it("update (templateId present and on disk): preserves id and params, replaces name and graph", async () => {
       setConfig({ orchestrator: true });
       h.templates = [mkTemplate("k1", "Old name")];

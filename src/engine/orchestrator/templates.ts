@@ -192,6 +192,32 @@ export function canBindTicket(flow: Flow): boolean {
   return flow.nodes.some((n) => isPlace(n) || isPlanned(n));
 }
 
+/** A template's stored inner flow is a SHAPE, never a live workflow's history —
+ * so every field that only makes sense on something that has actually run gets
+ * cleared here: the flow `id` (not part of the shape; `instantiate` mints a
+ * fresh one), `armed` (a template is never armed — `instantiate` always builds
+ * its copy disarmed regardless), `createdAt` (this flow was never created, only
+ * the template was), and every edge's host stamps — `firedAt`/`firedNote`/
+ * `error` and the consent stamps `launchConfirmedAt`/`commandConfirmedAt` —
+ * via `stripHostStamps`.
+ *
+ * `nodes` is taken as given rather than derived from `flow`, because `toTemplate`
+ * calls this with place-demoted nodes and deckView's `flow:writeTemplate`
+ * handler calls it with the flow's own nodes unchanged — this function only
+ * owns the normalization, not the demotion.
+ *
+ * The ONE normalization rule, shared by both write paths that produce a
+ * template's inner flow, so they cannot quietly drift on what "normalized"
+ * means: `toTemplate` (converting an existing flow into a new template) and
+ * `flow:writeTemplate` (deckView.ts — the canvas's own create/update save). */
+export function normalizedTemplateFlow(flow: Flow, name: string, nodes: FlowNode[]): Flow {
+  return {
+    id: "", name, armed: false, createdAt: 0,
+    nodes,
+    edges: flow.edges.map(stripHostStamps),
+  };
+}
+
 /** A template from a live workflow.
  *
  * The direction here is the one the engine already runs, backwards:
@@ -233,11 +259,6 @@ export function toTemplate(
     name,
     params: {},
     savedAt,
-    flow: {
-      // The flow id is not part of the shape; `instantiate` is given a fresh one.
-      id: "", name, armed: false, createdAt: 0,
-      nodes,
-      edges: flow.edges.map(stripHostStamps),
-    },
+    flow: normalizedTemplateFlow(flow, name, nodes),
   };
 }
