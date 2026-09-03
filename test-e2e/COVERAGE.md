@@ -53,9 +53,10 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `task-explore` | GUIDE § What it does | Explore asks where to open and which repos, then launches and lands a plan file | e2e: Explore launches and lands a plan file |
 | `task-explore-actions` | SETTINGS § table | Explore offers six kinds: Open a Jira ticket, Enhance knowledge / flow, Debug, General, Supervise running tasks, Verify on an environment; `agentFlow.exploreMode` pins one and `agentFlow.explorePrompts.*` edits each prompt | todo |
 | `explore-verify-environment` | SETTINGS § table | Verify asks which environment from `agentFlow.environments` plus Custom…, and seeds a read-only prompt that inspects logs, metrics, traces and deployed version there | todo |
-| `prompt-modes` | SETTINGS § table | Taking a task asks how the session should start — Plan first, Implementation, Test-driven, Investigate & root-cause, Orchestrator, Refine the ticket; `agentFlow.promptModes` layers over the built-ins (reuse an `id` to override, `hidden: true` to drop one) and `agentFlow.taskMode` pins one | todo |
+| `prompt-modes` | SETTINGS § table | Taking a task asks how the session should start — Plan first, Implementation, Test-driven, Investigate & root-cause, Orchestrator, Refine the ticket; `agentFlow.promptModes` layers over the built-ins (reuse an `id` to override, `hidden: true` to drop one) and `agentFlow.taskMode` pins one | e2e: listing the six built-in modes |
+| `prompt-modes-hidden` | SETTINGS § table | A `promptModes` entry with `hidden: true` drops that built-in from the picker; the other five remain | e2e: a hidden prompt mode is dropped |
 | `per-task-worktrees` | SETTINGS § table | Worktree mode takes the task in a real git worktree at `.claude/worktrees/<KEY>` on a per-task branch, git-excluded automatically | e2e: in a real git worktree on a per-task branch |
-| `per-task-worktrees-ask` | SETTINGS § table | `agentFlow.worktree: "ask"` offers the choice per take | todo |
+| `per-task-worktrees-ask` | SETTINGS § table | `agentFlow.worktree: "ask"` offers the choice per take | e2e: worktree "ask" offers the choice |
 | `remote-control` | SETTINGS § Remote Control | With `agentFlow.remoteControl` on, the panel is pre-filled with `/remote-control <KEY>` and the task prompt goes to the clipboard; a per-window multi-repo take and any shared-window launch skip it with a toast saying so | todo |
 | `remote-control-copilot` | SETTINGS § Remote Control | Under Copilot, `remoteControl: on` refuses the launch with an error toast before any worktree or window exists; `ask` simply skips the picker | todo |
 
@@ -380,11 +381,11 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-stamp-label-on-write` | SETTINGS § table | `agentFlow.stampLabelOnWrite` stamps the provenance label on a Jira write and marks a Deck-submitted review body as session-drafted | e2e: records the transition and the claude-code provenance |
 | `set-provenance-label` | SETTINGS § table | `agentFlow.provenanceLabel` (default `claude-code`) is the label stamped on Jira writes | e2e: changing a card's status records the transition and the claude-code |
 | `set-repos-root` | SETTINGS § table | `agentFlow.reposRoot` is where repo checkouts are discovered for inference and briefs | e2e: taking a task opens a real window and lands the brief |
-| `set-workspace-dir` | SETTINGS § table | `agentFlow.workspaceDir` is where generated `.code-workspace` files go | todo |
+| `set-workspace-dir` | SETTINGS § table | `agentFlow.workspaceDir` is where generated `.code-workspace` files go | e2e: writes <KEY>.code-workspace into workspaceDir |
 | `set-github-org` | SETTINGS § table | `agentFlow.githubOrg` is reserved — clone support is not implemented | untestable: documented absence |
 | `set-repo-blocklist` | SETTINGS § table | `agentFlow.repoBlocklist` names directories under `reposRoot` to exclude from discovery; hidden dirs are always skipped | unit: test/unit/engine/repos.test.ts |
-| `set-workspace-mode` | package.json | `agentFlow.workspaceMode` decides how repos open: `auto`, `multiroot` (a `<KEY>.code-workspace` in `workspaceDir`) or per-window | todo |
-| `set-open-in` | SETTINGS § Where a task opens | `agentFlow.openIn`: `ask`, `new-window`, `this-window` or `pick-existing` | todo |
+| `set-workspace-mode` | package.json | `agentFlow.workspaceMode` decides how repos open: `auto`, `multiroot` (a `<KEY>.code-workspace` in `workspaceDir`) or per-window | e2e: multiroot mode writes <KEY>.code-workspace |
+| `set-open-in` | SETTINGS § Where a task opens | `agentFlow.openIn`: `ask`, `new-window`, `this-window` or `pick-existing` | e2e: openIn "ask" lists a new window |
 | `set-worktree` | SETTINGS § table | `agentFlow.worktree` isolates the task in a git worktree at `.claude/worktrees/<KEY>`, git-excluded | e2e: worktree mode takes the task in a real git worktree |
 | `set-child-worktrees` | package.json | `agentFlow.childWorktrees` offers a worktree per child or one orchestrator session when a ticket has children | e2e: taking a parent offers its tree |
 | `set-track-open-windows` | SETTINGS § table | `agentFlow.trackOpenWindows` lists your open Agent Flow windows as destinations; off, no live windows are read | unit: test/unit/engine/openTarget.test.ts |
@@ -397,8 +398,8 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-seed-agent` | SETTINGS § table | `agentFlow.seedAgent` pre-fills the session's panel or terminal after opening | unit: test/unit/engine/workspace.test.ts |
 | `set-agent-provider` | SETTINGS § table | `agentFlow.agentProvider`: `claude-code`, `copilot`, `cursor`, `codex` or `ask`, each falling back to Claude Code where the editor cannot run it | e2e: a cursor provider setting degrades to Claude Code |
 | `set-agent-surface` | SETTINGS § table | `agentFlow.agentSurface`: `extension` for the chat panel, `terminal` for the CLI | e2e: the opened window seeds the agent prompt into a real integrated terminal |
-| `set-task-mode` | SETTINGS § table | `agentFlow.taskMode` pins one prompt mode by `id` so no picker shows | e2e: taking a task opens a real window |
-| `set-prompt-modes` | SETTINGS § table | `agentFlow.promptModes` layers over the six built-ins: override by `id`, `hidden: true` drops one, a custom mode's prompt lands in the brief | todo |
+| `set-task-mode` | SETTINGS § table | `agentFlow.taskMode` pins one prompt mode by `id` so no picker shows | e2e: a custom prompt mode lands its prompt |
+| `set-prompt-modes` | SETTINGS § table | `agentFlow.promptModes` layers over the six built-ins: override by `id`, `hidden: true` drops one, a custom mode's prompt is what the take seeds (the plan handshake's prompt — `.pick-task/TASK.md` itself never carries the mode's prompt, brief.ts) | e2e: a promptModes entry overrides a built-in's label |
 | `set-remote-control` | SETTINGS § Remote Control | `agentFlow.remoteControl`: `off`, `on` or `ask` | todo |
 | `set-batch-launch-confirm-threshold` | GUIDE § What it does | `agentFlow.batchLaunchConfirmThreshold` (default 6): larger task or review batches confirm first | todo |
 | `set-explore-prompt` | package.json | `agentFlow.explorePrompt` is the legacy Explore prompt, migrated into the knowledge action when customized | unit: test/unit/config.test.ts |
@@ -441,8 +442,8 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-pr-work-open-in` | SETTINGS § table | `agentFlow.prWorkOpenIn`: `ask` or `its-window` for Fix CI / Resolve conflict / Address review | todo |
 | `set-review-request-prompt` | package.json | `agentFlow.reviewRequestPrompt` overrides the review prompt; empty uses the built-in default | todo |
 | `set-telemetry-enabled` | TELEMETRY § Turning it off | `agentFlow.telemetry.enabled` (true) is re-read per event; off discards the in-memory queue | unit: test/unit/telemetry/telemetry.test.ts |
-| `open-in-pick-existing` | SETTINGS § Where a task opens | `pick-existing` opens the task into a chosen `.code-workspace`: same-name folders are skipped and named in the toast, new repos are added only after approval, declining leaves the file byte-identical | todo |
-| `open-in-this-window` | SETTINGS § Where a task opens | `this-window` never replaces what is open; a window Agent Flow cannot name is not offered This window, and `this-window` opens a new window instead | todo |
+| `open-in-pick-existing` | SETTINGS § Where a task opens | `pick-existing` opens the task into a chosen `.code-workspace`: same-name folders are skipped and named in the toast, new repos are added only after approval, declining leaves the file byte-identical | e2e: pick-existing adds only approved repos |
+| `open-in-this-window` | SETTINGS § Where a task opens | `this-window` never replaces what is open; a window Agent Flow cannot name is not offered This window, and `this-window` opens a new window instead | e2e: this-window in a window it cannot name |
 | `open-in-live-windows` | SETTINGS § Where a task opens | Under `ask` the picker lists open windows; a workspace window offers to add new repos, a folder window is focused and seeded without new roots | unit: test/unit/engine/openTarget.test.ts |
 | `three-questions-model` | SETTINGS § Where the session opens | `agentFlow.openIn` decides the window, `agentFlow.agentProvider` the tool, `agentFlow.agentSurface` what starts it | e2e: the take seeds the real Claude Code panel in the opened |
 
@@ -478,7 +479,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `priv-open-agents-reads` | PRIVACY | With `agentFlow.openAgents` on the Deck reads `~/.claude/sessions`, and with `agentFlow.prFacts` also on runs `gh pr list` in a live session's directory even one you never pointed it at | todo |
 | `priv-review-strip-shared-gate` | PRIVACY | `agentFlow.reviewRequests` only produces a forge read while `agentFlow.prFacts` is on | todo |
 | `priv-doctor-probes` | PRIVACY | Doctor makes two authenticated GETs and runs `gh auth status`, and writes nothing except the clipboard when asked to copy | todo |
-| `priv-pick-task-excluded` | PRIVACY | Briefs go in a git-excluded `.pick-task/`, so they are never committed | todo |
+| `priv-pick-task-excluded` | PRIVACY | Briefs go in a git-excluded `.pick-task/`, so they are never committed | e2e: the brief directory is git-excluded |
 | `priv-output-channel-log` | PRIVACY | Every review submit and merge attempt, success or failure, is logged to the Agent Flow Deck output channel | todo |
 
 ## Meta
