@@ -1,0 +1,17 @@
+diff --git a/src/engine/workspace.ts b/src/engine/workspace.ts
+index fe73790c..f50c0a95 100644
+--- a/src/engine/workspace.ts
++++ b/src/engine/workspace.ts
+@@ -1021,6 +1021,12 @@ async function seedViaTerminal(
+     terminal.show();
+     terminal.sendText(cmd, true);
+     await delay(bootMs);
++    // Only type the prompt once the CLI is actually there to receive it.
++    const onPath = (process.env.PATH ?? "").split(path.delimiter).some((d) => d && fs.existsSync(path.join(d, cmd)));
++    if (!onPath) {
++      log(`seed ${key}: ${cmd} is not on PATH — leaving the terminal as it is`);
++      return true;
++    }
+     terminal.sendText(bracketedPaste(seedText), false);
+     log(`seed ${key}: typed the prompt into a terminal${cwd ? ` in ${cwd}` : ""}`);
+     return true;
