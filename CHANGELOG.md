@@ -51,6 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   repo no longer drags that repo onto a card in a different one. A template that already
   names its own repos or mode is unaffected; this only fills in what a template leaves
   blank, which is how the built-in starters can be attached at all.
+- **A card's attach picker no longer dead-ends when you have no templates of your own.** Its
+  empty state now offers an **Open Templates** button that takes you straight to the
+  Templates view instead of leaving flat text with nothing to click.
 
 ## [0.66.0] — 2026-09-01
 
