@@ -223,15 +223,17 @@ describeWithHost(
     });
 
     // Mutation-checked: App.tsx:641 `{filters.repo && (` → `{true && (` — the repo trigger rendered.
-    test("filters.repo false hides the repo lens", async () => {
+    test("filters.repo false hides the repo lens", async ({}, testInfo) => {
       const pool = await Pool.open(ctx.page(), 2);
       await expect(pool.repoTrigger()).toHaveCount(0);
+      await shot(ctx.page(), testInfo, "1b · no repo lens");
     });
 
     // Mutation-checked: App.tsx:650 `{filters.search && (` → `{true && (` — the search box rendered.
-    test("filters.search false hides the search box", async () => {
+    test("filters.search false hides the search box", async ({}, testInfo) => {
       const pool = await Pool.open(ctx.page(), 2);
       await expect(pool.searchBox()).toHaveCount(0);
+      await shot(ctx.page(), testInfo, "1c · no search box");
     });
 
     // Mutation-checked: App.tsx:598 `{caps.sizes && filters.size && (` → `{caps.sizes && (` — the S/M/L control rendered.
