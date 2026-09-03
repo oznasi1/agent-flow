@@ -49,6 +49,51 @@ export class Pool {
     return this.frame.locator(".card", { hasText: key });
   }
 
+  /** One lens button in the filter row — App.tsx:585 `role="group"
+   *  aria-label="Task filter"` on 2026-09-03. */
+  lens(name: string): Locator {
+    return this.frame.getByRole("group", { name: "Task filter" }).getByRole("button", { name });
+  }
+
+  /** Switch lens and wait for the refetch to settle on `n` cards. */
+  async selectLens(name: string, n: number): Promise<void> {
+    await this.lens(name).click();
+    await expect(this.cards()).toHaveCount(n, { timeout: 15_000 });
+  }
+
+  /** The card's status button, which opens the host's transition QuickPick —
+   *  App.tsx:903 `button.status.status-btn` on 2026-09-03. */
+  statusButton(key: string): Locator {
+    return this.card(key).locator("button.status");
+  }
+
+  /** "Add to my sprint" — App.tsx:913 `button.sprint-add`, visible text, gated
+   *  on `caps.sprints` and the card's assignee (App.tsx:823) on 2026-09-03. */
+  addToSprintButton(key: string): Locator {
+    return this.card(key).getByRole("button", { name: /add to my sprint/i });
+  }
+
+  /** The icon-only "Remove from sprint" button — App.tsx:922 `button.sprint-remove`,
+   *  addressed by its aria-label because it carries no visible text (2026-09-03). */
+  removeFromSprintButton(key: string): Locator {
+    return this.card(key).getByRole("button", { name: new RegExp(`Remove ${key} from your active sprint`) });
+  }
+
+  /** Every drag handle in the pool — App.tsx:886 `span.grip`, rendered only when
+   *  the lens can reorder (`canReorder`, App.tsx:498) on 2026-09-03. */
+  grips(): Locator {
+    return this.frame.locator(".grip");
+  }
+
+  /** The webview's own toasts — App.tsx:768 `.toast.toast--<level>` on 2026-09-03.
+   *  These are NOT workbench notifications: `tasksView.ts`'s `toast()` posts a
+   *  `{type:"toast", level}` message and the webview renders it. Only the
+   *  removal's Undo goes through `vscode.window.showInformationMessage`. Errors
+   *  stay until clicked; success/info vanish after 4.2s, so assert them promptly. */
+  toasts(level: "success" | "error" | "info", text?: string | RegExp): Locator {
+    return this.frame.locator(`.toast--${level}`, text === undefined ? {} : { hasText: text });
+  }
+
   /** Drive the repo multiselect. Batch mode only surfaces once a repo is
    *  selected (App.tsx) — every batch-shaped journey starts here. */
   async selectRepo(name: string): Promise<void> {
