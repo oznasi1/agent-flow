@@ -432,6 +432,19 @@ export interface OrchestratorDrawerProps {
 
 export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | null {
   const target = p.openId;
+  /** Editing a template, not a workflow — so every WORKFLOW verb is off.
+   *
+   * The vocabulary rule this file already states (see `TemplateRow`'s own doc
+   * comment on the Templates tab) enforced instead of described: a template
+   * has no ticket and nothing to watch, so it cannot be armed, disarmed,
+   * detached, approved or dry-run. One boolean rather than a check at each
+   * site, because the failure mode is a site nobody remembered — this file is
+   * 2,400+ lines and a verb gated by inspection is a verb someone will miss
+   * the next time one is added. Declared here, above both early returns
+   * (`p.view !== "canvas"` and `!flow`, below), even though it is not itself a
+   * hook: every value this component derives from `target` lives in one
+   * place, right beside `openKey`. */
+  const editingTemplate = target?.kind === "template";
   /** Stable string form of `target`, for every hook below that needs a value
    * to key an effect or `useDrawerExit` on rather than the target object's own
    * identity — `DeckApp` has no reason to hand back the same object reference
@@ -476,7 +489,14 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // since a condition like `agent-idle-over` is answered against `Date.now()`.
   // A stale-by-one-render verdict beside a `waiting` reason line that reads a
   // fresh clock (`observationOf`, below) is two answers about one rule.
-  const dry = dryRun && flow ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : [];
+  // `!editingTemplate` sits beside `dryRun`/`flow` here, not only at the panel's
+  // render site further down: the toggle that sets `dryRun` true is itself
+  // hidden while editing a template (see the header block, below), but
+  // `dryRun` is local state that outlives an `openKey` change — nothing resets
+  // it when the target switches FROM an armed flow with the panel open TO a
+  // template. A dry run is a verdict about being armed, and a template cannot
+  // be armed, so it has nothing to verdict either way.
+  const dry = dryRun && flow && !editingTemplate ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : [];
   const firing = dry.filter((v) => v.verdict === "fire").length;
   /** The Save-as-template dialog's own state: whether it is open, the name
    * typed so far, and one {mode, dest} choice per place node being demoted.
@@ -813,10 +833,27 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const failed = flow.edges.filter((e) => e.error !== undefined && !isMigrationNotice(e.error)).length;
   // Reported by the host on `deck:flows`, keyed by flow id — never a second
   // source of truth for whether rules are met, only for whether the user has
-  // yet said "go" on what already is.
-  const resume = p.pendingResume.find((r) => r.flowId === flow.id) ?? null;
+  // yet said "go" on what already is. `editingTemplate` short-circuits this
+  // BEFORE the lookup, not just at the render site below: a template's own
+  // inner flow has an empty `id` (`toTemplate` mints `id: ""`, templates.ts),
+  // and an armed real workflow could in principle report a pending resume
+  // keyed by that same empty string. A template has no ticket and nothing to
+  // watch, so there is no resume gate to show regardless of what `pendingResume`
+  // happens to contain — the rule holds even against a coincidental id match.
+  const resume = editingTemplate ? null : (p.pendingResume.find((r) => r.flowId === flow.id) ?? null);
 
+  /** Attaching binds a LIVE running card's repo into the graph as a `place`
+   * node — permanently, by that one card's own `runKey`. That is the opposite
+   * of what a template is for: a template's whole point is to be instantiated
+   * against a DIFFERENT ticket every time (`instantiate` in templates.ts binds
+   * a fresh `ticketKey` onto every `planned` node it copies), and a `place`
+   * baked into the shape would still name today's card no matter which
+   * ticket the template is later attached to. Refused here, at the one
+   * function both the tray's drop and the keyboard picker's `onCommit` call
+   * through — never at each call site — so a future third way to attach
+   * inherits the refusal for free. */
   const attachAt = (raw: string, x: number, y: number) => {
+    if (editingTemplate) return;
     const next = attached(flow, raw, x, y);
     if (next) p.onSave(next);
   };
@@ -829,8 +866,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    *
    * A key that no longer attaches (already a place, or unparseable) is skipped
    * rather than aborting the batch — `attached` already owns that judgement, and
-   * the picker's own candidate list excludes duplicates anyway. */
+   * the picker's own candidate list excludes duplicates anyway. Same
+   * template refusal as `attachAt`, and for the identical reason — see its
+   * own comment. */
   const attachMany = (keys: string[]) => {
+    if (editingTemplate) return;
     let next = flow;
     for (const raw of keys) {
       next = attached(next, raw, 24, 24 + next.nodes.length * 88) ?? next;
@@ -1655,77 +1695,90 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 {flow.edges.length === 1 ? "rule" : "rules"}
               </span>
               <div className="sp" />
-              {/* Beside the flow's own Arm control, because saving a
-                  template is a thing the OPEN WORKFLOW does. Quiet
-                  `orch-mini`, same as every neighbour: Arm alone is
-                  filled. Disabled whenever `canBindTicket` says the saved
-                  template could never be attached — an empty flow (`toTemplate`
-                  itself refuses that one), or one built only of command / gate /
-                  notify nodes, which `toTemplate` would save cleanly but
-                  `instantiate` would then refuse at every attach forever. A
-                  disabled control with a `title` is a clearer no, before the
-                  click, than a toast the user has to read to learn the same
-                  thing after it. */}
-              <button
-                type="button"
-                className="orch-mini"
-                disabled={!canBindTicket(flow)}
-                title={canBindTicket(flow) ? undefined : "Add a step (or a place) this template can bind a ticket to first"}
-                onClick={openSaveTemplate}
-              >
-                Save as template…
-              </button>
-              {/* The drawer's one filled control. Arm is the consent point for
-                  everything a flow does, so it is the only thing here allowed to
-                  be filled — armed is a state, not an invitation, so the fill goes
-                  away and this becomes the quiet way back out (see .orch-arm.on). */}
-              {/* The dry run sits immediately before Arm because that is the decision
-                  it serves: arming is the consent point for everything a flow does,
-                  and until now the only thing standing behind it was a hold-on-first-
-                  look. Quiet `orch-mini` like every other control on this header —
-                  Arm stays the surface's one filled control (see below) — and
-                  `aria-pressed` for its on/off state, the App.tsx idiom the Expand
-                  button beside it already follows. */}
-              <button
-                type="button"
-                className="orch-mini"
-                aria-pressed={dryRun}
-                onClick={() => {
-                  // Told to the host on the way IN, once, and never on the way out:
-                  // closing the panel is not a dry run. Deliberately not posted from
-                  // the `dry` computation above either — that recomputes on every
-                  // render (see its comment), so a post from there would be a message
-                  // per frame for as long as the panel stays open. `previewFlow` is
-                  // pure and cheap enough to call a second time here rather than
-                  // reach for a render-order dependency to reuse the first result.
-                  //
-                  // Counts only, and no telemetry import: the webview cannot reach
-                  // the host's event catalog and has no business deciding what is
-                  // recorded — it reports what it did, the host decides. `blocked` is
-                  // every PENDING rule that would not fire on this pass — waiting,
-                  // held by the cap, unobservable or blank alike — which is why it and
-                  // `fired` need not add up to `edges`: a settled rule is in neither.
-                  if (!dryRun) {
-                    const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi);
-                    send({
-                      type: "flow:dryRun",
-                      edges: flow.edges.length,
-                      fired: rows.filter((r) => r.verdict === "fire").length,
-                      blocked: rows.filter((r) => r.verdict !== "fire").length,
-                    });
-                  }
-                  setDryRun((v) => !v);
-                }}
-              >
-                What would fire?
-              </button>
-              <button
-                type="button"
-                className={`orch-arm${flow.armed ? " on" : ""}`}
-                onClick={() => p.onArm(flow.id, !flow.armed)}
-              >
-                {flow.armed ? "Armed · disarm" : "Arm"}
-              </button>
+              {/* Every control in this block is a WORKFLOW verb — Save-as-template
+                  makes a NEW template from an attached, ticket-bound flow; dry run
+                  and Arm both act on a live watch that a template has none of (see
+                  `editingTemplate`'s own doc comment). None of the three render at
+                  all while editing a template, rather than being disabled: a
+                  disabled-with-title control still answers a `getByRole("button",
+                  { name })` query, and this file's own vocabulary rule is that
+                  these verbs do not exist for a template, not that they exist and
+                  refuse. */}
+              {!editingTemplate && (
+                <>
+                  {/* Beside the flow's own Arm control, because saving a
+                      template is a thing the OPEN WORKFLOW does. Quiet
+                      `orch-mini`, same as every neighbour: Arm alone is
+                      filled. Disabled whenever `canBindTicket` says the saved
+                      template could never be attached — an empty flow (`toTemplate`
+                      itself refuses that one), or one built only of command / gate /
+                      notify nodes, which `toTemplate` would save cleanly but
+                      `instantiate` would then refuse at every attach forever. A
+                      disabled control with a `title` is a clearer no, before the
+                      click, than a toast the user has to read to learn the same
+                      thing after it. */}
+                  <button
+                    type="button"
+                    className="orch-mini"
+                    disabled={!canBindTicket(flow)}
+                    title={canBindTicket(flow) ? undefined : "Add a step (or a place) this template can bind a ticket to first"}
+                    onClick={openSaveTemplate}
+                  >
+                    Save as template…
+                  </button>
+                  {/* The drawer's one filled control. Arm is the consent point for
+                      everything a flow does, so it is the only thing here allowed to
+                      be filled — armed is a state, not an invitation, so the fill goes
+                      away and this becomes the quiet way back out (see .orch-arm.on). */}
+                  {/* The dry run sits immediately before Arm because that is the decision
+                      it serves: arming is the consent point for everything a flow does,
+                      and until now the only thing standing behind it was a hold-on-first-
+                      look. Quiet `orch-mini` like every other control on this header —
+                      Arm stays the surface's one filled control (see below) — and
+                      `aria-pressed` for its on/off state, the App.tsx idiom the Expand
+                      button beside it already follows. */}
+                  <button
+                    type="button"
+                    className="orch-mini"
+                    aria-pressed={dryRun}
+                    onClick={() => {
+                      // Told to the host on the way IN, once, and never on the way out:
+                      // closing the panel is not a dry run. Deliberately not posted from
+                      // the `dry` computation above either — that recomputes on every
+                      // render (see its comment), so a post from there would be a message
+                      // per frame for as long as the panel stays open. `previewFlow` is
+                      // pure and cheap enough to call a second time here rather than
+                      // reach for a render-order dependency to reuse the first result.
+                      //
+                      // Counts only, and no telemetry import: the webview cannot reach
+                      // the host's event catalog and has no business deciding what is
+                      // recorded — it reports what it did, the host decides. `blocked` is
+                      // every PENDING rule that would not fire on this pass — waiting,
+                      // held by the cap, unobservable or blank alike — which is why it and
+                      // `fired` need not add up to `edges`: a settled rule is in neither.
+                      if (!dryRun) {
+                        const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi);
+                        send({
+                          type: "flow:dryRun",
+                          edges: flow.edges.length,
+                          fired: rows.filter((r) => r.verdict === "fire").length,
+                          blocked: rows.filter((r) => r.verdict !== "fire").length,
+                        });
+                      }
+                      setDryRun((v) => !v);
+                    }}
+                  >
+                    What would fire?
+                  </button>
+                  <button
+                    type="button"
+                    className={`orch-arm${flow.armed ? " on" : ""}`}
+                    onClick={() => p.onArm(flow.id, !flow.armed)}
+                  >
+                    {flow.armed ? "Armed · disarm" : "Arm"}
+                  </button>
+                </>
+              )}
             </div>
           </>
         )}
@@ -1739,7 +1792,17 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             for symmetry with the header's own `p.view === "canvas"` block. */}
         {p.view === "canvas" && (
           <>
-        {savingTemplate && (
+        {savingTemplate && !editingTemplate && (
+          // `!editingTemplate` is belt-and-suspenders here, not the primary
+          // gate: the button that calls `openSaveTemplate` is itself hidden
+          // in the header block above, and the `[openKey]` effect near the
+          // top of this component already forces `savingTemplate` back to
+          // `false` the moment the target changes kind. Kept anyway, for the
+          // same reason `resume` and `dry` are gated at their own source
+          // rather than trusted to stay false by construction — a save-as-
+          // template dialog open over a TEMPLATE would create a template
+          // from a template, which is not a concept this feature has.
+          //
           // Same slot the resume banner and the dry-run panel below use for a
           // thing that briefly takes over this body without leaving the
           // drawer — first among them, since saving IS the reason the panel
@@ -1817,7 +1880,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             </div>
           </div>
         )}
-        {dryRun && (
+        {dryRun && !editingTemplate && (
+          // `!editingTemplate` here for the same reason `dry` itself is gated
+          // at its source, above: `dryRun` is local state that can outlive an
+          // `openKey` switch from an armed flow straight onto a template.
+          //
           // Between the resume gate and the graph, and above BOTH views on
           // purpose: a verdict about the graph should not cost you sight of it,
           // and it is the same answer whether you are editing on the canvas or in
@@ -1895,24 +1962,32 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <button type="button" className="orch-mini" onClick={addGate}>+ Gate</button>
               <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
               {addCommandPicker}
-              <MultiCombo
-                trigger="+ Add place…"
-                ariaLabel="Add a place"
-                searchPlaceholder="Filter places…"
-                options={placeCandidates(flow, p.runs).map((c) => ({
-                  value: c.key,
-                  label: c.runKey,
-                  detail: c.repo,
-                  // A ticket key is an identifier; a command's label is not. See
-                  // `ComboOption.mono`.
-                  mono: true,
-                }))}
-                // Every board run is already attached, or the board is empty. Both
-                // are answered by the board, not in here, so the line says what is
-                // true rather than offering a search over nothing.
-                emptyLabel="Nothing left to attach — every place is already here"
-                onCommit={attachMany}
-              />
+              {/* A place binds a LIVE running card's `runKey` into the graph —
+                  see `attachAt`'s own comment for why that is the opposite of
+                  what a template is for. Hidden rather than left to hit
+                  `attachMany`'s own no-op refusal: an empty-looking picker
+                  that quietly does nothing on commit is worse than one that
+                  is not offered. */}
+              {!editingTemplate && (
+                <MultiCombo
+                  trigger="+ Add place…"
+                  ariaLabel="Add a place"
+                  searchPlaceholder="Filter places…"
+                  options={placeCandidates(flow, p.runs).map((c) => ({
+                    value: c.key,
+                    label: c.runKey,
+                    detail: c.repo,
+                    // A ticket key is an identifier; a command's label is not. See
+                    // `ComboOption.mono`.
+                    mono: true,
+                  }))}
+                  // Every board run is already attached, or the board is empty. Both
+                  // are answered by the board, not in here, so the line says what is
+                  // true rather than offering a search over nothing.
+                  emptyLabel="Nothing left to attach — every place is already here"
+                  onCommit={attachMany}
+                />
+              )}
             </div>
             {/* The same two blocks the canvas renders, in the same order they read
                 in: what the flow's rules ACT on, and the panel that configures

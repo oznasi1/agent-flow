@@ -2780,6 +2780,118 @@ describe("the resume banner", () => {
   });
 });
 
+// Task 12: the verb gate. `shipItTemplate`/`dummyEdges` are declared further
+// down in this file (module scope, used by "the Templates tab" below) but
+// available here regardless — both are plain top-level `const`s referenced
+// only from inside these `it` callbacks, which vitest does not invoke until
+// the whole module (every describe/it registration) has already run.
+describe("template authoring mode", () => {
+  /** One WORKFLOW verb per line, matched against THIS file's own button text —
+   * not the generic seed list the brief for this task offered (which named
+   * `/attach workflow/i` and `/^detach$/i`). Those two live on `WorkflowBlock`
+   * (a card's own drawer, `onAttach`/`onDetach` there), never inside
+   * `OrchestratorDrawer.tsx`, and `wf` on that path is always a real, attached
+   * `Flow` — never a `FlowTemplate` — so there is no route from this
+   * component to either button; they are excluded here rather than padded in
+   * to match a list that cannot fire.
+   *
+   * This file's own "attach" is binding a live running card's repo into the
+   * graph as a `place` node (`attachAt`/`attachMany`), offered as "+ Add
+   * place…" and reachable only from the List tab — see `toList` below. The
+   * trigger's accessible name is actually its `aria-label` ("Add a place"),
+   * not its visible "+ Add place…" text (`MultiCombo`, combo.tsx) — the
+   * regex below matches that, not the glyph.
+   *
+   * Anchored (`^...$`) wherever the plain text is short enough to collide
+   * with a sibling control: "Disarm" (the resume banner's own button) vs. the
+   * Arm toggle's "Armed · disarm" is the exact collision "the resume banner"
+   * describe block above already documents for `getByRole`. Approve/Reject
+   * are not tested here at all — `gateStateOf` derives them from an edge's
+   * `performed`/`firedAt` stamps, which `toTemplate` strips on every edge via
+   * `stripHostStamps` (templates.ts), so they are unreachable by construction
+   * for ANY template, not merely hidden by this task's own gate; a regex for
+   * a button that no fixture in this file can ever render would test nothing. */
+  const WORKFLOW_VERBS = [
+    /^arm$/i,
+    /^disarm$/i,
+    /^go$/i,
+    /what would fire/i,
+    /save as template/i,
+    /add a place/i,
+  ];
+
+  /** "+ Add place…" renders only inside the List tab's own Add bar (the
+   * canvas tab's equivalent is a drag-and-drop-only tray with no button of
+   * its own) — the other five verbs live in the header, which renders
+   * identically regardless of this toggle, so switching once up front costs
+   * those five checks nothing. */
+  const toList = () => fireEvent.click(screen.getByRole("tab", { name: "List" }));
+
+  it("offers no workflow verb while editing a template", () => {
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "t1" }, templates: [shipItTemplate()],
+    })} />);
+    toList();
+    for (const v of WORKFLOW_VERBS) {
+      expect(screen.queryByRole("button", { name: v })).toBeNull();
+    }
+  });
+
+  it("still offers those verbs on a flow, so the gate is not just hiding everything", () => {
+    // Attachable: a planned node (`canBindTicket` true, so "Save as
+    // template…" is enabled rather than merely present) plus a pending
+    // resume keyed to this exact flow id, so "Go"/"Disarm" have something to
+    // answer. `armed: false` on purpose — the Arm toggle's OWN armed state
+    // renders "Armed · disarm" instead of "Arm", which would make the "Arm"
+    // half of this list vacuously fail to find anything to assert on; nothing
+    // in this component requires a flow to be armed before it can hold a
+    // pending resume; see `resume`'s own derivation, which never reads
+    // `flow.armed`.
+    const attachable = flow({
+      nodes: [
+        { id: "n1", kind: "planned", x: 24, y: 24, join: "any", ticketKey: "", repos: ["agent-flow"], mode: "quick", dest: "worktree" },
+      ],
+      edges: dummyEdges(1),
+    });
+    render(<OrchestratorDrawer {...props({
+      flows: [attachable],
+      openId: { kind: "flow", id: "f1" },
+      pendingResume: [{ flowId: "f1", flowName: "Ship the migration", lines: ["a rule is ready"] }],
+    })} />);
+    toList();
+    for (const v of WORKFLOW_VERBS) {
+      expect(screen.queryByRole("button", { name: v })).not.toBeNull();
+    }
+  });
+
+  it("shows no resume banner while editing a template, even when pendingResume names its inner flow id", () => {
+    // `toTemplate` mints a template's inner flow with `id: ""` (templates.ts)
+    // — a `pendingResume` entry keyed by that exact empty string is the
+    // adversarial case `resume`'s own derivation (`OrchestratorDrawer.tsx`)
+    // must refuse regardless of the coincidental id match, not merely one
+    // that happens not to occur in practice.
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "t1" }, templates: [shipItTemplate()],
+      pendingResume: [{ flowId: "", flowName: "Ship it", lines: ["a rule is ready"] }],
+    })} />);
+    expect(screen.queryByTestId("orch-resume")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Go" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Disarm" })).toBeNull();
+  });
+
+  it("still lets a template's own shape be edited — Notify, Gate and planned work stay offered", () => {
+    // The negative space this task's own scope draws: only the LIVE/ticket
+    // verbs are gone. Building the template's SHAPE — what a later attach
+    // will bind a ticket to — is still the whole point of opening it here.
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "t1" }, templates: [shipItTemplate()],
+    })} />);
+    expect(screen.getByRole("button", { name: "+ Notify" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ Gate" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ Add planned work" })).toBeTruthy();
+  });
+});
+
 describe("Reset", () => {
   const firedFlow = () => flow({
     nodes: [
