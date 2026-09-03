@@ -52,9 +52,54 @@ export class Pool {
   /** Drive the repo multiselect. Batch mode only surfaces once a repo is
    *  selected (App.tsx) — every batch-shaped journey starts here. */
   async selectRepo(name: string): Promise<void> {
-    await this.frame.locator(".repo-select-trigger").click();
+    await this.repoTrigger().click();
     await this.frame.locator(".repo-opt", { hasText: name }).click();
     await this.page.keyboard.press("Escape"); // close the popover; the selection sticks
+  }
+
+  // ---- The lens row. Every locator below is read from src/webview/App.tsx on
+  // 2026-09-03; the line cited is where the element is rendered. Role + accessible
+  // name where the component gives one, so a class rename in `styles.ts` cannot
+  // silently detach a journey from the control it thinks it is driving.
+
+  /** The filter-tab group — `<div className="seg" role="group" aria-label="Task filter">`
+   *  (App.tsx:585). Its buttons are the lenses `visibleFilters(caps.supportedFilters)`
+   *  chose to render (App.tsx:586-593), labelled from `FILTER_LABELS` (App.tsx:22). */
+  filterGroup(): Locator {
+    return this.frame.getByRole("group", { name: "Task filter" });
+  }
+
+  /** One filter tab by its visible label ("Mine", "My sprint", …). `exact` so
+   *  "Sprint" cannot match "My sprint". `aria-pressed` (App.tsx:589) says which is
+   *  active. */
+  filterTab(label: string): Locator {
+    return this.filterGroup().getByRole("button", { name: label, exact: true });
+  }
+
+  /** The S/M/L estimate control — `role="group" aria-label="Size"` (App.tsx:601),
+   *  rendered only under `caps.sizes && filters.size` (App.tsx:598). */
+  sizeGroup(): Locator {
+    return this.frame.getByRole("group", { name: "Size" });
+  }
+
+  /** The status chip row — `role="group" aria-label="Status"` (App.tsx:619),
+   *  rendered only under `filters.status && availableStatuses.length > 0`
+   *  (App.tsx:616). Its first button is "All", then one per distinct status. */
+  statusGroup(): Locator {
+    return this.frame.getByRole("group", { name: "Status" });
+  }
+
+  /** The repo multiselect's trigger — `<button className="repo-select-trigger">`
+   *  (App.tsx:1138). `RepoMultiSelect` itself mounts only under `filters.repo`
+   *  (App.tsx:641) and returns null when the pool infers no repos (App.tsx:1134). */
+  repoTrigger(): Locator {
+    return this.frame.locator(".repo-select-trigger");
+  }
+
+  /** The fuzzy title/key search box — `<input placeholder="Search title or ticket…">`
+   *  inside `.text-search` (App.tsx:650-657), rendered only under `filters.search`. */
+  searchBox(): Locator {
+    return this.frame.getByPlaceholder("Search title or ticket…");
   }
 
   /** Switch to the Notepad tab. Role-based, so it survives a class rename. */
