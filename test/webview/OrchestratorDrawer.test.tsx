@@ -4713,6 +4713,56 @@ describe("the Templates tab", () => {
     await screen.findByText("Ship it");
     expect(screen.queryByText(/No templates yet/)).toBeNull();
   });
+
+  // Task 14: a built-in ships with the SAME `FlowTemplate` shape a user's own
+  // template has — the only signal this row can key off is the id prefix
+  // `isBuiltinTemplateId` checks, the same predicate the host uses before
+  // refusing a rename/delete/overwrite. Using a real STARTERS entry, not a
+  // hand-rolled id starting with "builtin-", so this test would catch the
+  // predicate and the fixture drifting apart, not just the row's own logic.
+  it("marks a built-in row as built-in", async () => {
+    const starter = STARTERS[0];
+    openTemplatesTab({ templates: [starter] });
+    await screen.findByText(starter.name);
+    const row = screen.getByText(starter.name).closest(".orch-tmpl-row") as HTMLElement;
+    expect(within(row).getByText("Built-in")).toBeTruthy();
+  });
+
+  // Duplicate is the one supported path to owning an editable copy of a
+  // built-in — it must stay enabled. Rename and Delete are ABSENT (this
+  // component's own doc comment explains why absent rather than disabled):
+  // asserting the row's full button list, not just that two names are
+  // missing, so a future third verb sneaking onto a built-in row fails here
+  // too.
+  it("offers Duplicate on a built-in but not Rename or Delete", async () => {
+    const starter = STARTERS[0];
+    openTemplatesTab({ templates: [starter] });
+    await screen.findByText(starter.name);
+    const row = screen.getByText(starter.name).closest(".orch-tmpl-row") as HTMLElement;
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate"]);
+  });
+
+  // The counterpart to the built-in test above: the gate must not be "hide
+  // everything everywhere" — a template the user actually owns keeps its
+  // full verb set. (The same shape `shipItTemplate()` already pins via the
+  // "offers no way to attach…" test above; this one isolates just the
+  // three-button claim under this task's own name.)
+  it("offers all three verbs — Duplicate, Rename, Delete — on a user template", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    await screen.findByText("Ship it");
+    const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Rename", "Delete"]);
+  });
+
+  // `onCards` is a lookup the CALLER does (`Flow.fromTemplate === t.id`) and
+  // is handed to `TemplateRow` unchanged — built-in-ness must not touch it.
+  it("still counts how many cards a built-in is on", async () => {
+    const starter = STARTERS[0];
+    const onCard = flow({ id: "f9", fromTemplate: starter.id });
+    openTemplatesTab({ templates: [starter], flows: [flow(), onCard] });
+    await screen.findByText(starter.name);
+    expect(screen.getByText("on 1 card")).toBeTruthy();
+  });
 });
 
 describe("Save as template", () => {

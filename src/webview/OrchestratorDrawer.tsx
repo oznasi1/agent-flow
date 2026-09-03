@@ -3,6 +3,7 @@ import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, GateNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
@@ -199,17 +200,32 @@ function SaveCommandRow({ runNow }: { runNow: () => string }): JSX.Element {
 }
 
 /** One row on the Templates tab: a template's name, its rule count, how many
- * live workflows were built from it, and the three verbs a TEMPLATE offers —
- * Duplicate, Rename, Delete. Never Arm, disarm or Detach: a template is the
- * reusable SHAPE, not a workflow attached to a card, so those verbs do not
- * exist here (see this task's own vocabulary rule).
+ * live workflows were built from it, and the verbs a TEMPLATE offers —
+ * Duplicate always, Rename and Delete only for a template the user owns.
+ * Never Arm, disarm or Detach: a template is the reusable SHAPE, not a
+ * workflow attached to a card, so those verbs do not exist here (see this
+ * task's own vocabulary rule).
+ *
+ * Built-in-ness is derived from `isBuiltinTemplateId(t.id)` — the same
+ * predicate the HOST checks before refusing a rename/delete/overwrite — rather
+ * than a prop this component is handed. One source of truth: a second copy of
+ * "is this one of the three starters" could drift from the host's own check
+ * (e.g. after a duplicate strips the prefix), silently offering a control that
+ * fails server-side, or hiding one that would have succeeded.
+ *
+ * Rename and Delete are ABSENT on a built-in, not disabled: a disabled button
+ * still needs a reason shown somewhere (a title attribute, a tooltip) and
+ * invites a second copy of that reason to drift from this comment. Duplicate
+ * is the one supported path to owning an editable copy, and it stays enabled
+ * unconditionally — see its own line below.
  *
  * `onCards` is a lookup the caller already did (`Flow.fromTemplate === t.id`),
  * never a guess from this row: matching on name or rule count would silently
  * merge two unrelated templates that happen to look alike, and a workflow is
  * free to diverge from its template's shape the moment it is instantiated —
  * name and rule count are exactly the two things that can no longer be
- * trusted to agree.
+ * trusted to agree. Unaffected by built-in-ness: a starter is on cards the
+ * same way a user template is, and this row must keep saying so.
  *
  * Its own component, not inlined in the switcher panel below, so Rename and
  * the delete confirmation each get their own local state scoped to one row —
@@ -228,6 +244,7 @@ function TemplateRow({
   const [renaming, setRenaming] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
   const ruleCount = t.flow.edges.length;
+  const builtin = isBuiltinTemplateId(t.id);
   return (
     <div className="orch-tmpl-row">
       <div className="row">
@@ -253,6 +270,11 @@ function TemplateRow({
         ) : (
           <span className="t">{t.name}</span>
         )}
+        {/* `.meta` — the same quiet, muted treatment this row already uses for
+            the rule count and card count below, not `--c-attn`/`--c-danger`:
+            being built-in is neither a warning nor a failure, just a fact
+            about where the template came from. */}
+        {builtin && <span className="meta">Built-in</span>}
         <div className="sp" />
         <span className="meta">{ruleCount} {ruleCount === 1 ? "rule" : "rules"}</span>
       </div>
@@ -275,8 +297,14 @@ function TemplateRow({
       ) : (
         <div className="row">
           <button type="button" className="orch-mini" onClick={onDuplicate}>Duplicate</button>
-          <button type="button" className="orch-mini" onClick={() => setRenaming(true)}>Rename</button>
-          <button type="button" className="orch-mini" onClick={() => setConfirming(true)}>Delete</button>
+          {/* Rename and Delete: absent, not disabled, on a built-in — see this
+              component's own doc comment for why. */}
+          {!builtin && (
+            <>
+              <button type="button" className="orch-mini" onClick={() => setRenaming(true)}>Rename</button>
+              <button type="button" className="orch-mini" onClick={() => setConfirming(true)}>Delete</button>
+            </>
+          )}
         </div>
       )}
     </div>
