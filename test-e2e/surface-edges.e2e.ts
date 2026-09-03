@@ -200,7 +200,7 @@ test('a batch under "ask" asks once and uses the answer for every task', async (
   // takeBatch: `resolveBatchProvider` runs ahead of them all). Its placeholder is
   // the batch-wide one (agentPick.ts).
   await expect(quickTitle(page)).toHaveText("Which tool?", { timeout: 15_000 });
-  await expect(quickInput(page).locator("input")).toHaveAttribute("placeholder", "Pick the tool for every session in this batch");
+  await expect(quickInput(page).getByPlaceholder("Pick the tool for every session in this batch")).toBeVisible();
   await shot(page, testInfo, "1 · asked once, for the batch");
   // Codex, not Claude Code: the sandbox's degradation default IS Claude Code, so
   // only a non-default answer can prove the answer travelled rather than the
