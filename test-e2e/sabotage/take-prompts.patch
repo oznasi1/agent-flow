@@ -1,0 +1,21 @@
+diff --git a/src/config.ts b/src/config.ts
+index ffee29c0..01d8ec4d 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -46,16 +46,6 @@ export const DEFAULT_PROMPT_MODES: PromptMode[] = [
+       "Reproduce the problem, trace it to a root cause, and explain what's going wrong with evidence from the code. " +
+       "Propose a fix, but don't change code unless I ask. Ticket: {url}{files}",
+   },
+-  {
+-    id: "orchestrator",
+-    label: "Orchestrator",
+-    detail: "Split into parallel subtasks, then integrate and verify",
+-    prompt:
+-      'Jira {key}: "{summary}". Read the task brief at {brief} for context and the repos involved. ' +
+-      "Break this into independent subtasks and tell me the breakdown before you start. Then dispatch a subagent " +
+-      "per subtask so they run in parallel, integrate the results yourself, and verify the whole thing works. " +
+-      "Ticket: {url}{files}",
+-  },
+   {
+     id: "refine",
+     label: "Refine the ticket",
