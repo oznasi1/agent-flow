@@ -49,7 +49,15 @@ export async function cursorHostExecutable(): Promise<string> {
   return patchedExe;
 }
 
-export async function launchHost(sb: Sandbox, opts: { host?: "vscode" | "cursor" } = {}): Promise<{ app: ElectronApplication; page: Page }> {
+/** `folder`: open the window ON this folder instead of empty. Opt-in and additive —
+ *  every journey that omits it boots the same empty window it always did. A window
+ *  with one folder has an identity (`windowIdentity`, src/engine/presence.ts:56), which
+ *  is what lets the destination picker offer "This window" (engine/openTarget.ts); an
+ *  empty window is deliberately unnameable and never gets that row. */
+export async function launchHost(
+  sb: Sandbox,
+  opts: { host?: "vscode" | "cursor"; folder?: string } = {},
+): Promise<{ app: ElectronApplication; page: Page }> {
   const executablePath = opts.host === "cursor" ? await cursorHostExecutable() : await downloadAndUnzipVSCode(VSCODE_VERSION);
   const app = await _electron.launch({
     executablePath,
@@ -77,6 +85,8 @@ export async function launchHost(sb: Sandbox, opts: { host?: "vscode" | "cursor"
       // test seam and keep secrets in memory for the session.
       "--password-store=basic",
       "--use-inmemory-secretstorage",
+      // Positional, after every flag: the folder the window opens on (see `opts.folder`).
+      ...(opts.folder ? [opts.folder] : []),
     ],
     env: (() => {
       const env: Record<string, string> = {};
