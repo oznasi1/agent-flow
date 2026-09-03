@@ -2163,7 +2163,128 @@ describe("the Workflows and Templates buttons", () => {
     host(flowsMsg([mkFlow("f1", "Ship the migration")]));
     expect(drawer()).toBeNull();
   });
+});
 
+// Task 13: "＋ New template…" mints a template held only in `DeckApp` state
+// (`draftTemplate` — see that state's own doc comment) and never written
+// anywhere — not `~/.agentflow/templates/`, not even `templates` itself, the
+// list a card's attach picker reads — until its own Save sends
+// `flow:writeTemplate`. The property under test throughout: an interrupted
+// draft costs nothing, because nothing was ever sent for it to interrupt.
+describe("＋ New template… — a draft that never touches disk", () => {
+  const newTemplateBtn = () => screen.getByRole("button", { name: "＋ New template…" });
+
+  const openTemplatesView = () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    fireEvent.click(templatesBtn());
+  };
+
+  it("opens a blank template on the canvas and sends nothing at all", () => {
+    openTemplatesView();
+    sent.mockClear();
+    fireEvent.click(newTemplateBtn());
+    // Canvas, not Templates — same destination "+ New flow" sends an
+    // ordinary workflow to.
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Flow name")).toBeInTheDocument();
+    // THE property that made a draft-flow-on-disk approach wrong (see
+    // DeckApp.tsx's own module comment): nothing reaches the host at all —
+    // not `flow:create`, not `flow:save`, not anything else either.
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("reopens the same in-flight draft on a second click, rather than minting a new one", () => {
+    openTemplatesView();
+    sent.mockClear(); // drop the mount's own deck:ready
+    fireEvent.click(newTemplateBtn());
+    fireEvent.change(screen.getByLabelText("Flow name"), { target: { value: "Ship it fast" } });
+    fireEvent.blur(screen.getByLabelText("Flow name"));
+    fireEvent.click(templatesBtn()); // back to Templates, draft still in flight
+    fireEvent.click(newTemplateBtn()); // and back to Canvas
+    // The typed name survived — this is the SAME draft, not a fresh blank one.
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it fast");
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("starts the draft with one planned step, so it can be saved immediately", () => {
+    openTemplatesView();
+    fireEvent.click(newTemplateBtn());
+    // The count renders twice — once in the canvas header, once in its own
+    // footer (OrchestratorDrawer.tsx's pre-existing, unrelated duplication;
+    // see that file's own "6 nodes · 0 rules" test for the same shape).
+    expect(screen.getAllByText(/1 node · 0 rules/)).toHaveLength(2);
+    expect(screen.getByTestId("orch-node-n1").className).toContain("plan");
+  });
+
+  it("naming it and pressing Save sends exactly one flow:writeTemplate, with no templateId", () => {
+    openTemplatesView();
+    fireEvent.click(newTemplateBtn());
+    fireEvent.change(screen.getByLabelText("Flow name"), { target: { value: "Ship it fast" } });
+    fireEvent.blur(screen.getByLabelText("Flow name"));
+    sent.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sent).toHaveBeenCalledTimes(1);
+    const [msg] = sent.mock.calls[0] as [Record<string, unknown>];
+    expect(msg.type).toBe("flow:writeTemplate");
+    expect(msg.name).toBe("Ship it fast");
+    expect(msg.templateId).toBeUndefined();
+  });
+
+  it("discards the draft on Cancel, leaving the Templates list unchanged", () => {
+    // Cancel drops `openFlowId` to `null` while the drawer stays open on
+    // Templates (`orchOpen` is untouched — see `onCancelTemplate`'s own
+    // comment), which is exactly the shape `useDrawerExit` (Drawer.tsx)
+    // treats as a close-in-place to animate: `closing` goes true for
+    // `DRAWER_ANIM_MS` even though nothing is actually closing from the
+    // user's point of view, and the drawer's landmark is `aria-hidden` for
+    // that span (see Drawer.tsx's own doc comment). Advancing past it is
+    // what the rest of this suite already does for the identical reason
+    // (OrchestratorDrawer.test.tsx's "the open and close animation").
+    vi.useFakeTimers();
+    try {
+      render(<DeckApp />);
+      host({
+        type: "deck:flows", commands: [], branchCi: {}, flows: [], enabled: true,
+        pendingResume: [], promptModes: [], templates: [makeTemplate("t1", "Ship it")],
+      });
+      fireEvent.click(templatesBtn());
+      expect(screen.getByText("Ship it")).toBeTruthy();
+      fireEvent.click(newTemplateBtn());
+      sent.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      act(() => { vi.advanceTimersByTime(DRAWER_ANIM_MS); });
+      const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+      expect(within(nav).getByRole("tab", { name: "Templates" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByText("Ship it")).toBeTruthy();
+      expect(templatesBtn().querySelector(".ct")!.textContent).toBe("1");
+      expect(sent).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A card's attach picker (`WorkflowBlock.tsx`/`DeckDetail.tsx`) lists
+  // `templates` straight from the host's `deck:flows` post — `draftTemplate`
+  // is never folded into that list (see `draftTemplate`'s own doc comment),
+  // so this holds structurally rather than by a special-cased filter that
+  // could rot.
+  it("never offers the draft in a card's attach picker", () => {
+    openTemplatesView();
+    fireEvent.click(newTemplateBtn());
+    fireEvent.change(screen.getByLabelText("Flow name"), { target: { value: "Ship it fast" } });
+    fireEvent.blur(screen.getByLabelText("Flow name"));
+    // Selecting a card closes the Orchestrator drawer (same as any other
+    // card click) but does not touch `draftTemplate` — it is still in
+    // flight, unsaved, when the attach picker opens below.
+    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "PROJ-9" } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    expect(screen.getByPlaceholderText("Choose a template for PROJ-9…")).toBeTruthy();
+    expect(screen.queryByText("Ship it fast")).toBeNull();
+    expect(screen.getByText("No templates saved yet")).toBeTruthy();
+  });
 });
 
 describe("the deck:flows handler", () => {

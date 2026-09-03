@@ -5,6 +5,7 @@ import type { AccountSlot } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
 import { bindsRun, boundTicketKeyOf, cardWorkflow, rankByState, type CardWorkflow, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
+import { TEMPLATE_SCHEMA } from "../engine/orchestrator/templates";
 import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
@@ -256,6 +257,58 @@ export function retainedOpenTarget(cur: OrchTarget | null, posted: Flow[]): Orch
   if (cur?.kind === "template") return cur;
   if (cur && posted.some((f) => f.id === cur.id)) return cur;
   return null;
+}
+
+/** How many drafts this session has minted — a monotonic counter, not a
+ * wall-clock read, so two clicks landing in the same millisecond (a fast
+ * double-click, or a test) still mint distinct ids. Same shape, same reason,
+ * as `toastSeq` above. */
+let draftTemplateSeq = 0;
+
+/** A fresh, in-memory template for "＋ New template…" — held only in
+ * `draftTemplate` state below, never written to `~/.agentflow/templates/`
+ * and never added to `templates` (the list `deck:flows` posts, which is what
+ * both the Templates screen and a card's attach picker read), until its own
+ * Save sends `flow:writeTemplate`. See this component's own module comment
+ * on why a draft-flow-on-disk approach was rejected: flows are global and
+ * shared across windows behind a lock, so an interrupted edit would leave
+ * another window looking at a workflow nobody made.
+ *
+ * Starts with exactly one `planned` node so `canBindTicket` (templates.ts)
+ * passes the moment this is minted — that function's own doc comment is
+ * explicit that a template built only of command/gate/notify nodes saves
+ * cleanly and then fails `instantiate` at EVERY future attach, forever.
+ * `repos: []` and `mode: ""` are not placeholders that need filling in
+ * before this is usable — they are `instantiate`'s own documented fallback
+ * (see `boundLaunch`, templates.ts): an empty `repos` takes the attaching
+ * card's own repos, and a `mode` the config no longer has falls back to the
+ * first configured one. `ticketKey: ""` is the same blank every demoted
+ * place carries out of `toTemplate` — `instantiate` is what fills it in, at
+ * attach time.
+ *
+ * The template's own `name` (and its inner flow's) both start blank,
+ * mirroring `openSaveTemplate`'s identical choice below for the identical
+ * reason: a name is asked for, never guessed — see the canvas's own Save
+ * control for a template, which reads the typed name back off `flow.name`. */
+export function mintDraftTemplate(): FlowTemplate {
+  const id = `draft-${++draftTemplateSeq}`;
+  return {
+    schema: TEMPLATE_SCHEMA,
+    id,
+    name: "",
+    params: {},
+    savedAt: 0,
+    flow: {
+      id: "",
+      name: "",
+      armed: false,
+      createdAt: 0,
+      nodes: [
+        { id: "n1", x: 24, y: 24, join: "any", kind: "planned", ticketKey: "", repos: [], mode: "", dest: "worktree" },
+      ],
+      edges: [],
+    },
+  };
 }
 
 /** The identifier text the board's own key chip prints for this run — the
@@ -623,6 +676,15 @@ export function DeckApp(): JSX.Element {
    * flag as it is costs nothing: the drawer stays mounted but renders
    * nothing either way. */
   const [orchOpen, setOrchOpen] = React.useState(false);
+  /** The one in-flight "＋ New template…" draft, or `null` — never on disk,
+   * never in `templates` (so a card's attach picker can never offer it; see
+   * `mintDraftTemplate`'s own doc comment). At most one at a time: pressing
+   * "＋ New template…" again while a draft already exists reopens the SAME
+   * draft rather than minting a second one and orphaning the first — there
+   * is exactly one canvas to show it on. Cleared on Cancel and immediately
+   * after a successful Save is sent (the real template then arrives on the
+   * next `deck:flows` post) — see the drawer's own `onCancelTemplate` prop. */
+  const [draftTemplate, setDraftTemplate] = React.useState<FlowTemplate | null>(null);
   /** The selected card's `DeckCard.id`, not a run key: the Sessions lens renders
    * one card per session, so two cards can share a run and a key could not tell
    * them apart. */
@@ -1380,6 +1442,7 @@ export function DeckApp(): JSX.Element {
           commands={commands}
           branchCi={branchCi}
           templates={templates}
+          draftTemplate={draftTemplate}
           view={orchView}
           onView={setOrchView}
           // One row per card carrying a workflow, read from `workflowByCard` —
@@ -1396,12 +1459,60 @@ export function DeckApp(): JSX.Element {
           onCreate={() => send({ type: "flow:create" })}
           onOpen={(id) => setOpenFlowId({ kind: "flow", id })}
           onRename={(id, name) => send({ type: "flow:rename", id, name })}
-          onSave={(flow) => send({ type: "flow:save", flow })}
+          // Every graph edit on the canvas — drag, add a node, edit a
+          // field — goes through this one prop. A `flow` target sends it
+          // straight to the host, same as always; but the OPEN draft
+          // template has no file on disk for `flow:save` to find (the host
+          // silently refuses a write against an id it does not recognise —
+          // see that handler's own membership check), and "silently refuse"
+          // is not "nothing happened": the edit would vanish, since nothing
+          // else holds it either. So an edit to the draft's own flow is kept
+          // right here instead, in `draftTemplate` state, and never reaches
+          // `send` at all — which is the same property "＋ New template…"
+          // itself promises (see `mintDraftTemplate`'s own doc comment).
+          onSave={(flow) => {
+            if (draftTemplate && openFlowId?.kind === "template" && openFlowId.id === draftTemplate.id) {
+              setDraftTemplate({ ...draftTemplate, flow });
+              return;
+            }
+            send({ type: "flow:save", flow });
+          }}
           onDelete={(id) => send({ type: "flow:delete", id })}
           onArm={(id, armed) => send({ type: "flow:arm", id, armed })}
           onResumeApprove={(id) => send({ type: "flow:resumeApprove", id })}
           onResumeDisarm={(id) => send({ type: "flow:resumeDisarm", id })}
           onResetEdge={(id, edgeId) => send({ type: "flow:resetEdge", id, edgeId })}
+          // "＋ New template…", on the Templates screen and on Canvas's own
+          // blank-flow empty state alike (Task 13; see that empty state's own
+          // comment). Reopens the SAME in-flight draft rather than minting a
+          // second one — see `draftTemplate`'s own doc comment for why only
+          // one exists at a time. NOT `onCreate`: that mints an ordinary
+          // WORKFLOW and used to sit here under a "＋ New template" label
+          // (see the git history on the Templates screen's own comment) —
+          // the wrong verb, since the panel would close, Templates would
+          // stay empty, and an untitled entry would appear on the board
+          // instead. This mints a TEMPLATE, in memory, and sends nothing.
+          onNewTemplate={() => {
+            setSelId(null);
+            const draft = draftTemplate ?? mintDraftTemplate();
+            if (!draftTemplate) setDraftTemplate(draft);
+            setOpenFlowId({ kind: "template", id: draft.id });
+            setOrchView("canvas");
+            setOrchOpen(true);
+          }}
+          // Leaves template-editing entirely, back to the Templates screen —
+          // called both by the canvas's own Cancel button (discarding
+          // whatever draft is open) and right after its Save sends
+          // `flow:writeTemplate` (the draft's job is done; the real template
+          // arrives on the next `deck:flows` post). Clearing `draftTemplate`
+          // when the target being left is not actually the draft (a future,
+          // still-unreachable path for editing an already-saved template) is
+          // a harmless no-op — there is nothing there to clear.
+          onCancelTemplate={() => {
+            setDraftTemplate(null);
+            setOpenFlowId(null);
+            setOrchView("templates");
+          }}
         />
       )}
 

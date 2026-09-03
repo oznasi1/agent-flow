@@ -88,13 +88,14 @@ const flow: Flow = {
 };
 
 const props = {
-  flows: [flow], openId: { kind: "flow" as const, id: "f1" }, runs: [], pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [],
+  flows: [flow], openId: { kind: "flow" as const, id: "f1" }, runs: [], pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [], draftTemplate: null,
   // Canvas by default: the third test below (the Save-as-template dialog) is
   // a Canvas-only control. The first two override this to "templates" — see
   // `openTemplatesTab`'s own comment for why a click can no longer get there.
   view: "canvas" as const, onView: noop, rows: [], onOpenCard: noop,
   onClose: noop, onCreate: noop, onOpen: noop, onRename: noop, onSave: noop, onDelete: noop,
   onArm: noop, onResumeApprove: noop, onResumeDisarm: noop, onResetEdge: noop,
+  onNewTemplate: noop, onCancelTemplate: noop,
 };
 
 /** The drawer slides in the same way the card drawer does (`ORCH_ANIM_MS` —

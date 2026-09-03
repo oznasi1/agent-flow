@@ -281,6 +281,8 @@ const FLOW_LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "message type sent to the host, a wire value" },
   { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:deleteTemplate",
     why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:writeTemplate",
+    why: "message type sent to the host, a wire value — Task 13's canvas Save control while editing a template" },
   // src/webview/OrchestratorDrawer.tsx: the flow-graph canvas's own
   // pre-existing copy, confirmed present at this branch's merge-base with
   // main — none of it was touched by this feature, and none of it is the

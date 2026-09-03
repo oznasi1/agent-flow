@@ -115,6 +115,9 @@ const COMMANDS = [
 const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => ({
   flows: [flow()], openId: { kind: "flow", id: "f1" } as OrchTarget, runs: [], pendingResume: [], promptModes: MODES, commands: COMMANDS, branchCi: {},
   templates: [],
+  // No in-flight draft by default — Task 13's own describe block below is
+  // what overrides this to exercise "＋ New template…".
+  draftTemplate: null,
   // Canvas by default: the whole pre-existing suite below asserts against the
   // flow-graph editor, and defaulting here keeps every one of those tests
   // exercising exactly what it did before `view` existed as a prop at all.
@@ -124,6 +127,7 @@ const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = 
   onClose: vi.fn(), onCreate: vi.fn(), onOpen: vi.fn(),
   onRename: vi.fn(), onSave: vi.fn(), onDelete: vi.fn(),
   onArm: vi.fn(), onResumeApprove: vi.fn(), onResumeDisarm: vi.fn(), onResetEdge: vi.fn(),
+  onNewTemplate: vi.fn(), onCancelTemplate: vi.fn(),
   ...over,
 });
 
@@ -4637,17 +4641,22 @@ describe("the Templates tab", () => {
     expect(send).not.toHaveBeenCalled();
   });
 
-  // A template is made by saving a workflow, not by a button on this tab —
-  // an earlier draft offered "＋ New template" here, wired to `onCreate`,
-  // which actually builds an ordinary WORKFLOW on the Running tab and leaves
-  // Templates exactly as empty as it was. That is the wrong verb for what a
-  // first-time user here is trying to do, so there is no such button, and no
-  // path from this tab calls `onCreate` at all.
-  it("has no way to create anything from here — a template comes from Save as template on a workflow", async () => {
+  // Task 13: a "＋ New template…" button lives here again — an earlier
+  // draft offered one with this exact name too, wired to `onCreate`, which
+  // actually builds an ordinary WORKFLOW on the Running tab and leaves
+  // Templates exactly as empty as it was (see the removal's own history:
+  // commit 8d6ec5b8). That was the wrong verb, not the wrong idea — this one
+  // is `onNewTemplate`, which mints a TEMPLATE held only in memory
+  // (`DeckApp`'s own `draftTemplate`) until its own Save is pressed. Pinned
+  // by NEVER calling `onCreate`, the same property the removed test above
+  // pinned, plus that the restored button actually reaches the new verb.
+  it("offers ＋ New template…, wired to onNewTemplate and never onCreate", async () => {
     const onCreate = vi.fn();
-    openTemplatesTab({ templates: [shipItTemplate()], onCreate });
+    const onNewTemplate = vi.fn();
+    openTemplatesTab({ templates: [shipItTemplate()], onCreate, onNewTemplate });
     await screen.findByText("Ship it");
-    expect(screen.queryByRole("button", { name: /new template/i })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /new template/i }));
+    expect(onNewTemplate).toHaveBeenCalled();
     expect(onCreate).not.toHaveBeenCalled();
   });
 

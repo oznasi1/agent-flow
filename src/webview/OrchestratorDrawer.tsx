@@ -418,6 +418,15 @@ export interface OrchestratorDrawerProps {
    * file's own closures need to wrap first, so no new prop callback exists
    * for any of the three. */
   templates: FlowTemplate[];
+  /** The one in-flight "＋ New template…" draft, or `null` — `DeckApp`'s own
+   * state (`mintDraftTemplate`'s own doc comment), handed in as a prop
+   * rather than reached for, so `openFlow` below can resolve a template
+   * target against it the exact same way it resolves one against
+   * `p.templates`: a draft is a `FlowTemplate` like any other, just one
+   * `deck:flows` will never carry. Never itself added to `p.templates` —
+   * that is what keeps a card's attach picker (`DeckDetail.tsx`, reading the
+   * very same `templates` list this drawer does) from ever offering it. */
+  draftTemplate: FlowTemplate | null;
   onClose: () => void;
   onCreate: () => void;
   onOpen: (id: string) => void;
@@ -428,6 +437,15 @@ export interface OrchestratorDrawerProps {
   onResumeApprove: (id: string) => void;
   onResumeDisarm: (id: string) => void;
   onResetEdge: (id: string, edgeId: string) => void;
+  /** "＋ New template…" — mints a fresh draft (or reopens the one already in
+   * flight) and opens it on Canvas. See `DeckApp`'s own `onNewTemplate` for
+   * why this is not `onCreate`: that verb mints a WORKFLOW, not a template. */
+  onNewTemplate: () => void;
+  /** Leave template-editing entirely, back to the Templates screen — the
+   * canvas's own Cancel button while `editingTemplate`, and also called
+   * right after Save sends `flow:writeTemplate` (see `DeckApp`'s own
+   * doc comment on its identical prop). */
+  onCancelTemplate: () => void;
 }
 
 export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | null {
@@ -460,7 +478,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       ? undefined
       : target.kind === "flow"
         ? p.flows.find((f) => f.id === target.id)
-        : p.templates.find((t) => t.id === target.id)?.flow;
+        // A saved template first, and the in-flight draft only as a
+        // fallback: a real save always wins, and a draft never collides
+        // with one anyway (its id never matches anything `deck:flows` ever
+        // posts — see `mintDraftTemplate`'s own doc comment).
+        : (p.templates.find((t) => t.id === target.id) ?? (p.draftTemplate?.id === target.id ? p.draftTemplate : undefined))?.flow;
   /** The flow the drawer keeps painting while it slides back out, and whether it
    * is doing that — both from the shared drawer seam, so this drawer and the
    * card detail leave the board the same way. Frozen and unreachable for that
@@ -776,14 +798,30 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
                 />
               ))}
-              {/* A template is made by SAVING a workflow, never by a button on
-                  this screen — see the canvas's own "Save as template…"
-                  control. `.orch-empty` is the same empty-state treatment the
-                  canvas itself uses. */}
+              {/* A button with this exact name used to live here and was
+                  removed (Task 12's own review round) — it called `onCreate`,
+                  which mints an ordinary WORKFLOW: the panel would close,
+                  this screen would stay exactly as empty as before, and an
+                  untitled entry would appear on the board instead. The
+                  wrong verb for a first-time user on an empty Templates
+                  screen, so it was gone rather than fixed to do something
+                  else — building a workflow first and using its own "Save
+                  as template…" (below, on Canvas) remained the one way in.
+                  `onNewTemplate` is a different verb, not the same one
+                  restored: it mints a TEMPLATE, held only in `DeckApp`
+                  state (`draftTemplate` — see `mintDraftTemplate`'s own
+                  doc comment) and never written anywhere until its own
+                  Save is pressed, which is exactly the property that made
+                  the old button's `onCreate` wrong here in the first
+                  place. */}
+              <button type="button" className="orch-mini" onClick={p.onNewTemplate}>＋ New template…</button>
+              {/* `.orch-empty` is the same empty-state treatment the canvas
+                  itself uses. */}
               {p.templates.length === 0 && (
                 <div className="orch-empty">
-                  No templates yet. Build a workflow, then use its own
-                  &ldquo;Save as template&hellip;&rdquo; to keep the shape.
+                  No templates yet. Start with &ldquo;＋ New template&hellip;&rdquo;
+                  above, or build a workflow and use its own &ldquo;Save as
+                  template&hellip;&rdquo; to keep the shape.
                 </div>
               )}
             </div>
@@ -1654,39 +1692,71 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 anyway, and a drawer painting a deleted flow in the meantime
                 is a lie. A separate row from Save-as-template/Arm below on
                 purpose — see that row's own test for why sharing a parent
-                with either would be the wrong claim. */}
-            <div className="row" style={{ marginTop: 6 }}>
-              {p.flows.map((f) => (
+                with either would be the wrong claim.
+
+                Hidden while `editingTemplate`: every control here is a bare
+                `Flow` object's own verb — switch to another OPEN FLOW, start
+                one, delete this one — and a template's inner flow is none of
+                those things; it has no membership in `p.flows` at all (a
+                template lives in `p.templates`, or, for the draft, nowhere
+                `deck:flows` reaches yet — see `draftTemplate`'s own doc
+                comment), so `p.onDelete(flow.id)` here would ask the host to
+                delete a flow id that is either someone else's or nothing on
+                disk at all. */}
+            {!editingTemplate && (
+              <div className="row" style={{ marginTop: 6 }}>
+                {p.flows.map((f) => (
+                  <button
+                    type="button"
+                    key={f.id}
+                    className="orch-mini"
+                    aria-pressed={f.id === flow.id}
+                    onClick={() => p.onOpen(f.id)}
+                  >
+                    {f.name}
+                  </button>
+                ))}
+                <button type="button" className="orch-mini" onClick={p.onCreate}>+ New flow</button>
+                <div className="sp" />
                 <button
                   type="button"
-                  key={f.id}
                   className="orch-mini"
-                  aria-pressed={f.id === flow.id}
-                  onClick={() => p.onOpen(f.id)}
+                  onClick={() => { p.onDelete(flow.id); p.onClose(); }}
                 >
-                  {f.name}
+                  Delete flow
                 </button>
-              ))}
-              <button type="button" className="orch-mini" onClick={p.onCreate}>+ New flow</button>
-              <div className="sp" />
-              <button
-                type="button"
-                className="orch-mini"
-                onClick={() => { p.onDelete(flow.id); p.onClose(); }}
-              >
-                Delete flow
-              </button>
-            </div>
+              </div>
+            )}
             {/* Rename on blur, not per keystroke: every keystroke would be a disk
-                write and a re-post, and the field would fight the re-render. */}
+                write and a re-post, and the field would fight the re-render.
+                The SAME field doubles as the template's own name while
+                `editingTemplate` — `flow:writeTemplate`'s `name` (below) reads
+                it straight off `flow.name` — rather than a second input with
+                a second piece of state: `p.onRename` sends `flow:rename`,
+                which only ever finds a `Flow` already on disk (the same
+                membership check `flow:save` makes), so it cannot be what
+                names a template. `p.onSave` already IS the draft's own edit
+                path (see `DeckApp`'s doc comment on that prop) — a plain
+                object-spread rename is nothing more than one more field
+                changing on the same graph. `key={openKey}` (not `flow.id`,
+                which is always `""` for EVERY template's inner flow — see
+                `normalizedTemplateFlow`) so this remounts, and its
+                uncontrolled value resets, across two different templates or
+                two separate drafts rather than carrying the last one's typed
+                text into the next. */}
             <input
               className="orch-name"
               aria-label="Flow name"
               defaultValue={flow.name}
-              key={flow.id}
+              key={openKey}
               onBlur={(e) => {
                 const next = e.currentTarget.value.trim();
-                if (next && next !== flow.name) p.onRename(flow.id, next);
+                if (next === flow.name) return;
+                if (editingTemplate) {
+                  p.onSave({ ...flow, name: next });
+                } else if (next) {
+                  p.onRename(flow.id, next);
+                }
               }}
             />
             <div className="row" style={{ marginTop: 8 }}>
@@ -1695,16 +1765,65 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 {flow.edges.length === 1 ? "rule" : "rules"}
               </span>
               <div className="sp" />
-              {/* Every control in this block is a WORKFLOW verb — Save-as-template
-                  makes a NEW template from an attached, ticket-bound flow; dry run
-                  and Arm both act on a live watch that a template has none of (see
-                  `editingTemplate`'s own doc comment). None of the three render at
-                  all while editing a template, rather than being disabled: a
-                  disabled-with-title control still answers a `getByRole("button",
-                  { name })` query, and this file's own vocabulary rule is that
-                  these verbs do not exist for a template, not that they exist and
-                  refuse. */}
-              {!editingTemplate && (
+              {/* Every control in the `!editingTemplate` branch below is a
+                  WORKFLOW verb — Save-as-template makes a NEW template from
+                  an attached, ticket-bound flow; dry run and Arm both act on
+                  a live watch that a template has none of (see
+                  `editingTemplate`'s own doc comment). None of the three
+                  render at all while editing a template, rather than being
+                  disabled: a disabled-with-title control still answers a
+                  `getByRole("button", { name })` query, and this file's own
+                  vocabulary rule is that these verbs do not exist for a
+                  template, not that they exist and refuse.
+                  `editingTemplate`'s OWN two controls — Cancel and Save — take
+                  their place instead of sitting alongside them: nothing here
+                  arms, dry-runs or renames a bare flow, so nothing from that
+                  branch belongs beside them. */}
+              {editingTemplate ? (
+                <>
+                  <button type="button" className="orch-mini" onClick={p.onCancelTemplate}>Cancel</button>
+                  {/* Same `canBindTicket` gate `flow:writeTemplate`'s own host
+                      handler re-checks (deckView.ts) and `toTemplate`'s save
+                      dialog gates its own Save with, below — a disabled
+                      control with a `title` is a clearer no before the click
+                      than a toast the user has to read to learn the same
+                      thing after it. The typed name is read straight off
+                      `flow.name` (see the input above), so an untouched
+                      draft — blank by construction, `mintDraftTemplate`'s own
+                      doc comment — cannot be saved either, same reasoning. */}
+                  <button
+                    type="button"
+                    className="orch-mini"
+                    disabled={!flow.name.trim() || !canBindTicket(flow)}
+                    title={
+                      !canBindTicket(flow)
+                        ? "Add a step (or a place) this template can bind a ticket to first"
+                        : !flow.name.trim()
+                          ? "Name this template first"
+                          : undefined
+                    }
+                    onClick={() => {
+                      const name = flow.name.trim();
+                      if (!name || !canBindTicket(flow)) return;
+                      // `templateId` present only when this target already
+                      // names a SAVED template — the draft never does (its id
+                      // never appears in `p.templates`; see
+                      // `mintDraftTemplate`'s own doc comment), so this is
+                      // always the "create" branch for it, exactly the "no
+                      // `templateId`" shape this task's own tests pin.
+                      const templateId = p.templates.some((t) => t.id === target!.id) ? target!.id : undefined;
+                      send(
+                        templateId
+                          ? { type: "flow:writeTemplate", templateId, name, flow }
+                          : { type: "flow:writeTemplate", name, flow },
+                      );
+                      p.onCancelTemplate();
+                    }}
+                  >
+                    Save
+                  </button>
+                </>
+              ) : (
                 <>
                   {/* Beside the flow's own Arm control, because saving a
                       template is a thing the OPEN WORKFLOW does. Quiet
