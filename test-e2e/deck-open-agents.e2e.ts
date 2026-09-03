@@ -141,9 +141,13 @@ test("a local card on a ticket-shaped branch shows an inferred key only when a J
   const cardB = deck.card("local");
   await expect(cardB).toBeVisible({ timeout: 60_000 });
   await expect(cardB).toContainText("scratch");
-  await expect(cardB).not.toContainText("PROJ-5641");
-  await expect(cardB.locator(".chip", { hasText: "~inferred" })).toHaveCount(0);
+  // The KEY SLOT is what the claim is about — the branch chip on the card's signal
+  // line still reads `⎇ PROJ-5641-team-table` (that is the branch), so a whole-card
+  // text check would be wrong here. With nothing inferred the slot is the plain
+  // `span.key.untracked` reading "local", not a `button.key`, and no chip.
+  await expect(cardB.locator(".hd-k .key")).toHaveText("local");
   await expect(cardB.locator("button.key")).toHaveCount(0);
+  await expect(cardB.locator(".chip", { hasText: "~inferred" })).toHaveCount(0);
   await shot(launched.page, testInfo, "3 · B: no project, no key");
 });
 
