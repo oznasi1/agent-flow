@@ -89,7 +89,7 @@ describeWithHost("pool lenses · default fixture", {}, (ctx) => {
     await expect(pool.card(FIXTURE_TASK.key)).toHaveCount(0);
     await shot(ctx.page(), testInfo, "2 · fuzzy title search");
     // Leave the pool where the next test expects it: the "×" clear glyph
-    // (App.tsx:660-662) empties the query and both cards come back.
+    // (App.tsx:662-663) empties the query and both cards come back.
     await pool.frame.locator(".text-search-clear").click();
     await expect(pool.cards()).toHaveCount(2, { timeout: 15_000 });
   });
@@ -98,7 +98,7 @@ describeWithHost("pool lenses · default fixture", {}, (ctx) => {
   // discovered repos (tasksView.ts:803-804 → engine/infer.ts): E2E-1 "Fix the
   // rocket telemetry panel" lands on both repos, E2E-2 "Refit the rocket landing
   // gear" on rocket alone. Selecting "telemetry" must keep exactly the first.
-  // Mutation-checked: App.tsx:483 `selectedRepos.size === 0 ||` → `true ||` (repo selection ignored) — both cards stayed.
+  // Mutation-checked: App.tsx:484 `selectedRepos.size === 0 ||` → `true ||` (repo selection ignored) — both cards stayed.
   test("the repo lens narrows the pool to tasks inferred onto that repo", async ({}, testInfo) => {
     const pool = await Pool.open(ctx.page(), 2);
     await pool.selectRepo("telemetry");
