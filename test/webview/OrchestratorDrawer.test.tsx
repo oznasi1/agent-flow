@@ -11,6 +11,7 @@ import { TEMPLATE_SCHEMA, type FlowTemplate } from "../../src/engine/orchestrato
 // the migration itself rather than by this file restating its rule. Its io is
 // injected (see `FlowIo`), so importing it here costs no temp directory.
 import { readFlows, writeFlow } from "../../src/engine/orchestrator/store";
+import { STARTERS } from "../../src/engine/orchestrator/starters";
 import { edgeAction } from "../../src/engine/orchestrator/model";
 import { branchCiKey } from "../../src/engine/orchestrator/branchCi";
 import {
@@ -325,6 +326,26 @@ describe("the three top-level views", () => {
     expect(screen.queryByLabelText("Flow name")).toBeNull();
     expect(screen.queryByRole("button", { name: "Save as template…" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Arm" })).toBeNull();
+  });
+
+  // THE blocker this task exists to fix: `if (!flow) return null` used to sit
+  // above every check of `view`, so with no flow open (a first-time user, or
+  // anyone who has never created a workflow) the WHOLE drawer rendered
+  // nothing — Active and Templates included. A first-time user with zero
+  // workflows could never reach Templates at all. Pinned with the exact
+  // shape a real first run has: no flows, no target open, and the built-in
+  // starters as the only templates.
+  it("renders the Templates screen with no flow open at all — the first-time-user shape", async () => {
+    render(<OrchestratorDrawer {...props({ flows: [], openId: null, view: "templates", templates: [...STARTERS] })} />);
+    for (const t of STARTERS) expect(await screen.findByText(t.name)).toBeTruthy();
+    // And still no Canvas leaking through, same guarantee the test above pins
+    // for the flow-open case.
+    expect(screen.queryByLabelText("Flow name")).toBeNull();
+  });
+
+  it("renders the Active screen with no flow open at all, same as Templates", () => {
+    render(<OrchestratorDrawer {...props({ flows: [], openId: null, view: "active" })} />);
+    expect(screen.getByText(/No workflows attached anywhere/)).toBeTruthy();
   });
 });
 

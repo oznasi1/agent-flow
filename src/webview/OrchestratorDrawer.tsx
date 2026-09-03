@@ -609,6 +609,153 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     };
   }, [drag, flow, p]);
 
+  /** Hoisted above the `!flow` check below (their original home was right
+   * beside `startDrag`, which does need a flow) because the flow-less
+   * Active/Templates shell — the `p.view !== "canvas"` branch just below —
+   * needs them too, and none of the three touch `flow` at all: purely
+   * `width`/`resizing`/`expanded` state, unaffected by whether a flow is
+   * open. */
+  const startResize = (e: React.PointerEvent) => {
+    setResizing({ startX: e.clientX, startW: width });
+  };
+
+  /** ArrowLeft grows the drawer, ArrowRight shrinks it — the same mapping the
+   * pointer drag uses (see the resize effect's `move` above): pulling the
+   * left border further left is what makes the drawer wider. Persisted
+   * immediately, the same as a released drag, rather than waiting for the
+   * grip to lose focus — an arrow press IS the whole gesture, there is no
+   * separate "release" to persist on. */
+  const onGripKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const next = orchResize.clamp(e.key === "ArrowLeft" ? width + RESIZE_STEP : width - RESIZE_STEP);
+    setWidth(next);
+    orchResize.persist(next);
+  };
+
+  /** A pure boolean flip that never touches `width` — the functional-updater
+   * form so two activations landing in the same React batch (e.g. a rapid
+   * double click) still cancel out correctly instead of both reading the
+   * same stale `expanded` and racing to the same answer. Because expanding
+   * never writes into `width`, applying it again while already expanded is
+   * automatically idempotent: `renderWidth` below always recomputes
+   * `orchResize.full()` fresh, so there is nothing to compound or drift. */
+  const toggleExpanded = () => setExpanded((v) => !v);
+
+  /** What actually renders. Computed here, above the flow check below,
+   * rather than beside the canvas-only code that used to be its only
+   * reader: the flow-less Active/Templates render (just below) needs the
+   * exact same drawer width the canvas one does. */
+  const renderWidth = expanded ? orchResize.full() : width;
+
+  /** The three top-level tabs plus Expand/Close — identical whichever of
+   * the three screens is showing, and read from BOTH this component's
+   * flow-less return (just below, for Active/Templates) and its canvas one
+   * (further down): a single JSX value here rather than two copies of the
+   * same markup that could silently drift apart. `view` is `DeckApp`'s own
+   * state (see `OrchView`'s doc comment): the two header buttons `DeckApp`
+   * adds land here exactly the way a click on one of these three tabs
+   * already does. */
+  const topRow = (
+    <div className="row">
+      <span role="tablist" aria-label="Orchestrator" style={{ display: "flex", gap: 6 }}>
+        <button type="button" role="tab" aria-selected={p.view === "active"} className="orch-mini" onClick={() => p.onView("active")}>
+          Active
+        </button>
+        <button type="button" role="tab" aria-selected={p.view === "templates"} className="orch-mini" onClick={() => p.onView("templates")}>
+          Templates
+        </button>
+        <button type="button" role="tab" aria-selected={p.view === "canvas"} className="orch-mini" onClick={() => p.onView("canvas")}>
+          Canvas
+        </button>
+      </span>
+      <div className="sp" />
+      <button type="button" className="orch-mini" aria-pressed={expanded} onClick={toggleExpanded}>
+        Expand
+      </button>
+      <button type="button" className="orch-x" aria-label="Close" onClick={p.onClose}>✕</button>
+    </div>
+  );
+
+  /** Same resize grip in both renders, shared for the identical reason
+   * `topRow` is: nothing about it depends on a flow being open. See that
+   * control's own doc comment (further down, where it used to live alone)
+   * for the ARIA shape. */
+  const resizeGrip = !expanded && (
+    <div
+      className="orch-grip"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize Orchestrator drawer"
+      aria-valuenow={Math.round(width)}
+      aria-valuemin={MIN_ORCH_W}
+      aria-valuemax={orchResize.ceiling()}
+      tabIndex={0}
+      onPointerDown={startResize}
+      onKeyDown={onGripKeyDown}
+    />
+  );
+
+  // Active and Templates are surfaces over the WHOLE workspace and need no flow
+  // resolved; only Canvas edits one. A branch above the canvas's own early return,
+  // rather than making `flow` optional below it: everything past this point
+  // dereferences `flow`, and threading undefined through it buys nothing.
+  if (p.view !== "canvas") {
+    return (
+      <Drawer surface="orch" label="Orchestrator" closing={closing} style={{ ["--orch-w" as any]: `${renderWidth}px` }}>
+        {resizeGrip}
+        <div className="orch-hd">{topRow}</div>
+        <div className="orch-body">
+          {/* The Active screen: every card carrying a workflow, in one place.
+              Pure presentation — `WorkflowList` renders exactly the rows it is
+              handed and does not sort them (see its own contract) — so this
+              component's only job is to hand it `p.rows` and wire a click back
+              through `p.onOpenCard`. */}
+          {p.view === "active" && (
+            <div className="orch-active">
+              <WorkflowList rows={p.rows} onOpen={p.onOpenCard} />
+            </div>
+          )}
+          {/* The Templates screen: every reusable shape, starters included.
+              `.orch-tmpl-list` is the same wrapper class the old Templates tab
+              used, kept unchanged so the template/workflow vocabulary gate's
+              own region scan (`jsxBlockAround(..., "orch-tmpl-list")`) still
+              finds this exact content. */}
+          {p.view === "templates" && (
+            <div className="orch-tmpl-list">
+              {/* A template is never attached from here — one entry point,
+                  the card that needs a workflow, and this screen offering a
+                  second, worse way to do what the card already does would be
+                  a category error this feature's own naming rule calls out by
+                  name: this screen offers Duplicate/Rename/Delete and nothing
+                  that arms, disarms, or attaches anything. */}
+              {p.templates.map((t) => (
+                <TemplateRow
+                  key={t.id}
+                  t={t}
+                  onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
+                  onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
+                  onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
+                  onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
+                />
+              ))}
+              {/* A template is made by SAVING a workflow, never by a button on
+                  this screen — see the canvas's own "Save as template…"
+                  control. `.orch-empty` is the same empty-state treatment the
+                  canvas itself uses. */}
+              {p.templates.length === 0 && (
+                <div className="orch-empty">
+                  No templates yet. Build a workflow, then use its own
+                  &ldquo;Save as template&hellip;&rdquo; to keep the shape.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </Drawer>
+    );
+  }
+
   if (!flow) return null;
 
   /** How many nodes this flow HAS — every one the canvas draws, which is what the
@@ -708,33 +855,6 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     setSelEdge(id);
     setSel(null);
   };
-
-  const startResize = (e: React.PointerEvent) => {
-    setResizing({ startX: e.clientX, startW: width });
-  };
-
-  /** ArrowLeft grows the drawer, ArrowRight shrinks it — the same mapping the
-   * pointer drag uses (see the resize effect's `move` above): pulling the
-   * left border further left is what makes the drawer wider. Persisted
-   * immediately, the same as a released drag, rather than waiting for the
-   * grip to lose focus — an arrow press IS the whole gesture, there is no
-   * separate "release" to persist on. */
-  const onGripKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    const next = orchResize.clamp(e.key === "ArrowLeft" ? width + RESIZE_STEP : width - RESIZE_STEP);
-    setWidth(next);
-    orchResize.persist(next);
-  };
-
-  /** A pure boolean flip that never touches `width` — the functional-updater
-   * form so two activations landing in the same React batch (e.g. a rapid
-   * double click) still cancel out correctly instead of both reading the
-   * same stale `expanded` and racing to the same answer. Because expanding
-   * never writes into `width`, applying it again while already expanded is
-   * automatically idempotent: `renderWidth` below always recomputes
-   * `orchResize.full()` fresh, so there is nothing to compound or drift. */
-  const toggleExpanded = () => setExpanded((v) => !v);
 
   const startDrag = (id: string, e: React.PointerEvent) => {
     const node = flow.nodes.find((n) => n.id === id);
@@ -1108,12 +1228,6 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     p.onSave(next);
   };
 
-  /** What actually renders. Expand does not touch `width` — see the
-   * `expanded` state's own doc comment — so this ternary IS the whole
-   * mechanism: collapsing needs no separate "restore" step because `width`
-   * was never overwritten to begin with. */
-  const renderWidth = expanded ? orchResize.full() : width;
-
   /** `.orch-body`'s own left+right padding (16px each, see orchestratorStyles.ts)
    * plus `.orch-graph`'s own 1px border on each side — the fixed horizontal
    * cost between the drawer's own width and the graph's actual content box.
@@ -1431,71 +1545,16 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       closing={closing}
       style={{ ["--orch-w" as any]: `${renderWidth}px` }}
     >
-      {/* role="separator" + aria-orientation is the ARIA shape App.tsx's own
-          controls already use (role="tablist"/"group" with aria-selected/
-          -pressed) — a real widget role plus the state attributes that make
-          it usable without a mouse, not a bespoke pattern. Keyboard-resizable
-          on purpose: this phase's whole point is that the drawer works
-          without one, so a grip only a mouse could move would contradict it.
-          Hidden rather than merely disabled while expanded — not styled
-          inert, not in the DOM at all — because there is nothing to drag TO:
-          the drawer is already at its widest legal width, so a grip sitting
-          at the very edge of the viewport with nowhere further to go would
-          be a control that does nothing, not a quiet one. The Expand toggle
-          below (aria-pressed) is the one way back to a custom width. */}
-      {!expanded && (
-        <div
-          className="orch-grip"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize Orchestrator drawer"
-          aria-valuenow={Math.round(width)}
-          aria-valuemin={MIN_ORCH_W}
-          aria-valuemax={orchResize.ceiling()}
-          tabIndex={0}
-          onPointerDown={startResize}
-          onKeyDown={onGripKeyDown}
-        />
-      )}
+      {/* Shared with the flow-less (Active/Templates) return above — see
+          `resizeGrip`'s own doc comment for the ARIA shape and why it is
+          hidden rather than disabled while expanded. */}
+      {resizeGrip}
       <div className="orch-hd">
-        {/* The three top-level screens, replacing the old "Flows · N ▾"
-            disclosure: Active (every card carrying a workflow), Templates
-            (every reusable shape, starters included) and Canvas (the
-            flow-graph editor further down). `role="tablist"`/`role="tab"`/
-            `aria-selected` is this file's own idiom (see the Canvas/List
-            toggle below, which predates this) — followed here rather than
-            invented fresh. `view` is `DeckApp`'s state, not local: a later
-            task adds two header buttons that land here from outside the
-            drawer, and a tab click only this component could see could
-            never agree with them. */}
-        <div className="row">
-          <span role="tablist" aria-label="Orchestrator" style={{ display: "flex", gap: 6 }}>
-            <button type="button" role="tab" aria-selected={p.view === "active"} className="orch-mini" onClick={() => p.onView("active")}>
-              Active
-            </button>
-            <button type="button" role="tab" aria-selected={p.view === "templates"} className="orch-mini" onClick={() => p.onView("templates")}>
-              Templates
-            </button>
-            <button type="button" role="tab" aria-selected={p.view === "canvas"} className="orch-mini" onClick={() => p.onView("canvas")}>
-              Canvas
-            </button>
-          </span>
-          <div className="sp" />
-          {/* Same quiet `orch-mini` as its neighbours — Arm stays the surface's
-              only filled control (see its own comment below). aria-pressed
-              is the App.tsx idiom (its filter/size/status `.seg` groups use
-              exactly this attribute for on/off state) rather than a bespoke
-              one; CONTROLS_CSS's own on-state rule ("weight and foreground,
-              never a fill") is the visual language this borrows, even though
-              this button lives in a different sheet. The label stays
-              "Expand" in both states, the same way those `.seg` buttons never
-              rewrite their own text when pressed. Lives on every screen, not
-              only Canvas — the drawer's own width is not a Canvas concern. */}
-          <button type="button" className="orch-mini" aria-pressed={expanded} onClick={toggleExpanded}>
-            Expand
-          </button>
-          <button type="button" className="orch-x" aria-label="Close" onClick={p.onClose}>✕</button>
-        </div>
+        {/* `topRow` (shared with the flow-less return above) is the three
+            top-level screens plus Expand/Close. `view` is `DeckApp`'s state,
+            not local: the two header buttons `DeckApp` adds land here the
+            same way a click on one of the three tabs does. */}
+        {topRow}
         {p.view === "canvas" && (
           <>
             {/* The keyboard path onto this same flow: a canvas built from divs and
@@ -1656,57 +1715,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       </div>
 
       <div className="orch-body">
-        {/* The Active screen: every card carrying a workflow, in one place.
-            Pure presentation — `WorkflowList` renders exactly the rows it is
-            handed and does not sort them (see its own contract) — so this
-            component's only job is to hand it `p.rows` and wire a click back
-            through `p.onOpenCard`. `p.rows` is `[]` until a later task derives
-            the real rows from the board; this one only builds the shell. */}
-        {p.view === "active" && (
-          <div className="orch-active">
-            <WorkflowList rows={p.rows} onOpen={p.onOpenCard} />
-          </div>
-        )}
-        {/* The Templates screen: every reusable shape, starters included.
-            `.orch-tmpl-list` is the same wrapper class the old Templates tab
-            used, kept unchanged so the template/workflow vocabulary gate's
-            own region scan (`jsxBlockAround(..., "orch-tmpl-list")`) still
-            finds this exact content. */}
-        {p.view === "templates" && (
-          <div className="orch-tmpl-list">
-            {/* A template is never attached from here — one entry point,
-                the card that needs a workflow, and this screen offering a
-                second, worse way to do what the card already does would be
-                a category error this feature's own naming rule calls out by
-                name: this screen offers Duplicate/Rename/Delete and nothing
-                that arms, disarms, or attaches anything. */}
-            {p.templates.map((t) => (
-              <TemplateRow
-                key={t.id}
-                t={t}
-                onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
-                onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
-                onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
-                onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
-              />
-            ))}
-            {/* A template is made by SAVING a workflow, never by a button on
-                this screen — there used to be one here (＋ New template) that
-                called `onCreate`, which builds an ordinary WORKFLOW: the
-                screen would still be empty, and a new untitled entry would
-                appear on the Active list instead. That is exactly the wrong
-                verb for what a first-time user here is trying to do, so
-                there is no such button, and no path from this screen calls
-                `onCreate` at all. `.orch-empty` is the same empty-state
-                treatment the canvas itself uses. */}
-            {p.templates.length === 0 && (
-              <div className="orch-empty">
-                No templates yet. Build a workflow, then use its own
-                &ldquo;Save as template&hellip;&rdquo; to keep the shape.
-              </div>
-            )}
-          </div>
-        )}
+        {/* Active and Templates are handled by the flow-less return above —
+            reaching this point at all means `p.view === "canvas"` (see the
+            early return's own comment). No `p.view` check needed here for
+            that reason, but the canvas content below is still wrapped in one
+            for symmetry with the header's own `p.view === "canvas"` block. */}
         {p.view === "canvas" && (
           <>
         {savingTemplate && (
