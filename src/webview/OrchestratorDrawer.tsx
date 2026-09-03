@@ -354,11 +354,25 @@ export type OrchView = "active" | "templates" | "canvas";
 
 export interface OrchestratorDrawerProps {
   flows: Flow[];
-  /** Which flow or template is open. `null` closes the drawer. */
+  /** Which flow or template Canvas is addressing. `null` there means Canvas
+   * has nothing to show (`if (!flow) return null`, below) — but that is no
+   * longer the same claim as "the drawer is closed": Active and Templates
+   * need no flow addressed at all. See `open`, just below, for the signal
+   * that actually answers that question on their behalf. */
   openId: OrchTarget | null;
   /** Which of the three top-level screens is showing. See `OrchView`. */
   view: OrchView;
   onView: (v: OrchView) => void;
+  /** Is the drawer showing at all, for the Active/Templates screens
+   * specifically — Canvas needs no such signal, since whether a flow
+   * resolves already decides its visibility (`openId` above). Active and
+   * Templates have no flow to key off, so `DeckApp` hands this over
+   * explicitly instead. Optional, and treated as shown when absent
+   * (`p.open === false` is the one value that closes it): every test in this
+   * file predating the flag exercises Canvas, or an Active/Templates screen
+   * with no opinion on open/closed either way, and defaulting to shown keeps
+   * every one of them compiling and passing unmodified. */
+  open?: boolean;
   /** The Active screen's own rows — one per card carrying a workflow,
    * already sorted by the caller (see `WorkflowList`'s own contract: it
    * renders what it is handed and does not sort). Empty until a later task
@@ -701,6 +715,9 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // rather than making `flow` optional below it: everything past this point
   // dereferences `flow`, and threading undefined through it buys nothing.
   if (p.view !== "canvas") {
+    // `DeckApp`'s own "is the drawer showing at all" signal — see `open`'s own
+    // doc comment for why Canvas needs no equivalent check.
+    if (p.open === false) return null;
     return (
       <Drawer surface="orch" label="Orchestrator" closing={closing} style={{ ["--orch-w" as any]: `${renderWidth}px` }}>
         {resizeGrip}

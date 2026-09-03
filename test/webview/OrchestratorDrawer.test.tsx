@@ -347,6 +347,24 @@ describe("the three top-level views", () => {
     render(<OrchestratorDrawer {...props({ flows: [], openId: null, view: "active" })} />);
     expect(screen.getByText(/No workflows attached anywhere/)).toBeTruthy();
   });
+
+  // `open` is `DeckApp`'s own "is the drawer showing at all" signal — the
+  // thing that answers "closed" for Active/Templates now that neither needs
+  // a flow resolved to render SOMETHING. Canvas needs no such check (its own
+  // `if (!flow) return null` already decides), which is exactly why every
+  // test elsewhere in this file never sets this prop and still passes: `open`
+  // absent is treated as shown.
+  it("renders nothing on Active or Templates when the caller says the drawer is closed", () => {
+    const { container, rerender } = render(<OrchestratorDrawer {...props({ view: "active", open: false })} />);
+    expect(container.firstChild).toBeNull();
+    rerender(<OrchestratorDrawer {...props({ view: "templates", open: false })} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("defaults to shown when `open` is not passed at all", () => {
+    render(<OrchestratorDrawer {...props({ view: "active", open: undefined })} />);
+    expect(screen.queryByRole("tablist", { name: "Orchestrator" })).not.toBeNull();
+  });
 });
 
 const drop = (el: Element, payload: string) =>

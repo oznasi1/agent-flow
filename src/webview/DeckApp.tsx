@@ -597,14 +597,32 @@ export function DeckApp(): JSX.Element {
   const [openFlowId, setOpenFlowId] = React.useState<OrchTarget | null>(null);
   /** Which of the Orchestrator drawer's three top-level screens is showing —
    * see `OrchView`'s own doc comment for why this lives here rather than as
-   * the drawer's own local state: a later task adds two header buttons
-   * (Workflows / Templates) that set this from outside the drawer, so
-   * `DeckApp` has to be the one holding it already. Defaults to "active"
-   * (harmless either way today — nothing can open the drawer without also
-   * setting this: the existing single header button always forces "canvas"
-   * on open, see its own comment below, and the `deck:flows` auto-open does
-   * the same). */
+   * the drawer's own local state: the Workflows/Templates header buttons
+   * below set this from outside the drawer, so `DeckApp` has to be the one
+   * holding it. Defaults to "active", since that is what a first click on
+   * either header button below shows (Workflows) or falls through to
+   * (Templates does not touch this at all, but "active" is as good a rest
+   * state as any for a drawer that starts closed — see `orchOpen`). */
   const [orchView, setOrchView] = React.useState<OrchView>("active");
+  /** Is the Orchestrator drawer showing at all, independent of `orchView` and
+   * of `openFlowId`. Needed only because those two stopped being enough
+   * on their own: before OrchestratorDrawer.tsx learned to render Active and
+   * Templates without a resolved flow, "no flow addressed" (`openFlowId ===
+   * null`) WAS "nothing to show" — the drawer's own `if (!flow) return null`
+   * closed it for free. Once Active/Templates stopped needing a flow, that
+   * stopped being true, and with `orchView` defaulting to "active" the
+   * drawer would otherwise show itself unasked on the very first render.
+   *
+   * Set alongside `openFlowId` everywhere a flow gets addressed (the
+   * fresh-flow auto-open below, "Open in Workflows ↗", both header buttons),
+   * and cleared alongside it everywhere the drawer is explicitly dismissed
+   * (✕, selecting a card, opening a card from the Active list). Left ALONE
+   * when a flow disappears out from under an open Canvas (deleted in another
+   * window) — Canvas keeps its own separate guard for that
+   * (`if (!flow) return null`, OrchestratorDrawer.tsx), and leaving this
+   * flag as it is costs nothing: the drawer stays mounted but renders
+   * nothing either way. */
+  const [orchOpen, setOrchOpen] = React.useState(false);
   /** The selected card's `DeckCard.id`, not a run key: the Sessions lens renders
    * one card per session, so two cards can share a run and a key could not tell
    * them apart. */
@@ -783,13 +801,16 @@ export function DeckApp(): JSX.Element {
         if (autoOpen) setSelId(null);
         // An auto-opened fresh flow must land on the Canvas screen, not
         // whichever of the three top-level views happened to be showing —
-        // "+ New flow" (or the header chip's own zero-flows path, below)
-        // means "start drawing", never "go look at the Active list". Plain,
-        // unnested `setView` beside `setSelId` above for the identical
-        // reason that one is not folded into the `setOpenFlowId` updater:
-        // React may replay a pure updater, and a side effect belongs beside
-        // it, not inside it.
+        // "+ New flow" means "start drawing", never "go look at the Active
+        // list". Plain, unnested `setView`/`setOrchOpen` beside `setSelId`
+        // above for the identical reason neither is folded into the
+        // `setOpenFlowId` updater: React may replay a pure updater, and a
+        // side effect belongs beside it, not inside it. `setOrchOpen` matters
+        // here specifically for a flow created while the drawer was fully
+        // closed (`orchOpen` false) — without it the fresh flow would resolve
+        // and paint, but stay invisible behind the closed drawer's own gate.
         if (autoOpen) setOrchView("canvas");
+        if (autoOpen) setOrchOpen(true);
         // `retainedOpenTarget` is the kind-aware guard — see its own doc
         // comment for why a `flow` and a `template` target cannot be treated
         // alike here. `null` means nothing survived, which is exactly when
@@ -900,10 +921,6 @@ export function DeckApp(): JSX.Element {
 
   const needs = cards.filter((c) => c.column === "needs").length;
   const mergeable = cards.filter((c) => c.column === "merge").length;
-  // With arming real, the count that matters on the chip is how many flows are
-  // armed — that is the thing quietly spending your attention while the drawer
-  // is closed, not how many flows merely exist.
-  const armedCount = flows.filter((f) => f.armed).length;
   // The board's own total, not "today": a day figure would need per-line
   // timestamps and would print a number that disagrees with the cards under it.
   const boardEq = live.reduce((s, x) => s + (x.usage ? weightedEq(x.usage) : 0), 0);
@@ -1001,6 +1018,18 @@ export function DeckApp(): JSX.Element {
       }));
   }, [cards, workflowByCard, runs, now, branchCi]);
 
+  // How many rows on the Active list are genuinely waiting on the reader —
+  // `waiting-on-you` (a gate asking a question) or `stopped` (a rule that
+  // errored and will never fire again until Reset), the same two statuses
+  // `RANK` (attach.ts) already ranks ahead of everything else. Read from
+  // `activeRows` itself, not recomputed from `flows`/`runs` a second way, so
+  // the Workflows chip's own badge can never name a different number than the
+  // list underneath it renders.
+  const needsYouCount = activeRows.filter((r) => {
+    const s = r.workflow.state.status;
+    return s === "waiting-on-you" || s === "stopped";
+  }).length;
+
   // One card, wherever it lands — a lane renders exactly what an unlaned column
   // does, so a lane can never quietly grow its own kind of card.
   const card = (c: DeckCard): JSX.Element => (
@@ -1011,7 +1040,7 @@ export function DeckApp(): JSX.Element {
         send({ type: "deck:mergePr", key: c.status.run.key, repo: t.repo, number: t.number });
       }}
       selected={c.id === selId}
-      onSelect={() => { setOpenFlowId(null); setSelId((cur) => (cur === c.id ? null : c.id)); }}
+      onSelect={() => { setOpenFlowId(null); setOrchOpen(false); setSelId((cur) => (cur === c.id ? null : c.id)); }}
       workflow={workflowByCard.get(c.id)} />
   );
 
@@ -1041,32 +1070,58 @@ export function DeckApp(): JSX.Element {
           )}
         </div>
         <div className="sp" />
+        {/* Two sibling entry points, replacing the single "Orchestrator" chip.
+            That one button's zero-flows click used to mint a blank flow
+            (`flow:create`) instead of opening anything — with no flows yet,
+            there was no way to reach Templates at all. Each button below
+            always opens ITS OWN view; neither ever sends `flow:create`. */}
         {orchEnabled && (
-          <button
-            type="button"
-            className={`ctl orch-chip${armedCount > 0 ? " armed" : ""}`}
-            onClick={() => {
-              setSelId(null);
-              // A later task replaces this one button with two (Workflows /
-              // Templates), each setting `orchView` to its own destination.
-              // Until then this single button keeps its released behavior
-              // exactly — zero flows mints one (the `deck:flows` handler's
-              // own auto-open already lands that on "canvas"), otherwise it
-              // toggles the drawer — and forces "canvas" on the way IN only:
-              // this button has only ever opened straight onto the flow
-              // graph, and closing is not a view change to make.
-              if (flows.length === 0) { send({ type: "flow:create" }); return; }
-              if (openFlowId) { setOpenFlowId(null); return; }
-              setOrchView("canvas");
-              setOpenFlowId({ kind: "flow", id: flows[0].id });
-            }}
-          >
-            <OrchestratorIcon />
-            <span>Orchestrator</span>
-            {armedCount > 0
-              ? <span className="ct">{armedCount} armed</span>
-              : flows.length > 0 && <span className="ct">{flows.length}</span>}
-          </button>
+          <>
+            <button
+              type="button"
+              // Reusing `.orch-chip`'s existing `armed` escalation (bold, full-
+              // strength brand hue) for "needs you" rather than borrowing the
+              // board's own amber `.attn` — orchestratorStyles.ts's own comment
+              // on `.orch-chip` is explicit that teal names this SURFACE and
+              // amber is reserved for "a card needs you" elsewhere on the
+              // board; painting this chip amber too would read as a second
+              // alarm rather than the one place this feature lives.
+              className={`ctl orch-chip${needsYouCount > 0 ? " armed" : ""}`}
+              onClick={() => {
+                setSelId(null);
+                // Toggle only against ITS OWN view — clicking Workflows while
+                // Templates is showing switches to Active rather than
+                // closing, matching how a click on the drawer's own in-panel
+                // tabs behaves (OrchestratorDrawer.tsx's "asks the caller to
+                // change the view rather than changing it itself"). Neither
+                // button ever touches `openFlowId`: Active and Templates are
+                // surfaces over the whole workspace, not addressed at a flow.
+                if (orchOpen && orchView === "active") { setOrchOpen(false); return; }
+                setOrchView("active");
+                setOrchOpen(true);
+              }}
+            >
+              <OrchestratorIcon />
+              <span>Workflows</span>
+              {needsYouCount > 0
+                ? <span className="ct">{needsYouCount} needs you</span>
+                : activeRows.length > 0 && <span className="ct">{activeRows.length}</span>}
+            </button>
+            <button
+              type="button"
+              className="ctl orch-chip"
+              onClick={() => {
+                setSelId(null);
+                if (orchOpen && orchView === "templates") { setOrchOpen(false); return; }
+                setOrchView("templates");
+                setOrchOpen(true);
+              }}
+            >
+              <OrchestratorIcon />
+              <span>Templates</span>
+              {templates.length > 0 && <span className="ct">{templates.length}</span>}
+            </button>
+          </>
         )}
         {/* A lens, not a trust toggle: both sides show everything, one card per
             session or one per launched task. Persisted, so it survives a reload. */}
@@ -1308,6 +1363,15 @@ export function DeckApp(): JSX.Element {
         <OrchestratorDrawer
           flows={flows}
           openId={openFlowId}
+          // Independent of `openFlowId`/`view` — see `orchOpen`'s own doc
+          // comment above for why Active/Templates need this said explicitly,
+          // and why Canvas does not: leaving this component mounted whenever
+          // `orchEnabled` (unconditionally, exactly as before this task) is
+          // what lets its OWN `useDrawerExit` machinery animate Canvas's exit
+          // when a flow closes — gating this render on `orchOpen` instead
+          // would yank the component out of the tree the instant it flips,
+          // with no chance to slide out.
+          open={orchOpen}
           // The full list, not `live`: a flow's place node binds a run key, and a
           // run shelving as closed must not make its own node unresolvable.
           runs={runs}
@@ -1327,8 +1391,8 @@ export function DeckApp(): JSX.Element {
           // one opens a workflow FROM a card (closes the card, opens the
           // drawer); this one opens a card FROM its workflow row (closes the
           // drawer, opens the card), so the workflow is read where it lives.
-          onOpenCard={(cardId) => { setOpenFlowId(null); setSelId(cardId); }}
-          onClose={() => setOpenFlowId(null)}
+          onOpenCard={(cardId) => { setOpenFlowId(null); setOrchOpen(false); setSelId(cardId); }}
+          onClose={() => { setOpenFlowId(null); setOrchOpen(false); }}
           onCreate={() => send({ type: "flow:create" })}
           onOpen={(id) => setOpenFlowId({ kind: "flow", id })}
           onRename={(id, name) => send({ type: "flow:rename", id, name })}
@@ -1364,7 +1428,7 @@ export function DeckApp(): JSX.Element {
           // Orchestrator, close the card): the two drawers share one slot, so
           // opening one here has to close the other explicitly rather than
           // trusting a render order.
-          onOpenWorkflow={(id) => { setOrchView("canvas"); setOpenFlowId({ kind: "flow", id }); setSelId(null); }}
+          onOpenWorkflow={(id) => { setOrchView("canvas"); setOpenFlowId({ kind: "flow", id }); setOrchOpen(true); setSelId(null); }}
         />
       )}
     </>
