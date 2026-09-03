@@ -1,0 +1,12 @@
+diff --git a/src/config.ts b/src/config.ts
+index ffee29c0..d3744feb 100644
+--- a/src/config.ts
++++ b/src/config.ts
+@@ -247,7 +247,6 @@ export interface ExploreAction {
+ const EXPLORE_ACTION_DEFS: { id: string; label: string; settingKey: string; defaultPrompt: string; needsEnv?: boolean }[] = [
+   { id: "jiraTicket", label: "Open a Jira ticket", settingKey: "explorePrompts.jiraTicket", defaultPrompt: DEFAULT_EXPLORE_JIRA_TICKET_PROMPT },
+   { id: "knowledge", label: "Enhance knowledge / flow", settingKey: "explorePrompts.knowledge", defaultPrompt: DEFAULT_EXPLORE_PROMPT },
+-  { id: "debug", label: "Debug", settingKey: "explorePrompts.debug", defaultPrompt: DEFAULT_EXPLORE_DEBUG_PROMPT },
+   { id: "general", label: "General", settingKey: "explorePrompts.general", defaultPrompt: DEFAULT_EXPLORE_GENERAL_PROMPT },
+   { id: "supervise", label: "Supervise running tasks", settingKey: "explorePrompts.supervise", defaultPrompt: DEFAULT_EXPLORE_SUPERVISE_PROMPT },
+   { id: "verify", label: "Verify on an environment", settingKey: "explorePrompts.verify", defaultPrompt: DEFAULT_EXPLORE_VERIFY_PROMPT, needsEnv: true },

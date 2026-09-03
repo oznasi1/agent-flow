@@ -51,8 +51,8 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `task-launch-in-parallel-no-repo` | GUIDE § What it does | A task touching none of the filtered repos launches in all of them, so no task launches with no repo | todo |
 | `task-launch-in-parallel-threshold` | GUIDE § What it does | Batches larger than `agentFlow.batchLaunchConfirmThreshold` (default 6) confirm first | todo |
 | `task-explore` | GUIDE § What it does | Explore asks where to open and which repos, then launches and lands a plan file | e2e: Explore launches and lands a plan file |
-| `task-explore-actions` | SETTINGS § table | Explore offers six kinds: Open a Jira ticket, Enhance knowledge / flow, Debug, General, Supervise running tasks, Verify on an environment; `agentFlow.exploreMode` pins one and `agentFlow.explorePrompts.*` edits each prompt | todo |
-| `explore-verify-environment` | SETTINGS § table | Verify asks which environment from `agentFlow.environments` plus Custom…, and seeds a read-only prompt that inspects logs, metrics, traces and deployed version there | todo |
+| `task-explore-actions` | SETTINGS § table | Explore offers six kinds: Open a Jira ticket, Enhance knowledge / flow, Debug, General, Supervise running tasks, Verify on an environment; `agentFlow.exploreMode` pins one and `agentFlow.explorePrompts.*` edits each prompt | e2e: Explore offers the six documented session kinds |
+| `explore-verify-environment` | SETTINGS § table | Verify asks which environment from `agentFlow.environments` plus Custom…, and seeds a read-only prompt that inspects logs, metrics, traces and deployed version there | e2e: a verify session is seeded read-only against the chosen environment |
 | `prompt-modes` | SETTINGS § table | Taking a task asks how the session should start — Plan first, Implementation, Test-driven, Investigate & root-cause, Orchestrator, Refine the ticket; `agentFlow.promptModes` layers over the built-ins (reuse an `id` to override, `hidden: true` to drop one) and `agentFlow.taskMode` pins one | todo |
 | `per-task-worktrees` | SETTINGS § table | Worktree mode takes the task in a real git worktree at `.claude/worktrees/<KEY>` on a per-task branch, git-excluded automatically | e2e: in a real git worktree on a per-task branch |
 | `per-task-worktrees-ask` | SETTINGS § table | `agentFlow.worktree: "ask"` offers the choice per take | todo |
@@ -402,15 +402,15 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-remote-control` | SETTINGS § Remote Control | `agentFlow.remoteControl`: `off`, `on` or `ask` | todo |
 | `set-batch-launch-confirm-threshold` | GUIDE § What it does | `agentFlow.batchLaunchConfirmThreshold` (default 6): larger task or review batches confirm first | todo |
 | `set-explore-prompt` | package.json | `agentFlow.explorePrompt` is the legacy Explore prompt, migrated into the knowledge action when customized | unit: test/unit/config.test.ts |
-| `set-explore-mode` | SETTINGS § table | `agentFlow.exploreMode` pins one Explore action or `ask` shows the picker | todo |
+| `set-explore-mode` | SETTINGS § table | `agentFlow.exploreMode` pins one Explore action or `ask` shows the picker | e2e: an explorePrompts override lands in the plan |
 | `set-explore-prompts-jira-ticket` | package.json | `agentFlow.explorePrompts.jiraTicket` is the prompt for Open a Jira ticket | todo |
 | `set-explore-prompts-knowledge` | package.json | `agentFlow.explorePrompts.knowledge` is the prompt for Enhance knowledge / flow | todo |
 | `set-explore-prompts-debug` | package.json | `agentFlow.explorePrompts.debug` is the prompt for Debug | todo |
-| `set-explore-prompts-general` | package.json | `agentFlow.explorePrompts.general` is the prompt for General, and the one a Notepad run borrows | todo |
+| `set-explore-prompts-general` | package.json | `agentFlow.explorePrompts.general` is the prompt for General, and the one a Notepad run borrows | e2e: an explorePrompts override lands in the plan |
 | `set-explore-prompts-supervise` | package.json | `agentFlow.explorePrompts.supervise` is the prompt for Supervise running tasks, whose brief lists your other active tasks | todo |
-| `set-explore-prompts-verify` | package.json | `agentFlow.explorePrompts.verify` is the read-only prompt for Verify on an environment with `{env}` | todo |
+| `set-explore-prompts-verify` | package.json | `agentFlow.explorePrompts.verify` is the read-only prompt for Verify on an environment with `{env}` | e2e: a verify session is seeded read-only against the chosen environment |
 | `set-explore-slack-dm` | package.json | `agentFlow.exploreSlackDm` per action asks the session to send a Slack DM summary when it ends (off by default) | todo |
-| `set-environments` | SETTINGS § table | `agentFlow.environments` are offered by Verify on an environment, plus Custom… | todo |
+| `set-environments` | SETTINGS § table | `agentFlow.environments` are offered by Verify on an environment, plus Custom… | e2e: Verify on an environment asks which, from the environments setting plus Custom |
 | `set-deck-show-token-total` | package.json | `agentFlow.deck.showTokenTotal` adds a Tokens on board header total (off by default) | todo |
 | `set-open-agents` | SETTINGS § table | `agentFlow.openAgents` shows every Claude Code session on this machine, on cards and as `local` cards | todo |
 | `set-deck-grouping` | SETTINGS § table | `agentFlow.deckGrouping`: `agents` (one card per session) or `workspaces`; the board's control writes it | todo |
