@@ -106,7 +106,7 @@ describeWithHost("pool writes · stampLabelOnWrite off", { "agentFlow.stampLabel
 // each test writes the knob it needs and clears it before it ends.
 
 describeWithHost("pool writes · edges", { "agentFlow.provenanceLabel": "e2e-bot" }, (ctx) => {
-  // Mutation-checked: `const unassigned = true` in TaskCard (App.tsx:807)
+  // Mutation-checked: `showAddToSprint` reduced to `caps.sprints && !onRemoveFromSprint` — the assignee gate dropped (App.tsx:823)
   test("Add to my sprint is absent on a task assigned to someone else", async ({}, testInfo) => {
     const pool = await Pool.open(ctx.page(), 2);
     await expect(pool.addToSprintButton(FIXTURE_TASK.key)).toBeVisible();
