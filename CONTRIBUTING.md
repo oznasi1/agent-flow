@@ -23,6 +23,7 @@ npm install
 | `npm run test:ct` | Run the Playwright component tests (real Chromium; covers measured-layout behavior jsdom cannot). |
 | `npm run test:e2e` | Real-host E2E: downloads a pinned VS Code, launches it sandboxed (own HOME, user-data, extensions), and drives take-a-task against the fixture connector. First run downloads ~150MB (the pinned VS Code) plus the pinned Claude Code vsix for the panel-seeding journey. |
 | `npm run e2e:report` | Build the verify-feature report from the last `test:e2e` run — one self-contained HTML with a labelled screenshot strip and verdict per journey (`test-results/verify-report.html`). |
+| `npm run e2e:merge` | CI only, normally: merge the four shards' blob reports (`all-blobs/`, written by `PW_BLOB=1 playwright test --shard=N/4`) into the same `test-results/e2e-results.json` and `playwright-e2e-report/` a single run writes, so `e2e:report` reads one whole run. |
 | `npm run sabotage [journey]` | Mutation-check the E2E lane: apply `test-e2e/sabotage/<journey>.patch`, rebuild, run that one journey, require it to fail, revert. Requires a clean tree — the revert would discard uncommitted work. Runs weekly in CI, not per-PR. |
 | `npm run typecheck` | `tsc --noEmit`. |
 | `npm run package` | Build a `.vsix` with `vsce`. |
