@@ -25,6 +25,11 @@ export function describeWithHost(
   title: string,
   settings: Record<string, unknown>,
   fn: (ctx: HostCtx) => void,
+  /** Runs between `makeSandbox` and `launchHost` — the only window in which a
+   *  journey can shape state the webview reads once at init (the fixture
+   *  connector's `config.json` caps, a richer `.claude/` seed, forge shims).
+   *  A `beforeAll` registered inside `fn` would fire AFTER the host is up. */
+  prepare?: (sb: Sandbox) => void,
 ): void {
   test.describe(title, () => {
     test.describe.configure({ mode: "serial" });
@@ -35,6 +40,7 @@ export function describeWithHost(
 
     test.beforeAll(async () => {
       sb = makeSandbox(settings);
+      prepare?.(sb);
       const launched = await launchHost(sb);
       app = launched.app;
       page = launched.page;
