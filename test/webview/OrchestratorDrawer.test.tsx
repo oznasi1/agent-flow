@@ -132,9 +132,27 @@ const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = 
 });
 
 describe("OrchestratorDrawer", () => {
-  it("renders nothing when no flow is open", () => {
-    const { container } = render(<OrchestratorDrawer {...props({ openId: null })} />);
+  it("renders nothing when no flow is open and the drawer is closed", () => {
+    // `open: false` is what actually closes this drawer — see `p.open`'s own
+    // doc comment, and the Canvas empty-state's own gate on it (Task 13):
+    // `DeckApp`'s Close/Cancel/Save-done handlers clear `openId` and
+    // `orchOpen` together, which is what this fixture now says explicitly
+    // rather than relying on `openId: null` alone.
+    const { container } = render(<OrchestratorDrawer {...props({ openId: null, open: false })} />);
     expect(container.firstChild).toBeNull();
+  });
+
+  // Task 13: THE fix this task exists to make. `if (!flow) return null` used
+  // to sit here unconditionally — a first-time user (or anyone whose flow
+  // vanished, or who clicked Canvas's own tab with nothing addressed) landed
+  // on a blank drawer with no explanation and no way out. See this
+  // component's own doc comment on the branch that replaced it.
+  it("shows Canvas's own empty state, not nothing, when no flow is open but the drawer is shown", () => {
+    render(<OrchestratorDrawer {...props({ openId: null })} />);
+    expect(screen.getByText(/No workflow is open here/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Active" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ New flow" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "＋ New template…" })).toBeTruthy();
   });
 
   // OrchTarget addressing (Task 8): the drawer can be opened on either a
@@ -156,15 +174,23 @@ describe("OrchestratorDrawer", () => {
     expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it template flow");
   });
 
-  it("renders nothing for a target naming a template that is not in the list", () => {
+  it("renders nothing for a target naming a template that is not in the list, when the drawer is closed", () => {
     // The same tolerance the flow path already has for a missing id: an
-    // `OrchTarget` naming something absent from its own list resolves to no
-    // flow, and the drawer stays closed rather than throwing or showing a
-    // stale graph.
+    // `OrchTarget` naming something absent from its own list (and absent
+    // from `draftTemplate` too) resolves to no flow — and `open: false` is
+    // what actually closes the drawer over that (see the test above this
+    // one for why the fixture says so explicitly now).
     const { container } = render(<OrchestratorDrawer {...props({
-      flows: [], openId: { kind: "template", id: "no-such-template" }, templates: [template()],
+      flows: [], openId: { kind: "template", id: "no-such-template" }, templates: [template()], open: false,
     })} />);
     expect(container.firstChild).toBeNull();
+  });
+
+  it("shows the empty state, not a stale graph or nothing, for a template target that resolves to nothing", () => {
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "no-such-template" }, templates: [template()],
+    })} />);
+    expect(screen.getByText(/No workflow is open here/)).toBeTruthy();
   });
 
   it("shows the open flow's name in an editable field", () => {
@@ -3732,7 +3758,13 @@ describe("the open and close animation", () => {
       const { container, rerender } = render(<OrchestratorDrawer {...props()} />);
       expect(aside(container)).not.toBeNull();
 
-      rerender(<OrchestratorDrawer {...props({ openId: null })} />);
+      // `open: false` alongside `openId: null` — a real dismissal, the shape
+      // `DeckApp`'s Close/Cancel/Save-done handlers actually send (both
+      // change together; see those props' own doc comments). Without it,
+      // Task 13's Canvas empty state would stand in the drawer's place once
+      // the slide-out finishes, rather than the drawer actually closing —
+      // see that empty-state branch's own `p.open === false` gate.
+      rerender(<OrchestratorDrawer {...props({ openId: null, open: false })} />);
       // Still in the DOM, or there would be nothing for the CSS to animate.
       const closing = aside(container);
       expect(closing).not.toBeNull();
@@ -3791,11 +3823,22 @@ describe("the open and close animation", () => {
 
   // A flow that disappears from under the drawer — another window deleted it,
   // and the host posts a list without it — is not a close. `openId` still
-  // names it, so there is no dismissal to animate and nothing on disk to draw.
-  it("vanishes at once when the open flow disappears from the list", () => {
+  // names it, so there is no dismissal to animate and nothing on disk to
+  // draw — but `DeckApp` deliberately leaves `orchOpen` alone in exactly
+  // this case (see that state's own doc comment: "Left ALONE when a flow
+  // disappears out from under an open Canvas"), so `p.open` here stays
+  // shown. Task 13 changed what "nothing to draw" renders as: this used to
+  // vanish outright (`if (!flow) return null`, unconditionally) — now it
+  // shows Canvas's own empty state instead, the same dead end this whole
+  // task removes everywhere else it could happen. Silently vanishing was
+  // never the honest answer to "the workflow you were just looking at is
+  // gone" — it looked identical to a user-initiated close, with nothing said
+  // about which had happened.
+  it("shows the empty state — not nothing — when the open flow disappears from the list", () => {
     const { container, rerender } = render(<OrchestratorDrawer {...props()} />);
     rerender(<OrchestratorDrawer {...props({ flows: [] })} />);
-    expect(aside(container)).toBeNull();
+    expect(aside(container)).not.toBeNull();
+    expect(screen.getByText(/No workflow is open here/)).toBeTruthy();
   });
 });
 

@@ -2163,6 +2163,24 @@ describe("the Workflows and Templates buttons", () => {
     host(flowsMsg([mkFlow("f1", "Ship the migration")]));
     expect(drawer()).toBeNull();
   });
+
+  // Task 13's own carried-forward fix: Canvas's own tab, clicked directly
+  // with nothing addressed, used to render a blank drawer — `if (!flow)
+  // return null` sat above every check of `view`. Pinned end-to-end here
+  // (OrchestratorDrawer.test.tsx pins the same branch at the component
+  // level, with the mutation check); this is the real path a user takes —
+  // open on Active (Workflows), then click Canvas.
+  it("shows Canvas's own empty state, not a blank drawer, when its tab is clicked with nothing addressed", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    fireEvent.click(workflowsBtn());
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    fireEvent.click(within(nav).getByRole("tab", { name: "Canvas" }));
+    expect(screen.getByText(/No workflow is open here/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Active" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ New flow" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "＋ New template…" })).toBeTruthy();
+  });
 });
 
 // Task 13: "＋ New template…" mints a template held only in `DeckApp` state

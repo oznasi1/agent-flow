@@ -831,7 +831,51 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     );
   }
 
-  if (!flow) return null;
+  /** Canvas with nothing addressed — `target` was `null`, or named a flow or
+   * template that is not (or no longer) in the list `deck:flows` posts. This
+   * used to be `if (!flow) return null`, which is the exact dead end this
+   * whole feature exists to remove: once Active and Templates learned to
+   * render without a resolved flow (see `p.view !== "canvas"`'s own return,
+   * above), a click on Canvas's own tab with nothing open was the one
+   * remaining way to land on a blank drawer with no explanation and no way
+   * out. `.orch-empty` is the exact same empty-state treatment the
+   * Templates screen (above) and the empty graph (below, once a flow IS
+   * open) both use — not a new one invented for this case.
+   *
+   * The three ways out are the three that already exist elsewhere in this
+   * component, not new ones: pick an already-addressed workflow from
+   * Active, start a fresh one ("+ New flow", the exact string the
+   * flow-switcher row further down already spends — see FLOW_LEGITIMATE in
+   * vocabulary.test.ts), or start a template from nothing ("＋ New
+   * template…", wired the same way the Templates screen's own button
+   * above is).
+   *
+   * `p.open === false` closes this exactly the way the flow-less
+   * Active/Templates return (above) closes on it — required here for the
+   * identical reason: `DeckApp`'s own Close button (and Cancel, and a
+   * successful Save) clear `openFlowId` and `orchOpen` together but leave
+   * `orchView` sitting on whatever it last was, which is "canvas" every
+   * time a card's own workflow or a template was the thing just dismissed.
+   * Without this check a plain, deliberate Close would leave THIS empty
+   * state standing in the drawer's place rather than actually closing it —
+   * a new, smaller dead end sitting where the old one used to be. */
+  if (!flow) {
+    if (p.open === false) return null;
+    return (
+      <Drawer surface="orch" label="Orchestrator" closing={closing} style={{ ["--orch-w" as any]: `${renderWidth}px` }}>
+        {resizeGrip}
+        <div className="orch-hd">{topRow}</div>
+        <div className="orch-body">
+          <div className="orch-empty">
+            No workflow is open here. Pick one from{" "}
+            <button type="button" className="orch-mini" onClick={() => p.onView("active")}>Active</button>,{" "}
+            start a <button type="button" className="orch-mini" onClick={p.onCreate}>+ New flow</button>,{" "}
+            or <button type="button" className="orch-mini" onClick={p.onNewTemplate}>＋ New template…</button>.
+          </div>
+        </div>
+      </Drawer>
+    );
+  }
 
   /** How many nodes this flow HAS — every one the canvas draws, which is what the
    * header's and the footer's "N nodes" claim to count. It used to be
