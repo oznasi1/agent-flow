@@ -21,6 +21,17 @@ const PRODUCT_NAME = /\bAgent Flow(?: Deck)?\b/g;
 export const hasAgentWord = (s: string): boolean =>
   AGENT_WORD.test(s.replace(PRODUCT_NAME, ""));
 
+/** The template/workflow gate's word. Matched the same way as the agent-word —
+ * boundary-only, so "workflow"/"Workflows" (no boundary before "flow", since
+ * the preceding letter is a word character too) never trips it, only a bare
+ * "flow"/"flows" does. The product name is "Agent Flow Deck", so it must be
+ * stripped first for the same reason `hasAgentWord` strips it: without that,
+ * the product's own name would fail the gate everywhere it is printed. */
+const FLOW_WORD = /\bflows?\b/i;
+
+export const hasFlowWord = (s: string): boolean =>
+  FLOW_WORD.test(s.replace(PRODUCT_NAME, ""));
+
 /** Stylesheet modules each export ONE template literal holding a whole CSS
  * file. That string is code, not prose: its class names (`.c-agents`) and CSS
  * comments would land in the allowlist as multi-kilobyte entries that any
@@ -52,9 +63,13 @@ function isNotCopy(node: ts.Node): boolean {
   return false;
 }
 
-/** Every user-facing string in one source file that contains the agent-word,
- * whitespace-collapsed so a reflowed line does not change the allowlist. */
-export function userFacingStrings(fileName: string, source: string): string[] {
+/** Every candidate user-facing string in one source file — plain literals,
+ * template chunks, JSX text — whitespace-collapsed so a reflowed line does not
+ * change the allowlist, and with no word filter applied. This is the shared
+ * extraction the agent-word and flow-word gates both build on, so a fix to
+ * what counts as "copy" (comments excluded, object keys excluded, etc.) helps
+ * every gate at once rather than needing a second AST walk. */
+export function allUiStrings(fileName: string, source: string): string[] {
   const sf = ts.createSourceFile(
     fileName,
     source,
@@ -71,7 +86,7 @@ export function userFacingStrings(fileName: string, source: string): string[] {
     // string literal like "agents" in the same file — allowlisting the wire
     // value would then silently allowlist the display string too. Do not
     // "fix" this by adding .trim() back.
-    if (hasAgentWord(text)) out.push(text.replace(/\s+/g, " "));
+    out.push(text.replace(/\s+/g, " "));
   };
   const visit = (n: ts.Node): void => {
     if ((ts.isStringLiteral(n) || ts.isNoSubstitutionTemplateLiteral(n)) && !isNotCopy(n)) take(n.text);
@@ -81,6 +96,86 @@ export function userFacingStrings(fileName: string, source: string): string[] {
   };
   visit(sf);
   return out;
+}
+
+/** Every user-facing string in one source file that contains the agent-word.
+ * Kept as its own export — rather than inlining `allUiStrings(...).filter(hasAgentWord)`
+ * at every call site — because it is the one the top-level describe block below
+ * documents and tests directly. */
+export function userFacingStrings(fileName: string, source: string): string[] {
+  return allUiStrings(fileName, source).filter(hasAgentWord);
+}
+
+/** The exact source text of one top-level function — a `function NAME(...)`
+ * declaration, or a `const NAME = (...) => {...}` / `const NAME = function
+ * (...) {...}` assignment — found by name anywhere in the file. Lets a gate
+ * scope a scan to one component's own render body ("does a workflow verb
+ * appear anywhere INSIDE TemplateRow") rather than to a string's own content
+ * ("does a string contain both 'template' and a verb"), which is what makes
+ * the difference between catching a bare `Detach` button dropped into that
+ * component and missing it. Throws when the name is not found, so renaming or
+ * removing the component fails the test loudly instead of silently scanning
+ * nothing. */
+export function functionSource(fileName: string, source: string, name: string): string {
+  const sf = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  let found: ts.Node | undefined;
+  const visit = (n: ts.Node): void => {
+    if (found) return;
+    if (ts.isFunctionDeclaration(n) && n.name?.text === name) {
+      found = n;
+      return;
+    }
+    if (
+      ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.name.text === name &&
+      n.initializer && (ts.isArrowFunction(n.initializer) || ts.isFunctionExpression(n.initializer))
+    ) {
+      found = n.initializer;
+      return;
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (!found) throw new Error(`functionSource: no function or const named ${JSON.stringify(name)} in ${fileName}`);
+  return source.slice(found.getStart(sf), found.getEnd());
+}
+
+/** The full source text of the smallest enclosing JSX element (or fragment)
+ * that contains a given landmark string — a className, an aria-label, any
+ * literal or JSX-text substring. A second way to scope a scan to one region
+ * of a render method, for a block that is inline JSX rather than its own
+ * named component (`functionSource` cannot find what has no name). Throws
+ * when the landmark is not found, for the same reason `functionSource` does. */
+export function jsxBlockAround(fileName: string, source: string, landmark: string): string {
+  const sf = ts.createSourceFile(
+    fileName,
+    source,
+    ts.ScriptTarget.Latest,
+    true,
+    fileName.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
+  );
+  let marker: ts.Node | undefined;
+  const findMarker = (n: ts.Node): void => {
+    if (marker) return;
+    if ((ts.isStringLiteralLike(n) || ts.isJsxText(n)) && n.getText(sf).includes(landmark)) {
+      marker = n;
+      return;
+    }
+    ts.forEachChild(n, findMarker);
+  };
+  findMarker(sf);
+  if (!marker) throw new Error(`jsxBlockAround: landmark ${JSON.stringify(landmark)} not found in ${fileName}`);
+  let n: ts.Node | undefined = marker;
+  while (n && !ts.isJsxElement(n) && !ts.isJsxFragment(n)) n = n.parent;
+  if (!n) {
+    throw new Error(`jsxBlockAround: no enclosing JSX element around ${JSON.stringify(landmark)} in ${fileName}`);
+  }
+  return source.slice(n.getStart(sf), n.getEnd());
 }
 
 function walk(dir: string, acc: string[] = []): string[] {

@@ -152,9 +152,14 @@ child_process.exec(command, {
 })
 ```
 
-stdout and stderr go to the Deck's output channel and **nowhere else** —
-that is the only place an unattended deploy's output can be read afterwards.
-The rule's own receipt carries the exit code and a sentence, not the output.
+stdout and stderr go to the Deck's output channel, and — for any armed flow —
+into [the flow journal](FLOW_JOURNAL.md) alongside the `fired`/`errored` line
+the rule stamps. When that flow is attached to a card as a workflow, the
+card drawer's Workflow block offers an **Output** button on the step, which
+reopens the journal's copy in its own editor tab — the way to read it back
+after the output channel itself has scrolled past it or the window has
+closed. The rule's own receipt carries the exit code and a sentence, not the
+output.
 
 ## The latch
 
@@ -208,6 +213,163 @@ test) two trips through the same menu.
 Free text stays a footer action rather than a tickable row: there is nothing
 to batch about a command you have not typed yet.
 
+## Templates and workflows
+
+A **template** is a flow with no ticket and no run, saved so its shape can be
+reused. A **workflow** is a template attached to one card. That split is
+UI-only — a workflow is an ordinary flow underneath, and everything above
+about one pass, consent, and the latch applies to it exactly as it does to
+any other flow. The names never appear in the source: the code keeps `Flow`,
+`FlowTemplate`, and every `flow:*` message, because they are frozen by
+`test/unit/compat.test.ts` and thousands of installs read them.
+
+- **`flow:saveTemplate`** demotes every `place` node in the flow to a
+  `planned` node — stripping the run it was bound to — and writes the result
+  to a sibling `templates` directory, next to the flows directory this whole
+  page has been describing. A template is never armed and never evaluated by
+  the pass above: it has no ticket and nothing to watch.
+- **`flow:attach`** instantiates a template against one card, binding the
+  card's ticket to every planned node the template holds. The result is an
+  ordinary flow, disarmed, with neither consent stamp — arming it and giving
+  consent both happen exactly as described above, from scratch. Its optional
+  `replace: true` first detaches whatever workflow the card already carries;
+  omitting it while one is already there is a refusal, not a silent second
+  attachment.
+- **`flow:detach`** deletes the flow's file outright. Attachment is derived
+  from the graph — a `place`/`planned` node bound to the card's run or ticket
+  — never stored, so there is no separate link to clear.
+- **`flow:renameTemplate`**, **`flow:deleteTemplate`**, **`flow:duplicateTemplate`**
+  act on the template file only. Deleting a template never touches a workflow
+  already instantiated from it: `instantiate` copies the whole shape rather
+  than sharing it, so an existing workflow keeps running unaffected — a later
+  rename or delete of the template it came from changes none of its rules.
+  Each instantiated workflow does keep one pointer back, `Flow.fromTemplate`,
+  set once by `instantiate` and never re-read for shape — its only reader is
+  the Templates tab's own `on N cards` count (`OrchestratorDrawer.tsx`), which
+  is why that count is exact rather than a guess by name and rule count.
+- **`flow:openOutput`** reads [the flow journal](FLOW_JOURNAL.md) for the
+  named edge and opens its most recent `fired`/`errored` output in its own
+  editor tab — never back across the wire to the drawer, since output can be
+  far larger than any receipt sentence and the drawer is a fixed 620px.
+  Offered on a workflow's `done` or `fail` step whenever its rule runs a
+  command; every other rule kind (launch, seed, notify, a gate's `ask`) has
+  no output to read, so the button never appears for one. The opened tab is
+  headed with a one-line pointer back to the journal line it came from —
+  `fired`/`errored`, the action, the edge, and when — so two Output tabs
+  don't read as the same undifferentiated blob. A flow or edge the journal has
+  nothing for is a toast naming which of three things is true — nothing
+  journaled at all (which reads the same as a journal that failed to read —
+  see [FLOW_JOURNAL.md](FLOW_JOURNAL.md)), this edge never ran, or it ran
+  without capturing
+  output — never a blank tab.
+
+### Finding them
+
+The Deck's header carries two buttons where a single "Orchestrator" chip used
+to sit: **Workflows** (badged `N needs you` once at least one workflow is
+`waiting-on-you` or `stopped`, else a plain count of every card carrying one)
+and **Templates** (badged with the total, starters included). Each opens the
+drawer straight to its own view — clicking Workflows a second time while
+Templates is showing switches to Active rather than closing, matching how the
+drawer's own in-panel tabs behave. Neither button ever mints a blank flow;
+the old chip's zero-flows click did, which meant "no flows yet" was also "no
+way to reach Templates at all".
+
+The drawer itself has three top-level views, replacing a "Flows · N ▾"
+disclosure that buried Templates behind Canvas:
+
+- **Active** lists every card carrying a workflow, one row per card, ranked
+  the same way the board's own chip ranks a card with several — `stopped` and
+  `waiting-on-you` first. Clicking a row closes the drawer and opens that
+  card. The Workflows button's own badge and the rows underneath it are read
+  from the same derivation, so the two can never name a different count.
+- **Templates** lists every reusable shape — the built-in starters below,
+  then whatever is saved to disk.
+- **Canvas** is the flow editor itself: drawing rules, arming, dry-running,
+  resuming, and now also drafting an unsaved template (below). With nothing
+  open it shows an explanation instead of a blank panel.
+
+### Built-in starters
+
+Three shapes ship inside the extension itself, never written to
+`~/.agentflow/templates/`: **Ship it** (launch → `npm test` → ask to open a
+PR), **Test & notify** (launch → `npm test` → notify), and **Review only**
+(launch → notify) — see `STARTERS` in `src/engine/orchestrator/starters.ts`.
+**Test & notify** neither checks branch CI nor merges anything, despite the
+similar name; it names honestly what a built-in CAN do without the user's own
+settings — run the tests, then say so. The shape that would actually gate on
+CI and merge needs a `branch-ci-passed` condition parameterised by
+`{ repo, branch }`, which is unknowable before the user's own repo exists —
+the same reason every starter's `planned` node ships empty `repos`/`mode`.
+They carry a `builtin-` id prefix rather than a flag, so they are ordinary
+`FlowTemplate` records everywhere one is read — `flow:attach`,
+`flow:duplicateTemplate`, the Templates list — but every WRITE path
+(`flow:renameTemplate`, `flow:deleteTemplate`, saving over one directly)
+checks the prefix and refuses: *"That is a built-in template. Duplicate it to
+make a version you can change."* **Duplicate** copies the shape into an
+ordinary, disk-backed template the user owns; the original stays exactly as
+shipped. Because none is ever copied into a user's own storage, a starter
+improved in a later release reaches every install on upgrade, not only a
+fresh one.
+
+A starter's `planned` node ships with empty `repos` and `mode` — it cannot
+know a checkout name or a configured prompt mode before the user's own
+settings exist, and baking either in would be exactly the kind of hardcoded
+value this project refuses to ship. `instantiate` fills both in at attach
+time from the card being bound to: `repos` from the card's own checkouts,
+`mode` from the configured prompt modes (falling back to the first one if the
+node's own is empty or no longer valid). A template saved with its own
+populated `repos` or a configured `mode` still wins — this fallback only
+fires when the template leaves either blank, which every starter does and any
+older user template might. One consequence worth stating plainly: a template
+saved against one repo no longer carries that repo onto a card attached in a
+different one — attaching always resolves against the card in front of you,
+never the card the template happened to be saved from.
+
+### Authoring a template directly
+
+**＋ New template…**, on the Templates view and on an empty Canvas, opens a
+fresh draft held only in memory — nothing reaches `~/.agentflow/templates/`
+until Save is pressed. The draft's SHAPE can be built up the same way any
+flow's can — add a notify, a gate, a command, or another planned step, and
+wire rules between them — but every WORKFLOW verb is hidden: arm, disarm,
+dry-run, resume, save-as-template, and **attach** (offered elsewhere as
+"+ Add place…") all assume a live card with a ticket to watch, and a draft
+has neither. Only **Cancel** and **Save** are offered.
+
+Save sends `flow:writeTemplate` with the draft's flow and a name; the host
+normalizes it the same way `flow:saveTemplate` does (ids cleared, disarmed,
+every host stamp stripped) and writes it, then closes the draft back to the
+Templates view.
+
+**Edit**, on a saved template's own row, reopens that template on Canvas to
+change it. The template is copied into the same in-memory draft a new one
+uses, so edits accumulate off disk exactly as a fresh draft's do, and the
+canvas paints the working copy rather than the saved one — a `deck:flows`
+refresh landing mid-edit re-posts the saved copy without disturbing what you
+have typed. Save then sends `flow:writeTemplate` **with** `templateId`, the
+update-in-place branch: the template keeps its id (so any workflow's
+`fromTemplate` and the row's "on N cards" count still point at it) and its
+graph is replaced. A built-in has no Edit — the host refuses to overwrite one —
+which is why its refusal says to **Duplicate** it first: the duplicate is
+yours, and Edit appears on it.
+
+**Cancel** discards the draft outright — there was never anything on disk to
+clean up. Closing the drawer a different way (the panel's own Close, or
+selecting a card) does **not**: the draft survives in memory, and the next
+**＋ New template…** click reopens that same half-drawn draft rather than
+minting a blank one — see `draftTemplate`'s own doc comment in `DeckApp.tsx`
+for why only one can exist at a time. The one exception: if what is open is a
+saved template being edited (not a new draft), **＋ New template…** mints a
+fresh blank rather than handing that template back under a new-template
+label.
+
+### Reaching Templates from a stuck attach picker
+
+A card's attach picker used to dead-end on "No templates saved yet" whenever
+`templates` came back empty. It now offers an **Open Templates** button right
+there, which closes the picker and opens the drawer's Templates view instead.
+
 ## Boundaries
 
 ### You can
@@ -223,7 +385,17 @@ to batch about a command you have not typed yet.
   becomes its own node in one write.
 - **Keep a one-off** — name it in the drawer and it lands in `settings.json`,
   in the right scope.
-- **Read the output** — full stdout and stderr in the Deck's output channel.
+- **Read the output** — full stdout and stderr in the Deck's output channel
+  while the window is open, or later from a workflow's own card drawer: a
+  `done` or `fail` step whose rule runs a command offers **Output**, which
+  reads the journal's `fired`/`errored` line for that edge and opens it in an
+  editor tab (`flow:openOutput`). It shows the LATEST such line for that
+  edge — the one the step's own done/fail state already reflects — and
+  refuses honestly rather than guess when there is nothing to show: nothing
+  journaled for the flow yet, this edge specifically hasn't run, or it ran
+  but captured no output (which reads the same whether the command printed
+  nothing or its output predates this build — the journal does not
+  distinguish the two).
 - **Recover a failed rule** — Reset clears the latch and keeps the note and
   mode.
 - **Refuse the whole thing** — the command gate is separate from the session

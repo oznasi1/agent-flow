@@ -400,4 +400,20 @@ describe("buildRunStatus", () => {
       expect(s.agent.state).toBe("needs-you");
     });
   });
+
+  // `deckView.ts`'s `ticketKeyPatch` is documented as correct only because it
+  // is "the ONE place [`inferredTicketKey`] is set" — it ADDS the field when
+  // the resolved ticket key differs from `run.key`, but returns `{}` (never
+  // `{ inferredTicketKey: undefined }`) otherwise, so it can only ever ADD the
+  // field to a `RunStatus`, never CLEAR one already there. That is safe only
+  // as long as `buildRunStatus` itself never puts the field on the object in
+  // the first place — nothing enforced that until now. `run.url` here names
+  // the same ticket as `run.key`, which is exactly the shape `ticketKeyPatch`
+  // would itself omit the field for; `buildRunStatus` has no ticket-key logic
+  // of its own to get that right or wrong; the field must simply never appear.
+  it("never sets inferredTicketKey — deckView.ts's ticketKeyPatch is the only place that does", () => {
+    const s = buildRunStatus({ run, ticket: null, projectsRoot: projRoot, nowMs: NOW });
+    expect(s.inferredTicketKey).toBeUndefined();
+    expect(Object.prototype.hasOwnProperty.call(s, "inferredTicketKey")).toBe(false);
+  });
 });

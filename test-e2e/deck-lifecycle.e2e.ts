@@ -99,7 +99,14 @@ test("forget removes a run's record without touching its neighbour", async ({}, 
 
   await expect(deck.card("E2E-A")).toBeVisible({ timeout: 60_000 });
   await deck.card("E2E-A").click();
-  await deck.detail().getByRole("button", { name: /forget/i }).click();
+  // Forget moved behind the drawer's `More` disclosure in the card-detail
+  // rebuild (DeckDetail.tsx) — it is closed by default, so the button is not
+  // reachable until `openMore()` expands it.
+  await deck.openMore();
+  // Exact, not /forget/i: the `More` summary's own label also contains
+  // "forget" ("...spend breakdown, forget"), and a loose match now resolves
+  // two buttons once the disclosure is open.
+  await deck.detail().getByRole("button", { name: "Forget", exact: true }).click();
 
   await expect.poll(() => fs.existsSync(a), { timeout: 60_000 }).toBe(false);
   expect(fs.existsSync(b)).toBe(true);

@@ -5,12 +5,14 @@ import { render, screen, fireEvent, act, within, waitFor } from "@testing-librar
 
 vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
 
-import { DeckApp } from "../../src/webview/DeckApp";
+import { DeckApp, retainedOpenTarget, workflowChipTrailer } from "../../src/webview/DeckApp";
 import { DECK_CSS, DRAWER_ANIM_MS } from "../../src/webview/deckStyles";
 import { DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
 import { send } from "../../src/webview/vscodeApi";
 import type { AgentActivity, CardAgent, OutboundMessage, PrFacts, RepoGit, ReviewRequest, RunStatus } from "../../src/types";
-import type { Flow } from "../../src/engine/orchestrator/model";
+import type { Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
+import type { WorkflowState } from "../../src/engine/orchestrator/attach";
+import { TEMPLATE_SCHEMA, type FlowTemplate } from "../../src/engine/orchestrator/templates";
 
 const sent = vi.mocked(send);
 
@@ -18,6 +20,19 @@ function host(msg: OutboundMessage) {
   act(() => {
     window.dispatchEvent(new MessageEvent("message", { data: msg }));
   });
+}
+
+// Copy, per-repo diffs, the spend table and Forget/Track it moved behind the
+// drawer's `More` disclosure (DeckDetail.tsx) — its body renders only once
+// open, not merely once the browser's own `open` attribute lands (that
+// attribute is set by the click's default action a tick before the "toggle"
+// event that actually flips React state and renders the body, so waiting on
+// it directly resolves too early). "Spend" is unconditional in the body, so
+// it is present the instant the body renders at all, whatever the card's
+// own PR/local/tracked state.
+async function openMore() {
+  fireEvent.click(screen.getByRole("button", { name: /^More/ }));
+  await waitFor(() => expect(screen.getByText("Spend")).toBeTruthy());
 }
 
 const mkStatus = (over: Partial<RunStatus> = {}): RunStatus => ({
@@ -390,18 +405,20 @@ describe("DeckApp", () => {
     expect(container.querySelector(".act.primary.live")).toBeNull();
   });
 
-  it("forgets a run from the drawer's action list", () => {
+  it("forgets a run from the drawer's action list", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "PROJ-1" });
   });
 
-  it("removes a forgotten card immediately, without waiting for the host", () => {
+  it("removes a forgotten card immediately, without waiting for the host", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
     fireEvent.click(document.querySelectorAll(".card")[0]);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     // No deck:runs has arrived; the card is gone regardless.
     expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
@@ -409,11 +426,12 @@ describe("DeckApp", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:forget", key: "PROJ-1" });
   });
 
-  it("restores an optimistically removed card if the host still reports it", () => {
+  it("restores an optimistically removed card if the host still reports it", async () => {
     // The host post is authoritative — a delete that failed must not vanish the run.
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: "Forget" }));
     expect(screen.queryByText("PROJ-1")).not.toBeInTheDocument();
     host(runsMsg([mkStatus()]));
@@ -444,10 +462,11 @@ describe("DeckApp", () => {
     expect(screen.getByText(/synced/i)).toBeInTheDocument();
   });
 
-  it("opens the ticket in Jira from the drawer's action list", () => {
+  it("opens the ticket in Jira from the drawer's action list", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: "Open in Jira" }));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://jira/PROJ-1" });
   });
@@ -472,10 +491,11 @@ describe("DeckApp", () => {
     expect(screen.getByTitle("explore-retry-logic")).toBeInTheDocument();
   });
 
-  it("does not offer to open a ticketless run in Jira", () => {
+  it("does not offer to open a ticketless run in Jira", async () => {
     render(<DeckApp />);
     host(runsMsg([untracked()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     expect(screen.queryByText(/Open in Jira/i)).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Forget" })).toBeInTheDocument();
   });
@@ -555,26 +575,29 @@ describe("DeckApp", () => {
     expect(screen.queryByText("PROJ-5641")).toBeNull();
   });
 
-  it("offers Track it and no Forget", () => {
+  it("offers Track it and no Forget", async () => {
     render(<DeckApp />);
     host(runsMsg([mkLocal()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     expect(screen.getByRole("button", { name: "Track it" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Forget" })).toBeNull();
   });
 
-  it("posts deck:track", () => {
+  it("posts deck:track", async () => {
     render(<DeckApp />);
     host(runsMsg([mkLocal()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: "Track it" }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-webapp-1a2b3c4d" });
   });
 
-  it("still offers Forget on a tracked card", () => {
+  it("still offers Forget on a tracked card", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     expect(screen.getByRole("button", { name: "Forget" })).toBeTruthy();
   });
 
@@ -1698,13 +1721,15 @@ describe("DeckApp — source label", () => {
     expect(document.querySelector(".note")!.textContent).toBe("git + Jira backbone · best-effort live from ~/.claude/projects");
   });
 
-  it("renders a tracked card's Jira strings byte-for-byte: key title, status pill title, drawer action item", () => {
+  it("renders a tracked card's Jira strings byte-for-byte: key title, status pill title, drawer action item", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
     expect(screen.getByTitle("Open PROJ-1 in Jira")).toBeInTheDocument();
-    // The status pill and the "Open in <source>" action both moved into the drawer.
+    // The status pill and the "Open in <source>" action both moved into the drawer —
+    // the action item a further click away, behind `More`.
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("Jira status: In Progress")).toBeInTheDocument();
+    await openMore();
     expect(screen.getByText("Open in Jira")).toBeInTheDocument();
   });
 
@@ -1714,15 +1739,17 @@ describe("DeckApp — source label", () => {
     expect(screen.getByTitle("Open PROJ-5641 in Jira")).toBeInTheDocument();
   });
 
-  it("templates every one of those strings off a non-Jira sourceLabel — proving the label actually reaches the render", () => {
+  it("templates every one of those strings off a non-Jira sourceLabel — proving the label actually reaches the render", async () => {
     render(<DeckApp />);
     host(runsMsg([mkStatus()], "PR initiated", "Acme"));
     expect(screen.getByTitle("Re-read git, Acme and PR state now")).toBeInTheDocument();
     expect(document.querySelector(".note")!.textContent).toBe("git + Acme backbone · best-effort live from ~/.claude/projects");
     expect(screen.getByTitle("Open PROJ-1 in Acme")).toBeInTheDocument();
-    // The status pill and the "Open in <source>" action both moved into the drawer.
+    // The status pill and the "Open in <source>" action both moved into the drawer —
+    // the action item a further click away, behind `More`.
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(screen.getByTitle("Acme status: In Progress")).toBeInTheDocument();
+    await openMore();
     expect(screen.getByText("Open in Acme")).toBeInTheDocument();
     // A fresh deck:runs post with an unknown agent activity is the only way left
     // to reach the parked string — the live signal is unconditional now, so
@@ -1781,6 +1808,40 @@ const mkFlow = (id: string, name: string): Flow => ({
   id, name, armed: false, createdAt: 1_000, nodes: [], edges: [],
 });
 
+/** A minimal saved template — for the Templates badge count, which does not
+ * care what shape any of them hold, only how many there are. */
+const makeTemplate = (id: string, name: string): FlowTemplate => ({
+  schema: TEMPLATE_SCHEMA, id, name, params: {}, savedAt: 1_000, flow: mkFlow(`${id}-flow`, name),
+});
+
+/** A flow with a single `place` node bound to `runKey` — ONE of the two shapes
+ * `bindsRun` (attach.ts) matches, used where a test only needs SOME flow bound
+ * to a run key, not the shape a real attach produces. `flow:attach` itself
+ * never writes a `place` node: `instantiate` writes a `planned` node carrying
+ * `ticketKey` (attach.ts's own comment on `boundTicketKeyOf` — "the ONLY
+ * binding a freshly attached workflow has, since a template carries no place
+ * nodes"). See `plannedFlow` below for that actual shape — the distinction
+ * matters because a run key and a ticket key can differ, which a
+ * `place`-bound fixture can never exercise. */
+const boundFlow = (id: string, name: string, runKey: string): Flow => ({
+  id, name, armed: false, createdAt: 1_000,
+  nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey, repo: "svc" }],
+  edges: [],
+});
+
+/** The shape `flow:attach` actually produces: a single `planned` node bound by
+ * TICKET key, not run key (`deckView.ts`'s `flow:attach` computes
+ * `ticketKeyFor` and `instantiate` writes it into a `planned` node's
+ * `ticketKey`). Distinct from `boundFlow` on purpose — a fixture whose run key
+ * already equals its ticket key cannot tell "matched by ticket key" from
+ * "matched by run key", which is exactly the gap a review round found
+ * unpinned at this call site. */
+const plannedFlow = (id: string, name: string, ticketKey: string): Flow => ({
+  id, name, armed: false, createdAt: 1_000,
+  nodes: [{ id: "n1", kind: "planned", x: 0, y: 0, join: "any", ticketKey, repos: ["svc"], mode: "implementation", dest: "new-window" }],
+  edges: [],
+});
+
 /** A flow whose single edge `e1` has already fired — for the reset-through-
  * DeckApp test below, which needs a real fired edge to click Reset on. */
 const firedFlow = (): Flow => ({
@@ -1794,13 +1855,26 @@ const firedFlow = (): Flow => ({
 
 // `pendingResume` defaults empty: the resume gate (Task 4) is host-side state
 // with no rendering yet (Task 6 wires the banner) — every existing fixture here
-// predates the field and has nothing to hold.
-const flowsMsg = (flows: Flow[], enabled = true): OutboundMessage =>
-  ({ type: "deck:flows", commands: [], branchCi: {}, flows, enabled, pendingResume: [], promptModes: [] });
+// predates the field and has nothing to hold. `templates` defaults empty for
+// the same reason and is the one field a caller can override positionally
+// (rather than by spreading this function's own result, which loses the
+// discriminant `OutboundMessage` needs — this return type is the whole union,
+// not narrowed to the `deck:flows` member) — see "survives the Deck's own 6s
+// deck:flows refresh" for the one test that needs a non-empty list.
+const flowsMsg = (flows: Flow[], enabled = true, templates: FlowTemplate[] = []): OutboundMessage =>
+  ({ type: "deck:flows", commands: [], branchCi: {}, flows, enabled, pendingResume: [], promptModes: [], templates });
 
-/** The drawer itself, not the header chip that shares its name. */
+/** The drawer itself, not either header button that opens onto it. */
 const drawer = () => screen.queryByRole("complementary", { name: "Orchestrator" });
-const chip = () => screen.getByRole("button", { name: /Orchestrator/ });
+/** The two sibling header buttons that replaced the single "Orchestrator"
+ * chip — Workflows always opens straight onto Active, Templates onto
+ * Templates; neither ever opens Canvas (see "the Workflows and Templates
+ * buttons" below). Reaching Canvas in a test now goes through the
+ * fresh-flow auto-open (a plain `flowsMsg([])` then the flow(s) under test)
+ * or through a bound card's own "Open in Workflows ↗", matching how a real
+ * user would actually get there. */
+const workflowsBtn = () => screen.getByRole("button", { name: /Workflows/ });
+const templatesBtn = () => screen.getByRole("button", { name: /Templates/ });
 
 // The host and this webview ship in one .vsix, so a real post always carries
 // every list on this message. What makes a missing one worth defending anyway is
@@ -1827,7 +1901,7 @@ describe("a deck:flows payload missing a field a newer webview reads", () => {
     edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
   });
 
-  const without = (field: "flows" | "commands" | "pendingResume" | "promptModes" | "branchCi"): OutboundMessage => {
+  const without = (field: "flows" | "commands" | "pendingResume" | "promptModes" | "branchCi" | "templates"): OutboundMessage => {
     const msg = { ...flowsMsg([withARule()]) } as Record<string, unknown>;
     delete msg[field];
     return msg as unknown as OutboundMessage;
@@ -1836,11 +1910,17 @@ describe("a deck:flows payload missing a field a newer webview reads", () => {
   it("still renders the board and the drawer with no commands", () => {
     render(<DeckApp />);
     host(without("commands"));
-    // The chip is the board's own control, so its presence IS "the panel
-    // rendered" — under the unfixed version this query finds nothing at all,
-    // because the whole tree threw.
-    expect(chip()).toBeInTheDocument();
-    fireEvent.click(chip());
+    // The Workflows button is the board's own control, so its presence IS
+    // "the panel rendered" — under the unfixed version this query finds
+    // nothing at all, because the whole tree threw.
+    expect(workflowsBtn()).toBeInTheDocument();
+    // Reaching Canvas (where `commands` is actually dereferenced) now goes
+    // through a bound card's own "Open in Workflows ↗" — neither header
+    // button opens Canvas directly any more. `withARule()`'s `n1` is bound to
+    // PROJ-1, this message's own default run key.
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Open in Workflows ↗" }));
     expect(drawer()).not.toBeNull();
     // And the picker the missing field feeds still opens, saying what an empty
     // list means rather than showing a blank popup.
@@ -1851,6 +1931,22 @@ describe("a deck:flows payload missing a field a newer webview reads", () => {
     // Free text stays offered, so a build that received no commands is still a
     // build you can add one in.
     expect(screen.getByRole("button", { name: "Free-text command…" })).toBeTruthy();
+  });
+
+  it("still lets the attach picker open with no templates when the field is missing", () => {
+    // `templates` is `DeckDetail.tsx`'s own field to defend — added in the
+    // same task that added the Workflow section, and not yet covered by
+    // either test above: `setTemplates(m.templates ?? [])` is the guard, and
+    // this is what proves it rather than assuming it. PROJ-9 is deliberately
+    // NOT one of `withARule()`'s two bound run keys (PROJ-1, PROJ-2), so its
+    // card renders "Attach workflow…" rather than an already-bound block.
+    render(<DeckApp />);
+    host(without("templates"));
+    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "PROJ-9" } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    expect(screen.getByPlaceholderText("Choose a template for PROJ-9…")).toBeTruthy();
+    expect(screen.getByText("No templates saved yet")).toBeTruthy();
   });
 
   it("survives every other missing list on that message too", () => {
@@ -1869,76 +1965,199 @@ describe("a deck:flows payload missing a field a newer webview reads", () => {
     for (const field of ["flows", "pendingResume", "promptModes", "branchCi"] as const) {
       const r = render(<DeckApp />);
       host(without(field));
-      expect(screen.queryByRole("button", { name: /Orchestrator/ })).not.toBeNull();
-      fireEvent.click(chip());
-      // With `flows` missing there is no flow to open, so the drawer stays shut;
-      // every other case must actually render it — and then render a RULE, since
+      host(runsMsg([mkStatus()])); // PROJ-1, matching `withARule()`'s n1 when flows is present
+      expect(screen.queryByRole("button", { name: /Workflows/ })).not.toBeNull();
+      fireEvent.click(document.querySelector(".card") as HTMLElement);
+      // With `flows` missing there is no flow bound to this card, so there is
+      // no "Open in Workflows ↗" to press and the drawer stays shut; every
+      // other case must actually reach Canvas — and then render a RULE, since
       // `promptModes` is reached only by an open rule's USING select.
       if (field !== "flows") {
+        fireEvent.click(screen.getByRole("button", { name: "Open in Workflows ↗" }));
         expect(drawer()).not.toBeNull();
         fireEvent.click(screen.getByTestId("orch-edge-e1"));
         expect(screen.getByLabelText("Mode")).toBeTruthy();
+      } else {
+        expect(screen.queryByRole("button", { name: "Open in Workflows ↗" })).toBeNull();
+        expect(drawer()).toBeNull();
       }
       r.unmount();
     }
   });
 });
 
-describe("the Orchestrator chip", () => {
-  it("appears once the host says the feature is on", () => {
+// Two sibling entry points replacing the single "Orchestrator" chip. The
+// zero-flows click used to mint a blank flow (`flow:create`) instead of
+// opening anything — with no flows yet, there was no way to reach Templates
+// at all. Each button below always opens ITS OWN view; neither ever sends
+// `flow:create` (the last test in this block is the one that pins that dead
+// end shut).
+describe("the Workflows and Templates buttons", () => {
+  it("both appear once the host says the feature is on", () => {
     render(<DeckApp />);
-    expect(screen.queryByRole("button", { name: /Orchestrator/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Workflows/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Templates/ })).toBeNull();
     host(flowsMsg([]));
-    expect(chip()).toBeInTheDocument();
+    expect(workflowsBtn()).toBeInTheDocument();
+    expect(templatesBtn()).toBeInTheDocument();
   });
 
-  it("renders no chip when the host says the feature is off", () => {
+  it("offers neither when the orchestrator setting is off", () => {
     render(<DeckApp />);
     host(flowsMsg([mkFlow("f1", "Ship it")], false));
-    expect(screen.queryByRole("button", { name: /Orchestrator/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Workflows/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Templates/ })).toBeNull();
     expect(drawer()).toBeNull();
   });
 
-  it("counts the flows beside the label, and only when there are some", () => {
+  it("opens the Active view from Workflows and the Templates view from Templates", () => {
     render(<DeckApp />);
     host(flowsMsg([]));
-    expect(chip().querySelector(".ct")).toBeNull();
-    host(flowsMsg([mkFlow("f1", "a"), mkFlow("f2", "b")]));
-    expect(chip().querySelector(".ct")!.textContent).toBe("2");
-  });
-
-  // With arming real, the count that matters is how many flows are armed — not
-  // how many merely exist. Both directions of the condition are proved here so
-  // inverting either branch of `armedCount > 0 ? ... : ...` fails one of them.
-  it("reports the armed count on the chip, not the flow count", () => {
-    render(<DeckApp />);
-    host(flowsMsg([{ ...mkFlow("f1", "a"), armed: true }, mkFlow("f2", "b")]));
-    expect(chip().textContent).toContain("1 armed");
-  });
-
-  it("shows a plain count when nothing is armed", () => {
-    render(<DeckApp />);
-    host(flowsMsg([mkFlow("f1", "a"), mkFlow("f2", "b")]));
-    const text = chip().textContent ?? "";
-    expect(text).not.toContain("armed");
-    expect(text).toContain("2");
-  });
-
-  it("asks the host to create one when there are none", () => {
-    render(<DeckApp />);
-    host(flowsMsg([]));
-    fireEvent.click(chip());
-    expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
-  });
-
-  it("opens the drawer via the chip when there is a flow", () => {
-    render(<DeckApp />);
-    host(flowsMsg([mkFlow("f1", "Ship the migration")]));
-    // A saved flow no longer auto-opens on the post (Task 7) — only the chip does.
-    expect(drawer()).toBeNull();
-    fireEvent.click(chip());
+    fireEvent.click(workflowsBtn());
     expect(drawer()).toBeInTheDocument();
-    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship the migration");
+    let nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Active" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(templatesBtn());
+    nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Templates" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("toggles closed on a second click of the same button, asking the host nothing", () => {
+    render(<DeckApp />);
+    host(flowsMsg([mkFlow("f1", "Ship it")]));
+    sent.mockClear();
+    fireEvent.click(workflowsBtn());
+    expect(drawer()).toBeInTheDocument();
+    fireEvent.click(workflowsBtn());
+    expect(drawer()).toBeNull();
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("switches view rather than closing when the OTHER button is clicked while open", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    fireEvent.click(workflowsBtn());
+    fireEvent.click(templatesBtn());
+    // Still open — on Templates, not closed and not back on Active.
+    expect(drawer()).toBeInTheDocument();
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Templates" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  // Bound-workflow fixtures for the badge tests below — a `place` node bound
+  // by run key is one of the two shapes `bindsRun` (attach.ts) matches, and
+  // is enough on its own to make `cardWorkflow` attach the flow to that run's
+  // card, which is what makes it show up on the Active list at all.
+  const advancing = (id: string, runKey: string): Flow => ({
+    id, name: id, armed: true, createdAt: 1,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey, repo: "svc" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+  });
+  /** Waiting-on-you: the place's own edge already asked a gate — the shape
+   * `evaluate.ts` posts its `awaiting-answer` note against, same as "the
+   * card's workflow chip" describe block's own `gateOn` fixture. */
+  const waitingOnYou = (id: string, runKey: string): Flow => ({
+    id, name: id, armed: true, createdAt: 1,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey, repo: "svc" },
+      { id: "g1", kind: "gate", x: 0, y: 0, join: "any", question: "approve?" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "" },
+    ],
+    edges: [
+      { id: "e-ask", from: "n1", to: "g1", cond: { kind: "pr-merged" }, performed: true, firedAt: 1, firedNote: "asked you: approve?" },
+      { id: "e-gate", from: "g1", to: "n2", cond: { kind: "gate-approved" } },
+    ],
+  });
+  const stopped = (id: string, runKey: string): Flow => ({
+    id, name: id, armed: true, createdAt: 1,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey, repo: "svc" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, error: "smoke test failed" }],
+  });
+
+  it("says how many workflows need you", () => {
+    // One waiting-on-you (PROJ-1) and one advancing (PROJ-2) — the badge
+    // counts only the one that needs a human, not both attached workflows.
+    render(<DeckApp />);
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
+    host(flowsMsg([waitingOnYou("f1", "PROJ-1"), advancing("f2", "PROJ-2")]));
+    expect(workflowsBtn().querySelector(".ct")!.textContent).toBe("1 needs you");
+  });
+
+  it("falls back to the active count when nothing needs you", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
+    host(flowsMsg([advancing("f1", "PROJ-1"), advancing("f2", "PROJ-2")]));
+    const text = workflowsBtn().querySelector(".ct")!.textContent;
+    expect(text).not.toContain("needs you");
+    expect(text).toBe("2");
+  });
+
+  it("counts stopped the same as waiting-on-you — both need a human", () => {
+    render(<DeckApp />);
+    host(runsMsg([mkStatus(), mkStatus({ run: { ...mkStatus().run, key: "PROJ-2" } })]));
+    host(flowsMsg([stopped("f1", "PROJ-1"), waitingOnYou("f2", "PROJ-2")]));
+    expect(workflowsBtn().querySelector(".ct")!.textContent).toBe("2 needs you");
+  });
+
+  it("shows no Workflows badge with nothing attached anywhere", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    expect(workflowsBtn().querySelector(".ct")).toBeNull();
+  });
+
+  it("counts templates on the Templates badge, starters included", () => {
+    render(<DeckApp />);
+    host({
+      type: "deck:flows", commands: [], branchCi: {}, flows: [], enabled: true, pendingResume: [], promptModes: [],
+      templates: [makeTemplate("t1", "Ship it"), makeTemplate("t2", "Test & merge")],
+    });
+    expect(templatesBtn().querySelector(".ct")!.textContent).toBe("2");
+  });
+
+  it("shows no Templates badge with none saved", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    expect(templatesBtn().querySelector(".ct")).toBeNull();
+  });
+
+  // THE dead end this task exists to close: the old single chip's zero-flows
+  // click sent `flow:create` instead of opening anything, which is exactly
+  // what made Templates unreachable for a first-time user. Both buttons must
+  // open their own view instead, every time, flows or no flows.
+  it("opens a view rather than minting a flow when there are none", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    fireEvent.click(workflowsBtn());
+    expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "flow:create" }));
+    expect(drawer()).toBeInTheDocument();
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Active" })).toHaveAttribute("aria-selected", "true");
+
+    fireEvent.click(workflowsBtn()); // close it before trying Templates
+    fireEvent.click(templatesBtn());
+    expect(sent).not.toHaveBeenCalledWith(expect.objectContaining({ type: "flow:create" }));
+    expect(within(screen.getByRole("tablist", { name: "Orchestrator" })).getByRole("tab", { name: "Templates" }))
+      .toHaveAttribute("aria-selected", "true");
+  });
+
+  // Auto-open — a flow becoming fresh with nothing clicked at all — is
+  // unaffected by either button and still lands the drawer on Canvas. This
+  // is proved fully in "the deck:flows handler" and "the Orchestrator's
+  // top-level view" below; this one line pins that it does not need EITHER
+  // button pressed first.
+  it("still auto-opens for a flow that was just created, with neither button ever clicked", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    host(flowsMsg([mkFlow("f1", "New flow")]));
+    expect(drawer()).toBeInTheDocument();
+    expect(screen.getByLabelText("Flow name")).toHaveValue("New flow");
   });
 
   // The bug this phase carried over: on the first post the previous list is `[]`,
@@ -1950,39 +2169,246 @@ describe("the Orchestrator chip", () => {
     expect(drawer()).toBeNull();
   });
 
-  // The behaviour the auto-open exists for, proved alongside the fix above so the
-  // seen-set guard cannot be the kind of fix that also breaks what it must keep.
-  it("still opens the drawer for a flow that was just created", () => {
+  // Task 13's own carried-forward fix: Canvas's own tab, clicked directly
+  // with nothing addressed, used to render a blank drawer — `if (!flow)
+  // return null` sat above every check of `view`. Pinned end-to-end here
+  // (OrchestratorDrawer.test.tsx pins the same branch at the component
+  // level, with the mutation check); this is the real path a user takes —
+  // open on Active (Workflows), then click Canvas.
+  it("shows Canvas's own empty state, not a blank drawer, when its tab is clicked with nothing addressed", () => {
     render(<DeckApp />);
     host(flowsMsg([]));
-    fireEvent.click(chip());
-    expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
-    host(flowsMsg([mkFlow("f1", "New flow")]));
-    expect(drawer()).toBeInTheDocument();
+    fireEvent.click(workflowsBtn());
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    fireEvent.click(within(nav).getByRole("tab", { name: "Canvas" }));
+    expect(screen.getByText(/No workflow is open here/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Active" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ New flow" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "＋ New template…" })).toBeTruthy();
+  });
+});
+
+// Task 13: "＋ New template…" mints a template held only in `DeckApp` state
+// (`draftTemplate` — see that state's own doc comment) and never written
+// anywhere — not `~/.agentflow/templates/`, not even `templates` itself, the
+// list a card's attach picker reads — until its own Save sends
+// `flow:writeTemplate`. The property under test throughout: an interrupted
+// draft costs nothing, because nothing was ever sent for it to interrupt.
+describe("＋ New template… — a draft that never touches disk", () => {
+  const newTemplateBtn = () => screen.getByRole("button", { name: "＋ New template…" });
+
+  const openTemplatesView = () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    fireEvent.click(templatesBtn());
+  };
+
+  it("opens a blank template on the canvas and sends nothing at all", () => {
+    openTemplatesView();
+    sent.mockClear();
+    fireEvent.click(newTemplateBtn());
+    // Canvas, not Templates — same destination "+ New flow" sends an
+    // ordinary workflow to.
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Flow name")).toBeInTheDocument();
+    // THE property that made a draft-flow-on-disk approach wrong (see
+    // DeckApp.tsx's own module comment): nothing reaches the host at all —
+    // not `flow:create`, not `flow:save`, not anything else either.
+    expect(sent).not.toHaveBeenCalled();
   });
 
-  it("does not ask the host for anything when it only toggles the drawer", () => {
-    render(<DeckApp />);
-    host(flowsMsg([mkFlow("f1", "Ship it")]));
-    sent.mockClear();
-    fireEvent.click(chip());
-    fireEvent.click(chip());
+  it("reopens the same in-flight draft on a second click, rather than minting a new one", () => {
+    openTemplatesView();
+    sent.mockClear(); // drop the mount's own deck:ready
+    fireEvent.click(newTemplateBtn());
+    fireEvent.change(screen.getByLabelText("Flow name"), { target: { value: "Ship it fast" } });
+    fireEvent.blur(screen.getByLabelText("Flow name"));
+    fireEvent.click(templatesBtn()); // back to Templates, draft still in flight
+    fireEvent.click(newTemplateBtn()); // and back to Canvas
+    // The typed name survived — this is the SAME draft, not a fresh blank one.
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it fast");
     expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("survives the Deck's own 6s deck:flows refresh, not only a manual reopen", () => {
+    // The reopen test above only proves the draft outlives a NAVIGATION away
+    // and back. The Deck posts `deck:flows` on its own timer regardless of
+    // what the user is doing (roughly every 6s) — a draft that could not
+    // survive THAT would be destroyed mid-authoring, silently, which is
+    // exactly the failure an on-disk draft was rejected to avoid (see
+    // `draftTemplate`'s own module comment). Two posts here, not one: an
+    // empty `templates` list (this draft never appears in it — see "never
+    // offers the draft in a card's attach picker") and then a non-empty one
+    // (a real save landing from another window mid-edit), so neither shape
+    // of a routine refresh is the one that was left uncovered.
+    openTemplatesView();
+    fireEvent.click(newTemplateBtn());
+    fireEvent.change(screen.getByLabelText("Flow name"), { target: { value: "Ship it fast" } });
+    fireEvent.blur(screen.getByLabelText("Flow name"));
+    expect(screen.getAllByText(/1 node · 0 rules/)).toHaveLength(2);
+    sent.mockClear();
+
+    host(flowsMsg([])); // an ordinary refresh, templates still empty
+    // The drawer's own landmark, not just its contents: a `setOpenFlowId(null)`
+    // regression here starts `useDrawerExit`'s slide-out immediately, which
+    // freezes the LAST rendered flow on screen (Drawer.tsx's own doc comment)
+    // for `DRAWER_ANIM_MS` — long enough that a bare content assertion right
+    // after `host()` would still see the typed name and pass anyway. The
+    // landmark goes `aria-hidden` the instant that slide-out starts, which
+    // `queryByRole` respects, so checking IT is what actually tells the two
+    // cases apart.
+    expect(drawer()).not.toBeNull();
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it fast");
+    expect(screen.getAllByText(/1 node · 0 rules/)).toHaveLength(2);
+    expect(sent).not.toHaveBeenCalled();
+
+    host(flowsMsg([], true, [makeTemplate("t1", "Ship it")])); // another, templates now non-empty
+    expect(drawer()).not.toBeNull();
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it fast");
+    expect(screen.getAllByText(/1 node · 0 rules/)).toHaveLength(2);
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("starts the draft with one planned step, so it can be saved immediately", () => {
+    openTemplatesView();
+    fireEvent.click(newTemplateBtn());
+    // The count renders twice — once in the canvas header, once in its own
+    // footer (OrchestratorDrawer.tsx's pre-existing, unrelated duplication;
+    // see that file's own "6 nodes · 0 rules" test for the same shape).
+    expect(screen.getAllByText(/1 node · 0 rules/)).toHaveLength(2);
+    expect(screen.getByTestId("orch-node-n1").className).toContain("plan");
+  });
+
+  it("naming it and pressing Save sends exactly one flow:writeTemplate, with no templateId", () => {
+    openTemplatesView();
+    fireEvent.click(newTemplateBtn());
+    fireEvent.change(screen.getByLabelText("Flow name"), { target: { value: "Ship it fast" } });
+    fireEvent.blur(screen.getByLabelText("Flow name"));
+    sent.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sent).toHaveBeenCalledTimes(1);
+    const [msg] = sent.mock.calls[0] as [Record<string, unknown>];
+    expect(msg.type).toBe("flow:writeTemplate");
+    expect(msg.name).toBe("Ship it fast");
+    expect(msg.templateId).toBeUndefined();
+  });
+
+  // Editing a SAVED template is the half of "directly authorable" that the
+  // draft alone does not cover. Three properties, each its own mutation-catcher:
+  // the edit must actually STICK on screen (the drawer resolves the working
+  // copy ahead of the saved one — resolve them the other way and the name
+  // input snaps back to "Ship it" after every keystroke while the edit piles
+  // up unseen in state); Save must send the UPDATE shape, `flow:writeTemplate`
+  // WITH `templateId`, not mint a second template; and the whole thing must
+  // send nothing until Save, exactly like a new draft.
+  // `makeTemplate` deliberately holds an EMPTY flow (it exists for the badge
+  // count), so its Save would be disabled by `canBindTicket` and a click
+  // would prove nothing. A saved template a user can actually reopen and
+  // save again carries a planned node — the shape `instantiate` needs.
+  const savedShipIt = (): FlowTemplate => ({ ...makeTemplate("t1", "Ship it"), flow: plannedFlow("", "Ship it", "") });
+
+  it("Edit on a saved template opens its own graph, keeps the edit on screen, and saves in place", () => {
+    render(<DeckApp />);
+    host(flowsMsg([], true, [savedShipIt()]));
+    fireEvent.click(templatesBtn());
+    const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    sent.mockClear();
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it");
+    expect(sent).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Flow name"), { target: { value: "Ship it v2" } });
+    fireEvent.blur(screen.getByLabelText("Flow name"));
+    // The edit is visible — the working copy won the resolution.
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it v2");
+    // And it survives the Deck's own refresh re-posting the SAVED copy.
+    host(flowsMsg([], true, [savedShipIt()]));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it v2");
+    expect(sent).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sent).toHaveBeenCalledTimes(1);
+    const [msg] = sent.mock.calls[0] as [Record<string, unknown>];
+    expect(msg.type).toBe("flow:writeTemplate");
+    expect(msg.templateId).toBe("t1");
+    expect(msg.name).toBe("Ship it v2");
+  });
+
+  // `draftTemplate` now holds EITHER a new draft or a saved template's
+  // working copy. "＋ New template…" pressed while a saved one is open must
+  // mint a fresh blank — reusing the slot would hand back the saved
+  // template's shape under a new-template label.
+  it("＋ New template… while editing a saved template mints a fresh blank, not that template", () => {
+    render(<DeckApp />);
+    host(flowsMsg([], true, [savedShipIt()]));
+    fireEvent.click(templatesBtn());
+    const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it");
+    fireEvent.click(templatesBtn());
+    fireEvent.click(screen.getByRole("button", { name: "＋ New template…" }));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("");
+  });
+
+  it("discards the draft on Cancel, leaving the Templates list unchanged", () => {
+    // Cancel drops `openFlowId` to `null` while the drawer stays open on
+    // Templates (`orchOpen` is untouched — see `onCancelTemplate`'s own
+    // comment), which is exactly the shape `useDrawerExit` (Drawer.tsx)
+    // treats as a close-in-place to animate: `closing` goes true for
+    // `DRAWER_ANIM_MS` even though nothing is actually closing from the
+    // user's point of view, and the drawer's landmark is `aria-hidden` for
+    // that span (see Drawer.tsx's own doc comment). Advancing past it is
+    // what the rest of this suite already does for the identical reason
+    // (OrchestratorDrawer.test.tsx's "the open and close animation").
+    vi.useFakeTimers();
+    try {
+      render(<DeckApp />);
+      host({
+        type: "deck:flows", commands: [], branchCi: {}, flows: [], enabled: true,
+        pendingResume: [], promptModes: [], templates: [makeTemplate("t1", "Ship it")],
+      });
+      fireEvent.click(templatesBtn());
+      expect(screen.getByText("Ship it")).toBeTruthy();
+      fireEvent.click(newTemplateBtn());
+      sent.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      act(() => { vi.advanceTimersByTime(DRAWER_ANIM_MS); });
+      const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+      expect(within(nav).getByRole("tab", { name: "Templates" })).toHaveAttribute("aria-selected", "true");
+      expect(screen.getByText("Ship it")).toBeTruthy();
+      expect(templatesBtn().querySelector(".ct")!.textContent).toBe("1");
+      expect(sent).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // A card's attach picker (`WorkflowBlock.tsx`/`DeckDetail.tsx`) lists
+  // `templates` straight from the host's `deck:flows` post — `draftTemplate`
+  // is never folded into that list (see `draftTemplate`'s own doc comment),
+  // so this holds structurally rather than by a special-cased filter that
+  // could rot.
+  it("never offers the draft in a card's attach picker", () => {
+    openTemplatesView();
+    fireEvent.click(newTemplateBtn());
+    fireEvent.change(screen.getByLabelText("Flow name"), { target: { value: "Ship it fast" } });
+    fireEvent.blur(screen.getByLabelText("Flow name"));
+    // Selecting a card closes the Orchestrator drawer (same as any other
+    // card click) but does not touch `draftTemplate` — it is still in
+    // flight, unsaved, when the attach picker opens below.
+    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "PROJ-9" } })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    expect(screen.getByPlaceholderText("Choose a template for PROJ-9…")).toBeTruthy();
+    expect(screen.queryByText("Ship it fast")).toBeNull();
+    expect(screen.getByText("No templates saved yet")).toBeTruthy();
   });
 });
 
 describe("the deck:flows handler", () => {
-  it("opens a flow it has not seen before — the answer to pressing the chip with none", () => {
-    render(<DeckApp />);
-    host(flowsMsg([]));
-    fireEvent.click(chip());
-    expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
-    expect(drawer()).toBeNull();
-    // The host's answer to that create.
-    host(flowsMsg([mkFlow("f1", "New flow")]));
-    expect(drawer()).toBeInTheDocument();
-  });
-
   // `setOpenFlowId` used to be called INSIDE `setFlows`'s updater — a side effect in
   // a state updater, which React's contract forbids because it may replay one. The
   // fix reads the previous list from a ref and calls both setters at the top level.
@@ -1996,7 +2422,6 @@ describe("the deck:flows handler", () => {
   it("keeps a newly created flow open under StrictMode's double render", () => {
     render(<React.StrictMode><DeckApp /></React.StrictMode>);
     host(flowsMsg([]));
-    fireEvent.click(chip());
     host(flowsMsg([mkFlow("f1", "New flow")]));
     expect(drawer()).toBeInTheDocument();
   });
@@ -2017,8 +2442,13 @@ describe("the deck:flows handler", () => {
 
   it("keeps the open flow open across an unrelated post", () => {
     render(<DeckApp />);
+    // Neither header button opens Canvas any more (see "the Workflows and
+    // Templates buttons" above) — reaching it here goes through the exact
+    // fresh-flow auto-open every other test in this describe block already
+    // relies on: an empty previous list, then the flow under test, which
+    // reads as newly created and opens on it.
+    host(flowsMsg([]));
     host(flowsMsg([mkFlow("f1", "One")]));
-    fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     expect(drawer()).toBeInTheDocument();
     host(flowsMsg([mkFlow("f1", "One"), mkFlow("f2", "Two")]));
     // f2 is new, but f1 is still open and an open flow wins over a fresh one.
@@ -2027,8 +2457,8 @@ describe("the deck:flows handler", () => {
 
   it("closes the drawer when the open flow is deleted elsewhere", () => {
     render(<DeckApp />);
-    host(flowsMsg([mkFlow("f1", "One"), mkFlow("f2", "Two")]));
-    fireEvent.click(chip()); // opens flows[0] ("One") — no longer automatic
+    host(flowsMsg([]));
+    host(flowsMsg([mkFlow("f1", "One"), mkFlow("f2", "Two")])); // both fresh — opens on the first, "One"
     expect(drawer()).toBeInTheDocument();
     host(flowsMsg([mkFlow("f2", "Two")]));
     expect(drawer()).toBeNull();
@@ -2053,14 +2483,123 @@ describe("the deck:flows handler", () => {
     expect(document.querySelector(".dd.closing")).not.toBeNull();
     expect(document.querySelector(".orch")).not.toBeNull();
   });
+
+  // The fix for the gap the card-workflows e2e spec caught: `flow:attach` also
+  // posts a fresh flow, and the auto-open above would otherwise slam the card
+  // drawer shut on the very workflow the user just attached to it, before they
+  // ever see it disarmed (design doc §3). Suppressed exactly when the fresh
+  // flow binds the run the open card drawer is already showing — the same
+  // `bindsRun` predicate `cardWorkflow` itself uses, so this cannot drift from
+  // what the block and chip agree a card's workflow is.
+  it("keeps the card drawer open, and does not auto-open the Orchestrator, when a fresh flow attaches to the open card", () => {
+    render(<DeckApp />);
+    host(flowsMsg([])); // establishes seenFlowsRef, previous list []
+    host(runsMsg([mkStatus()])); // PROJ-1
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    // A fresh flow bound to the SAME run the open card drawer is showing —
+    // exactly what attaching a template to this card produces.
+    host(flowsMsg([boundFlow("f1", "Ship it", "PROJ-1")]));
+    expect(document.querySelector(".dd")).not.toBeNull();
+    expect(document.querySelector(".dd.closing")).toBeNull();
+    expect(document.querySelector(".orch")).toBeNull();
+  });
+
+  // The other direction: a fresh flow that binds a DIFFERENT run must still go
+  // through the ordinary auto-open — the suppression above is about which run
+  // the flow is FOR, not about whether some card happens to be selected (the
+  // "suppress whenever any card is open" alternative was rejected precisely
+  // because it would break this case).
+  it("still closes the card and opens the Orchestrator when a fresh flow binds a different run", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    host(runsMsg([mkStatus()])); // PROJ-1 card open
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    host(flowsMsg([boundFlow("f1", "Ship it", "PROJ-9")]));
+    expect(document.querySelector(".dd.closing")).not.toBeNull();
+    expect(document.querySelector(".orch")).not.toBeNull();
+  });
+
+  // The gap a review round found unpinned: every other test in this file has
+  // a run whose ticket key happens to equal its own run key, so a predicate
+  // that reads `selected.status.run.key` instead of the correct
+  // `boundTicketKeyOf(selected.status)` passes every one of them anyway. This
+  // run genuinely disagrees — a local card (`local-1a2b`, the key Track it
+  // saves a promoted local run under) whose `inferredTicketKey` is `PROJ-7` —
+  // with a `planned` node (the REAL shape `flow:attach` produces, see
+  // `plannedFlow`'s own comment) bound by that ticket key, not the run key.
+  // Suppression must still fire.
+  it("keeps the card drawer open for a local card whose ticket key differs from its run key", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    host(runsMsg([mkStatus({
+      run: {
+        key: "local-1a2b", summary: "Local card", url: "https://fixture.invalid/browse/local-1a2b",
+        createdAt: 1, mode: "per-window",
+        repos: [{ name: "svc", path: "/r/svc", isGit: true, branch: "local-1a2b" }], briefPaths: [],
+      },
+      inferredTicketKey: "PROJ-7",
+    })]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    expect(document.querySelector(".dd")).not.toBeNull();
+    host(flowsMsg([plannedFlow("f1", "Ship it", "PROJ-7")]));
+    expect(document.querySelector(".dd")).not.toBeNull();
+    expect(document.querySelector(".dd.closing")).toBeNull();
+    expect(document.querySelector(".orch")).toBeNull();
+  });
+});
+
+// `retainedOpenTarget` is the kind-aware guard inside the `deck:flows`
+// handler above, tested directly rather than only through a rendered board:
+// no button in this webview can yet open the drawer on a TEMPLATE (a later
+// task adds that navigation), so there is no way to drive a template target
+// through `render(<DeckApp />)` alone. Direct testing is also what keeps this
+// pinned against a regression that a rendered-board test would only catch by
+// accident, six seconds later, on whichever `deck:flows` post happened to
+// land during the test.
+describe("retainedOpenTarget", () => {
+  it("keeps a flow target only while its id is still in the posted list", () => {
+    expect(retainedOpenTarget({ kind: "flow", id: "f1" }, [mkFlow("f1", "One")]))
+      .toEqual({ kind: "flow", id: "f1" });
+    // Today's exact, unchanged behaviour: a flow that fell out of `posted`
+    // (deleted in another window) is not retained.
+    expect(retainedOpenTarget({ kind: "flow", id: "f1" }, [mkFlow("f2", "Two")])).toBeNull();
+  });
+
+  // The guard this whole task turns on. A template target rides no evidence
+  // in `posted` at all — templates ride `m.templates`, a different field of
+  // the same message — and a later task's unsaved draft template exists on
+  // disk nowhere. A `posted`-membership check applied to a template would
+  // close the drawer on the very next `deck:flows` post (roughly every 6s)
+  // and silently discard an in-progress draft. This is the test that would
+  // fail under a naive widening that dropped the `kind` guard and checked
+  // `posted` membership for both kinds alike.
+  it("keeps a template target open even when a deck:flows post does not mention it", () => {
+    expect(retainedOpenTarget({ kind: "template", id: "draft-1" }, []))
+      .toEqual({ kind: "template", id: "draft-1" });
+    expect(retainedOpenTarget({ kind: "template", id: "draft-1" }, [mkFlow("f1", "One")]))
+      .toEqual({ kind: "template", id: "draft-1" });
+  });
+
+  it("returns null for nothing surviving, letting the caller's own fresh-flow auto-open decide", () => {
+    expect(retainedOpenTarget(null, [mkFlow("f1", "One")])).toBeNull();
+  });
 });
 
 describe("the drawer's callbacks", () => {
-  /** Board with the feature on and one flow open in the drawer. */
+  /** Board with the feature on and one flow open in the drawer, on Canvas.
+   * Neither header button opens Canvas any more (see "the Workflows and
+   * Templates buttons" above), so this reaches it the same way "the deck:flows
+   * handler" tests do: an empty previous list, then the flow(s) under test,
+   * every one of which reads as freshly created against that empty list and
+   * auto-opens — landing on the FIRST of `flows`, which is what makes "Ship
+   * the migration" (the single-flow default) and "One" (this block's own
+   * two-flow case, below) the ones that end up open. */
   const open = (flows: Flow[] = [mkFlow("f1", "Ship the migration")]) => {
     render(<DeckApp />);
+    host(flowsMsg([]));
     host(flowsMsg(flows));
-    fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     sent.mockClear();
   };
 
@@ -2091,16 +2630,18 @@ describe("the drawer's callbacks", () => {
     expect(drawer()).toBeNull();
   });
 
+  // The switcher is always visible on the Canvas screen now — no "Flows ·
+  // N ▾" disclosure to open first (Task 9 replaced it with a top-level
+  // Active/Templates/Canvas tablist; the switcher itself moved into Canvas's
+  // own header rather than behind a click).
   it("onCreate posts flow:create from the drawer's own switcher", () => {
     open();
-    fireEvent.click(screen.getByRole("button", { name: /^Flows/ }));
     fireEvent.click(screen.getByRole("button", { name: "+ New flow" }));
     expect(sent).toHaveBeenCalledWith({ type: "flow:create" });
   });
 
   it("onOpen switches flows locally, with no message to the host", () => {
     open([mkFlow("f1", "One"), mkFlow("f2", "Two")]);
-    fireEvent.click(screen.getByRole("button", { name: /^Flows/ }));
     fireEvent.click(screen.getByRole("button", { name: "Two" }));
     expect(screen.getByLabelText("Flow name")).toHaveValue("Two");
     expect(sent).not.toHaveBeenCalled();
@@ -2118,9 +2659,9 @@ describe("the drawer's callbacks", () => {
     // permanently dim and the inspector can never say what it is waiting on.
     render(<DeckApp />);
     host(runsMsg([mkStatus()]));
+    host(flowsMsg([])); // establishes the previous list this flow reads as "fresh" against
     host(flowsMsg([{ ...mkFlow("f1", "One"),
       nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "svc" }] }]));
-    fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     const dot = screen.getByTestId("orch-node-n1").querySelector(".d") as HTMLElement;
     // mkStatus's single-repo run has a working agent.
     expect(dot.style.background).toBe("var(--c-progress)");
@@ -2138,6 +2679,7 @@ describe("the drawer's callbacks", () => {
 
   it("passes a resume approval through as flow:resumeApprove", () => {
     render(<DeckApp />);
+    host(flowsMsg([])); // establishes the previous list this flow reads as "fresh" against
     host({
       type: "deck:flows",
       commands: [],
@@ -2146,8 +2688,8 @@ describe("the drawer's callbacks", () => {
       enabled: true,
       pendingResume: [{ flowId: "f1", flowName: "Ship the migration", lines: ["ready"] }],
       promptModes: [],
+      templates: [],
     });
-    fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     fireEvent.click(screen.getByRole("button", { name: /^go$/i }));
     expect(sent).toHaveBeenCalledWith({ type: "flow:resumeApprove", id: "f1" });
   });
@@ -2157,6 +2699,7 @@ describe("the drawer's callbacks", () => {
   // that the host's own list (not a hardcoded one) is what renders.
   it("hands the drawer the host's prompt modes, not a hardcoded list", () => {
     render(<DeckApp />);
+    host(flowsMsg([])); // establishes the previous list this flow reads as "fresh" against
     host({
       type: "deck:flows",
       commands: [],
@@ -2172,8 +2715,8 @@ describe("the drawer's callbacks", () => {
       enabled: true,
       pendingResume: [],
       promptModes: [{ id: "quick", label: "Quick pass from the host" }],
+      templates: [],
     });
-    fireEvent.click(chip());
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     const options = Array.from(screen.getByLabelText("Mode").querySelectorAll("option")).map((o) => o.textContent);
     expect(options).toEqual(["Quick pass from the host"]);
@@ -2181,11 +2724,66 @@ describe("the drawer's callbacks", () => {
 
   it("passes a reset through as flow:resetEdge", () => {
     render(<DeckApp />);
+    host(flowsMsg([])); // establishes the previous list this flow reads as "fresh" against
     host(flowsMsg([firedFlow()]));
-    fireEvent.click(chip()); // a saved flow no longer auto-opens (Task 7)
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     fireEvent.click(screen.getByRole("button", { name: /reset/i }));
     expect(sent).toHaveBeenCalledWith({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+  });
+});
+
+// Task 9: `DeckApp` now owns which of the drawer's three top-level screens is
+// showing (`orchView`, passed through as `view`/`onView`). Every existing
+// entry point that opens the drawer targeting a specific flow must land on
+// Canvas — that is what the "Flow name" assertions below actually pin, since
+// only the Canvas screen renders that field (see `WorkflowList`'s own test
+// file, and the Active/Templates section of OrchestratorDrawer.test.tsx, for
+// the screens that would show instead if this regressed).
+describe("the Orchestrator's top-level view", () => {
+  // Neither header button opens Canvas any more — Workflows opens Active,
+  // full stop, even when flows already exist (see "the Workflows and
+  // Templates buttons" above for the pin that replaced this test's old
+  // premise). This is the flip side of that: proving Active really shows,
+  // not merely that Canvas doesn't.
+  it("Workflows lands on Active even when flows already exist, never on Canvas", () => {
+    render(<DeckApp />);
+    host(flowsMsg([mkFlow("f1", "Ship the migration")]));
+    fireEvent.click(workflowsBtn());
+    expect(screen.queryByLabelText("Flow name")).toBeNull();
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Active" })).toHaveAttribute("aria-selected", "true");
+  });
+
+  it("a freshly created flow lands on Canvas regardless of which view was showing", () => {
+    render(<DeckApp />);
+    host(flowsMsg([]));
+    fireEvent.click(workflowsBtn()); // drawer open on Active
+    expect(screen.queryByLabelText("Flow name")).toBeNull();
+    // A flow appearing from anywhere else — "+ New flow", another window, a
+    // template attach — still auto-opens straight onto Canvas, overriding
+    // whichever view was showing.
+    host(flowsMsg([mkFlow("f1", "Untitled flow")]));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Untitled flow");
+  });
+
+  it("opening a workflow from the card drawer also lands on Canvas, not wherever the Orchestrator was last left", () => {
+    // Distinct from the "opening a workflow from the card drawer closes the
+    // card..." test elsewhere in this file (which pins the mutual-exclusion
+    // contract with `selId`): this one is specifically about `orchView`, and
+    // is the regression a naive `onOpenWorkflow` — one that forgot to force
+    // the view — would not be caught by that other test, since both would
+    // show SOME open drawer either way.
+    render(<DeckApp />);
+    const bound: Flow = {
+      id: "f9", name: "Ship it", armed: true, createdAt: 1,
+      nodes: [{ id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "svc" }],
+      edges: [],
+    };
+    host(flowsMsg([bound]));
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(document.querySelector(".card")!);
+    fireEvent.click(screen.getByRole("button", { name: "Open in Workflows ↗" }));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it");
   });
 });
 
@@ -2584,11 +3182,21 @@ describe("card selection", () => {
 
   it("closes the Orchestrator drawer when a card is selected", () => {
     render(<DeckApp />);
-    host({ type: "deck:flows", flows: [{ id: "f1", name: "F", nodes: [], edges: [], armed: false } as never],
-      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {} } as OutboundMessage);
+    // Neither header button opens Canvas any more, so this reaches it the
+    // realistic way instead: a card bound to a flow, and that card's own
+    // "Open in Workflows ↗".
+    host(flowsMsg([{ id: "f1", name: "F", armed: false, createdAt: 1,
+      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "svc" }], edges: [] }]));
     host(runsMsg([mkStatus()]));
-    fireEvent.click(screen.getByRole("button", { name: /orchestrator/i }));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Open in Workflows ↗" }));
     expect(document.querySelector(".orch")).not.toBeNull();
+    // `onOpenWorkflow` clears `selId` on the way in, so the card drawer is
+    // sliding out (still mounted as `.dd.closing` for its own exit animation,
+    // same as every other dismissal on this surface) rather than gone
+    // outright — and the next click below is a fresh select, not a
+    // toggle-off, since `selId` itself is already null.
+    expect(document.querySelector(".dd.closing")).not.toBeNull();
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(document.querySelector(".dd")).not.toBeNull();
     // The two drawers share the slot: selecting a card must set `openFlowId`
@@ -2603,15 +3211,70 @@ describe("card selection", () => {
 
   // The reverse direction of the test above: the spec asks for mutual exclusion
   // both ways, and only "selecting a card closes the Orchestrator" had a test.
-  it("closes the card detail drawer when the Orchestrator chip is clicked", () => {
+  it("closes the card detail drawer when Workflows is clicked", () => {
     render(<DeckApp />);
     host({ type: "deck:flows", flows: [{ id: "f1", name: "F", nodes: [], edges: [], armed: false } as never],
-      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {} } as OutboundMessage);
+      enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [] } as OutboundMessage);
     host(runsMsg([mkStatus()]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
     expect(document.querySelector(".dd")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: /orchestrator/i }));
+    fireEvent.click(workflowsBtn());
     expect(document.querySelector(".dd.closing")).not.toBeNull();
+  });
+
+  // The Workflow section's own "Open in Workflows ↗" is a THIRD way to open the
+  // Orchestrator over a selected card (the chip above is the first; a fresh
+  // flow auto-opening is the second, in the deck:flows handler), and it has to
+  // honor the same mutual-exclusion contract the two tests above pin: `onSelect`
+  // clears `openFlowId`, the chip's `onClick` clears `selId`, and this callback
+  // (`onOpenWorkflow` in DeckApp.tsx) must clear `selId` too, or a workflow
+  // opened from a card mounts the Orchestrator drawer ON TOP of the still-open
+  // card drawer instead of replacing it.
+  it("opening a workflow from the card drawer closes the card and opens the Orchestrator on that flow", () => {
+    render(<DeckApp />);
+    const bound: Flow = {
+      id: "f9", name: "Ship it", armed: true, createdAt: 1,
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "svc" },
+        { id: "n2", kind: "notify", x: 320, y: 24, join: "any", message: "done" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+    };
+    host({ type: "deck:flows", flows: [bound], enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [] } as OutboundMessage);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    expect(document.querySelector(".dd")).not.toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Open in Workflows ↗" }));
+    // Same proof-of-closing shape the two tests above use: the card drawer
+    // starts its exit animation rather than vanishing outright.
+    expect(document.querySelector(".dd.closing")).not.toBeNull();
+    expect(document.querySelector(".orch")).not.toBeNull();
+    // Not just "some flow opened" — THIS one: the drawer's own rename field
+    // (`defaultValue={flow.name}` in OrchestratorDrawer.tsx) says which.
+    expect((screen.getByLabelText("Flow name") as HTMLInputElement).value).toBe("Ship it");
+  });
+
+  // Regression for the Escape-bubbling hazard the review round caught: this
+  // picker sits INSIDE the already-open card drawer (unlike every other picker
+  // in the app, which lives inside the Orchestrator drawer, never open at the
+  // same time as a selected card), and DeckApp itself also listens for Escape
+  // on `window` to clear the card selection. Without `stopPropagation` in the
+  // picker's own Escape handler, cancelling the picker also slid the whole
+  // card drawer shut underneath it — the user loses their place to cancel a
+  // search box.
+  it("Escape cancels the attach picker without closing the card drawer under it", () => {
+    render(<DeckApp />);
+    host({ type: "deck:flows", flows: [], enabled: true, pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [] } as OutboundMessage);
+    host(runsMsg([mkStatus()]));
+    fireEvent.click(card());
+    fireEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    const input = screen.getByPlaceholderText("Choose a template for PROJ-1…");
+    fireEvent.keyDown(input, { key: "Escape" });
+    // The picker itself closed...
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-1…")).toBeNull();
+    // ...but the card drawer did not so much as start closing.
+    expect(document.querySelector(".dd")).not.toBeNull();
+    expect(document.querySelector(".dd.closing")).toBeNull();
   });
 
   // "does not select when a PR link is clicked" is deleted here, not re-pointed:
@@ -2847,10 +3510,11 @@ describe("DeckApp card anatomy", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:usageFor", key: "PROJ-1" });
   });
 
-  it("feeds a deck:usage reply into the open drawer", () => {
+  it("feeds a deck:usage reply into the open drawer", async () => {
     render(<DeckApp />);
     host(runsMsg([withPr(healthyPr())]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
     host({ type: "deck:usage", key: "PROJ-1", usage: { input: 0, output: 20_000, cacheWrite: 0, cacheRead: 0 } });
     expect(document.querySelector(".dd-spend")).not.toBeNull();
@@ -2860,10 +3524,11 @@ describe("DeckApp card anatomy", () => {
   // A reply can land after the user has moved on. Keying by run rather than
   // holding one "current" slot is what stops the new drawer showing the old
   // run's figure.
-  it("ignores a deck:usage reply for a run other than the open one", () => {
+  it("ignores a deck:usage reply for a run other than the open one", async () => {
     render(<DeckApp />);
     host(runsMsg([withPr(healthyPr())]));
     fireEvent.click(document.querySelector(".card") as HTMLElement);
+    await openMore();
     host({ type: "deck:usage", key: "SOMEONE-ELSE", usage: { input: 0, output: 99_000, cacheWrite: 0, cacheRead: 0 } });
     expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
     expect(document.querySelector(".dd-spend")).toBeNull();
@@ -3242,5 +3907,224 @@ describe("the forge account in the legend", () => {
     expect(screen.getByText("oznasi1")).toBeTruthy();
     host({ ...runsMsg([mkStatus()]), ghAccount: null });
     expect(screen.queryByText("oznasi1")).toBeNull();
+  });
+});
+
+// The card's own workflow chip (Task 12): a single "name, and state" mark in
+// the foot, so a board of twenty cards says which one carries a workflow
+// without opening any of them. Same fixture shapes DeckDetail.test.tsx's own
+// `place`/`notify`/`gateNode`/`edge` use — a place feeding a notify terminal,
+// with a gate spliced in for the waiting case — reused rather than a second
+// set of node-builders for the same graph shapes.
+describe("the card's workflow chip", () => {
+  const place = (id: string, runKey: string): FlowNode =>
+    ({ id, x: 0, y: 0, join: "any", kind: "place", runKey, repo: "svc" });
+  const notify = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "notify", message: "" });
+  const gateNode = (id: string, question: string): FlowNode =>
+    ({ id, x: 0, y: 0, join: "any", kind: "gate", question });
+  const edge = (over: Partial<FlowEdge> & { id: string; from: string; to: string }): FlowEdge =>
+    ({ cond: { kind: "pr-merged" }, ...over });
+
+  /** Advancing: one place feeding one notify, its only edge still pending —
+   * `attach.ts`'s `workflowState` calls that "advancing" once armed with no
+   * step in `you`/`fail`. */
+  const shipItOn = (runKey: string): Flow => ({
+    id: "f1", name: "Ship it", armed: true, createdAt: 100,
+    nodes: [place("n1", runKey), notify("n2")],
+    edges: [edge({ id: "e1", from: "n1", to: "n2" })],
+  });
+
+  /** Waiting-on-you: the place already asked a gate (that incoming edge fired),
+   * and the gate's own outgoing edge is what `evaluate.ts` posts its
+   * `awaiting-answer` note against — the same shape DeckDetail.test.tsx's
+   * `withGateOn` builds, with the gate's `question` set to what the chip
+   * should say. `question` defaults to a real phrase; the blank-question test
+   * below passes `""` through the same fixture rather than a second one. */
+  const gateOn = (runKey: string, question = "approve deploy"): Flow => ({
+    id: "f1", name: "Ship it", armed: true, createdAt: 100,
+    nodes: [place("n1", runKey), gateNode("g1", question), notify("n2")],
+    edges: [
+      edge({ id: "e-ask", from: "n1", to: "g1", performed: true, firedAt: 1, firedNote: `asked you: ${question}` }),
+      edge({ id: "e-gate", from: "g1", to: "n2", cond: { kind: "gate-approved" } }),
+    ],
+  });
+
+  /** Stopped: the one edge carries its own recorded `error`, which is the
+   * receipt `workflowState` reports for a `fail` step and the chip's only
+   * honest source for what a stopped workflow hit. */
+  const failedOn = (runKey: string): Flow => ({
+    id: "f1", name: "Ship it", armed: true, createdAt: 100,
+    nodes: [place("n1", runKey), notify("n2")],
+    edges: [edge({ id: "e1", from: "n1", to: "n2", error: "smoke test failed" })],
+  });
+
+  /** One card bound to `PROJ-142`, posted through the same `deck:flows`/
+   * `deck:runs` messages a real host sends — `enabled` defaults `true` the same
+   * way `flowsMsg` itself does, so a test that wants the orchestrator off says
+   * so explicitly rather than relying on an unstated default. */
+  const renderBoard = (opts: { flows: Flow[]; orchEnabled?: boolean }) => {
+    render(<DeckApp />);
+    host(flowsMsg(opts.flows, opts.orchEnabled ?? true));
+    host(runsMsg([mkStatus({ run: { ...mkStatus().run, key: "PROJ-142" } })]));
+  };
+
+  it("names the workflow on an advancing card, with no progress count", () => {
+    renderBoard({ flows: [shipItOn("PROJ-142")] });
+    const chip = screen.getByTitle(/Ship it/);
+    expect(chip.textContent).toBe("Ship it");
+    expect(chip.textContent).not.toMatch(/\d+ of \d+/);
+  });
+
+  it("says what a waiting workflow wants", () => {
+    renderBoard({ flows: [gateOn("PROJ-142")] });
+    expect(screen.getByText(/Ship it — approve deploy/)).toBeTruthy();
+  });
+
+  // The blank-question fallback, exercised end to end: a real, unanswered gate
+  // whose own `question` is empty must still render a chip — the name alone,
+  // never a trailing "— " with nothing after it.
+  it("shows the workflow name alone when a waiting gate's own question is blank", () => {
+    renderBoard({ flows: [gateOn("PROJ-142", "")] });
+    // `title` carries the label alone, with no leading glyph (see DeckApp.tsx's
+    // own comment on why the mark is `aria-hidden` and outside `wfLabel`) — the
+    // one place this test can assert "the name, and nothing else" without also
+    // asserting the unrelated attention mark this status always carries.
+    const chip = screen.getByTitle(/^Ship it$/);
+    expect(chip.title).toBe("Ship it");
+    expect(chip.textContent).not.toContain("—");
+  });
+
+  it("says what a stopped workflow hit", () => {
+    renderBoard({ flows: [failedOn("PROJ-142")] });
+    expect(screen.getByText(/Ship it — smoke test failed/)).toBeTruthy();
+  });
+
+  it("shows no chip when the card has no workflow", () => {
+    renderBoard({ flows: [] });
+    expect(screen.queryByTitle(/Ship it/)).toBeNull();
+  });
+
+  /** Done: the one edge already fired, which `workflowState` reads as every rule
+   * settled. Disarmed is the same fixture as `shipItOn` with `armed` off — the
+   * flag is the whole difference, which is the point. */
+  const doneOn = (runKey: string): Flow => ({
+    id: "f1", name: "Ship it", armed: true, createdAt: 100,
+    nodes: [place("n1", runKey), notify("n2")],
+    edges: [edge({ id: "e1", from: "n1", to: "n2", performed: true, firedAt: 1, firedNote: "merged" })],
+  });
+
+  // The chip's hue is applied entirely by its status class (`deckStyles.ts` holds
+  // the colours), and nothing asserted the mapping: advancing and stopped could
+  // trade classes and the whole suite would stay green while a healthy workflow
+  // went red. The design doc's §6 rule is what that would break — amber means
+  // exactly one thing, red means a real failure, and a workflow that is merely
+  // attached and fine must be neither. Asserted as the COMPLETE className so a
+  // chip carrying two status classes at once fails too.
+  it.each([
+    ["advancing", () => shipItOn("PROJ-142")],
+    ["waiting-on-you", () => gateOn("PROJ-142")],
+    ["stopped", () => failedOn("PROJ-142")],
+    ["disarmed", () => ({ ...shipItOn("PROJ-142"), armed: false })],
+    ["done", () => doneOn("PROJ-142")],
+  ] as [string, () => Flow][])("hues a %s card's chip with that status as its only class", (status, mk) => {
+    renderBoard({ flows: [mk()] });
+    expect(document.querySelector(".c-wf")!.className).toBe(`c-wf ${status}`);
+  });
+
+  // The stylesheet half of the same rule: a class swap in the TSX is caught
+  // above, a colour swap in the CSS only here.
+  it("spends --c-attn and --c-danger only on the two chip states that need a human", () => {
+    const rules = [...DECK_CSS.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(\.c-wf\.[\w-]+)\s*\{([^}]*)\}/g)]
+      .map(([, sel, body]) => [sel, body] as const);
+    const usersOf = (token: string) => rules.filter(([, body]) => body.includes(token)).map(([sel]) => sel);
+    expect(usersOf("--c-attn")).toEqual([".c-wf.waiting-on-you"]);
+    expect(usersOf("--c-danger")).toEqual([".c-wf.stopped"]);
+    // And the rules really were found: a selector rename would otherwise leave
+    // every expectation above trivially satisfied by an empty list.
+    expect(rules).toHaveLength(5);
+  });
+
+  // Paired with "names the workflow on an advancing card" above, which posts
+  // the identical fixture with the orchestrator left at its default `true` and
+  // gets a chip — so this failing to find one is proof of the setting's own
+  // effect, not of a selector that would never have matched anyway.
+  it("shows no chip when the orchestrator is off", () => {
+    renderBoard({ flows: [shipItOn("PROJ-142")], orchEnabled: false });
+    expect(screen.queryByTitle(/Ship it/)).toBeNull();
+  });
+
+  // The anti-drift test the whole `workflowByCard` design rests on: one board,
+  // one card carrying a workflow, and both the board's own chip and the
+  // Active list's row for that same card must name the identical flow and the
+  // identical state — because both are read off the one map DeckApp builds,
+  // never a second hand-rolled derivation. `gateOn` gives a "waiting-on-you"
+  // card rather than the default "advancing" one, so the state half of this
+  // assertion is not the one status every fixture in this file already
+  // defaults to.
+  it("shows the same workflow on a card's chip and in the Active list", () => {
+    renderBoard({ flows: [gateOn("PROJ-142", "approve deploy")] });
+
+    // The board's own chip: name and status class, exactly as the "says what
+    // a waiting workflow wants" and "hues a %s card's chip" tests above read
+    // them.
+    expect(screen.getByText(/Ship it — approve deploy/)).toBeTruthy();
+    expect(document.querySelector(".c-wf")!.className).toBe("c-wf waiting-on-you");
+
+    // Into the drawer's Active screen — straight there, one click, now that
+    // Workflows opens onto Active directly rather than onto Canvas.
+    fireEvent.click(workflowsBtn());
+
+    // Scoped to the drawer alone: the board's own tracked-key button for this
+    // same run also carries the text "PROJ-142", and an unscoped query would
+    // match both.
+    const row = within(drawer()!).getByRole("button", { name: /PROJ-142/ });
+    // The same flow name, and the same state — the two facts a chip and a row
+    // could disagree about if either read its own, separate derivation.
+    expect(within(row).getByText("Ship it")).toBeTruthy();
+    expect(within(row).getByText("waiting on you")).toBeTruthy();
+    expect(row.closest("li")).toHaveAttribute("data-status", "waiting-on-you");
+  });
+});
+
+// `workflowChipTrailer`'s own defensive branch, tested directly rather than
+// through a rendered board: nothing REAL can construct a `WorkflowState`
+// where a "you" step's edge does not start at a gate — `evaluate.ts` only ever
+// posts `awaiting-answer` against a node that already IS one (see that
+// function's own doc comment) — so the only way to prove the fallback holds is
+// to hand it a `WorkflowState` a real derivation could never produce.
+describe("workflowChipTrailer's defensive fallback", () => {
+  const stepState = (over: Partial<WorkflowState["steps"][number]> & { edgeId: string; state: "you" }) =>
+    ({ ...over });
+
+  it("shows the name alone when the pending edge's own source is not a gate", () => {
+    // The edge a real derivation would only ever point at a gate points at the
+    // PLACE node instead — the shape `!gate || gate.kind !== "gate"` defends
+    // against, never reachable through `attach.ts` itself.
+    const flow: Flow = {
+      id: "f1", name: "Ship it", armed: true, createdAt: 100,
+      nodes: [
+        { id: "n1", x: 0, y: 0, join: "any", kind: "place", runKey: "PROJ-142", repo: "svc" },
+        { id: "n2", x: 0, y: 0, join: "any", kind: "notify", message: "" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+    };
+    const state: WorkflowState = {
+      status: "waiting-on-you", done: 0, total: 1,
+      steps: [stepState({ edgeId: "e1", state: "you", reason: "awaiting-answer" })],
+    };
+    expect(workflowChipTrailer(flow, state)).toBeUndefined();
+  });
+
+  it("shows the name alone when the pending edge names a node that no longer exists", () => {
+    const flow: Flow = {
+      id: "f1", name: "Ship it", armed: true, createdAt: 100,
+      nodes: [{ id: "n2", x: 0, y: 0, join: "any", kind: "notify", message: "" }],
+      edges: [{ id: "e1", from: "gone", to: "n2", cond: { kind: "pr-merged" } }],
+    };
+    const state: WorkflowState = {
+      status: "waiting-on-you", done: 0, total: 1,
+      steps: [stepState({ edgeId: "e1", state: "you", reason: "awaiting-answer" })],
+    };
+    expect(workflowChipTrailer(flow, state)).toBeUndefined();
   });
 });

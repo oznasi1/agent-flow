@@ -1,16 +1,51 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as React from "react";
-import { render, screen, fireEvent, within } from "@testing-library/react";
+import { render, screen, fireEvent, within, waitFor, act } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
-vi.mock("../../src/webview/vscodeApi", () => ({ send: vi.fn() }));
+// This repo's pinned jsdom has no PointerEvent constructor. Without it, a
+// fireEvent.pointer* call falls through to a bare Event with no clientX, and
+// every drag assertion in the "resizing" describe below would see NaN. jsdom's
+// MouseEvent does honour clientX via its init dict, so a thin PointerEvent-
+// shaped subclass of it is enough for the resize handlers under test, which
+// only read that one field. Same polyfill OrchestratorDrawer.test.tsx already
+// carries for its own grip's drag tests — duplicated rather than shared for
+// now, alongside the ~45 lines of resize wiring itself that the two drawers
+// don't yet share (a recorded, deliberately deferred follow-up).
+if (typeof window !== "undefined" && !window.PointerEvent) {
+  class PointerEventPolyfill extends MouseEvent {
+    pointerId: number;
+    pointerType: string;
+    constructor(type: string, params: MouseEventInit & { pointerId?: number; pointerType?: string } = {}) {
+      super(type, params);
+      this.pointerId = params.pointerId ?? 0;
+      this.pointerType = params.pointerType ?? "mouse";
+    }
+  }
+  // @ts-expect-error — jsdom's lib.dom types still declare PointerEvent even though
+  // the runtime lacks it, so this assignment looks redundant to tsc; it is not.
+  window.PointerEvent = PointerEventPolyfill;
+}
 
-import { DeckDetail } from "../../src/webview/DeckDetail";
+// Same shape OrchestratorDrawer.test.tsx mocks vscodeApi with: `getState`/
+// `setState` are real spies (not just `send`), so the resizing tests below can
+// assert exactly what gets persisted and under which key — the whole point of
+// the two-drawer, two-key hazard this module exists to prevent.
+vi.mock("../../src/webview/vscodeApi", () => ({
+  send: vi.fn(),
+  vscodeApi: { getState: vi.fn(() => undefined), setState: vi.fn() },
+}));
+
+import { DeckDetail, type DeckDetailProps } from "../../src/webview/DeckDetail";
 import { DECK_CSS } from "../../src/webview/deckStyles";
-import { send } from "../../src/webview/vscodeApi";
+import { send, vscodeApi } from "../../src/webview/vscodeApi";
 import type { DeckCard } from "../../src/webview/deckCards";
-import type { PrEntryMap, PrFacts, RunStatus } from "../../src/types";
+import { ticketKeyFor, type FlowTemplate, type PrEntryMap, type PrFacts, type RunStatus } from "../../src/types";
 import type { UsageTotals } from "../../src/engine/usage";
+import type { Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
+import { STARTERS } from "../../src/engine/orchestrator/starters";
+import { instantiate } from "../../src/engine/orchestrator/templates";
 
 const sent = vi.mocked(send);
 beforeEach(() => sent.mockClear());
@@ -41,13 +76,129 @@ const mkCard = (over: Partial<RunStatus> = {}, agent: DeckCard["agent"] = null):
 // `usage` is threaded as a 4th positional so every pre-existing call renders with
 // it undefined — the "still reading" state, which is what a drawer genuinely shows
 // before the host answers.
+//
+// `wf` is a 5th, optional positional covering the workflow-block props Task 11
+// added: every one of this file's 60-odd pre-existing calls omits it, which is
+// what proves "ships inert" — `orchEnabled` defaults false here exactly as it
+// does on a real install, and none of those tests had to change to keep the
+// Workflow section absent.
 const render1 = (
   card: DeckCard,
   onClose = vi.fn(),
   onForget = vi.fn(),
   usage?: UsageTotals | null,
+  wf: Partial<Pick<DeckDetailProps, "flows" | "templates" | "runs" | "branchCi" | "orchEnabled" | "onOpenWorkflow" | "onOpenTemplates">> = {},
 ) =>
-  render(<DeckDetail card={card} sourceLabel="Jira" usage={usage} onClose={onClose} onForget={onForget} />);
+  render(<DeckDetail
+    card={card} sourceLabel="Jira" usage={usage} onClose={onClose} onForget={onForget}
+    flows={wf.flows ?? []}
+    templates={wf.templates ?? []}
+    runs={wf.runs ?? []}
+    branchCi={wf.branchCi ?? {}}
+    orchEnabled={wf.orchEnabled ?? false}
+    onOpenWorkflow={wf.onOpenWorkflow ?? vi.fn()}
+    onOpenTemplates={wf.onOpenTemplates ?? vi.fn()}
+  />);
+
+// Same minimal fixture shapes test/unit/engine/orchestrator/attach.test.ts and
+// workflowBlock.test.tsx already use: a place feeding a notify terminal is
+// enough for every rule this file's own tests read.
+const place = (id: string, runKey: string): FlowNode =>
+  ({ id, x: 0, y: 0, join: "any", kind: "place", runKey, repo: "svc" });
+const notify = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "notify", message: "" });
+const edge = (over: Partial<FlowEdge> & { id: string }): FlowEdge =>
+  ({ from: "n1", to: "n2", cond: { kind: "pr-merged" }, ...over });
+
+// A run-action target, for the Output wiring test below: Output is only
+// offered on a `run` rule (see `WorkflowBlock`'s own `canShowOutput`), and
+// every other fixture in this file points at a notify terminal.
+const command = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "command", run: "deploy.sh" });
+
+const shipItOn = (runKey: string, over: Partial<Flow> = {}): Flow => ({
+  id: "f1", name: "Ship it", armed: true, createdAt: 100,
+  nodes: [place("n1", runKey), notify("n2")],
+  edges: [edge({ id: "e1" })],
+  ...over,
+});
+
+const shipItTemplate: FlowTemplate = {
+  schema: 1, id: "k1", name: "Ship it", params: {}, savedAt: 0,
+  flow: { id: "", name: "Ship it", armed: false, createdAt: 0,
+    nodes: [{ id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["svc"], mode: "plan", dest: "worktree" }],
+    edges: [] },
+};
+const reviewOnlyTemplate: FlowTemplate = {
+  schema: 1, id: "k2", name: "Review only", params: {}, savedAt: 0,
+  flow: { id: "", name: "Review only", armed: false, createdAt: 0,
+    nodes: [{ id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["svc"], mode: "plan", dest: "worktree" }],
+    edges: [] },
+};
+
+/** A real, posed-and-unanswered gate — same shape
+ * test/unit/engine/orchestrator/attach.test.ts's own `withGate` builds — for
+ * the one test below that needs a genuine `waiting-on-you` status rather than
+ * a hand-built `WorkflowState`. */
+const gateNode = (id: string): FlowNode => ({ id, x: 0, y: 0, join: "any", kind: "gate", question: "Proceed?" });
+const withGateOn = (runKey: string): Flow => ({
+  id: "f1", name: "Ship it", armed: true, createdAt: 100,
+  nodes: [place("n1", runKey), gateNode("g1"), notify("n2")],
+  edges: [
+    edge({ id: "e-ask", from: "n1", to: "g1", performed: true, firedAt: 1, firedNote: "asked" }),
+    edge({ id: "e-gate", from: "g1", to: "n2", cond: { kind: "gate-approved" } }),
+  ],
+});
+
+/** `render1` with the onClose/onForget/usage positionals left at their
+ * defaults — every test below is only ever exercising the Workflow section. */
+const renderWf = (
+  card: DeckCard,
+  wf: Partial<Pick<DeckDetailProps, "flows" | "templates" | "runs" | "branchCi" | "orchEnabled" | "onOpenWorkflow" | "onOpenTemplates">>,
+) => render1(card, undefined, undefined, undefined, wf);
+
+/** A card whose run key is `key` — every test below binds a workflow by run
+ * key, and `mkCard`'s own default ("PROJ-1") is never it. Same
+ * override-the-nested-run idiom this file's own `mkCard` callers already use
+ * (see the "explore-tenant-config" and "local-abc" cases above). */
+const cardWithKey = (key: string, over: Partial<RunStatus> = {}): DeckCard =>
+  mkCard({ run: { ...mkCard().status.run, key }, ...over });
+
+/** The `keyFromUrl` half of a Jira-shaped connector, matching
+ * `src/tasks/jira/connector.ts` — the one method `ticketKeyFor` asks for. The
+ * connector itself reaches `vscode` and cannot be imported here. */
+const jiraish = { keyFromUrl: (url: string) => url.split("/browse/")[1]?.trim() || null };
+
+/** A local card as the host really posts one: a `local-<slug>-<sha1>` key, a
+ * NON-EMPTY url (`localRunFor` builds it from the inferred ticket, so a local
+ * run with a ticket always has one), and `inferredTicketKey` derived through the
+ * same `ticketKeyFor` the host's own `flow:attach` uses. Both halves of the
+ * fixture come from one derivation, so it cannot describe a run production
+ * could not produce. */
+const localRun = (ticket: string): RunStatus["run"] =>
+  ({ ...mkCard().status.run, key: "local-webapp-9f2c1a4", url: `https://jira/browse/${ticket}`, kind: "local" });
+
+const localCard = (ticket: string): DeckCard => {
+  const run = localRun(ticket);
+  return mkCard({ run, inferredTicketKey: ticketKeyFor(run, jiraish) });
+};
+
+// Copy, per-repo diffs, the spend table and Forget/Track it all moved behind
+// the `More` disclosure — its body renders only once open (see DeckDetail.tsx's
+// own comment on why it does not lean on the browser's native
+// `details:not([open])` hiding, which jsdom does not implement anyway). The
+// `toggle` event fires asynchronously even in jsdom, so this needs a real
+// `waitFor`, never a bare click-then-assert — the same rule this file's own
+// header comment already states for an async `FileReader` post.
+// Waits for "Spend" specifically, not the `<details>`'s own `open` attribute:
+// the browser sets that attribute as part of the click's default action, a
+// tick BEFORE the "toggle" event (which is what actually flips `moreOpen` and
+// renders the body) fires — waiting on the attribute alone was found to
+// resolve before React had re-rendered, leaving the body still absent. Spend's
+// own heading is unconditional inside the body, so it is there the instant the
+// body renders at all, whatever the card's own PR/local/tracked state.
+const openMore = async () => {
+  fireEvent.click(screen.getByRole("button", { name: /^More/ }));
+  await waitFor(() => expect(screen.getByText("Spend")).toBeTruthy());
+};
 
 describe("DeckDetail", () => {
   it("names the run in its header", () => {
@@ -111,6 +262,16 @@ describe("DeckDetail", () => {
     expect(document.querySelector(".dd .c-repos .repo")!.textContent).toContain("svc");
   });
 
+  // Work is a single-line fact strip now: the "Work" label shares its row with
+  // the branch/elapsed line instead of heading a block of rows above it.
+  it("renders Work as a single-line strip — the label shares the branch/elapsed row", () => {
+    render1(mkCard());
+    const strip = document.querySelector(".dd-strip")!;
+    expect(strip.querySelector(".dd-lbl")!.textContent).toBe("Work");
+    expect(strip.querySelector(".c-branch .bn")!.textContent).toContain("feat/x");
+    expect(strip.querySelector(".c-branch .elapsed")).toBeTruthy();
+  });
+
   it("relocates the PR block", () => {
     render1(mkCard({ prs: { svc: { facts: facts({ number: 77 }), fetchedAt: 1 } } as PrEntryMap }));
     expect(document.querySelector(".dd .pr-block")!.textContent).toContain("#77");
@@ -128,7 +289,9 @@ describe("DeckDetail", () => {
     expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "open" });
   });
 
-  it("scopes a per-repo diff to that repo", () => {
+  // Per-repo diffs moved into `More` — the plain "Diff" promoted above the fold
+  // stays scoped to the whole task, exactly as "Diff — all repos" always was.
+  it("scopes a per-repo diff to that repo", async () => {
     const card = mkCard({
       repos: [
         { name: "svc", path: "/r/svc", branch: "feat/x", dirty: false, ahead: 0, added: 1, removed: 0, files: 1 },
@@ -136,12 +299,14 @@ describe("DeckDetail", () => {
       ],
     });
     render1(card);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /diff — web/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:inspect", key: "PROJ-1", action: "diff", repo: "web" });
   });
 
-  it("offers no per-repo diff on a single-repo card — the all-repos one already is it", () => {
+  it("offers no per-repo diff on a single-repo card — the all-repos one already is it", async () => {
     render1(mkCard());
+    await openMore();
     expect(screen.queryByRole("button", { name: /diff — svc/i })).toBeNull();
   });
 
@@ -185,75 +350,152 @@ describe("DeckDetail", () => {
     expect(within(container).queryByRole("button", { name: /address pr/i })).toBeNull();
   });
 
-  it("links each failing check by name", () => {
+  // The lead PR's own failing checks stay in `More` — `Open PR` itself is
+  // promoted, but the per-check links never had a promoted equivalent even
+  // before this rebuild.
+  it("links each failing check by name", async () => {
     render1(mkCard({
       prs: { svc: { facts: facts({ ci: { passing: 0, pending: 0, failing: [{ name: "e2e", url: "https://ci/e2e" }] } }), fetchedAt: 1 } } as PrEntryMap,
     }));
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /open failing check — e2e/i }));
     expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://ci/e2e" });
   });
 
-  it("offers no action for a failing check with no url — there is nothing to open", () => {
+  it("offers no action for a failing check with no url — there is nothing to open", async () => {
     render1(mkCard({
       prs: { svc: { facts: facts({ ci: { passing: 0, pending: 0, failing: [{ name: "lint", url: "" }] } }), fetchedAt: 1 } } as PrEntryMap,
     }));
+    await openMore();
     expect(screen.queryByRole("button", { name: /open failing check — lint/i })).toBeNull();
   });
 
-  it("copies the branch name without touching the host", () => {
+  it("copies the branch name without touching the host", async () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render1(mkCard());
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /copy branch name/i }));
     expect(writeText).toHaveBeenCalledWith("feat/x");
     expect(sent).not.toHaveBeenCalled();
   });
 
-  it("copies the ticket key without touching the host", () => {
+  it("copies the ticket key without touching the host", async () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render1(mkCard());
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /copy ticket key/i }));
     expect(writeText).toHaveBeenCalledWith("PROJ-1");
     expect(sent).not.toHaveBeenCalled();
   });
 
-  it("copies the PR url without touching the host", () => {
+  it("copies the PR url without touching the host", async () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render1(mkCard({ prs: { svc: { facts: facts({ url: "https://gh/pr/77" }), fetchedAt: 1 } } as PrEntryMap }));
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /copy pr url/i }));
     expect(writeText).toHaveBeenCalledWith("https://gh/pr/77");
     expect(sent).not.toHaveBeenCalled();
   });
 
-  it("copies the worktree path without touching the host", () => {
+  it("copies the worktree path without touching the host", async () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });
     render1(mkCard());
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /copy worktree path/i }));
     expect(writeText).toHaveBeenCalledWith("/r/svc");
     expect(sent).not.toHaveBeenCalled();
   });
 
-  it("forgets through the callback, not a raw post", () => {
+  it("forgets through the callback, not a raw post", async () => {
     const onForget = vi.fn();
     render1(mkCard(), vi.fn(), onForget);
+    await openMore();
     fireEvent.click(screen.getByRole("button", { name: /^forget$/i }));
     expect(onForget).toHaveBeenCalledWith("PROJ-1");
   });
 
-  it("offers Track it instead of Forget on a local card", () => {
+  it("offers Track it instead of Forget on a local card", async () => {
     render1(mkCard({ run: { ...mkCard().status.run, key: "local-abc", url: "", kind: "local" } as never }));
+    await openMore();
     expect(screen.queryByRole("button", { name: /^forget$/i })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: /track it/i }));
     expect(sent).toHaveBeenCalledWith({ type: "deck:track", key: "local-abc" });
   });
 
-  it("prints how many actions it is offering", () => {
+  // The "N actions" counter is gone outright — `More`'s own summary names what
+  // it holds instead of counting it.
+  it("no longer prints an action count", () => {
     render1(mkCard());
-    const n = document.querySelectorAll(".dd-act").length;
-    expect(document.querySelector(".dd-count")!.textContent).toContain(String(n));
+    expect(screen.queryByText(/\d+ actions/)).toBeNull();
+    expect(document.querySelector(".dd-count")).toBeNull();
+  });
+
+  it("promotes exactly four actions above the fold, in order", () => {
+    render1(mkCard({ prs: { svc: { facts: facts({ number: 482 }), fetchedAt: 1 } } as PrEntryMap }));
+    const promoted = screen.getByRole("group", { name: "Actions" });
+    expect(within(promoted).getAllByRole("button").map((b) => b.textContent))
+      .toEqual(["Open workspace", "Open PR #482", "Diff", "Address PR"]);
+  });
+
+  it("opens the lead PR externally from the promoted button", () => {
+    render1(mkCard({ prs: { svc: { facts: facts({ number: 482, url: "https://gh/pr/482" }), fetchedAt: 1 } } as PrEntryMap }));
+    fireEvent.click(screen.getByRole("button", { name: "Open PR #482" }));
+    expect(sent).toHaveBeenCalledWith({ type: "openExternal", url: "https://gh/pr/482" });
+  });
+
+  // Fewer than four apply when there is no PR and no review to address: Open
+  // workspace and Diff are unconditional, so those are the floor.
+  it("promotes only what applies when there is no PR and nothing to address", () => {
+    render1(mkCard({ column: "progress" }));
+    const promoted = screen.getByRole("group", { name: "Actions" });
+    expect(within(promoted).getAllByRole("button").map((b) => b.textContent))
+      .toEqual(["Open workspace", "Diff"]);
+  });
+
+  it("hides every remaining action behind one disclosure", async () => {
+    render1(mkCard());
+    expect(screen.queryByText("Copy branch name")).toBeNull();
+    await openMore();
+    expect(screen.getByText("Copy branch name")).toBeTruthy();
+  });
+
+  // `role="button"` on the summary is needed for it to be queryable as one at
+  // all (neither jsdom's nor a screen reader's role mapping treats a bare
+  // `<summary>` as a button), but overriding the role also throws away its
+  // native expanded/collapsed state — `aria-expanded` puts that back.
+  it("reports its open state via aria-expanded on the summary", async () => {
+    render1(mkCard());
+    const more = screen.getByRole("button", { name: /^More/ });
+    expect(more).toHaveAttribute("aria-expanded", "false");
+    await openMore();
+    expect(more).toHaveAttribute("aria-expanded", "true");
+  });
+
+  // Enumerated on purpose: `More` is a disclosure, not a deletion. This test is
+  // what stops a rebuild quietly dropping an affordance somebody used. Built
+  // from what the drawer actually offers today (read off DeckDetail.tsx and
+  // this file's own fixtures) — four of the old dozen (Open workspace, Diff —
+  // all repos' promoted stand-in "Diff", Address PR, Open PR) moved above the
+  // fold instead of into `More`, and are checked there via the two tests above
+  // rather than repeated here, since a promoted button and a `More` row for
+  // the very same action would give `getByRole` two matches for one name.
+  it("keeps every action the old drawer had reachable", async () => {
+    const { container } = render1(mkCard({ prs: { svc: { facts: facts({ number: 482 }), fetchedAt: 1 } } as PrEntryMap }));
+    // Promoted, not in `More` — reachable already, before any click.
+    for (const label of ["Open workspace", "Diff", "Open PR #482", "Address PR"]) {
+      expect(within(container).getByRole("button", { name: label })).toBeTruthy();
+    }
+    await openMore();
+    for (const label of [
+      "Open in Jira", "Copy branch name", "Copy ticket key", "Copy PR url",
+      "Copy worktree path", "Forget",
+    ]) {
+      await waitFor(() => expect(screen.getByRole("button", { name: label })).toBeTruthy());
+    }
   });
 
   it("closes on its close button", () => {
@@ -365,8 +607,12 @@ describe("DeckDetail CSS", () => {
     return DECK_CSS.slice(at, DECK_CSS.indexOf("}", at));
   };
 
+  // The scroll/clip rule lives on `.dd-scroll` now, not `.dd` itself — `.dd`
+  // carries only width, so the resize grip (a sibling of `.dd-scroll`,
+  // positioned relative to `.dd`) is never clipped by this overflow rule or
+  // carried away when the scrollable content scrolls.
   it("gives the drawer vertical scroll only", () => {
-    const dd = block(".dd");
+    const dd = block(".dd-scroll");
     expect(dd).toMatch(/overflow:\s*hidden auto/);
     expect(dd).not.toMatch(/overflow:\s*auto\s*;/);
   });
@@ -444,30 +690,39 @@ describe("DeckDetail — Spend", () => {
 
   const spend = () => document.querySelector(".dd-spend") as HTMLElement | null;
 
-  it("reads as still-loading before the host answers", () => {
+  // Spend moved a second time, into `More` alongside Copy, per-repo diffs and
+  // Forget — every case here opens the disclosure first, since none of this
+  // text exists in the DOM until it does (see DeckDetail.tsx's own comment on
+  // why the body renders only while open, rather than leaning on the
+  // browser's native `details:not([open])` hiding).
+  it("reads as still-loading before the host answers", async () => {
     render1(mkCard(), undefined, undefined, undefined);
+    await openMore();
     expect(screen.getByText(/Reading transcripts/)).toBeTruthy();
     expect(spend()).toBeNull();
   });
 
-  it("says so when the host could not read the transcripts", () => {
+  it("says so when the host could not read the transcripts", async () => {
     render1(mkCard(), undefined, undefined, null);
+    await openMore();
     expect(screen.getByText(/Couldn't read/)).toBeTruthy();
     expect(spend()).toBeNull();
   });
 
   // The invariant the card's tests existed to protect, relocated: a run that was
   // measured and genuinely cost nothing must not look like one still being read.
-  it("distinguishes a genuine zero from an unread run", () => {
+  it("distinguishes a genuine zero from an unread run", async () => {
     render1(mkCard(), undefined, undefined, totals());
+    await openMore();
     expect(screen.getByText("No recorded usage")).toBeTruthy();
     expect(screen.queryByText(/Reading transcripts/)).toBeNull();
     expect(spend()).toBeNull();
   });
 
-  it("breaks the four token classes out, each with its raw count", () => {
+  it("breaks the four token classes out, each with its raw count", async () => {
     render1(mkCard(), undefined, undefined,
       totals({ input: 1_234, output: 5_678, cacheWrite: 90_123, cacheRead: 4_567_890 }));
+    await openMore();
     const rows = Array.from(spend()!.querySelectorAll(".sp-row")).map((el) => ({
       k: el.querySelector(".sp-k")!.textContent,
       v: el.querySelector(".sp-v")!.textContent,
@@ -479,8 +734,9 @@ describe("DeckDetail — Spend", () => {
     expect(rows[3].v).toBe("4,567,890");
   });
 
-  it("labels the weighted total eq, never tok", () => {
+  it("labels the weighted total eq, never tok", async () => {
     render1(mkCard(), undefined, undefined, totals({ cacheRead: 3_804_000 }));
+    await openMore();
     const tot = spend()!.querySelector(".sp-tot")!;
     // weightedEq({cacheRead: 3_804_000}) = 380,400 → formatEq → "380k"
     expect(tot.querySelector(".sp-v")!.textContent).toContain("380k");
@@ -494,10 +750,397 @@ describe("DeckDetail — Spend", () => {
   // The weighted total is deliberately NOT the sum of the rows above it: cache
   // reads are ~96.7% of raw tokens at a tenth the rate, so a raw sum would rank
   // tasks by conversation length rather than by cost.
-  it("does not print the weighted total as the raw sum of its rows", () => {
+  it("does not print the weighted total as the raw sum of its rows", async () => {
     render1(mkCard(), undefined, undefined, totals({ output: 1_000_000, cacheRead: 1_000_000 }));
+    await openMore();
     const tot = spend()!.querySelector(".sp-tot .sp-v")!.textContent;
     // raw sum would be 2,000,000 → "2.0M"; weighted is 1_000_000*5 + 1_000_000*0.1 = 5,100,000
     expect(tot).toContain("5.1M");
+  });
+});
+
+// Modeled on OrchestratorDrawer.test.tsx's own "resizing" describe (same shape,
+// same drawerResize.ts arithmetic underneath) — none of it needs a real drag,
+// only fireEvent's pointer/keyboard events and a manual act() around the
+// move+up pair, the same split that file uses so the resize effect's window
+// listeners are attached before the move they need to observe.
+//
+// The one real difference from that file's version: this drawer writes its
+// live width onto `document.documentElement`, not an inline style on its own
+// element (see deckStyles.ts's own comment on `.dd` for why — `.board.dd-open`
+// is a sibling of the drawer in DeckApp.tsx, not its descendant, and a custom
+// property only cascades to descendants of wherever it's declared). `widthOf`
+// below reads it from there.
+describe("resizing", () => {
+  const grip = () => screen.getByRole("separator", { name: /resize/i });
+  const widthOf = () => document.documentElement.style.getPropertyValue("--dd-w");
+
+  it("exposes the grip as a focusable vertical separator", () => {
+    render1(mkCard());
+    const g = grip();
+    expect(g).toHaveAttribute("aria-orientation", "vertical");
+    expect(g.tabIndex).toBe(0);
+  });
+
+  it("starts at the 620px default when nothing is stored", () => {
+    render1(mkCard());
+    expect(widthOf()).toBe("620px");
+  });
+
+  it("writes the live width onto document.documentElement so a sibling of the drawer (.board) can read it too", () => {
+    render1(mkCard());
+    expect(document.documentElement.style.getPropertyValue("--dd-w")).toBe("620px");
+  });
+
+  it("removes --dd-w from document.documentElement once the drawer unmounts", () => {
+    const { unmount } = render1(mkCard());
+    expect(widthOf()).toBe("620px");
+    unmount();
+    expect(document.documentElement.style.getPropertyValue("--dd-w")).toBe("");
+  });
+
+  it("dragging the grip changes the width", () => {
+    render1(mkCard());
+    fireEvent.pointerDown(grip(), { clientX: 300 });
+    act(() => {
+      // Left border pulled 40px further left grows the (right-anchored) drawer
+      // by 40px: 620 + (300 - 260) = 660.
+      fireEvent.pointerMove(window, { clientX: 260 });
+      fireEvent.pointerUp(window);
+    });
+    expect(widthOf()).toBe("660px");
+  });
+
+  it("persists the width via vscodeApi.setState once the drag ends, under ddWidth", () => {
+    render1(mkCard());
+    fireEvent.pointerDown(grip(), { clientX: 300 });
+    act(() => {
+      fireEvent.pointerMove(window, { clientX: 260 });
+      fireEvent.pointerUp(window);
+    });
+    expect(vscodeApi.setState).toHaveBeenCalledWith({ ddWidth: 660 });
+  });
+
+  // The precise hazard drawerResize.ts's merge exists to prevent: this
+  // drawer's own resize must never clobber the Orchestrator drawer's
+  // "orchWidth", stored in the same shared webview state object.
+  it("merges into existing state rather than clobbering the Orchestrator drawer's own width", () => {
+    // Two `.mockReturnValueOnce` rather than one `.mockReturnValue`, deliberately:
+    // this component calls `getState` exactly twice (the initial `read()` at
+    // mount, then `persist()`'s own internal read-before-merge) — scoping the
+    // stub to exactly those two calls keeps `vscodeApi.getState`'s default
+    // `() => undefined` in effect for every OTHER test in this file. A bare
+    // `mockReturnValue` here was found to leak `orchWidth` into the very next
+    // test below, since `clearMocks` (vitest.config.ts) resets call history but
+    // not a scripted return value.
+    vi.mocked(vscodeApi.getState)
+      .mockReturnValueOnce({ orchWidth: 560 })
+      .mockReturnValueOnce({ orchWidth: 560 });
+    render1(mkCard());
+    fireEvent.keyDown(grip(), { key: "ArrowLeft" });
+    expect(vscodeApi.setState).toHaveBeenCalledWith({ orchWidth: 560, ddWidth: 636 });
+  });
+
+  it("clamps the width at the floor", () => {
+    render1(mkCard());
+    fireEvent.pointerDown(grip(), { clientX: 300 });
+    act(() => {
+      // Dragged hugely toward "narrower" — far past the 460px floor.
+      fireEvent.pointerMove(window, { clientX: 900 });
+      fireEvent.pointerUp(window);
+    });
+    expect(widthOf()).toBe("460px");
+  });
+
+  // The ceiling is read from window.innerWidth at drag time, so this shrinks
+  // the viewport to 900 first (ceiling = max(460, 900 - 340) = 560, distinct
+  // from the 460px floor) then drags hugely toward "wider".
+  it("clamps the width at the ceiling, derived from the viewport", () => {
+    render1(mkCard());
+    const prevWidth = window.innerWidth;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 900 });
+    try {
+      fireEvent.pointerDown(grip(), { clientX: 300 });
+      act(() => {
+        fireEvent.pointerMove(window, { clientX: -900 });
+        fireEvent.pointerUp(window);
+      });
+      expect(widthOf()).toBe("560px");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: prevWidth });
+    }
+  });
+
+  it("resizes with arrow keys — ArrowLeft grows, ArrowRight shrinks", () => {
+    render1(mkCard());
+    fireEvent.keyDown(grip(), { key: "ArrowLeft" });
+    expect(widthOf()).toBe("636px");
+    fireEvent.keyDown(grip(), { key: "ArrowRight" });
+    fireEvent.keyDown(grip(), { key: "ArrowRight" });
+    expect(widthOf()).toBe("604px");
+    expect(vscodeApi.setState).toHaveBeenLastCalledWith({ ddWidth: 604 });
+  });
+
+  it("ignores keys other than the two arrow keys", () => {
+    render1(mkCard());
+    fireEvent.keyDown(grip(), { key: "Enter" });
+    expect(widthOf()).toBe("620px");
+  });
+
+  it("honours a stored width from a previous session on mount", () => {
+    vi.mocked(vscodeApi.getState).mockReturnValueOnce({ ddWidth: 650 });
+    render1(mkCard());
+    expect(widthOf()).toBe("650px");
+  });
+
+  it("falls back to the default width when the stored value is corrupt", () => {
+    // A future version's shape, or a hand-edited value — either way, not the
+    // number this version expects.
+    vi.mocked(vscodeApi.getState).mockReturnValueOnce({ ddWidth: "wide" } as never);
+    expect(() => render1(mkCard())).not.toThrow();
+    expect(widthOf()).toBe("620px");
+  });
+
+  it("falls back to the default width when getState itself throws", () => {
+    vi.mocked(vscodeApi.getState).mockImplementationOnce(() => {
+      throw new Error("state store unavailable");
+    });
+    expect(() => render1(mkCard())).not.toThrow();
+    expect(widthOf()).toBe("620px");
+  });
+
+  it("does not throw when persisting the width fails", () => {
+    vi.mocked(vscodeApi.setState).mockImplementationOnce(() => {
+      throw new Error("state store unavailable");
+    });
+    render1(mkCard());
+    expect(() => fireEvent.keyDown(grip(), { key: "ArrowLeft" })).not.toThrow();
+  });
+});
+
+describe("DeckDetail — Workflow section", () => {
+  it("shows the workflow bound to this card", () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [shipItOn("PROJ-142")], orchEnabled: true });
+    // Paired with the inert test's own `queryByText("Workflow")` assertion —
+    // without a positive counterpart somewhere, a heading rename could still
+    // pass that test for the wrong reason.
+    expect(screen.getByText("Workflow")).toBeTruthy();
+    expect(screen.getByText("Ship it")).toBeTruthy();
+  });
+
+  it("shows no Workflow section at all when the orchestrator is off", () => {
+    // New behaviour ships inert: agentFlow.orchestrator defaults to false, and
+    // this whole surface — the "Workflow" heading, the block, the chip — must
+    // be invisible, not merely un-armed.
+    renderWf(cardWithKey("PROJ-142"), { flows: [shipItOn("PROJ-142")], orchEnabled: false });
+    expect(screen.queryByText("Workflow")).toBeNull();
+    expect(screen.queryByText("Ship it")).toBeNull();
+  });
+
+  it("picks the workflow that most needs a human when two bind the card", () => {
+    const stopped: Flow = {
+      ...shipItOn("PROJ-142"), id: "f-stop", name: "Hotfix", createdAt: 200,
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, error: "exit 1" }],
+    };
+    renderWf(cardWithKey("PROJ-142"), { flows: [shipItOn("PROJ-142"), stopped], orchEnabled: true });
+    expect(screen.getByText("Hotfix")).toBeTruthy();
+    expect(screen.getByText("+1 more")).toBeTruthy();
+    expect(screen.queryByText("Ship it")).toBeNull();
+  });
+
+  it("shows the attach picker's trigger, and no picker, before it is opened", () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    expect(screen.getByText("No workflow attached")).toBeTruthy();
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-142…")).toBeNull();
+  });
+
+  it("attaching sends flow:attach with the card's run key", async () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Ship it" }));
+    await waitFor(() => expect(sent).toHaveBeenCalledWith(
+      { type: "flow:attach", runKey: "PROJ-142", templateId: "k1" },
+    ));
+  });
+
+  // A user's own template may share a name with a starter — "Ship it" is one
+  // anyone might pick — and the picker shows names alone, so the two rows
+  // would be indistinguishable without a marker. The same word the Templates
+  // view uses, from the same predicate the host checks.
+  it("the picker marks a built-in starter, and not a user's own template", async () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [STARTERS[0], shipItTemplate], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    const opts = screen.getAllByRole("button", { name: /Ship it/ });
+    const builtin = opts.find((o) => o.textContent?.includes("Built-in"));
+    const own = opts.find((o) => !o.textContent?.includes("Built-in"));
+    expect(builtin).toBeTruthy();
+    expect(own).toBeTruthy();
+    expect(opts).toHaveLength(2);
+  });
+
+  it("the picker filters by name", async () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate, reviewOnlyTemplate], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    await userEvent.type(screen.getByPlaceholderText("Choose a template for PROJ-142…"), "review");
+    await waitFor(() => expect(screen.queryByText("Ship it")).toBeNull());
+    expect(screen.getByText("Review only")).toBeTruthy();
+  });
+
+  // The original dead end this feature exists to close: "No templates saved
+  // yet" with no action at all. Three starters ship and are served whenever
+  // `agentFlow.orchestrator` is on, so an empty `templates` list is rare in
+  // practice — but it stays reachable (a user deleted their own, or the
+  // setting just flipped on in a window that hasn't gotten a `deck:flows`
+  // post yet), and the empty state must offer a way out rather than strand
+  // the user here. `onOpenTemplates` is the SAME channel `onOpenWorkflow`
+  // uses one row up — DeckDetail asks DeckApp to move the Orchestrator
+  // surface rather than doing it here — so this test pins the wiring, not a
+  // new one.
+  it("offers a way to create one when no template matches", async () => {
+    const onOpenTemplates = vi.fn();
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [], orchEnabled: true, onOpenTemplates });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    expect(screen.getByText(/No templates saved yet/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Open Templates" }));
+    expect(onOpenTemplates).toHaveBeenCalled();
+  });
+
+  // The counterpart this task's own brief calls out by name: a failed SEARCH
+  // is not the same dead end, and must not grow the same exit — "No match
+  // for …" already tells the user how to get back (clear the search), and
+  // stacking a second affordance on it would suggest the library itself is
+  // empty when it demonstrably is not.
+  it("does not offer the same way out when a search merely finds nothing", async () => {
+    const onOpenTemplates = vi.fn();
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true, onOpenTemplates });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    await userEvent.type(screen.getByPlaceholderText("Choose a template for PROJ-142…"), "nope");
+    expect(await screen.findByText("No match for “nope”")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open Templates" })).toBeNull();
+  });
+
+  it("names a local card's inferred ticket in the picker's placeholder", async () => {
+    // A local card's run key is a worktree slug, not a ticket — the picker asks
+    // about the INFERRED ticket key (see DeckDetail.tsx's `boundTicketKey`),
+    // same as `attachedWorkflows` itself binds a planned node by.
+    //
+    // The url is NON-EMPTY, which the previous version of this fixture had
+    // wrong: the host only ever sends `inferredTicketKey` because it resolved a
+    // ticket out of `run.url` (`localRunFor` sets that url FROM the inferred
+    // ticket, so no url means no inferred key either — see deckView.ts's
+    // `ticketKeyPatch`). Pairing an empty url with an inferred key asked for
+    // behaviour production cannot produce, and it was the shape that let the
+    // real bug through: the derivation under test reads the url-less branch
+    // only, which no local card with a ticket ever takes.
+    renderWf(localCard("PROJ-9"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    expect(screen.getByPlaceholderText("Choose a template for PROJ-9…")).toBeTruthy();
+  });
+
+  // The user-visible failure the seam caused, end to end and in the one place it
+  // was seen: a local card whose branch names a ticket, carrying a workflow the
+  // HOST attached — bound by `ticketKeyFor`, the host's own derivation, run here
+  // against the same url the wire carries, and instantiated by the host's own
+  // `instantiate`. Before the fix the drawer said "No workflow attached" on a
+  // card that demonstrably had one, and pressing Attach again produced a refusal
+  // naming the hash.
+  it("shows the workflow the host attached to a local card, bound by the host's own ticket key", () => {
+    const run = localRun("PROJ-9");
+    const hostKey = ticketKeyFor(run, jiraish);
+    // A template carries no place nodes, so this planned node's ticket key is
+    // the ONLY thing binding the flow to the card.
+    const attached = instantiate(shipItTemplate, hostKey, "f-new", 100, { repos: ["svc"], modes: ["plan"] });
+    expect(attached.nodes.filter((n) => n.kind === "place")).toEqual([]);
+    renderWf(localCard("PROJ-9"), { flows: [attached], orchEnabled: true });
+    expect(screen.getByText("Ship it")).toBeTruthy();
+    expect(screen.queryByText("No workflow attached")).toBeNull();
+  });
+
+  it("closes the picker without sending anything when cancelled", async () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-142…")).toBeNull();
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("closes the picker on Escape too, and stops the key there", () => {
+    // `DeckApp.test.tsx` has the full regression (Escape must not also close
+    // the surrounding card drawer, since `DeckApp` listens for the same key on
+    // `window`) — this is the narrower claim this file alone can prove: the
+    // picker's own handler treats Escape as ITS dismissal and calls
+    // `stopPropagation` rather than leaving the event to bubble untouched.
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    fireEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    const input = screen.getByPlaceholderText("Choose a template for PROJ-142…");
+    const event = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    const stopSpy = vi.spyOn(event, "stopPropagation");
+    fireEvent(input, event);
+    expect(stopSpy).toHaveBeenCalled();
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-142…")).toBeNull();
+  });
+
+  it("closes the picker when the selected card changes under it", () => {
+    // `DeckApp.tsx` never remounts this component on a card switch (see
+    // `DeckDetailProps.closing`'s own doc comment), so `pickerOpen` would
+    // otherwise survive from card A onto card B — still open, re-placeholdered
+    // for B, and a pick would attach to the card the user is now looking at
+    // rather than the one they meant to when they opened it.
+    const result = renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true });
+    fireEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    expect(screen.getByPlaceholderText("Choose a template for PROJ-142…")).toBeTruthy();
+    result.rerender(<DeckDetail
+      card={cardWithKey("PROJ-9")} sourceLabel="Jira" onClose={vi.fn()} onForget={vi.fn()}
+      flows={[]} templates={[shipItTemplate]} runs={[]} branchCi={{}} orchEnabled onOpenWorkflow={vi.fn()}
+      onOpenTemplates={vi.fn()}
+    />);
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-142…")).toBeNull();
+    expect(screen.queryByPlaceholderText("Choose a template for PROJ-9…")).toBeNull();
+  });
+
+  it("Arm sends flow:arm for this card's own workflow id", async () => {
+    const disarmed = shipItOn("PROJ-142", { armed: false });
+    renderWf(cardWithKey("PROJ-142"), { flows: [disarmed], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Arm" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:arm", id: "f1", armed: true });
+  });
+
+  it("Detach sends flow:detach for this card's own workflow id", async () => {
+    const done = shipItOn("PROJ-142", { edges: [edge({ id: "e1", firedAt: 1, firedNote: "ran" })] });
+    renderWf(cardWithKey("PROJ-142"), { flows: [done], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Detach" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:detach", id: "f1" });
+  });
+
+  it("Approve sends flow:answerGate for this card's own workflow id", async () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [withGateOn("PROJ-142")], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Approve" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:answerGate", id: "f1", edgeId: "e-gate", answer: "approved" });
+  });
+
+  it("Reset sends flow:resetEdge for this card's own workflow id", async () => {
+    const stopped = shipItOn("PROJ-142", { edges: [edge({ id: "e1", error: "exit 1" })] });
+    renderWf(cardWithKey("PROJ-142"), { flows: [stopped], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+  });
+
+  it("Output sends flow:openOutput for this card's own workflow id", async () => {
+    const stopped: Flow = {
+      id: "f1", name: "Ship it", armed: true, createdAt: 100,
+      nodes: [place("n1", "PROJ-142"), command("n2")],
+      edges: [edge({ id: "e1", error: "exit 1" })],
+    };
+    renderWf(cardWithKey("PROJ-142"), { flows: [stopped], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Output" }));
+    expect(sent).toHaveBeenCalledWith({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+  });
+
+  it("Open in Workflows calls onOpenWorkflow with this card's own workflow id, sending no host message", async () => {
+    const onOpenWorkflow = vi.fn();
+    renderWf(cardWithKey("PROJ-142"), { flows: [shipItOn("PROJ-142")], orchEnabled: true, onOpenWorkflow });
+    await userEvent.click(screen.getByRole("button", { name: "Open in Workflows ↗" }));
+    expect(onOpenWorkflow).toHaveBeenCalledWith("f1");
+    expect(sent).not.toHaveBeenCalled();
   });
 });

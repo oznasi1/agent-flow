@@ -4,6 +4,8 @@
 import * as os from "os";
 import * as path from "path";
 import { ACTION_MISMATCH_PREFIX, edgeAction, Flow, FlowEdge, FlowNode, isSettled } from "./model";
+import { isBuiltinTemplateId } from "./starters";
+import { FlowTemplate, validTemplate } from "./templates";
 
 /** The only IO surface. Implementations return null / throw only from `readDir`;
  * `readFile` returns null for anything it cannot read, so one unreadable file
@@ -238,4 +240,67 @@ export function readFlows(io: FlowIo, dir: string): Flow[] {
 
 export function removeFlow(io: FlowIo, dir: string, id: string): void {
   io.remove(fileFor(dir, id));
+}
+
+/** Templates sit beside flows, read and written through the same `FlowIo` with
+ * the same rules: the same id charset (an id becomes a path, so this is a
+ * traversal guard, not cosmetics) and the same tolerance (one unreadable file
+ * costs one template, never the whole picker). */
+export function defaultTemplatesDir(): string {
+  return path.join(os.homedir(), ".agentflow", "templates");
+}
+
+function templateFileFor(dir: string, id: string): string {
+  if (!VALID_FLOW_ID.test(id)) throw new Error(`invalid template id: ${JSON.stringify(id)}`);
+  return path.join(dir, `${id}.json`);
+}
+
+export function writeTemplate(io: FlowIo, dir: string, t: FlowTemplate): void {
+  io.writeFile(templateFileFor(dir, t.id), JSON.stringify(t, null, 2));
+}
+
+export function readTemplates(io: FlowIo, dir: string): FlowTemplate[] {
+  let entries: string[];
+  try {
+    entries = io.readDir(dir);
+  } catch {
+    // No directory yet is the ordinary first-run case, not an error.
+    return [];
+  }
+  const out: FlowTemplate[] = [];
+  for (const name of entries) {
+    if (!name.endsWith(".json")) continue;
+    const text = io.readFile(path.join(dir, name));
+    if (text === null) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      continue;
+    }
+    const t = validTemplate(parsed);
+    // The filename must be the one this record's own id resolves to — the same
+    // check `readFlows` makes, and for the same reason. The store only ever
+    // writes `<id>.json` (`templateFileFor`), so a mismatch is never
+    // store-authored: it is a copied file (`cp k1.json k1-backup.json`), and
+    // accepting it puts two templates claiming the same id in the picker —
+    // duplicate React keys — while `removeTemplate`/`writeTemplate` address by
+    // id, so the copy could never be reached to fix or delete it: it would
+    // resurrect in the list on every read, permanently stuck. Skip it, one
+    // item lost, exactly like every other malformed record this reader
+    // tolerates.
+    if (!t || name !== `${t.id}.json`) continue;
+    // A built-in ships in `starters.ts` and is never written here, so a file
+    // claiming one of those ids is a copy, a backup, or a hand-edit — and
+    // honouring it would put two templates with the same id in the picker,
+    // one of which the user can never delete. Same failure the filename check
+    // above exists to stop.
+    if (isBuiltinTemplateId(t.id)) continue;
+    out.push(t);
+  }
+  return out;
+}
+
+export function removeTemplate(io: FlowIo, dir: string, id: string): void {
+  io.remove(templateFileFor(dir, id));
 }

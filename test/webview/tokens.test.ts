@@ -57,7 +57,12 @@ const ruleBlocks = (sheet: string): { selector: string; body: string }[] =>
 // and carries that zone's hue to every rule under it. (`--accent` was here too, per
 // card, until the card's accent rail retired and the column body's own rail took
 // over stating the zone — see the "per-card accent" guard at the end of this file.)
-const RUNTIME_ONLY = ["--zone"];
+// `--dd-w` is the same shape for a different reason: DeckDetail.tsx sets it on
+// `document.documentElement` (not an inline style on any element this sheet
+// styles) because `.board.dd-open` — a sibling of the drawer in DeckApp.tsx,
+// never its descendant — has to see the same live width, and a custom
+// property only cascades to descendants of wherever it's declared.
+const RUNTIME_ONLY = ["--zone", "--dd-w"];
 
 describe("tokens.ts", () => {
   it("declares every token it owns", () => {

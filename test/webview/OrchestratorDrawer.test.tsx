@@ -2,13 +2,16 @@
 import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
 import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
-import { OrchestratorDrawer, DRAG_SEP } from "../../src/webview/OrchestratorDrawer";
+import { OrchestratorDrawer, DRAG_SEP, OrchTarget, OrchView } from "../../src/webview/OrchestratorDrawer";
+import type { WorkflowRow } from "../../src/webview/WorkflowList";
 import { ORCH_ANIM_MS, ORCH_CSS, ORCH_EDGE_PAINT_DY } from "../../src/webview/orchestratorStyles";
 import type { Flow, FlowEdge } from "../../src/engine/orchestrator/model";
+import { TEMPLATE_SCHEMA, type FlowTemplate } from "../../src/engine/orchestrator/templates";
 // The real store, so the "a new wire is never latched" test below is answered by
 // the migration itself rather than by this file restating its rule. Its io is
 // injected (see `FlowIo`), so importing it here costs no temp directory.
 import { readFlows, writeFlow } from "../../src/engine/orchestrator/store";
+import { STARTERS } from "../../src/engine/orchestrator/starters";
 import { edgeAction } from "../../src/engine/orchestrator/model";
 import { branchCiKey } from "../../src/engine/orchestrator/branchCi";
 import {
@@ -81,6 +84,18 @@ const flow = (over: Partial<Flow> = {}): Flow => ({
   id: "f1", name: "Ship the migration", armed: false, createdAt: 1_000, nodes: [], edges: [], ...over,
 });
 
+/** A minimal template fixture for the `OrchTarget` addressing tests below —
+ * distinct from `shipItTemplate` further down (the Templates-tab fixtures),
+ * which this file's early tests should not need to reach past to use. Its
+ * `flow.name` is deliberately unlike any `flow()` fixture's name, so a test
+ * asserting "the template's own graph rendered" cannot pass against a flow
+ * that merely happened to be open already. */
+const template = (over: Partial<FlowTemplate> = {}): FlowTemplate => ({
+  schema: TEMPLATE_SCHEMA, id: "builtin-ship-it", name: "Ship it (template)", params: {}, savedAt: 1_000,
+  flow: { id: "", name: "Ship it template flow", armed: false, createdAt: 0, nodes: [], edges: [] },
+  ...over,
+});
+
 /** Two modes, distinct ids and labels, so a test asserting "the option list is
  * the one the host sent" cannot pass against a coincidence with some other
  * hardcoded default. */
@@ -98,17 +113,84 @@ const COMMANDS = [
 ];
 
 const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => ({
-  flows: [flow()], openId: "f1", runs: [], pendingResume: [], promptModes: MODES, commands: COMMANDS, branchCi: {},
+  flows: [flow()], openId: { kind: "flow", id: "f1" } as OrchTarget, runs: [], pendingResume: [], promptModes: MODES, commands: COMMANDS, branchCi: {},
+  templates: [],
+  // No in-flight draft by default — Task 13's own describe block below is
+  // what overrides this to exercise "＋ New template…".
+  draftTemplate: null,
+  // Canvas by default: the whole pre-existing suite below asserts against the
+  // flow-graph editor, and defaulting here keeps every one of those tests
+  // exercising exactly what it did before `view` existed as a prop at all.
+  // Task 9's own tests (`describe("the three top-level views")`) are what
+  // override this to see Active/Templates content instead.
+  view: "canvas" as OrchView, onView: vi.fn(), rows: [], onOpenCard: vi.fn(),
   onClose: vi.fn(), onCreate: vi.fn(), onOpen: vi.fn(),
   onRename: vi.fn(), onSave: vi.fn(), onDelete: vi.fn(),
   onArm: vi.fn(), onResumeApprove: vi.fn(), onResumeDisarm: vi.fn(), onResetEdge: vi.fn(),
+  onNewTemplate: vi.fn(), onCancelTemplate: vi.fn(), onEditTemplate: vi.fn(),
   ...over,
 });
 
 describe("OrchestratorDrawer", () => {
-  it("renders nothing when no flow is open", () => {
-    const { container } = render(<OrchestratorDrawer {...props({ openId: null })} />);
+  it("renders nothing when no flow is open and the drawer is closed", () => {
+    // `open: false` is what actually closes this drawer — see `p.open`'s own
+    // doc comment, and the Canvas empty-state's own gate on it (Task 13):
+    // `DeckApp`'s Close/Cancel/Save-done handlers clear `openId` and
+    // `orchOpen` together, which is what this fixture now says explicitly
+    // rather than relying on `openId: null` alone.
+    const { container } = render(<OrchestratorDrawer {...props({ openId: null, open: false })} />);
     expect(container.firstChild).toBeNull();
+  });
+
+  // Task 13: THE fix this task exists to make. `if (!flow) return null` used
+  // to sit here unconditionally — a first-time user (or anyone whose flow
+  // vanished, or who clicked Canvas's own tab with nothing addressed) landed
+  // on a blank drawer with no explanation and no way out. See this
+  // component's own doc comment on the branch that replaced it.
+  it("shows Canvas's own empty state, not nothing, when no flow is open but the drawer is shown", () => {
+    render(<OrchestratorDrawer {...props({ openId: null })} />);
+    expect(screen.getByText(/No workflow is open here/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Active" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ New flow" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "＋ New template…" })).toBeTruthy();
+  });
+
+  // OrchTarget addressing (Task 8): the drawer can be opened on either a
+  // saved flow or a template, and the two kinds resolve through different
+  // props (`flows` vs. `templates`) to the same kind of thing — a `Flow` the
+  // canvas can render.
+  it("opens on a flow when the target names one", () => {
+    render(<OrchestratorDrawer {...props({ openId: { kind: "flow", id: "f1" } })} />);
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship the migration");
+  });
+
+  it("opens on a template's own graph when the target names a template", () => {
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "builtin-ship-it" }, templates: [template()],
+    })} />);
+    // The template's OWN flow renders — not a coincidence with some `flows`
+    // entry, since `flows` is empty here — and its name shows the same way an
+    // ordinary flow's does.
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it template flow");
+  });
+
+  it("renders nothing for a target naming a template that is not in the list, when the drawer is closed", () => {
+    // The same tolerance the flow path already has for a missing id: an
+    // `OrchTarget` naming something absent from its own list (and absent
+    // from `draftTemplate` too) resolves to no flow — and `open: false` is
+    // what actually closes the drawer over that (see the test above this
+    // one for why the fixture says so explicitly now).
+    const { container } = render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "no-such-template" }, templates: [template()], open: false,
+    })} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("shows the empty state, not a stale graph or nothing, for a template target that resolves to nothing", () => {
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "no-such-template" }, templates: [template()],
+    })} />);
+    expect(screen.getByText(/No workflow is open here/)).toBeTruthy();
   });
 
   it("shows the open flow's name in an editable field", () => {
@@ -152,10 +234,11 @@ describe("OrchestratorDrawer", () => {
     expect(screen.getByText(/add a node/i)).toBeTruthy();
   });
 
+  // The switcher is always visible on Canvas now — no disclosure to open
+  // first — since Templates moved off this panel onto its own top-level view.
   it("lets you switch to another flow", () => {
     const onOpen = vi.fn();
     render(<OrchestratorDrawer {...props({ onOpen, flows: [flow(), flow({ id: "f2", name: "Second" })] })} />);
-    fireEvent.click(screen.getByRole("button", { name: /flows/i }));
     fireEvent.click(screen.getByRole("button", { name: "Second" }));
     expect(onOpen).toHaveBeenCalledWith("f2");
   });
@@ -163,7 +246,6 @@ describe("OrchestratorDrawer", () => {
   it("creates a flow from the switcher", () => {
     const onCreate = vi.fn();
     render(<OrchestratorDrawer {...props({ onCreate })} />);
-    fireEvent.click(screen.getByRole("button", { name: /flows/i }));
     fireEvent.click(screen.getByRole("button", { name: "+ New flow" }));
     expect(onCreate).toHaveBeenCalled();
   });
@@ -196,6 +278,122 @@ describe("OrchestratorDrawer", () => {
     const del = screen.getByRole("button", { name: "Delete flow" });
     expect(del.className).toBe("orch-mini");
     expect(del.getAttribute("style")).toBeNull();
+  });
+});
+
+// Task 9: the old "Flows · N ▾" disclosure (a click-to-reveal panel with its
+// own Running/Templates sub-tablist) is gone, replaced by three top-level
+// screens — Active, Templates, Canvas — controlled by `view`/`onView`
+// (`DeckApp`'s state, not local: see `OrchView`'s own doc comment). This is
+// the shell only; a later task derives real `rows` from the board and adds
+// the two header buttons that set `view` from outside the drawer.
+describe("the three top-level views", () => {
+  it("offers Active, Templates and Canvas as top-level tabs, and no more", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getAllByRole("tab").map((t) => t.textContent)).toEqual(["Active", "Templates", "Canvas"]);
+  });
+
+  it("reflects `view` on aria-selected, and reflects it alone — not local state", () => {
+    render(<OrchestratorDrawer {...props({ view: "templates" })} />);
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Active" })).toHaveAttribute("aria-selected", "false");
+    expect(within(nav).getByRole("tab", { name: "Templates" })).toHaveAttribute("aria-selected", "true");
+    expect(within(nav).getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "false");
+  });
+
+  it("asks the caller to change the view rather than changing it itself", () => {
+    // `onView` is a plain mock here, wired to nothing — so clicking a tab
+    // must NOT change what renders (that would mean this component holds its
+    // own view state after all, defeating the whole point: a later task's
+    // header buttons set this from outside, and a control this component
+    // could override on its own click could disagree with them).
+    const onView = vi.fn();
+    render(<OrchestratorDrawer {...props({ view: "canvas", onView })} />);
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    fireEvent.click(within(nav).getByRole("tab", { name: "Active" }));
+    expect(onView).toHaveBeenCalledWith("active");
+    expect(screen.getByTestId("orch-canvas")).toBeTruthy(); // still Canvas — `view` prop never moved
+
+    fireEvent.click(within(nav).getByRole("tab", { name: "Templates" }));
+    expect(onView).toHaveBeenCalledWith("templates");
+    expect(screen.getByTestId("orch-canvas")).toBeTruthy();
+  });
+
+  it("no longer offers a Flows disclosure", () => {
+    render(<OrchestratorDrawer {...props()} />);
+    expect(screen.queryByText(/Flows ·/)).toBeNull();
+    expect(screen.queryByRole("tablist", { name: "Workflow list" })).toBeNull();
+    expect(screen.queryByRole("tab", { name: "Running" })).toBeNull();
+  });
+
+  it("mounts WorkflowList on Active, passing rows and wiring a click through onOpenCard", () => {
+    const onOpenCard = vi.fn();
+    const rows: WorkflowRow[] = [{
+      cardId: "c1", ticketKey: "PROJ-1", title: "Ship the migration",
+      workflow: {
+        flow: flow(),
+        state: { status: "advancing", done: 1, total: 3, steps: [] },
+        extraCount: 0,
+      },
+    }];
+    render(<OrchestratorDrawer {...props({ view: "active", rows, onOpenCard })} />);
+    expect(screen.getByText("PROJ-1")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /PROJ-1/ }));
+    expect(onOpenCard).toHaveBeenCalledWith("c1");
+  });
+
+  it("renders WorkflowList's own empty state when there are no rows yet", () => {
+    render(<OrchestratorDrawer {...props({ view: "active", rows: [] })} />);
+    expect(screen.getByText(/No workflows attached anywhere/)).toBeTruthy();
+    // And nothing of the Canvas or Templates screens leaks through alongside it.
+    expect(screen.queryByLabelText("Flow name")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Duplicate" })).toBeNull();
+  });
+
+  it("shows only the Templates screen's own content when view is templates — no Canvas controls leak through", () => {
+    render(<OrchestratorDrawer {...props({ view: "templates" })} />);
+    expect(screen.queryByLabelText("Flow name")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Save as template…" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Arm" })).toBeNull();
+  });
+
+  // THE blocker this task exists to fix: `if (!flow) return null` used to sit
+  // above every check of `view`, so with no flow open (a first-time user, or
+  // anyone who has never created a workflow) the WHOLE drawer rendered
+  // nothing — Active and Templates included. A first-time user with zero
+  // workflows could never reach Templates at all. Pinned with the exact
+  // shape a real first run has: no flows, no target open, and the built-in
+  // starters as the only templates.
+  it("renders the Templates screen with no flow open at all — the first-time-user shape", async () => {
+    render(<OrchestratorDrawer {...props({ flows: [], openId: null, view: "templates", templates: [...STARTERS] })} />);
+    for (const t of STARTERS) expect(await screen.findByText(t.name)).toBeTruthy();
+    // And still no Canvas leaking through, same guarantee the test above pins
+    // for the flow-open case.
+    expect(screen.queryByLabelText("Flow name")).toBeNull();
+  });
+
+  it("renders the Active screen with no flow open at all, same as Templates", () => {
+    render(<OrchestratorDrawer {...props({ flows: [], openId: null, view: "active" })} />);
+    expect(screen.getByText(/No workflows attached anywhere/)).toBeTruthy();
+  });
+
+  // `open` is `DeckApp`'s own "is the drawer showing at all" signal — the
+  // thing that answers "closed" for Active/Templates now that neither needs
+  // a flow resolved to render SOMETHING. Canvas needs no such check (its own
+  // `if (!flow) return null` already decides), which is exactly why every
+  // test elsewhere in this file never sets this prop and still passes: `open`
+  // absent is treated as shown.
+  it("renders nothing on Active or Templates when the caller says the drawer is closed", () => {
+    const { container, rerender } = render(<OrchestratorDrawer {...props({ view: "active", open: false })} />);
+    expect(container.firstChild).toBeNull();
+    rerender(<OrchestratorDrawer {...props({ view: "templates", open: false })} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("defaults to shown when `open` is not passed at all", () => {
+    render(<OrchestratorDrawer {...props({ view: "active", open: undefined })} />);
+    expect(screen.queryByRole("tablist", { name: "Orchestrator" })).not.toBeNull();
   });
 });
 
@@ -246,12 +444,20 @@ const pickFreeTextCommand = (): void => {
 // part of the drawer's own header, not flowList.tsx's concern); flowList.tsx
 // and its own test file cover what the list view renders and how its rows
 // behave once it is showing.
+//
+// Task 9 added a top-level tab ALSO named "Canvas" (Active/Templates/Canvas,
+// the drawer's own three screens), so a bare `getByRole("tab", { name:
+// "Canvas" })` now matches two elements. `canvasTab` scopes to this toggle's
+// own tablist (`aria-label="Flow view"`, pre-existing) so these assertions
+// keep meaning exactly what they always did.
+const canvasTab = () => within(screen.getByRole("tablist", { name: "Flow view" })).getByRole("tab", { name: "Canvas" });
+
 describe("the canvas/list view toggle", () => {
   it("defaults to the canvas — the toggle only ever narrows what a mouse user already had", () => {
     render(<OrchestratorDrawer {...props()} />);
     expect(screen.getByTestId("orch-canvas")).toBeTruthy();
     expect(screen.queryByTestId("orch-list")).toBeNull();
-    expect(screen.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
+    expect(canvasTab()).toHaveAttribute("aria-selected", "true");
     expect(screen.getByRole("tab", { name: "List" })).toHaveAttribute("aria-selected", "false");
   });
 
@@ -260,7 +466,7 @@ describe("the canvas/list view toggle", () => {
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
     expect(screen.queryByTestId("orch-canvas")).toBeNull();
     expect(screen.getByRole("tab", { name: "List" })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "false");
+    expect(canvasTab()).toHaveAttribute("aria-selected", "false");
   });
 
   it("renders the same flow's rules in the list — one model, two presentations", () => {
@@ -272,7 +478,7 @@ describe("the canvas/list view toggle", () => {
   it("switches back to the canvas", () => {
     render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
     fireEvent.click(screen.getByRole("tab", { name: "List" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Canvas" }));
+    fireEvent.click(canvasTab());
     expect(screen.getByTestId("orch-canvas")).toBeTruthy();
     expect(screen.queryByTestId("orch-list")).toBeNull();
   });
@@ -315,7 +521,7 @@ describe("the canvas/list view toggle", () => {
     const row1 = screen.getByTestId("flowlist-row-e1");
     row1.focus();
     fireEvent.keyDown(row1, { key: "Delete" });
-    fireEvent.click(screen.getByRole("tab", { name: "Canvas" }));
+    fireEvent.click(canvasTab());
     expect(screen.getByText(/select a connection/i)).toBeTruthy();
   });
 });
@@ -2604,6 +2810,149 @@ describe("the resume banner", () => {
   });
 });
 
+// Task 12: the verb gate. `shipItTemplate`/`dummyEdges` are declared further
+// down in this file (module scope, used by "the Templates tab" below) but
+// available here regardless — both are plain top-level `const`s referenced
+// only from inside these `it` callbacks, which vitest does not invoke until
+// the whole module (every describe/it registration) has already run.
+describe("template authoring mode", () => {
+  /** One WORKFLOW verb per line, matched against THIS file's own button text —
+   * not the generic seed list the brief for this task offered (which named
+   * `/attach workflow/i` and `/^detach$/i`). Those two live on `WorkflowBlock`
+   * (a card's own drawer, `onAttach`/`onDetach` there), never inside
+   * `OrchestratorDrawer.tsx`, and `wf` on that path is always a real, attached
+   * `Flow` — never a `FlowTemplate` — so there is no route from this
+   * component to either button; they are excluded here rather than padded in
+   * to match a list that cannot fire.
+   *
+   * This file's own "attach" is binding a live running card's repo into the
+   * graph as a `place` node (`attachAt`/`attachMany`), offered as "+ Add
+   * place…" and reachable only from the List tab — see `toList` below. The
+   * trigger's accessible name is actually its `aria-label` ("Add a place"),
+   * not its visible "+ Add place…" text (`MultiCombo`, combo.tsx) — the
+   * regex below matches that, not the glyph.
+   *
+   * Anchored (`^...$`) wherever the plain text is short enough to collide
+   * with a sibling control: "Disarm" (the resume banner's own button) vs. the
+   * Arm toggle's "Armed · disarm" is the exact collision "the resume banner"
+   * describe block above already documents for `getByRole`. Approve/Reject
+   * are not tested here at all — `gateStateOf` derives them from an edge's
+   * `performed`/`firedAt` stamps, which `toTemplate` strips on every edge via
+   * `stripHostStamps` (templates.ts), so they are unreachable by construction
+   * for ANY template, not merely hidden by this task's own gate; a regex for
+   * a button that no fixture in this file can ever render would test nothing. */
+  const WORKFLOW_VERBS = [
+    /^arm$/i,
+    /^disarm$/i,
+    /^go$/i,
+    /what would fire/i,
+    /save as template/i,
+    /add a place/i,
+  ];
+
+  /** "+ Add place…" renders only inside the List tab's own Add bar (the
+   * canvas tab's equivalent is a drag-and-drop-only tray with no button of
+   * its own) — the other five verbs live in the header, which renders
+   * identically regardless of this toggle, so switching once up front costs
+   * those five checks nothing. */
+  const toList = () => fireEvent.click(screen.getByRole("tab", { name: "List" }));
+
+  it("offers no workflow verb while editing a template", () => {
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "t1" }, templates: [shipItTemplate()],
+    })} />);
+    toList();
+    for (const v of WORKFLOW_VERBS) {
+      expect(screen.queryByRole("button", { name: v })).toBeNull();
+    }
+  });
+
+  it("still offers those verbs on a flow, so the gate is not just hiding everything", () => {
+    // Attachable: a planned node (`canBindTicket` true, so "Save as
+    // template…" is enabled rather than merely present) plus a pending
+    // resume keyed to this exact flow id, so "Go"/"Disarm" have something to
+    // answer. `armed: false` on purpose — the Arm toggle's OWN armed state
+    // renders "Armed · disarm" instead of "Arm", which would make the "Arm"
+    // half of this list vacuously fail to find anything to assert on; nothing
+    // in this component requires a flow to be armed before it can hold a
+    // pending resume; see `resume`'s own derivation, which never reads
+    // `flow.armed`.
+    const attachable = flow({
+      nodes: [
+        { id: "n1", kind: "planned", x: 24, y: 24, join: "any", ticketKey: "", repos: ["agent-flow"], mode: "quick", dest: "worktree" },
+      ],
+      edges: dummyEdges(1),
+    });
+    render(<OrchestratorDrawer {...props({
+      flows: [attachable],
+      openId: { kind: "flow", id: "f1" },
+      pendingResume: [{ flowId: "f1", flowName: "Ship the migration", lines: ["a rule is ready"] }],
+    })} />);
+    toList();
+    for (const v of WORKFLOW_VERBS) {
+      expect(screen.queryByRole("button", { name: v })).not.toBeNull();
+    }
+  });
+
+  it("shows no resume banner while editing a template, even when pendingResume names its inner flow id", () => {
+    // `toTemplate` mints a template's inner flow with `id: ""` (templates.ts)
+    // — a `pendingResume` entry keyed by that exact empty string is the
+    // adversarial case `resume`'s own derivation (`OrchestratorDrawer.tsx`)
+    // must refuse regardless of the coincidental id match, not merely one
+    // that happens not to occur in practice.
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "t1" }, templates: [shipItTemplate()],
+      pendingResume: [{ flowId: "", flowName: "Ship it", lines: ["a rule is ready"] }],
+    })} />);
+    expect(screen.queryByTestId("orch-resume")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Go" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Disarm" })).toBeNull();
+  });
+
+  it("still lets a template's own shape be edited — Notify, Gate and planned work stay offered", () => {
+    // The negative space this task's own scope draws: only the LIVE/ticket
+    // verbs are gone. Building the template's SHAPE — what a later attach
+    // will bind a ticket to — is still the whole point of opening it here.
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "t1" }, templates: [shipItTemplate()],
+    })} />);
+    expect(screen.getByRole("button", { name: "+ Notify" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ Gate" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "+ Add planned work" })).toBeTruthy();
+  });
+
+  it("+ Add planned work in template mode adds a planned node locally, with no host round trip", () => {
+    // Presence alone was the whole bug: the button rendered while editing a
+    // draft (`flow.id === ""`) and, ungated, sent `flow:addPlanned` — a
+    // message the host answers with `readFlows(...).find(f => f.id === "")`,
+    // which can never match a template's inner flow. Four QuickPicks, no
+    // node, no toast. What actually matters is the EFFECT of the click, not
+    // whether the control exists — see this test file's own module comment
+    // on `send` for why the ordinary (non-template) path goes through it.
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "t1" }, templates: [shipItTemplate()], onSave,
+    })} />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add planned work" }));
+    expect(send).not.toHaveBeenCalled();
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as Flow;
+    // shipItTemplate() seeds exactly one planned node (n1); the click must add
+    // a second one rather than replacing it or doing nothing.
+    expect(saved.nodes).toHaveLength(2);
+    const added = saved.nodes.find((n) => n.id !== "n1");
+    expect(added?.kind).toBe("planned");
+    // The exact blank shape `mintDraftTemplate` seeds (DeckApp.tsx) — bound at
+    // attach time by `instantiate`, never guessed here.
+    if (added?.kind === "planned") {
+      expect(added.ticketKey).toBe("");
+      expect(added.repos).toEqual([]);
+      expect(added.mode).toBe("");
+      expect(added.dest).toBe("worktree");
+    }
+  });
+});
+
 describe("Reset", () => {
   const firedFlow = () => flow({
     nodes: [
@@ -3440,7 +3789,13 @@ describe("the open and close animation", () => {
       const { container, rerender } = render(<OrchestratorDrawer {...props()} />);
       expect(aside(container)).not.toBeNull();
 
-      rerender(<OrchestratorDrawer {...props({ openId: null })} />);
+      // `open: false` alongside `openId: null` — a real dismissal, the shape
+      // `DeckApp`'s Close/Cancel/Save-done handlers actually send (both
+      // change together; see those props' own doc comments). Without it,
+      // Task 13's Canvas empty state would stand in the drawer's place once
+      // the slide-out finishes, rather than the drawer actually closing —
+      // see that empty-state branch's own `p.open === false` gate.
+      rerender(<OrchestratorDrawer {...props({ openId: null, open: false })} />);
       // Still in the DOM, or there would be nothing for the CSS to animate.
       const closing = aside(container);
       expect(closing).not.toBeNull();
@@ -3499,11 +3854,22 @@ describe("the open and close animation", () => {
 
   // A flow that disappears from under the drawer — another window deleted it,
   // and the host posts a list without it — is not a close. `openId` still
-  // names it, so there is no dismissal to animate and nothing on disk to draw.
-  it("vanishes at once when the open flow disappears from the list", () => {
+  // names it, so there is no dismissal to animate and nothing on disk to
+  // draw — but `DeckApp` deliberately leaves `orchOpen` alone in exactly
+  // this case (see that state's own doc comment: "Left ALONE when a flow
+  // disappears out from under an open Canvas"), so `p.open` here stays
+  // shown. Task 13 changed what "nothing to draw" renders as: this used to
+  // vanish outright (`if (!flow) return null`, unconditionally) — now it
+  // shows Canvas's own empty state instead, the same dead end this whole
+  // task removes everywhere else it could happen. Silently vanishing was
+  // never the honest answer to "the workflow you were just looking at is
+  // gone" — it looked identical to a user-initiated close, with nothing said
+  // about which had happened.
+  it("shows the empty state — not nothing — when the open flow disappears from the list", () => {
     const { container, rerender } = render(<OrchestratorDrawer {...props()} />);
     rerender(<OrchestratorDrawer {...props({ flows: [] })} />);
-    expect(aside(container)).toBeNull();
+    expect(aside(container)).not.toBeNull();
+    expect(screen.getByText(/No workflow is open here/)).toBeTruthy();
   });
 });
 
@@ -3596,7 +3962,11 @@ describe("the dry run", () => {
   it("says a rule is blocked, and why, when its source card is off the board", () => {
     const panel = openDryRun({ runs: [] });
     expect(panel.textContent).toContain("blocked");
-    expect(panel.textContent).toMatch(/not on the board/i);
+    // Wording moved to `reasonWhy` (orchestratorRule.ts), shared with the card
+    // drawer's own live stepper — "isn't on the board" now, not "is not on the
+    // board right now", because `gone` is a dead end while that stays true,
+    // not a transient absence (see `reasonWhy`'s own doc comment).
+    expect(panel.textContent).toMatch(/isn't on the board/i);
   });
 
   it("does not claim the pass will act on this verdict alone", () => {
@@ -4228,5 +4598,394 @@ describe("GATE_H and the stylesheet must agree", () => {
   // other, fails this.
   it("gives .orch-node.gate the exact height GATE_H names", () => {
     expect(ORCH_CSS).toContain(`.orch-node.gate { height: ${GATE_H}px; }`);
+  });
+});
+
+// Task 13: the Templates tab and the Save-as-template dialog. Until this
+// lands, nothing anywhere in the webview can create a template at all — the
+// attach picker built in an earlier task shows its empty state for every
+// user, no matter how many flows they have built.
+//
+// Five dummy edges, all pointing a node at itself — none of these tests ever
+// evaluate the template's own rules, only count and render them, so the
+// wiring only has to be well-typed, not meaningful.
+const dummyEdges = (n: number): FlowEdge[] =>
+  Array.from({ length: n }, (_, i) => ({ id: `e${i + 1}`, from: "n1", to: "n1", cond: { kind: "pr-merged" } }));
+
+const shipItTemplate = (over: Partial<FlowTemplate> = {}): FlowTemplate => ({
+  schema: TEMPLATE_SCHEMA,
+  id: "t1",
+  name: "Ship it",
+  params: {},
+  savedAt: 1_000,
+  flow: {
+    id: "", name: "Ship it", armed: false, createdAt: 0,
+    nodes: [
+      { id: "n1", kind: "planned", x: 24, y: 24, join: "any", ticketKey: "", repos: ["agent-flow"], mode: "quick", dest: "worktree" },
+    ],
+    edges: dummyEdges(5),
+  },
+  ...over,
+});
+
+/** Renders straight onto the Templates screen. Task 9 promoted Templates from
+ * a sub-tab behind the old "Flows · N ▾" disclosure to one of the drawer's
+ * three top-level, `DeckApp`-controlled views (see `OrchView`) — a real user
+ * now reaches it with a single click on the top-level "Templates" tab, and
+ * `view` is a controlled prop with no internal state backing it in this test
+ * file's plain `onView: vi.fn()`, so a click here would call the mock without
+ * changing what renders. Passing `view: "templates"` directly is what actually
+ * shows the screen these tests assert on. */
+const openTemplatesTab = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
+  render(<OrchestratorDrawer {...props({ view: "templates", ...over })} />);
+};
+
+describe("the Templates tab", () => {
+  it("lists templates on the Templates tab with their rule counts", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    expect(await screen.findByText("Ship it")).toBeTruthy();
+    expect(screen.getByText("5 rules")).toBeTruthy();
+  });
+
+  it("says how many cards a template is in use on, by Flow.fromTemplate", async () => {
+    const onCard = flow({ id: "f9", fromTemplate: "t1" });
+    openTemplatesTab({ templates: [shipItTemplate()], flows: [flow(), onCard] });
+    expect(await screen.findByText("on 1 card")).toBeTruthy();
+  });
+
+  // The lookup this task's own brief insists on: a flow that merely looks
+  // like the template's output (same name, same rule count) is NOT counted —
+  // only `fromTemplate` naming this template's id counts, because a workflow
+  // is free to diverge from its template's shape the instant it exists.
+  it("does not count a workflow that only looks like the template's output", async () => {
+    const lookalike = flow({ id: "f9", name: "Ship it", edges: dummyEdges(5) });
+    openTemplatesTab({ templates: [shipItTemplate()], flows: [flow(), lookalike] });
+    await screen.findByText("Ship it");
+    expect(screen.getByText("on 0 cards")).toBeTruthy();
+  });
+
+  it("offers no way to attach a template from here — one entry point, and it is the card", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    await screen.findByText("Ship it");
+    expect(screen.queryByRole("button", { name: /Attach/i })).toBeNull();
+    // And never a WORKFLOW verb ON THE ROW ITSELF — a template is not
+    // attached to anything, so it cannot be armed, disarmed or detached (see
+    // this task's own naming rule: Template is the shape, Workflow is a
+    // template on one card). Scoped to the row, not the whole drawer: the
+    // OPEN flow behind this switcher keeps its own real Arm button, and that
+    // is a workflow's control, not a claim this row is making.
+    const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    expect(within(row).queryByRole("button", { name: /^Arm$/i })).toBeNull();
+    expect(within(row).queryByRole("button", { name: /disarm/i })).toBeNull();
+    expect(within(row).queryByRole("button", { name: /detach/i })).toBeNull();
+    // Edit is a TEMPLATE verb (it reopens the shape itself), not a workflow one,
+    // so it belongs on this row exactly as Duplicate/Rename/Delete do.
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Edit", "Rename", "Delete"]);
+  });
+
+  it("duplicates a template", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    fireEvent.click(await screen.findByRole("button", { name: "Duplicate" }));
+    expect(send).toHaveBeenCalledWith({ type: "flow:duplicateTemplate", templateId: "t1" });
+  });
+
+  it("renames a template on blur, not per keystroke", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    fireEvent.click(await screen.findByRole("button", { name: "Rename" }));
+    const input = screen.getByLabelText("Rename Ship it");
+    fireEvent.change(input, { target: { value: "Ship it fast" } });
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.blur(input);
+    expect(send).toHaveBeenCalledWith({ type: "flow:renameTemplate", templateId: "t1", name: "Ship it fast" });
+  });
+
+  it("deleting a template confirms first, and says what will and won't happen", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    expect(await screen.findByText(/Delete “Ship it”\?/)).toBeTruthy();
+    expect(screen.getByText(/keep running/i)).toBeTruthy();
+    expect(send).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete" }));
+    expect(send).toHaveBeenCalledWith({ type: "flow:deleteTemplate", templateId: "t1" });
+  });
+
+  it("cancelling the delete confirmation sends nothing", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    fireEvent.click(await screen.findByRole("button", { name: "Delete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText(/Delete “Ship it”\?/)).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  // Task 13: a "＋ New template…" button lives here again — an earlier
+  // draft offered one with this exact name too, wired to `onCreate`, which
+  // actually builds an ordinary WORKFLOW on the Running tab and leaves
+  // Templates exactly as empty as it was (see the removal's own history:
+  // commit 8d6ec5b8). That was the wrong verb, not the wrong idea — this one
+  // is `onNewTemplate`, which mints a TEMPLATE held only in memory
+  // (`DeckApp`'s own `draftTemplate`) until its own Save is pressed. Pinned
+  // by NEVER calling `onCreate`, the same property the removed test above
+  // pinned, plus that the restored button actually reaches the new verb.
+  it("offers ＋ New template…, wired to onNewTemplate and never onCreate", async () => {
+    const onCreate = vi.fn();
+    const onNewTemplate = vi.fn();
+    openTemplatesTab({ templates: [shipItTemplate()], onCreate, onNewTemplate });
+    await screen.findByText("Ship it");
+    fireEvent.click(screen.getByRole("button", { name: /new template/i }));
+    expect(onNewTemplate).toHaveBeenCalled();
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("explains where a template comes from when there are none yet", () => {
+    openTemplatesTab({ templates: [] });
+    expect(screen.getByText(/No templates yet/)).toBeTruthy();
+  });
+
+  it("does not show the empty-state explanation once a template exists", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    await screen.findByText("Ship it");
+    expect(screen.queryByText(/No templates yet/)).toBeNull();
+  });
+
+  // Task 14: a built-in ships with the SAME `FlowTemplate` shape a user's own
+  // template has — the only signal this row can key off is the id prefix
+  // `isBuiltinTemplateId` checks, the same predicate the host uses before
+  // refusing a rename/delete/overwrite. Using a real STARTERS entry, not a
+  // hand-rolled id starting with "builtin-", so this test would catch the
+  // predicate and the fixture drifting apart, not just the row's own logic.
+  it("marks a built-in row as built-in", async () => {
+    const starter = STARTERS[0];
+    openTemplatesTab({ templates: [starter] });
+    await screen.findByText(starter.name);
+    const row = screen.getByText(starter.name).closest(".orch-tmpl-row") as HTMLElement;
+    expect(within(row).getByText("Built-in")).toBeTruthy();
+  });
+
+  // Duplicate is the one supported path to owning an editable copy of a
+  // built-in — it must stay enabled. Rename and Delete are ABSENT (this
+  // component's own doc comment explains why absent rather than disabled):
+  // asserting the row's full button list, not just that two names are
+  // missing, so a future third verb sneaking onto a built-in row fails here
+  // too.
+  it("offers Duplicate on a built-in but not Rename or Delete", async () => {
+    const starter = STARTERS[0];
+    openTemplatesTab({ templates: [starter] });
+    await screen.findByText(starter.name);
+    const row = screen.getByText(starter.name).closest(".orch-tmpl-row") as HTMLElement;
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate"]);
+  });
+
+  // The counterpart to the built-in test above: the gate must not be "hide
+  // everything everywhere" — a template the user actually owns keeps its
+  // full verb set. (The same shape `shipItTemplate()` already pins via the
+  // "offers no way to attach…" test above; this one isolates just the
+  // three-button claim under this task's own name.)
+  it("offers all four verbs — Duplicate, Edit, Rename, Delete — on a user template", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    await screen.findByText("Ship it");
+    const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Edit", "Rename", "Delete"]);
+  });
+
+  // Edit is the other half of "directly authorable", and what makes the
+  // built-in refusal's own advice ("Duplicate it to make a version you can
+  // change") true: a saved template the user owns can be reopened. The row
+  // only ASKS — `DeckApp` owns the copy-into-draft and the target — so this
+  // pins the wiring by id, the same way the Duplicate/Rename/Delete tests
+  // above pin theirs.
+  it("Edit on a user template asks DeckApp to open that template by id", async () => {
+    const onEditTemplate = vi.fn();
+    openTemplatesTab({ templates: [shipItTemplate()], onEditTemplate });
+    await screen.findByText("Ship it");
+    const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    expect(onEditTemplate).toHaveBeenCalledWith("t1");
+  });
+
+  // `onCards` is a lookup the CALLER does (`Flow.fromTemplate === t.id`) and
+  // is handed to `TemplateRow` unchanged — built-in-ness must not touch it.
+  it("still counts how many cards a built-in is on", async () => {
+    const starter = STARTERS[0];
+    const onCard = flow({ id: "f9", fromTemplate: starter.id });
+    openTemplatesTab({ templates: [starter], flows: [flow(), onCard] });
+    await screen.findByText(starter.name);
+    expect(screen.getByText("on 1 card")).toBeTruthy();
+  });
+});
+
+describe("Save as template", () => {
+  // A DOM-position assertion, not merely "exists somewhere in the drawer":
+  // the button shares its actual parent with Arm, and does NOT share a
+  // parent with "Delete flow" (a real but different control, in the
+  // header's own row) — which is what "sits beside" has to mean to be worth
+  // asserting at all.
+  it("sits in the same row as the flow's own Arm control, not merely somewhere in the drawer", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    const save = screen.getByRole("button", { name: "Save as template…" });
+    const arm = screen.getByRole("button", { name: "Arm" });
+    const deleteFlow = screen.getByRole("button", { name: "Delete flow" });
+    expect(save.parentElement).toBe(arm.parentElement);
+    expect(save.parentElement).not.toBe(deleteFlow.parentElement);
+  });
+
+  it("is disabled on a flow with no steps — toTemplate refuses one anyway", () => {
+    render(<OrchestratorDrawer {...props({ flows: [flow()] })} />);
+    expect(screen.getByRole("button", { name: "Save as template…" })).toBeDisabled();
+  });
+
+  // A flow `toTemplate` would happily save (it only throws on an EMPTY flow)
+  // but `instantiate` would then refuse forever, at every single attach,
+  // because there is no place or planned node to bind a ticket to. Disabling
+  // this button is the only thing that stops such a template from ever
+  // reaching the picker in the first place.
+  it("is disabled on a flow built only of command / gate / notify nodes, and says why", () => {
+    const commandOnly = flow({
+      nodes: [
+        { id: "n1", kind: "command", x: 0, y: 0, join: "any", run: "echo hi" },
+        { id: "n2", kind: "notify", x: 40, y: 0, join: "any", message: "done" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "command-succeeded" } }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [commandOnly] })} />);
+    const save = screen.getByRole("button", { name: "Save as template…" });
+    expect(save).toBeDisabled();
+    expect(save).toHaveAttribute("title");
+  });
+
+  it("stays enabled, with no title, on a flow with at least one place", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    const save = screen.getByRole("button", { name: "Save as template…" });
+    expect(save).not.toBeDisabled();
+    expect(save).not.toHaveAttribute("title");
+  });
+
+  it("asks for a name, plus a prompt mode and a destination per demoted place", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    expect(screen.getByLabelText("Name")).toBeTruthy();
+    expect(screen.getAllByLabelText(/prompt mode/i)).toHaveLength(2);
+    expect(screen.getAllByLabelText(/destination/i)).toHaveLength(2);
+  });
+
+  // Prefilling is fine; inventing is not. Both values must be VISIBLE and
+  // CHANGEABLE before Save — a guessed destination is exactly the defect
+  // this dialog exists to prevent (see templates.ts's own doc comment on
+  // `DemotionChoice`).
+  it("prefills the configured default mode and worktree, visibly and changeably", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    const [mode1] = screen.getAllByLabelText(/prompt mode/i) as HTMLSelectElement[];
+    const [dest1] = screen.getAllByLabelText(/destination/i) as HTMLSelectElement[];
+    expect(mode1.value).toBe("quick"); // MODES[0].id — the configured default
+    expect(dest1.value).toBe("worktree");
+    fireEvent.change(mode1, { target: { value: "careful" } });
+    expect(mode1.value).toBe("careful");
+  });
+
+  it("disables Save until a name is typed", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ship it" } });
+    expect(screen.getByRole("button", { name: "Save" })).not.toBeDisabled();
+  });
+
+  it("sends flow:saveTemplate with one choice per place, using the prefilled defaults", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ship it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(send).toHaveBeenCalledWith({
+      type: "flow:saveTemplate", id: "f1", name: "Ship it",
+      choices: [
+        { nodeId: "n1", mode: "quick", dest: "worktree" },
+        { nodeId: "n2", mode: "quick", dest: "worktree" },
+      ],
+    });
+  });
+
+  it("sends a changed mode/destination, not the prefill it replaced", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    const [mode1] = screen.getAllByLabelText(/prompt mode/i);
+    const [, dest2] = screen.getAllByLabelText(/destination/i);
+    fireEvent.change(mode1, { target: { value: "careful" } });
+    fireEvent.change(dest2, { target: { value: "new-window" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ship it" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(send).toHaveBeenCalledWith({
+      type: "flow:saveTemplate", id: "f1", name: "Ship it",
+      choices: [
+        { nodeId: "n1", mode: "careful", dest: "worktree" },
+        { nodeId: "n2", mode: "quick", dest: "new-window" },
+      ],
+    });
+  });
+
+  // Distinct from "disables Save until a name is typed" above: that one
+  // covers a literally empty field, this one covers a field that LOOKS
+  // non-empty but trims to nothing — proving the disabled check and the
+  // send both key off the trimmed value, not raw non-emptiness.
+  it("keeps Save disabled — and sends nothing — for a name that is only whitespace", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "   " } });
+    const saveBtn = screen.getByRole("button", { name: "Save" });
+    expect(saveBtn).toBeDisabled();
+    fireEvent.click(saveBtn);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  // Important 2 from review: the switcher stays reachable while this dialog
+  // sits open, so nothing used to stop a user from opening it on flow A,
+  // typing a name, then using "Flows · N" to look at flow B — leaving the
+  // dialog open, still showing A's typed name, now rendering B's OWN place
+  // rows, and ready to send that name against B's id on the next Save. This
+  // is a WRITE, unlike the dry-run panel (a read that recomputes fresh off
+  // whichever flow is current and is left alone — see the effect's own
+  // comment for why).
+  it("closes itself, unsent, the moment the open flow changes — switching must not save the wrong workflow", () => {
+    const flowA = twoPlaces();
+    const flowB = flow({
+      id: "f2", name: "Other",
+      nodes: [{ id: "m1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-9", repo: "r" }],
+    });
+    const { rerender } = render(<OrchestratorDrawer {...props({ flows: [flowA, flowB] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Ship it" } });
+    expect(screen.getByLabelText("Name")).toHaveValue("Ship it");
+
+    rerender(<OrchestratorDrawer {...props({ flows: [flowA, flowB], openId: { kind: "flow", id: "f2" } })} />);
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+
+    // And reopening on the NEW flow starts blank — nothing typed for A
+    // survives into B's own dialog.
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    expect(screen.getByLabelText("Name")).toHaveValue("");
+  });
+
+  it("Cancel closes the dialog and sends nothing", () => {
+    render(<OrchestratorDrawer {...props({ flows: [twoPlaces()] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByLabelText("Name")).toBeNull();
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("asks nothing about places when the flow demotes none — a bare Name field", () => {
+    // A planned node, not a bare notify: this is the "demotes none" case
+    // (there is no PLACE to ask about), not the "cannot bind a ticket at
+    // all" case `canBindTicket` now disables the button for — a notify-only
+    // flow used to sit here before that guard existed, but that flow could
+    // never actually be saved once fixed, since it has nothing to bind.
+    render(<OrchestratorDrawer {...props({ flows: [flow({ nodes: [
+      { id: "n1", kind: "planned", x: 24, y: 24, join: "any", ticketKey: "", repos: ["r"], mode: "quick", dest: "worktree" },
+      { id: "n2", kind: "notify", x: 64, y: 24, join: "any", message: "done" },
+    ] })] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Save as template…" }));
+    expect(screen.getByLabelText("Name")).toBeTruthy();
+    expect(screen.queryAllByLabelText(/prompt mode/i)).toHaveLength(0);
+    expect(screen.queryAllByLabelText(/destination/i)).toHaveLength(0);
   });
 });

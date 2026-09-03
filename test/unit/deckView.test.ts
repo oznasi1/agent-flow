@@ -10,9 +10,10 @@ import type { ForgeGap } from "../../src/engine/forge/types";
 import type { TaskConnector, TaskProvider } from "../../src/tasks/provider";
 import type { CommandNode, Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
 import { BRANCH_CI_ARGS, branchCiKey } from "../../src/engine/orchestrator/branchCi";
+import { STARTERS } from "../../src/engine/orchestrator/starters";
 import { GH_TIMEOUT_MS } from "../../src/engine/pr/provider";
 import type { AgentProvider, AgentProviderSetting } from "../../src/config";
-import type { FlowCommand } from "../../src/types";
+import type { DemotionChoice, FlowCommand, FlowTemplate } from "../../src/types";
 import { attentionKeys } from "../../src/engine/attention";
 import { forgeNote } from "../../src/deckView";
 
@@ -191,6 +192,13 @@ const h = vi.hoisted(() => ({
   readFlows: vi.fn((): Flow[] => []),
   writeFlow: vi.fn(),
   removeFlow: vi.fn(),
+  // Templates (Task 8): the on-disk store beside flows, mocked the same honest
+  // way — a write actually updates `templates`, so a read that follows a write
+  // in the same test sees it, exactly as the real file-per-id store would.
+  templates: [] as FlowTemplate[],
+  readTemplates: vi.fn((): FlowTemplate[] => []),
+  writeTemplate: vi.fn(),
+  removeTemplate: vi.fn(),
   // The flows-directory lock (Task 5). Granted by default, so every flow test
   // that is not about contention behaves as it did before the lock existed; a
   // test about a busy directory says so with mockReturnValue(false).
@@ -428,6 +436,10 @@ vi.mock("../../src/engine/orchestrator/store", async (importActual) => {
     readFlows: () => h.readFlows(),
     writeFlow: h.writeFlow,
     removeFlow: h.removeFlow,
+    defaultTemplatesDir: () => "/templates",
+    readTemplates: () => h.readTemplates(),
+    writeTemplate: h.writeTemplate,
+    removeTemplate: h.removeTemplate,
     // `journal.ts` turns a flow id straight into a path and checks it against the
     // SAME charset regex `fileFor` uses, from this module. It is re-exported real
     // rather than restated, because a second copy of that rule here could drift
@@ -471,7 +483,13 @@ vi.mock("../../src/engine/orchestrator/flowIo", () => ({
       h.journalLines.push(text.trimEnd());
     },
     size: () => null,
-    readFile: () => null,
+    // Reflects back whatever `h.journalLines` holds — real lines, checksum and
+    // all, whether they arrived via this same `append` or were seeded directly
+    // by a test with the real `appendEvent` (see `seedJournal` below) — so
+    // `flow:openOutput`'s real `readJournal` call has something honest to
+    // read. `null` (not `""`) when there is nothing, matching `JournalIo`'s own
+    // contract that a missing journal reads as empty, never as an error.
+    readFile: () => (h.journalLines.length > 0 ? `${h.journalLines.join("\n")}\n` : null),
     replace: () => {},
   }),
 }));
@@ -606,7 +624,7 @@ import { COMMAND_TIMEOUT_MS } from "../../src/engine/orchestrator/command";
 // a test that restated the number could not catch the call site passing a literal.
 // The real thresholds `truncateOutput` elides at — restating them here could not
 // catch the call site dropping the call.
-import { OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES } from "../../src/engine/orchestrator/journal";
+import { OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES, appendEvent, JournalEventInput } from "../../src/engine/orchestrator/journal";
 import { LOCK_TTL_MS } from "../../src/engine/orchestrator/lock";
 import { ACTION_MISMATCH_PREFIX } from "../../src/engine/orchestrator/model";
 import { PR_REVIEW_AUTOFIX_CLAUSE } from "../../src/engine/prompt";
@@ -695,6 +713,19 @@ const settled = () => new Promise<void>((r) => setTimeout(r, 0));
 
 /** The journal events this pass recorded, parsed. Order is write order. */
 const journal = () => h.journalLines.map((l) => JSON.parse(l) as Record<string, unknown>);
+
+/** Seeds `h.journalLines` with a real, correctly checksummed line — through the
+ * REAL `appendEvent`, not a hand-built JSON string — so `flow:openOutput`'s own
+ * `readJournal` call (also the real function, via the mocked `nodeJournalIo`
+ * above) has genuine lines to parse rather than something only shaped like
+ * one. `dir` and `mint` do not matter here: the mocked `append` ignores its
+ * path argument, and this suite does not assert on ids. */
+const seedJournal = (flowId: string, ev: JournalEventInput, nowMs: number): void => {
+  appendEvent(
+    { append: (_p, text) => h.journalLines.push(text.trimEnd()), size: () => null, readFile: () => null, replace: () => {} },
+    "/unused", flowId, ev, nowMs,
+  );
+};
 
 /** The gh probe is kicked off inside the very tick that reads it, so it can
  * never be resolved by the time that same tick's `ghReady()` call returns —
@@ -822,6 +853,13 @@ beforeEach(() => {
     h.flows = i >= 0 ? h.flows.map((f, idx) => (idx === i ? flow : f)) : [...h.flows, flow];
   });
   h.removeFlow.mockClear();
+  h.templates = [];
+  h.readTemplates.mockClear().mockImplementation(() => h.templates);
+  h.writeTemplate.mockClear().mockImplementation((_io: unknown, _dir: string, t: FlowTemplate) => {
+    const i = h.templates.findIndex((x) => x.id === t.id);
+    h.templates = i >= 0 ? h.templates.map((x, idx) => (idx === i ? t : x)) : [...h.templates, t];
+  });
+  h.removeTemplate.mockClear();
   h.commands = [];
   h.exec.mockClear().mockImplementation((_command: string, _opts: unknown, cb: ExecCallback) => {
     cb(null, "deployed 3 services", "warning: slow");
@@ -2234,6 +2272,32 @@ describe("DeckPanel local cards", () => {
     await settled();
     const local = lastRunsPost().runs.find((r: RunStatus) => r.run.kind === "local")!;
     expect(local.inferredTicketKey).toBeUndefined();
+  });
+
+  // A TRACKED run, not a local one, but the same field and the same reason: the
+  // wire has to carry the ticket key wherever the record's own key is not it, or
+  // the webview — which has no connector to parse a url with — binds a workflow
+  // by a hash while `flow:attach` binds it by the ticket. `track()` produces
+  // exactly this record: a promoted local card keeps its place-hash key when a
+  // real run already owned the inferred key, and its ticket then lives only in
+  // the url. See attach.ts's `boundTicketKeyOf`, which is `inferredTicketKey ??
+  // run.key`, and is only equal to `ticketKeyFor` because of this.
+  it("sends the ticket key for a Track-it run still keyed by its place hash", async () => {
+    h.runs = [mkRun({ key: "local-webapp-9f2c1a4", url: "https://jira/browse/PROJ-5641" })];
+    h.openSessions = [];
+    show(true);
+    await settled();
+    const tracked = lastRunsPost().runs.find((r: RunStatus) => r.run.key === "local-webapp-9f2c1a4")!;
+    expect(tracked.inferredTicketKey).toBe("PROJ-5641");
+  });
+
+  it("omits it on a launched run, whose own key already IS its ticket", async () => {
+    h.runs = [mkRun({ key: "PROJ-1", url: "https://jira/browse/PROJ-1" })];
+    h.openSessions = [];
+    show(true);
+    await settled();
+    const tracked = lastRunsPost().runs.find((r: RunStatus) => r.run.key === "PROJ-1")!;
+    expect(tracked.inferredTicketKey).toBeUndefined();
   });
 
   it("does not make a second card for a place a tracked run already owns", async () => {
@@ -5715,6 +5779,594 @@ describe("orchestrator flows", () => {
     // Not even the first question gets asked — the setting gate is checked
     // before the connector is ever touched.
     expect(window.showQuickPick).not.toHaveBeenCalled();
+  });
+
+  // A template is a workflow's shape with the ticket taken out (templates.ts).
+  // One planned node by default — enough to instantiate against — with a fresh
+  // `nodes` array per call so a test that mutates one fixture's nodes cannot
+  // bleed into another's.
+  const mkTemplate = (id: string, name: string, nodes: FlowNode[] = [
+    { id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["aws-ops"], mode: "plan", dest: "worktree" },
+  ]): FlowTemplate => ({
+    schema: 1, id, name, params: {}, savedAt: 1_000,
+    flow: { id: "unused", name, armed: false, createdAt: 0, nodes, edges: [] },
+  });
+
+  describe("flow:attach — instantiating a template onto a card (Task 8)", () => {
+    it("writes a disarmed workflow bound to the card's ticket", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "k1" });
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      expect(written.armed).toBe(false);
+      expect(
+        written.nodes.filter((n) => n.kind === "planned")
+          .every((n) => (n as { ticketKey: string }).ticketKey === "PROJ-142"),
+      ).toBe(true);
+      // launchConfirmedAt/commandConfirmedAt are never set here — that is
+      // instantiate()'s own contract (templates.test.ts pins it), not this
+      // handler's, so it is not re-pinned here.
+    });
+
+    it("derives the ticket key from the run's url when a run is on the board", async () => {
+      // ticketKeyFor, not runKey verbatim: a promoted local card can be saved
+      // under a place-hash key while its ticket lives only in the run's url
+      // (see ticketKeyFor's own comment in types.ts) — the same derivation
+      // every other card action already goes through.
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      h.runs = [mkRun({ key: "hash-abc123", url: "https://jira/browse/PROJ-99" })];
+      const { send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "hash-abc123", templateId: "k1" });
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      const planned = written.nodes.find((n) => n.kind === "planned") as { ticketKey: string };
+      expect(planned.ticketKey).toBe("PROJ-99");
+    });
+
+    it("refuses when a workflow is already attached and replace is absent", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      h.flows = [{
+        id: "f-old", name: "Already running", armed: true, createdAt: 500,
+        nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-142", repo: "aws-ops" }],
+        edges: [],
+      }];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "k1" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/already/i);
+      expect(toast?.message).toContain("Already running");
+    });
+
+    it("with replace detaches the old workflow first", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      h.flows = [{
+        id: "f-old", name: "Already running", armed: true, createdAt: 500,
+        nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-142", repo: "aws-ops" }],
+        edges: [],
+      }];
+      const { send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "k1", replace: true });
+      expect(h.removeFlow).toHaveBeenCalledWith(expect.anything(), "/flows", "f-old");
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      // Not just "a write happened" — the replacement is the freshly
+      // instantiated workflow, bound to the card's ticket, not the old flow
+      // (which has no planned node at all) written back untouched.
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      const planned = written.nodes.find((n) => n.kind === "planned") as { ticketKey: string } | undefined;
+      expect(planned?.ticketKey).toBe("PROJ-142");
+    });
+
+    it("warns when the template is no longer on disk", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "missing" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/no longer on disk/i);
+    });
+
+    it("warns, rather than writing a rootless workflow, for a template with no planned step", async () => {
+      // instantiate() throws for exactly this shape: a graph of notifications
+      // with nothing to bind the ticket to.
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Notify only", [
+        { id: "n1", x: 0, y: 0, join: "any", kind: "notify", message: "hi" },
+      ])];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-142", templateId: "k1" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/no planned step/i);
+    });
+
+    // The bug this task fixes: a built-in starter is never on disk
+    // (`readTemplates` skips a file claiming a `builtin-` id, store.ts), and
+    // this handler used to look the template up ONLY on disk — so attaching
+    // any of the three starters the drawer offers always hit the "no longer
+    // on disk" refusal above. `allTemplates()` (deckView.ts) is what makes a
+    // starter resolvable here. The starter's own planned node carries no
+    // `repos`/`mode` (starters.ts, deliberately), so this also exercises
+    // `instantiate`'s fallback onto the card's repos and the config's prompt
+    // modes — h.runs supplies the former, the config mock's default
+    // `promptModes` the latter.
+    it("attaches a built-in starter onto a card", async () => {
+      setConfig({ orchestrator: true });
+      h.runs = [mkRun()];
+      // `mkRun()`'s checkout is named "svc" — on disk here too, so the fallback
+      // onto the card's own repos (below) has something real to resolve to. See
+      // "refuses, at the click, when a local card's repos aren't on disk" for the
+      // case where it is not.
+      h.repos = [{ name: "svc", path: "/r/svc", isGit: true }];
+      const { send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-1", templateId: "builtin-ship-it" });
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      expect(written.fromTemplate).toBe("builtin-ship-it");
+      const planned = written.nodes.find((n) => n.kind === "planned") as
+        { ticketKey: string; repos: string[] } | undefined;
+      expect(planned?.ticketKey).toBe("PROJ-1");
+      // The starter's planned node ships with `repos: []` on purpose
+      // (starters.ts) — `instantiate` falls back to the card's own repos,
+      // which is `mkRun()`'s single "svc" checkout.
+      expect(planned?.repos).toEqual(["svc"]);
+    });
+
+    // The defect this task's own review found: `run.repos[].name` is the
+    // checkout name ONLY for a run Agent Flow itself launched. For a LOCAL
+    // card (localRuns.ts) it is synthesized from the worktree's folder path,
+    // which can name something `discoverRepos` does not recognize — a
+    // hand-made worktree, or a repo outside `agentFlow.reposRoot`. Before this
+    // fix, `instantiate` would happily build a workflow around that name, the
+    // card would look attached, and the launch rule would fail ~6s later with
+    // "isn't checked out under your repos root" — the edge latching stopped
+    // with no actionable moment. Now the mismatch is caught here, at the
+    // click, as instantiate's own "no repo to launch in" refusal.
+    it("refuses, at the click, when a local card's repos aren't on disk under agentFlow.reposRoot", async () => {
+      setConfig({ orchestrator: true });
+      // A local card whose checkout path.basename is "side-quest" — not
+      // reported by discoverRepos, which only sees what's under reposRoot.
+      h.runs = [mkRun({ repos: [{ name: "side-quest", path: "/elsewhere/side-quest", isGit: true, branch: "b" }] })];
+      h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-1", templateId: "builtin-ship-it" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/no repo to launch in/i);
+    });
+
+    it("keeps only the repos that resolve on disk, rather than dropping the whole attach", async () => {
+      // A partial mismatch is worse silently: before this fix, an unresolved
+      // repo among several was dropped with only an output-channel line, and
+      // the session launched missing a repo the card claimed. Now the
+      // resolvable one still attaches (the template itself names no repos, so
+      // this exercises the fallback with a MIX of good and bad names).
+      setConfig({ orchestrator: true });
+      h.runs = [mkRun({
+        repos: [
+          { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
+          { name: "side-quest", path: "/elsewhere/side-quest", isGit: true, branch: "b" },
+        ],
+      })];
+      h.repos = [{ name: "svc", path: "/r/svc", isGit: true }];
+      const { send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-1", templateId: "builtin-ship-it" });
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      const planned = written.nodes.find((n) => n.kind === "planned") as { repos: string[] } | undefined;
+      expect(planned?.repos).toEqual(["svc"]);
+    });
+  });
+
+  describe("flow:detach — removing an attached workflow (Task 8)", () => {
+    it("removes the workflow's flow file", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:detach", id: "f1" });
+      expect(h.removeFlow).toHaveBeenCalledWith(expect.anything(), "/flows", "f1");
+    });
+
+    it("ignores an id that is not in the store", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [mkFlow("f1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:detach", id: "intruder" });
+      expect(h.removeFlow).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("flow:saveTemplate — saving a flow as a reusable template (Task 8)", () => {
+    it("demotes places using the choices it was given", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [{
+        id: "f1", name: "Ship it", armed: false, createdAt: 1_000,
+        nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" }],
+        edges: [],
+      }];
+      const { send } = await openPanel();
+      await send({
+        type: "flow:saveTemplate", id: "f1", name: "Ship it",
+        choices: [{ nodeId: "n1", mode: "plan", dest: "worktree" }] satisfies DemotionChoice[],
+      });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const t = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(t.name).toBe("Ship it");
+      expect(t.flow.nodes[0]).toMatchObject({ kind: "planned", mode: "plan", dest: "worktree", ticketKey: "" });
+    });
+
+    it("refuses a flow whose id is not in the store", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [];
+      const { send } = await openPanel();
+      await send({ type: "flow:saveTemplate", id: "nope", name: "x", choices: [] });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+
+    it("warns, rather than writing an unusable template, when a place has no demotion choice", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [{
+        id: "f1", name: "Ship it", armed: false, createdAt: 1_000,
+        nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" }],
+        edges: [],
+      }];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:saveTemplate", id: "f1", name: "Ship it", choices: [] });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/no prompt mode and destination chosen/i);
+    });
+
+    // The drawer's own button already disables "Save as template…" for this
+    // shape (`canBindTicket`, templates.ts) — but that guard lives in a
+    // webview, which can be stale (open from before it shipped, or simply not
+    // re-rendered), and this handler is the one place that actually writes to
+    // disk. Without a refusal here, a command/gate/notify-only flow saves
+    // cleanly (`toTemplate` only throws on an EMPTY flow) and then fails
+    // `instantiate` at every single future attach, forever.
+    it("refuses a flow with no place or planned node — nothing for a saved template to ever bind a ticket to", async () => {
+      setConfig({ orchestrator: true });
+      h.flows = [{
+        id: "f1", name: "Notify only", armed: false, createdAt: 1_000,
+        nodes: [{ id: "n1", kind: "notify", x: 0, y: 0, join: "any", message: "done" }],
+        edges: [],
+      }];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:saveTemplate", id: "f1", name: "Notify only", choices: [] });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/nothing to bind|no step/i);
+    });
+  });
+
+  describe("flow:writeTemplate — the canvas's own save, create and update in one message (Task 12b)", () => {
+    // A graph the canvas could plausibly have open: one planned node, so
+    // `canBindTicket` passes. `id` is deliberately a real-looking flow id —
+    // the whole point of the normalization under test is that it never
+    // survives into the saved template.
+    const okFlow: Flow = {
+      id: "canvas-draft", name: "Ship it", armed: true, createdAt: 1_000,
+      nodes: [
+        { id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["aws-ops"], mode: "plan", dest: "worktree" },
+      ],
+      edges: [],
+    };
+
+    it("create (no templateId): mints a fresh, non-built-in id and normalizes the inner flow.id away", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:writeTemplate", name: "New template", flow: okFlow });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const t = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(t.id).not.toBe("");
+      expect(t.id.startsWith("builtin-")).toBe(false);
+      expect(t.name).toBe("New template");
+      // The inner flow's id is inert (nothing resolves it) and leaking the
+      // canvas's real on-disk flow id into a saved template would be
+      // misleading — normalized away exactly as `toTemplate` normalizes it.
+      expect(t.flow.id).toBe("");
+      expect(t.flow.nodes).toEqual(okFlow.nodes);
+    });
+
+    // `toTemplate` normalizes a whole set of fields on the inner flow, not just
+    // `id` (see `normalizedTemplateFlow`, templates.ts): a template's stored
+    // flow is a SHAPE, never a live workflow's history. Fix-round finding:
+    // the first cut of this handler only normalized `id`, so the same graph
+    // saved through `flow:saveTemplate` and through this new path produced two
+    // different stored templates. `launchConfirmedAt`/`commandConfirmedAt`
+    // live on `Flow` itself, not on an edge — `instantiate` still strips edge
+    // host stamps again on its own copy (`templates.ts:123`), so this is not a
+    // consent hole either way, but a stored template carrying any of this is
+    // meaningless or misleading state that should never have been written.
+    it("normalizes the inner flow like toTemplate does: armed, createdAt, flow-level consent stamps, and every edge's host stamps are all cleared", async () => {
+      setConfig({ orchestrator: true });
+      const dirtyFlow: Flow = {
+        id: "canvas-draft", name: "Ship it", armed: true, createdAt: 1_000,
+        launchConfirmedAt: 2_000, commandConfirmedAt: 3_000,
+        nodes: [
+          { id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["aws-ops"], mode: "plan", dest: "worktree" },
+        ],
+        edges: [
+          {
+            id: "e1", from: "n1", to: "n1", cond: { kind: "pr-merged" }, action: "launch",
+            firedAt: 5_000, firedNote: "done", error: "boom", performed: true,
+          },
+        ],
+      };
+      const { send } = await openPanel();
+      await send({ type: "flow:writeTemplate", name: "New template", flow: dirtyFlow });
+      const t = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(t.flow.armed).toBe(false);
+      expect(t.flow.createdAt).toBe(0);
+      expect(t.flow.launchConfirmedAt).toBeUndefined();
+      expect(t.flow.commandConfirmedAt).toBeUndefined();
+      const edge = t.flow.edges[0] as FlowEdge;
+      expect(edge.firedAt).toBeUndefined();
+      expect(edge.firedNote).toBeUndefined();
+      expect(edge.error).toBeUndefined();
+      expect(edge.performed).toBeUndefined();
+      // The condition itself is the user's graph, not host state — it survives.
+      expect(edge.cond).toEqual({ kind: "pr-merged" });
+    });
+
+    it("update (templateId present and on disk): preserves id and params, replaces name and graph", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Old name")];
+      const { send } = await openPanel();
+      await send({ type: "flow:writeTemplate", templateId: "k1", name: "New name", flow: okFlow });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const t = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(t.id).toBe("k1");
+      expect(t.name).toBe("New name");
+      expect(t.params).toEqual({});
+      expect(t.flow.id).toBe("");
+      expect(t.flow.nodes).toEqual(okFlow.nodes);
+    });
+
+    it("a templateId that names nothing on disk falls through to create, rather than silently doing nothing", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:writeTemplate", templateId: "not-on-disk", name: "New template", flow: okFlow });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const t = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(t.id).not.toBe("not-on-disk");
+    });
+
+    // A built-in is never on disk, so without the `isBuiltinTemplateId` guard
+    // this id would ALSO fall through to the not-on-disk create path above and
+    // silently mint a brand new template — a write, not a no-op, and the
+    // opposite of "refused". Asserting the specific toast is what tells
+    // "refused because built-in" apart from "wrote nothing", so this fails
+    // the moment the guard is removed rather than only when writeTemplate is
+    // asserted not-called.
+    it("refuses a built-in templateId with the specific built-in toast, and writes nothing", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:writeTemplate", templateId: "builtin-ship-it", name: "x", flow: okFlow });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast).toMatchObject({
+        level: "error",
+        message: "That is a built-in template. Duplicate it to make a version you can change.",
+      });
+    });
+
+    it("refuses a graph with no place or planned node — nothing to ever bind a ticket to — and writes nothing", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      const badFlow: Flow = {
+        id: "x", name: "Notify only", armed: false, createdAt: 0,
+        nodes: [{ id: "n1", x: 0, y: 0, join: "any", kind: "notify", message: "done" }],
+        edges: [],
+      };
+      await send({ type: "flow:writeTemplate", name: "Notify only", flow: badFlow });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/nothing to bind|no step/i);
+    });
+
+    it("does nothing when the orchestrator setting is off", async () => {
+      setConfig({ orchestrator: false });
+      const { send } = await openPanel();
+      await send({ type: "flow:writeTemplate", name: "New template", flow: okFlow });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("flow:renameTemplate, flow:deleteTemplate, flow:duplicateTemplate (Task 8)", () => {
+    it("flow:renameTemplate changes only the name", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "old")];
+      const { send } = await openPanel();
+      await send({ type: "flow:renameTemplate", templateId: "k1", name: "Ship the migration" });
+      expect(h.writeTemplate.mock.calls.at(-1)![2]).toMatchObject({ id: "k1", name: "Ship the migration" });
+    });
+
+    it("flow:renameTemplate ignores an id it does not have", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "old")];
+      const { send } = await openPanel();
+      await send({ type: "flow:renameTemplate", templateId: "nope", name: "x" });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+
+    // A built-in has no file on disk to overwrite, so "ignores an unknown id"
+    // (above) is not the same refusal as "recognized this as a built-in and
+    // refused on purpose" — both leave `writeTemplate` uncalled. Asserting the
+    // specific toast is what tells them apart: without the
+    // `isBuiltinTemplateId` guard in the handler, this would fall through to
+    // the ordinary not-found path (`existing` is undefined for a builtin- id,
+    // since `readTemplates` never returns one) and post no toast at all, so
+    // this test fails the moment the guard is removed.
+    it("refuses to rename a built-in starter, with the specific built-in toast", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:renameTemplate", templateId: "builtin-ship-it", name: "My ship it" });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast).toMatchObject({
+        level: "error",
+        message: "That is a built-in template. Duplicate it to make a version you can change.",
+      });
+    });
+
+    it("flow:deleteTemplate leaves workflows already made from it alone", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      h.flows = [{ ...mkFlow("f1", "Ship it"), fromTemplate: "k1" }];
+      const { send } = await openPanel();
+      await send({ type: "flow:deleteTemplate", templateId: "k1" });
+      expect(h.removeTemplate).toHaveBeenCalledWith(expect.anything(), "/templates", "k1");
+      expect(h.removeFlow).not.toHaveBeenCalled();
+    });
+
+    it("flow:deleteTemplate ignores an id it does not have", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:deleteTemplate", templateId: "nope" });
+      expect(h.removeTemplate).not.toHaveBeenCalled();
+    });
+
+    // Same reasoning as the rename refusal above: a built-in is not on disk,
+    // so "ignores an unknown id" and "refused because it is a built-in" both
+    // leave `removeTemplate` uncalled — only the specific toast tells them
+    // apart, and only that assertion fails when the guard is removed.
+    it("refuses to delete a built-in starter, with the specific built-in toast", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:deleteTemplate", templateId: "builtin-ship-it" });
+      expect(h.removeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast).toMatchObject({
+        level: "error",
+        message: "That is a built-in template. Duplicate it to make a version you can change.",
+      });
+    });
+
+    it("flow:duplicateTemplate writes a copy whose name is derived from, but different from, the original", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:duplicateTemplate", templateId: "k1" });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const written = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      // The one thing worth pinning about the name: it is NOT a verbatim copy
+      // (that would be indistinguishable from forgetting to rename it) but it
+      // still reads as "Ship it" plus something, not an unrelated string.
+      expect(written.name).not.toBe("Ship it");
+      expect(written.name).toContain("Ship it");
+      // A duplicate, not a rename-in-place: the original template is untouched.
+      expect(h.templates.some((t) => t.id === "k1" && t.name === "Ship it")).toBe(true);
+    });
+
+    it("flow:duplicateTemplate ignores an id it does not have", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:duplicateTemplate", templateId: "nope" });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+
+    // The other half of the bug this task fixes: `flow:duplicateTemplate` used
+    // the same disk-only lookup `flow:attach` did, so "Duplicate it to make a
+    // version you can change" — the very message the refusal toasts above
+    // advertise — silently did nothing for a built-in. `allTemplates()` is
+    // deliberately NOT guarded on `isBuiltinTemplateId` here: duplicating a
+    // built-in is the supported path to owning one, not a refusal.
+    it("duplicates a built-in starter into an ordinary user template with a fresh, non-builtin id", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:duplicateTemplate", templateId: "builtin-ship-it" });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const written = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      // Not the built-in's own id — `newFlowId` mints a fresh one, always
+      // prefixed "f…", never `builtin-` (flowIo.ts).
+      expect(written.id).not.toMatch(/^builtin-/);
+      expect(written.id).not.toBe("builtin-ship-it");
+      expect(written.name).not.toBe("Ship it");
+      expect(written.name).toContain("Ship it");
+    });
+
+    it("flow:duplicateTemplate refuses to write rather than clobber when every re-mint collides", async () => {
+      // The same bound flow:create's equivalent test pins: 9 attempts (one plus
+      // eight retries) against the deterministic counter mock. Seeding all nine
+      // ids as already taken makes exhaustion the only path left.
+      setConfig({ orchestrator: true });
+      h.templates = Array.from({ length: 9 }, (_, i) => mkTemplate(`fTEST-${i + 1}`, `taken ${i + 1}`));
+      const { send } = await openPanel();
+      await send({ type: "flow:duplicateTemplate", templateId: "fTEST-1" });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      // And nothing already on disk was disturbed.
+      expect(h.templates.map((t) => t.name)).toEqual(
+        Array.from({ length: 9 }, (_, i) => `taken ${i + 1}`),
+      );
+    });
+  });
+
+  it("deck:flows carries templates alongside flows", async () => {
+    setConfig({ orchestrator: true });
+    h.templates = [mkTemplate("k1", "Ship it")];
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { templates: FlowTemplate[] };
+    // Was `.map((t) => t.name)).toEqual(["Ship it"])` before the built-in
+    // starters (Task 5) were prepended to this list. That assertion is now
+    // ambiguous two ways over: it would also pass with three starters plus
+    // this disk template counted wrong, and the built-in named "Ship it"
+    // (starters.ts) collides by name with this fixture's own "Ship it" — so a
+    // name-based list no longer identifies which "Ship it" is which. Asserting
+    // on ids instead disambiguates the collision and still pins the on-disk
+    // template's presence (and position, last) exactly, the same way the old
+    // assertion pinned `["Ship it"]` exactly.
+    expect(msg.templates.map((t) => t.id)).toEqual([...STARTERS.map((s) => s.id), "k1"]);
+  });
+
+  it("empties templates alongside flows when the setting is off", async () => {
+    setConfig({ orchestrator: false });
+    h.templates = [mkTemplate("k1", "Ship it")];
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { templates: FlowTemplate[] };
+    expect(msg.templates).toEqual([]);
+  });
+
+  it("serves the built-in starters alongside the user's own templates", async () => {
+    setConfig({ orchestrator: true });
+    h.templates = [mkTemplate("k1", "Ship it")];
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { templates: FlowTemplate[] };
+    expect(msg.templates.map((t) => t.id)).toEqual(
+      expect.arrayContaining(["builtin-ship-it", "builtin-test-and-merge", "builtin-review-only"]),
+    );
+  });
+
+  it("serves no starters at all when the orchestrator setting is off", async () => {
+    // Starters follow `flows` and `pendingResume`: with the setting off there
+    // is nothing to attach, and silence must not read as "not loaded yet".
+    setConfig({ orchestrator: false });
+    const { p } = await openPanel();
+    const msg = posts(p).find((m) => m.type === "deck:flows") as { templates: FlowTemplate[] };
+    expect(msg.templates).toEqual([]);
+  });
+
+  it("ignores every attach/detach/template message when the setting is off", async () => {
+    setConfig({ orchestrator: false });
+    h.templates = [mkTemplate("k1", "Ship it")];
+    h.flows = [mkFlow("f1", "n")];
+    const { send } = await openPanel();
+    await send({ type: "flow:attach", runKey: "PROJ-1", templateId: "k1" });
+    await send({ type: "flow:detach", id: "f1" });
+    await send({ type: "flow:saveTemplate", id: "f1", name: "x", choices: [] });
+    await send({ type: "flow:renameTemplate", templateId: "k1", name: "x" });
+    await send({ type: "flow:deleteTemplate", templateId: "k1" });
+    await send({ type: "flow:duplicateTemplate", templateId: "k1" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+    expect(h.removeFlow).not.toHaveBeenCalled();
+    expect(h.writeTemplate).not.toHaveBeenCalled();
+    expect(h.removeTemplate).not.toHaveBeenCalled();
   });
 
   describe("flow:addPlanned — the missing ticket picker (Task 4b)", () => {
@@ -10173,6 +10825,150 @@ describe("arm, disarm and reset", () => {
     expect(e.performed).toBeUndefined();
   });
 
+  describe("flow:openOutput", () => {
+    // `1_000` and `1_002`ms both fall in the same whole second, so the header's
+    // timestamp is identical across these fixtures — the point is that the
+    // header's PRESENCE, `kind` and `action` are asserted, not that the clock
+    // resolution matters here.
+    const WHEN = "1970-01-01T00:00:01Z";
+
+    it("opens a fired edge's captured output in a plain-text editor tab, headed with its provenance", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "deployed ok" }, 1_000);
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({
+        content: `# fired · run · e1 · ${WHEN}\n\ndeployed ok`, language: "plaintext",
+      });
+      expect(window.showTextDocument).toHaveBeenCalledWith(expect.anything(), { preview: true });
+    });
+
+    it("echoes the journaled action verbatim in the header, not a hardcoded one", async () => {
+      // Every other fixture in this block happens to use action "run" — since
+      // that is the only kind the UI ever offers Output for — so this pins
+      // the header actually READS `result.action` off the journal line rather
+      // than a literal that would coincidentally match every other test here.
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "notify", note: "", output: "told you" }, 1_000);
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({
+        content: `# fired · notify · e1 · ${WHEN}\n\ntold you`, language: "plaintext",
+      });
+    });
+
+    it("opens an errored edge's captured output too, headed as errored", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "errored", edge: "e1", from: "a", to: "z", action: "run", error: "boom", output: "stack trace" }, 1_000);
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({
+        content: `# errored · run · e1 · ${WHEN}\n\nstack trace`, language: "plaintext",
+      });
+    });
+
+    it("shows the LATEST run's output, not an earlier one, when a Reset separates two runs", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "old run" }, 1_000);
+      seedJournal("f1", { kind: "reset", edge: "e1" }, 1_001);
+      seedJournal("f1", { kind: "errored", edge: "e1", from: "a", to: "z", action: "run", error: "boom", output: "new run" }, 1_002);
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).toHaveBeenCalledWith({
+        content: `# errored · run · e1 · ${WHEN}\n\nnew run`, language: "plaintext",
+      });
+    });
+
+    it("toasts honestly when nothing has been journaled for this workflow, admitting a read failure reads the same", async () => {
+      // `nodeJournalIo().readFile` swallows an unreadable file to `null`
+      // exactly like a missing one — `JournalIo`'s own contract — so an
+      // EACCES journal and an empty one both land here. The message must not
+      // claim more certainty than the code actually has.
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast).toMatchObject({ level: "info" });
+      expect(toast.message).toMatch(/nothing.*recorded/i);
+      expect(toast.message).toMatch(/could not be read/i);
+    });
+
+    it("toasts honestly when this step hasn't run yet, distinct from nothing journaled at all", async () => {
+      setConfig({ orchestrator: true });
+      // The journal is not empty — a SIBLING edge fired — but e1 itself never has.
+      seedJournal("f1", { kind: "fired", edge: "e2", from: "a", to: "z", action: "run", note: "", output: "sibling output" }, 1_000);
+      const { p, send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast.message).toMatch(/hasn't run yet/i);
+    });
+
+    it("toasts honestly when the run captured no output, distinct from never having run", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "" }, 1_000);
+      const { p, send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast.message).toMatch(/no output was recorded/i);
+    });
+
+    it("toasts an ERROR, distinct from the three info refusals, when the journal itself cannot be read", async () => {
+      // `readJournal` never throws for a missing or unreadable FILE — see
+      // `JournalIo`'s own doc comment — so the one path left that can throw is
+      // `journalPath` rejecting a flow id that fails `VALID_FLOW_ID`. Every
+      // other id this suite sends comes off disk; this one is deliberately
+      // shaped like something a webview payload could carry that no reader
+      // upstream has validated yet.
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "../evil", edgeId: "e1" });
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast).toMatchObject({ level: "error" });
+      expect(toast.message).toMatch(/couldn't read this workflow's journal/i);
+    });
+
+    it("does nothing when the orchestrator setting is off", async () => {
+      setConfig({ orchestrator: false });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "deployed ok" }, 1_000);
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(workspace.openTextDocument).not.toHaveBeenCalled();
+    });
+
+    it("emits flow_action open_output only once the editor actually opened", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "deployed ok" }, 1_000);
+      const { send } = await openPanel();
+      trackSpy.mockClear();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      const flowActions = trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action");
+      expect(flowActions.map((e: any) => e.action)).toEqual(["open_output"]);
+    });
+
+    it("emits nothing for a refusal — no editor opened, nothing to report", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      trackSpy.mockClear();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      const flowActions = trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action");
+      expect(flowActions).toEqual([]);
+    });
+
+    it("never writes anything — a read, not a mutation", async () => {
+      setConfig({ orchestrator: true });
+      seedJournal("f1", { kind: "fired", edge: "e1", from: "a", to: "z", action: "run", note: "", output: "deployed ok" }, 1_000);
+      const linesBefore = h.journalLines.length;
+      const { send } = await openPanel();
+      await send({ type: "flow:openOutput", id: "f1", edgeId: "e1" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      expect(h.journalLines).toHaveLength(linesBefore);
+    });
+  });
+
   it("flow:save preserves the host's own firedAt when the drawer's copy is stale", async () => {
     // The hazard: the host stamped e1 during a poll; the drawer still holds the
     // pre-stamp flow and saves a node move. Writing its copy verbatim would clear
@@ -10275,6 +11071,32 @@ describe("arm, disarm and reset", () => {
     expect(w.launchConfirmedAt).toBe(111);
     expect(w.commandConfirmedAt).toBe(222);
     expect(w.nodes).toHaveLength(1); // the graph edit itself still lands
+  });
+
+  it("flow:save keeps the template a workflow came from", async () => {
+    // `fromTemplate` is HOST-written (by `instantiate`, once) and HOST-read: the
+    // Templates tab's "on N cards" count is a lookup over it. A save carrying
+    // `undefined` for it would silently drop a workflow out of its own
+    // template's count. It survives today only because every `with*` transform
+    // in the drawer spreads the whole flow object; one reconstruction that did
+    // not, and the count goes quietly wrong.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "n"), fromTemplate: "k1" }];
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: { ...mkFlow("f1", "n"), nodes: [{ id: "n1", kind: "place", x: 3, y: 4, join: "any", runKey: "PROJ-1", repo: "r" }] } });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.fromTemplate).toBe("k1");
+    expect(w.nodes).toHaveLength(1); // the graph edit itself still lands
+  });
+
+  it("flow:save cannot invent a template origin the host never recorded", async () => {
+    // The other direction: a hand-drawn workflow must not be able to claim it
+    // came from a template and inflate that template's "on N cards" count.
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f1", "n") }];
+    const { send } = await openPanel();
+    await send({ type: "flow:save", flow: { ...mkFlow("f1", "n"), fromTemplate: "k1" } });
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).fromTemplate).toBeUndefined();
   });
 
   it("flow:save cannot invent a consent the host never recorded", async () => {

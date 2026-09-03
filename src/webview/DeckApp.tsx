@@ -1,14 +1,18 @@
 import * as React from "react";
 import { send } from "./vscodeApi";
-import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromptMode, OutboundMessage, PendingResume, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
+import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromptMode, FlowTemplate, OutboundMessage, PendingResume, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
 import type { AccountSlot } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
+import { bindsRun, boundTicketKeyOf, cardWorkflow, rankByState, type CardWorkflow, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
+import { TEMPLATE_SCHEMA } from "../engine/orchestrator/templates";
+import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
 import { prSignals, type MergeTarget } from "../engine/bucket";
-import { DRAG_SEP, OrchestratorDrawer } from "./OrchestratorDrawer";
+import { DRAG_SEP, OrchestratorDrawer, OrchTarget, OrchView } from "./OrchestratorDrawer";
+import type { WorkflowRow } from "./WorkflowList";
 import { ReviewStrip } from "./ReviewStrip";
 import { LoadingMark } from "./LoadingMark";
 import { CardKindIcon } from "./icons";
@@ -172,7 +176,156 @@ function stateView(r: RunStatus, sourceLabel: string): { text: string; tone: Ton
   }
 }
 
-function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, selected, onSelect }: {
+/** The glyph that borrows attention, one per status — only the two states that
+ * genuinely want a human get one, echoing `WorkflowBlock.tsx`'s own per-step
+ * `MARK`. Advancing, done and disarmed say nothing beyond their hue: a glyph on
+ * every chip would put twenty exclamation points and checkmarks on an ordinary
+ * board and drown out the two that matter. */
+const CHIP_MARK: Partial<Record<WorkflowStatus, string>> = {
+  "waiting-on-you": "!",
+  stopped: "✕",
+};
+
+/** The trailing phrase after a chip's name, or `undefined` when no honest one
+ * exists — never a sentence this function invents (see attach.ts's own doc
+ * comment on `StepState.receipt`/`reason`).
+ *
+ * `stopped` names the failing edge's own recorded `error` — the same receipt
+ * `WorkflowBlock.tsx`'s `stepText` reads for a `fail` step, spent here instead
+ * of `reasonWhy` because an error string already IS the honest phrase; nothing
+ * to derive.
+ *
+ * `waiting-on-you` names the gate's own `question`, read off the flow graph the
+ * same way `runner.ts`'s `performedNote` reads a gate's question off an edge's
+ * `to` for its "asked you: …" receipt — except the pending edge here points
+ * AWAY from the gate (`evaluate.ts`'s `awaiting-answer` note is always posted
+ * against the node an outgoing edge's `from` names), so the lookup runs on
+ * `edge.from` instead of `edge.to`. `reasonWhy("awaiting-answer")` would give
+ * "waiting for your answer" — true, but not what the flow is actually asking
+ * for — so this reaches past it for the one thing that can honestly say that:
+ * the gate's own words. A blank question falls back to the name alone rather
+ * than printing an empty dash, and so does the `!gate || gate.kind !== "gate"`
+ * guard: `evaluate.ts`'s own precondition for posting `awaiting-answer`
+ * (`findNode(i.flow, e.from)?.kind === "gate"`) makes that branch unreachable
+ * through the real `attach.ts` derivation — a "you" step's edge always starts
+ * at a gate — but this function does not trust that from the outside; a
+ * `WorkflowState` built any other way (a test, a future caller) gets the same
+ * honest fallback rather than a crash or a fabricated phrase.
+ *
+ * Exported for exactly that: it is the only way to exercise the defensive
+ * branch at all, since nothing REAL can construct a `WorkflowState` that trips
+ * it — see `DeckApp.test.tsx`'s own `workflowChipTrailer` describe block. */
+export function workflowChipTrailer(flow: Flow, state: WorkflowState): string | undefined {
+  if (state.status === "stopped") {
+    return state.steps.find((s) => s.state === "fail")?.receipt;
+  }
+  if (state.status === "waiting-on-you") {
+    const step = state.steps.find((s) => s.state === "you");
+    const edge = step && flow.edges.find((e) => e.id === step.edgeId);
+    const gate = edge && flow.nodes.find((n) => n.id === edge.from);
+    if (!gate || gate.kind !== "gate") return undefined;
+    return gate.question || undefined;
+  }
+  return undefined;
+}
+
+/** Whether the currently open Orchestrator target survives an ordinary
+ * `deck:flows` post — decided in the `deck:flows` handler before any
+ * fresh-flow auto-open is considered (see that call site: a `null` here falls
+ * through to the auto-open check, exactly like today's flow-only version
+ * did).
+ *
+ * Kind-aware, deliberately — this is the one branch that must NOT treat a
+ * `flow` and a `template` target alike:
+ *  - A `flow` target's only evidence of still existing is `posted` (this very
+ *    message), so it is dropped the moment its id falls out of that list — a
+ *    flow deleted in another window must close the drawer. This is today's
+ *    exact, unchanged behaviour.
+ *  - A `template` target has no such evidence here: templates ride
+ *    `m.templates`, a different field of the same message, never `posted`.
+ *    A later task adds an unsaved draft template that exists on disk
+ *    nowhere at all — for that draft, and for any template, there is no
+ *    "was it in the list" check that means anything. The Deck posts
+ *    `deck:flows` on every refresh (roughly every 6s), so applying `posted`
+ *    membership to a template would close the drawer moments after it opened
+ *    and silently discard an in-progress draft. So a template target is
+ *    retained unconditionally: its presence is not `posted`'s to vouch for.
+ *
+ * Exported so the kind-aware branch can be pinned directly — see
+ * `DeckApp.test.tsx`'s own `retainedOpenTarget` describe block, including the
+ * mutation check that confirms this test fails without the `kind` guard. */
+export function retainedOpenTarget(cur: OrchTarget | null, posted: Flow[]): OrchTarget | null {
+  if (cur?.kind === "template") return cur;
+  if (cur && posted.some((f) => f.id === cur.id)) return cur;
+  return null;
+}
+
+/** How many drafts this session has minted — a monotonic counter, not a
+ * wall-clock read, so two clicks landing in the same millisecond (a fast
+ * double-click, or a test) still mint distinct ids. Same shape, same reason,
+ * as `toastSeq` above. */
+let draftTemplateSeq = 0;
+
+/** A fresh, in-memory template for "＋ New template…" — held only in
+ * `draftTemplate` state below, never written to `~/.agentflow/templates/`
+ * and never added to `templates` (the list `deck:flows` posts, which is what
+ * both the Templates screen and a card's attach picker read), until its own
+ * Save sends `flow:writeTemplate`. See this component's own module comment
+ * on why a draft-flow-on-disk approach was rejected: flows are global and
+ * shared across windows behind a lock, so an interrupted edit would leave
+ * another window looking at a workflow nobody made.
+ *
+ * Starts with exactly one `planned` node so `canBindTicket` (templates.ts)
+ * passes the moment this is minted — that function's own doc comment is
+ * explicit that a template built only of command/gate/notify nodes saves
+ * cleanly and then fails `instantiate` at EVERY future attach, forever.
+ * `repos: []` and `mode: ""` are not placeholders that need filling in
+ * before this is usable — they are `instantiate`'s own documented fallback
+ * (see `boundLaunch`, templates.ts): an empty `repos` takes the attaching
+ * card's own repos, and a `mode` the config no longer has falls back to the
+ * first configured one. `ticketKey: ""` is the same blank every demoted
+ * place carries out of `toTemplate` — `instantiate` is what fills it in, at
+ * attach time.
+ *
+ * The template's own `name` (and its inner flow's) both start blank,
+ * mirroring `openSaveTemplate`'s identical choice below for the identical
+ * reason: a name is asked for, never guessed — see the canvas's own Save
+ * control for a template, which reads the typed name back off `flow.name`. */
+export function mintDraftTemplate(): FlowTemplate {
+  const id = `draft-${++draftTemplateSeq}`;
+  return {
+    schema: TEMPLATE_SCHEMA,
+    id,
+    name: "",
+    params: {},
+    savedAt: 0,
+    flow: {
+      id: "",
+      name: "",
+      armed: false,
+      createdAt: 0,
+      nodes: [
+        { id: "n1", x: 24, y: 24, join: "any", kind: "planned", ticketKey: "", repos: [], mode: "", dest: "worktree" },
+      ],
+      edges: [],
+    },
+  };
+}
+
+/** The identifier text the board's own key chip prints for this run — the
+ * inferred ticket key on a local card that has one, the tracked key
+ * otherwise, and `keyLabel`'s short word for anything untracked. Mirrors
+ * `Card`'s own three-way branch (below) so the Active list names a card by
+ * the exact text the board itself already shows for it, rather than a second
+ * hand-written guess at the same rule. */
+function boardKeyLabel(r: RunStatus): string {
+  const inferredKey = runKind(r.run) === "local" ? (r.inferredTicketKey ?? "") : "";
+  if (inferredKey) return inferredKey;
+  if (isTicketRun(r.run)) return r.run.key;
+  return keyLabel(r.run);
+}
+
+function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, selected, onSelect, workflow }: {
   r: RunStatus;
   /** Non-null on the Sessions lens: this card is that one session, and its state
    * line and action target come from the agent rather than the run. */
@@ -184,6 +337,15 @@ function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, se
   onMerge: (t: MergeTarget) => void;
   selected: boolean;
   onSelect: () => void;
+  /** The one workflow this card shows a chip for, and where it stands —
+   * `undefined` whenever `agentFlow.orchestrator` is off or nothing binds this
+   * run, either of which must render no chip at all. Derived ONCE per card by
+   * the caller (`DeckApp`'s own `card` closure), not here: `workflowState` runs
+   * `previewFlow` internally, and doing that derivation inside every `Card`
+   * instance would repeat it on every one of this component's own re-renders
+   * rather than once per board pass — see that closure's own comment for the
+   * numbers this was measured against. */
+  workflow?: { flow: Flow; state: WorkflowState };
 }): JSX.Element {
   // The agent's own activity when this card is an agent; the run's reduction
   // otherwise. `column` is threaded in rather than read off `r` for the same
@@ -216,8 +378,12 @@ function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, se
   // The key came from the branch, not from a launch. Say so: the branch could
   // name a ticket somebody else owns, and the ticket status on this card would
   // then be theirs. Computed host-side (the webview has no connector to parse
-  // r.run.url with) and sent as `inferredTicketKey` — absent whenever the host
-  // found no ticket in the url, which for a non-local run is always.
+  // r.run.url with) and sent as `inferredTicketKey` — absent whenever the url
+  // named no ticket, or named the run's own key. A tracked Track-it card can
+  // carry one too (its key stayed a place hash), which is why this reads the
+  // run's KIND rather than the field's presence: "the key came from a branch,
+  // not from a launch" is a statement about a local card, and a promoted one has
+  // been through Track it since.
   const inferredKey = local ? (r.inferredTicketKey ?? "") : "";
   // Only a card that names one run and one repo can become a node: a place node
   // resolves to exactly one repo so no condition is ever ambiguous about which
@@ -233,6 +399,12 @@ function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, se
   // reads the same lead PR, so the two cannot disagree.
   const firstBit = sigBits[0];
   const leadPrNumber = firstBit?.kind === "text" && firstBit.text.startsWith("#") ? firstBit.text.slice(1) : null;
+
+  // Name and state, no progress count — "2 of 5" is drawer information, and a
+  // card already carries a kind mark, a key, a status pill and a lane rail.
+  const wfTrailer = workflow ? workflowChipTrailer(workflow.flow, workflow.state) : undefined;
+  const wfLabel = workflow ? (wfTrailer ? `${workflow.flow.name} — ${wfTrailer}` : workflow.flow.name) : undefined;
+  const wfMark = workflow ? CHIP_MARK[workflow.state.status] : undefined;
 
   return (
     <div
@@ -351,6 +523,24 @@ function Card({ r, agent, column, sourceLabel, mergeWrites, merging, onMerge, se
       </div>
 
       <div className="c-foot2" onClick={(e) => e.stopPropagation()}>
+        {/* `title` mirrors the visible text rather than carrying it alone: the
+            label is already readable on the card and to a screen reader without
+            it (a `title` is invisible to a keyboard user and absent from a
+            screenshot), so it is here only as a hover affordance for the rare
+            long gate question this chip's own `text-overflow: ellipsis`
+            truncates. */}
+        {workflow && (
+          <span className={`c-wf ${workflow.state.status}`} title={wfLabel}>
+            {/* Decoration, not information: the state is already carried by
+                the visible words ("Ship it — approve deploy" already says
+                waiting, "Ship it — smoke test failed" already says stopped),
+                so the glyph is `aria-hidden` the same way `WorkflowBlock.tsx`'s
+                own per-step `MARK` is — without it, a screen reader would
+                announce a bare "!" or "✕" ahead of the sentence that already
+                says the same thing in words. */}
+            {wfMark && <span aria-hidden="true">{wfMark} </span>}{wfLabel}
+          </span>
+        )}
         <button
           className={`act primary ${r.windowOpen ? "live" : ""}`}
           title={r.windowOpen ? "Open now — Open focuses the window already running this task" : "Open this task's workspace"}
@@ -452,8 +642,50 @@ export function DeckApp(): JSX.Element {
    * drawer needs them to say what a `branch-ci-passed` rule is waiting on;
    * nothing else on the board reads a branch. */
   const [branchCi, setBranchCi] = React.useState<Record<string, BranchCiStatus>>({});
+  /** Reusable workflow shapes, for the card drawer's attach picker. Rides
+   * `deck:flows` alongside `flows` itself — see that message's own comment in
+   * types.ts for why: with the orchestrator off there is nothing to attach,
+   * and this is emptied on the same beat as `pendingResume`/`promptModes`. */
+  const [templates, setTemplates] = React.useState<FlowTemplate[]>([]);
   const [orchEnabled, setOrchEnabled] = React.useState(false);
-  const [openFlowId, setOpenFlowId] = React.useState<string | null>(null);
+  const [openFlowId, setOpenFlowId] = React.useState<OrchTarget | null>(null);
+  /** Which of the Orchestrator drawer's three top-level screens is showing —
+   * see `OrchView`'s own doc comment for why this lives here rather than as
+   * the drawer's own local state: the Workflows/Templates header buttons
+   * below set this from outside the drawer, so `DeckApp` has to be the one
+   * holding it. Defaults to "active", since that is what a first click on
+   * either header button below shows (Workflows) or falls through to
+   * (Templates does not touch this at all, but "active" is as good a rest
+   * state as any for a drawer that starts closed — see `orchOpen`). */
+  const [orchView, setOrchView] = React.useState<OrchView>("active");
+  /** Is the Orchestrator drawer showing at all, independent of `orchView` and
+   * of `openFlowId`. Needed only because those two stopped being enough
+   * on their own: before OrchestratorDrawer.tsx learned to render Active and
+   * Templates without a resolved flow, "no flow addressed" (`openFlowId ===
+   * null`) WAS "nothing to show" — the drawer's own `if (!flow) return null`
+   * closed it for free. Once Active/Templates stopped needing a flow, that
+   * stopped being true, and with `orchView` defaulting to "active" the
+   * drawer would otherwise show itself unasked on the very first render.
+   *
+   * Set alongside `openFlowId` everywhere a flow gets addressed (the
+   * fresh-flow auto-open below, "Open in Workflows ↗", both header buttons),
+   * and cleared alongside it everywhere the drawer is explicitly dismissed
+   * (✕, selecting a card, opening a card from the Active list). Left ALONE
+   * when a flow disappears out from under an open Canvas (deleted in another
+   * window) — Canvas keeps its own separate guard for that
+   * (`if (!flow) return null`, OrchestratorDrawer.tsx), and leaving this
+   * flag as it is costs nothing: the drawer stays mounted but renders
+   * nothing either way. */
+  const [orchOpen, setOrchOpen] = React.useState(false);
+  /** The one in-flight "＋ New template…" draft, or `null` — never on disk,
+   * never in `templates` (so a card's attach picker can never offer it; see
+   * `mintDraftTemplate`'s own doc comment). At most one at a time: pressing
+   * "＋ New template…" again while a draft already exists reopens the SAME
+   * draft rather than minting a second one and orphaning the first — there
+   * is exactly one canvas to show it on. Cleared on Cancel and immediately
+   * after a successful Save is sent (the real template then arrives on the
+   * next `deck:flows` post) — see the drawer's own `onCancelTemplate` prop. */
+  const [draftTemplate, setDraftTemplate] = React.useState<FlowTemplate | null>(null);
   /** The selected card's `DeckCard.id`, not a run key: the Sessions lens renders
    * one card per session, so two cards can share a run and a key could not tell
    * them apart. */
@@ -611,18 +843,47 @@ export function DeckApp(): JSX.Element {
         // Orchestrator is a one-time side effect (clearing `selId`) that must
         // happen exactly once per post, not once per replay.
         const fresh = seenBefore ? posted.find((f) => !old.some((o) => o.id === f.id)) : undefined;
+        // Suppressed when the fresh flow is the one just bound to the card
+        // whose drawer is open right now — `flow:attach` mints a fresh flow
+        // too, and treating it the same as "+ New flow" would slam the card
+        // drawer shut on a workflow the user just attached to it before they
+        // ever see it disarmed (design doc §3: attaching must show the shape
+        // before anything can spend). `bindsRun` (attach.ts) is the exact
+        // predicate `cardWorkflow` itself uses to decide whether a flow
+        // belongs to a card, so this cannot drift from what the block and
+        // chip already agree a card's workflow is.
+        const openCard = openCardRef.current;
+        const boundToOpenCard = fresh !== undefined && openCard !== null
+          && bindsRun(fresh, openCard.runKey, openCard.ticketKey);
+        const autoOpen = fresh !== undefined && !boundToOpenCard;
         // The two drawers share the same fixed slot at z-index 40 (see .dd and
         // .orch in deckStyles.ts) — a fresh flow auto-opening the Orchestrator
-        // must close any open card detail, or both mount at once.
-        if (fresh) setSelId(null);
-        setOpenFlowId((cur) => {
-          if (cur && posted.some((f) => f.id === cur)) return cur;
-          return fresh ? fresh.id : null;
-        });
+        // must close any open card detail, or both mount at once. Skipped
+        // when `boundToOpenCard`: then nothing is about to open BUT the card
+        // drawer already showing, so nothing needs to close under it.
+        if (autoOpen) setSelId(null);
+        // An auto-opened fresh flow must land on the Canvas screen, not
+        // whichever of the three top-level views happened to be showing —
+        // "+ New flow" means "start drawing", never "go look at the Active
+        // list". Plain, unnested `setView`/`setOrchOpen` beside `setSelId`
+        // above for the identical reason neither is folded into the
+        // `setOpenFlowId` updater: React may replay a pure updater, and a
+        // side effect belongs beside it, not inside it. `setOrchOpen` matters
+        // here specifically for a flow created while the drawer was fully
+        // closed (`orchOpen` false) — without it the fresh flow would resolve
+        // and paint, but stay invisible behind the closed drawer's own gate.
+        if (autoOpen) setOrchView("canvas");
+        if (autoOpen) setOrchOpen(true);
+        // `retainedOpenTarget` is the kind-aware guard — see its own doc
+        // comment for why a `flow` and a `template` target cannot be treated
+        // alike here. `null` means nothing survived, which is exactly when
+        // the ordinary fresh-flow auto-open gets to decide instead.
+        setOpenFlowId((cur) => retainedOpenTarget(cur, posted) ?? (autoOpen ? { kind: "flow", id: fresh!.id } : null));
         setOrchEnabled(m.enabled);
         setPendingResume(m.pendingResume ?? []);
         setPromptModes(m.promptModes ?? []);
         setCommands(m.commands ?? []);
+        setTemplates(m.templates ?? []);
         // The one field here that is NOT dereferenced unguarded downstream —
         // `describeCond` reads it as `c.branchCi?.[key]` — but defaulted with its
         // siblings anyway: the prop is typed non-optional, and leaving one member
@@ -678,6 +939,28 @@ export function DeckApp(): JSX.Element {
   React.useEffect(() => {
     if (selId !== null && selected === null) setSelId(null);
   }, [selId, selected]);
+  /** The run key and ticket key of whichever card's drawer is open right now,
+   * mirrored into a ref rather than read as state: the `deck:flows` message
+   * handler above is registered once (`[]` deps — see `flowsRef`'s own doc
+   * comment) and would otherwise only ever see `selected` as it was at mount.
+   * `flow:attach` mints a fresh flow bound to exactly this card, and that
+   * handler needs to recognise "this fresh flow is the one just attached to
+   * the card already open" without waiting on a render — see its own comment
+   * on why a fresh flow normally auto-opens the Orchestrator and closes this
+   * drawer, and why that must be suppressed for this one case. `null`
+   * whenever no card is selected. */
+  // Theoretical, not reachable by anything this fix guards: a `message` event
+  // could in principle land between a commit that changes `selected` and the
+  // effect below flushing, reading one render stale. Not reachable for attach
+  // itself — the click that produces `flow:attach`'s answering `deck:flows`
+  // post is many ticks after the drawer already opened and this effect long
+  // since flushed — noted here so the next reader does not rediscover it.
+  const openCardRef = React.useRef<{ runKey: string; ticketKey: string } | null>(null);
+  React.useEffect(() => {
+    openCardRef.current = selected
+      ? { runKey: selected.status.run.key, ticketKey: boundTicketKeyOf(selected.status) }
+      : null;
+  }, [selected?.status]);
   /** The card the detail drawer draws, and whether it is sliding out — the same
    * seam the Orchestrator drawer leaves the board through. It lives up here
    * rather than inside DeckDetail because the two signals it needs are this
@@ -701,10 +984,6 @@ export function DeckApp(): JSX.Element {
 
   const needs = cards.filter((c) => c.column === "needs").length;
   const mergeable = cards.filter((c) => c.column === "merge").length;
-  // With arming real, the count that matters on the chip is how many flows are
-  // armed — that is the thing quietly spending your attention while the drawer
-  // is closed, not how many flows merely exist.
-  const armedCount = flows.filter((f) => f.armed).length;
   // The board's own total, not "today": a day figure would need per-line
   // timestamps and would print a number that disagrees with the cards under it.
   const boardEq = live.reduce((s, x) => s + (x.usage ? weightedEq(x.usage) : 0), 0);
@@ -717,6 +996,103 @@ export function DeckApp(): JSX.Element {
     send({ type: "deck:forget", key });
   }, []);
 
+  // One "now" for the whole board pass, read once and handed to every card's
+  // workflow chip below — not one read per card, and not one read per card
+  // PLUS a second inside `rankByState` and a third inside `workflowState`,
+  // which is what `DeckDetail.tsx`'s own single `Date.now()` call already
+  // guards against for one card. The reasoning carries over unchanged: `now` is
+  // deliberately not memoized (a cached wall-clock reading is exactly the state
+  // that goes stale), and `forceTick`'s own 1s interval already re-renders this
+  // component regularly regardless of what this line does.
+  const now = Date.now();
+
+  // `cardWorkflow` (attach.ts) is the exact `attachedWorkflows` → `rankByState`
+  // → `workflowState` chain, plus the ticket-key derivation, that
+  // `DeckDetail.tsx`'s own drawer calls for the one selected card — the SAME
+  // function, not a second hand-written copy of the same three-step chain: a
+  // ticket-key rule that changed in one call site and not the other would let
+  // a card's own chip and its own drawer disagree about which workflow it
+  // carries, with nothing failing to say so. Computed ONCE per card, per board
+  // pass, into the map below — not from `Card` itself, which re-renders
+  // independently and would otherwise repeat the derivation on every one of
+  // ITS OWN re-renders rather than once per pass over the board, and not a
+  // second time for the Active list: that list's rows are built FROM this same
+  // map (below), which is what makes a card's chip and its own row in that
+  // list structurally unable to disagree — there is only one place either of
+  // them could have come from.
+  //
+  // The cost actually measured: `workflowState` runs `previewFlow` internally,
+  // which runs `evaluateFlow` twice, each rebuilding a `Map` over every run on
+  // the board. For the common case — one armed workflow per card — `rankByState`
+  // sorts a one-element array (zero comparisons, so it calls `workflowState`
+  // zero times internally) and the one explicit call inside `cardWorkflow` is
+  // the only one: a board of 30 cards each with one workflow costs 30
+  // `workflowState` calls, i.e. 60 `evaluateFlow` calls, per second. Cheap. The
+  // number only climbs where a card binds SEVERAL workflows at once (attach.ts's
+  // escape hatch, not the common shape): `rankByState`'s sort then calls
+  // `workflowState` twice per comparison, so a handful of 4-workflow cards on
+  // the same board could reach into the hundreds of `evaluateFlow` calls a
+  // second. That is a property of `rankByState` itself (unchanged here, and out
+  // of this task's files), not of computing it once per card instead of once
+  // per card per `Card` re-render — this fix removes the latter multiplier; it
+  // does not remove the former.
+  //
+  // `now` is in the dep list for correctness, not for a cache hit: it is
+  // deliberately unmemoized above (see that line's own comment) and
+  // `forceTick`'s 1s interval is only one of several things that re-render
+  // this component, so in practice this recomputes on nearly every render —
+  // about as often as the old per-card call did. The memo is not buying a
+  // cache here; the property it buys is the one paragraph up (one derivation,
+  // not two), which holds regardless of how often the effect body reruns.
+  const workflowByCard = React.useMemo(() => {
+    const m = new Map<string, CardWorkflow>();
+    if (!orchEnabled) return m;
+    for (const c of cards) {
+      const w = cardWorkflow(flows, c.status, runs, now, branchCi);
+      if (w) m.set(c.id, w);
+    }
+    return m;
+  }, [orchEnabled, cards, flows, runs, now, branchCi]);
+
+  // The Active screen's rows — one per card carrying a workflow, read from the
+  // exact same map the board's own chip reads below, so the two can never name
+  // a different workflow or a different state for the same card. Ranked with
+  // `rankByState` itself (not a second hand-written copy of `attach.ts`'s RANK
+  // table): sorting the entries by where their own flow lands in that
+  // function's own output keeps this list's precedence and the drawer's
+  // canvas-screen precedence (which also calls `rankByState`) the same rule,
+  // read once.
+  const activeRows: WorkflowRow[] = React.useMemo(() => {
+    const entries: { card: DeckCard; w: CardWorkflow }[] = [];
+    for (const c of cards) {
+      const w = workflowByCard.get(c.id);
+      if (w) entries.push({ card: c, w });
+    }
+    const order = rankByState(entries.map((e) => e.w.flow), runs, now, branchCi);
+    const rank = new Map(order.map((f, i) => [f, i]));
+    return entries
+      .slice()
+      .sort((a, b) => (rank.get(a.w.flow) ?? 0) - (rank.get(b.w.flow) ?? 0))
+      .map((e) => ({
+        cardId: e.card.id,
+        ticketKey: boardKeyLabel(e.card.status),
+        title: e.card.status.run.summary,
+        workflow: e.w,
+      }));
+  }, [cards, workflowByCard, runs, now, branchCi]);
+
+  // How many rows on the Active list are genuinely waiting on the reader —
+  // `waiting-on-you` (a gate asking a question) or `stopped` (a rule that
+  // errored and will never fire again until Reset), the same two statuses
+  // `RANK` (attach.ts) already ranks ahead of everything else. Read from
+  // `activeRows` itself, not recomputed from `flows`/`runs` a second way, so
+  // the Workflows chip's own badge can never name a different number than the
+  // list underneath it renders.
+  const needsYouCount = activeRows.filter((r) => {
+    const s = r.workflow.state.status;
+    return s === "waiting-on-you" || s === "stopped";
+  }).length;
+
   // One card, wherever it lands — a lane renders exactly what an unlaned column
   // does, so a lane can never quietly grow its own kind of card.
   const card = (c: DeckCard): JSX.Element => (
@@ -727,7 +1103,8 @@ export function DeckApp(): JSX.Element {
         send({ type: "deck:mergePr", key: c.status.run.key, repo: t.repo, number: t.number });
       }}
       selected={c.id === selId}
-      onSelect={() => { setOpenFlowId(null); setSelId((cur) => (cur === c.id ? null : c.id)); }} />
+      onSelect={() => { setOpenFlowId(null); setOrchOpen(false); setSelId((cur) => (cur === c.id ? null : c.id)); }}
+      workflow={workflowByCard.get(c.id)} />
   );
 
   return (
@@ -756,22 +1133,58 @@ export function DeckApp(): JSX.Element {
           )}
         </div>
         <div className="sp" />
+        {/* Two sibling entry points, replacing the single "Orchestrator" chip.
+            That one button's zero-flows click used to mint a blank flow
+            (`flow:create`) instead of opening anything — with no flows yet,
+            there was no way to reach Templates at all. Each button below
+            always opens ITS OWN view; neither ever sends `flow:create`. */}
         {orchEnabled && (
-          <button
-            type="button"
-            className={`ctl orch-chip${armedCount > 0 ? " armed" : ""}`}
-            onClick={() => {
-              setSelId(null);
-              if (flows.length === 0) send({ type: "flow:create" });
-              else setOpenFlowId((cur) => (cur ? null : flows[0].id));
-            }}
-          >
-            <OrchestratorIcon />
-            <span>Orchestrator</span>
-            {armedCount > 0
-              ? <span className="ct">{armedCount} armed</span>
-              : flows.length > 0 && <span className="ct">{flows.length}</span>}
-          </button>
+          <>
+            <button
+              type="button"
+              // Reusing `.orch-chip`'s existing `armed` escalation (bold, full-
+              // strength brand hue) for "needs you" rather than borrowing the
+              // board's own amber `.attn` — orchestratorStyles.ts's own comment
+              // on `.orch-chip` is explicit that teal names this SURFACE and
+              // amber is reserved for "a card needs you" elsewhere on the
+              // board; painting this chip amber too would read as a second
+              // alarm rather than the one place this feature lives.
+              className={`ctl orch-chip${needsYouCount > 0 ? " armed" : ""}`}
+              onClick={() => {
+                setSelId(null);
+                // Toggle only against ITS OWN view — clicking Workflows while
+                // Templates is showing switches to Active rather than
+                // closing, matching how a click on the drawer's own in-panel
+                // tabs behaves (OrchestratorDrawer.tsx's "asks the caller to
+                // change the view rather than changing it itself"). Neither
+                // button ever touches `openFlowId`: Active and Templates are
+                // surfaces over the whole workspace, not addressed at a flow.
+                if (orchOpen && orchView === "active") { setOrchOpen(false); return; }
+                setOrchView("active");
+                setOrchOpen(true);
+              }}
+            >
+              <OrchestratorIcon />
+              <span>Workflows</span>
+              {needsYouCount > 0
+                ? <span className="ct">{needsYouCount} needs you</span>
+                : activeRows.length > 0 && <span className="ct">{activeRows.length}</span>}
+            </button>
+            <button
+              type="button"
+              className="ctl orch-chip"
+              onClick={() => {
+                setSelId(null);
+                if (orchOpen && orchView === "templates") { setOrchOpen(false); return; }
+                setOrchView("templates");
+                setOrchOpen(true);
+              }}
+            >
+              <OrchestratorIcon />
+              <span>Templates</span>
+              {templates.length > 0 && <span className="ct">{templates.length}</span>}
+            </button>
+          </>
         )}
         {/* A lens, not a trust toggle: both sides show everything, one card per
             session or one per launched task. Persisted, so it survives a reload. */}
@@ -1013,6 +1426,15 @@ export function DeckApp(): JSX.Element {
         <OrchestratorDrawer
           flows={flows}
           openId={openFlowId}
+          // Independent of `openFlowId`/`view` — see `orchOpen`'s own doc
+          // comment above for why Active/Templates need this said explicitly,
+          // and why Canvas does not: leaving this component mounted whenever
+          // `orchEnabled` (unconditionally, exactly as before this task) is
+          // what lets its OWN `useDrawerExit` machinery animate Canvas's exit
+          // when a flow closes — gating this render on `orchOpen` instead
+          // would yank the component out of the tree the instant it flips,
+          // with no chance to slide out.
+          open={orchOpen}
           // The full list, not `live`: a flow's place node binds a run key, and a
           // run shelving as closed must not make its own node unresolvable.
           runs={runs}
@@ -1020,16 +1442,120 @@ export function DeckApp(): JSX.Element {
           promptModes={promptModes}
           commands={commands}
           branchCi={branchCi}
-          onClose={() => setOpenFlowId(null)}
+          templates={templates}
+          draftTemplate={draftTemplate}
+          view={orchView}
+          onView={setOrchView}
+          // One row per card carrying a workflow, read from `workflowByCard` —
+          // the SAME map the board's own chip reads above, so this list and
+          // the board can never name a different workflow, or a different
+          // state, for the same card.
+          rows={activeRows}
+          // Mirrors `DeckDetail`'s own `onOpenWorkflow` the other way: that
+          // one opens a workflow FROM a card (closes the card, opens the
+          // drawer); this one opens a card FROM its workflow row (closes the
+          // drawer, opens the card), so the workflow is read where it lives.
+          onOpenCard={(cardId) => { setOpenFlowId(null); setOrchOpen(false); setSelId(cardId); }}
+          onClose={() => { setOpenFlowId(null); setOrchOpen(false); }}
           onCreate={() => send({ type: "flow:create" })}
-          onOpen={(id) => setOpenFlowId(id)}
+          onOpen={(id) => setOpenFlowId({ kind: "flow", id })}
           onRename={(id, name) => send({ type: "flow:rename", id, name })}
-          onSave={(flow) => send({ type: "flow:save", flow })}
+          // Every graph edit on the canvas — drag, add a node, edit a
+          // field — goes through this one prop. A `flow` target sends it
+          // straight to the host, same as always; but ANY template target
+          // has no file on disk for `flow:save` to find (the host silently
+          // refuses a write against an id it does not recognise — see that
+          // handler's own membership check), and "silently refuse" is not
+          // "nothing happened": the edit would vanish, since nothing else
+          // holds it either. So an edit to a template's own flow is kept
+          // right here instead, in `draftTemplate` state, and never reaches
+          // `send` at all — which is the same property "＋ New template…"
+          // itself promises (see `mintDraftTemplate`'s own doc comment).
+          //
+          // Keyed on `openFlowId?.kind === "template"` alone, NOT on whether
+          // the target's id matches `draftTemplate.id` — today the two are
+          // always the same thing, since minting a fresh draft is the only
+          // way a template target is ever constructed (there is no "Open a
+          // saved template" affordance yet). But a guard keyed on the id
+          // would silently stop working the moment one is wired: every
+          // canvas edit on a REOPENED template would fall through to
+          // `flow:save` with the reopened flow's own `id: ""` (every stored
+          // template's inner flow has that same blank id —
+          // `normalizedTemplateFlow`), the host would refuse it, and the
+          // canvas would snap back after every edit. Keying on `kind` instead
+          // means this stays correct the day Open lands, with no one having
+          // to remember to revisit this line.
+          onSave={(flow) => {
+            if (openFlowId?.kind === "template") {
+              if (draftTemplate) setDraftTemplate({ ...draftTemplate, flow });
+              return;
+            }
+            send({ type: "flow:save", flow });
+          }}
           onDelete={(id) => send({ type: "flow:delete", id })}
           onArm={(id, armed) => send({ type: "flow:arm", id, armed })}
           onResumeApprove={(id) => send({ type: "flow:resumeApprove", id })}
           onResumeDisarm={(id) => send({ type: "flow:resumeDisarm", id })}
           onResetEdge={(id, edgeId) => send({ type: "flow:resetEdge", id, edgeId })}
+          // "＋ New template…", on the Templates screen and on Canvas's own
+          // blank-flow empty state alike (Task 13; see that empty state's own
+          // comment). Reopens the SAME in-flight draft rather than minting a
+          // second one — see `draftTemplate`'s own doc comment for why only
+          // one exists at a time. NOT `onCreate`: that mints an ordinary
+          // WORKFLOW and used to sit here under a "＋ New template" label
+          // (see the git history on the Templates screen's own comment) —
+          // the wrong verb, since the panel would close, Templates would
+          // stay empty, and an untitled entry would appear on the board
+          // instead. This mints a TEMPLATE, in memory, and sends nothing.
+          onNewTemplate={() => {
+            setSelId(null);
+            // Reopen an in-flight NEW draft, but never a saved template's
+            // working copy: `draftTemplate` also holds the copy Edit makes of
+            // a saved template (see `onEditTemplate` below), and "＋ New
+            // template…" pressed while one of those is open must mint a fresh
+            // blank, not hand back someone else's shape under a new-template
+            // label. Membership in `templates` is what tells the two apart —
+            // a new draft's id never appears there (`mintDraftTemplate`).
+            const inFlight = draftTemplate && !templates.some((t) => t.id === draftTemplate.id) ? draftTemplate : null;
+            const draft = inFlight ?? mintDraftTemplate();
+            if (draft !== draftTemplate) setDraftTemplate(draft);
+            setOpenFlowId({ kind: "template", id: draft.id });
+            setOrchView("canvas");
+            setOrchOpen(true);
+          }}
+          // Edit a SAVED template. The template is copied into `draftTemplate`
+          // — nodes and edges spread so no edit can reach the copy `deck:flows`
+          // handed us — and opened on Canvas under its OWN id. From there every
+          // piece already works unchanged: `onSave` above routes edits into the
+          // copy because the target's kind is "template"; the drawer resolves
+          // the working copy ahead of the saved one; and its Save finds the id
+          // in `templates` and sends `flow:writeTemplate` WITH `templateId`,
+          // the update-in-place branch. A built-in never gets here — its row
+          // offers no Edit — but the guard stays, because a stale webview
+          // could still ask and the host would refuse the write anyway.
+          onEditTemplate={(id) => {
+            if (isBuiltinTemplateId(id)) return;
+            const t = templates.find((x) => x.id === id);
+            if (!t) return;
+            setSelId(null);
+            setDraftTemplate({ ...t, flow: { ...t.flow, nodes: [...t.flow.nodes], edges: [...t.flow.edges] } });
+            setOpenFlowId({ kind: "template", id });
+            setOrchView("canvas");
+            setOrchOpen(true);
+          }}
+          // Leaves template-editing entirely, back to the Templates screen —
+          // called both by the canvas's own Cancel button (discarding
+          // whatever draft is open) and right after its Save sends
+          // `flow:writeTemplate` (the draft's job is done; the real template
+          // arrives on the next `deck:flows` post). Clearing `draftTemplate`
+          // when the target being left is not actually the draft (a future,
+          // still-unreachable path for editing an already-saved template) is
+          // a harmless no-op — there is nothing there to clear.
+          onCancelTemplate={() => {
+            setDraftTemplate(null);
+            setOpenFlowId(null);
+            setOrchView("templates");
+          }}
         />
       )}
 
@@ -1042,8 +1568,26 @@ export function DeckApp(): JSX.Element {
              `undefined` means still waiting; `null` means the host tried and
              failed. The drawer renders three distinct states from that. */
           usage={shownCard.status.usage ?? lazyUsage[shownCard.status.run.key]}
+          flows={flows}
+          templates={templates}
+          // The full list, not `live`: same reasoning as the Orchestrator drawer's
+          // own `runs` prop above — a place node binds a run key, and a run
+          // shelving as closed must not make its own node unresolvable.
+          runs={runs}
+          branchCi={branchCi}
+          orchEnabled={orchEnabled}
           onClose={() => setSelId(null)}
           onForget={forget}
+          // Same pairing the Orchestrator chip's own onClick uses above (open the
+          // Orchestrator, close the card): the two drawers share one slot, so
+          // opening one here has to close the other explicitly rather than
+          // trusting a render order.
+          onOpenWorkflow={(id) => { setOrchView("canvas"); setOpenFlowId({ kind: "flow", id }); setOrchOpen(true); setSelId(null); }}
+          // The attach picker's empty-state exit. Mirrors the Templates chip's
+          // own onClick above (setOrchView + setOrchOpen), not `onOpenWorkflow`'s
+          // shape: this screen isn't addressed at a flow, so `openFlowId` is
+          // left alone rather than set or cleared.
+          onOpenTemplates={() => { setOrchView("templates"); setOrchOpen(true); setSelId(null); }}
         />
       )}
     </>

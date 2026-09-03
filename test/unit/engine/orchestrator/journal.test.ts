@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
-  JournalIo, journalPath, createIdMinter, appendEvent, readJournal,
+  JournalIo, journalPath, createIdMinter, appendEvent, readJournal, findEdgeOutput,
   truncateOutput, JOURNAL_CAP_BYTES, JOURNAL_TRIM_TO_BYTES, OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES,
 } from "../../../../src/engine/orchestrator/journal";
 
@@ -261,5 +261,85 @@ describe("the journal's byte cap", () => {
     // outright would be worse than exceeding the cap for one line.
     expect(events).toHaveLength(1);
     expect(events[0].edge.startsWith("z")).toBe(true);
+  });
+});
+
+describe("findEdgeOutput", () => {
+  // Built by hand rather than round-tripped through `appendEvent`/`readJournal`:
+  // this function's contract is about the EVENT ARRAY, and the IO half already
+  // has its own coverage above.
+  const fired = (edge: string, output?: string) => ({
+    id: "x", at: 1, flow: "f1", kind: "fired" as const,
+    edge, from: "a", to: "z", action: "run", note: "",
+    ...(output === undefined ? {} : { output }),
+  });
+  const errored = (edge: string, output?: string) => ({
+    id: "y", at: 2, flow: "f1", kind: "errored" as const,
+    edge, from: "a", to: "z", action: "run", error: "boom",
+    ...(output === undefined ? {} : { output }),
+  });
+
+  it("reports no-journal for an empty event list — nothing at all has been recorded", () => {
+    expect(findEdgeOutput([], "e1")).toEqual({ ok: false, reason: "no-journal" });
+  });
+
+  it("reports no-event when the journal has lines, but none naming this edge", () => {
+    expect(findEdgeOutput([fired("e2", "hi")], "e1")).toEqual({ ok: false, reason: "no-event" });
+  });
+
+  it("reports no-output when the edge fired but the line carries no captured output", () => {
+    expect(findEdgeOutput([fired("e1")], "e1")).toEqual({ ok: false, reason: "no-output" });
+  });
+
+  it("returns a fired edge's output, labelled fired, with its action and timestamp", () => {
+    expect(findEdgeOutput([fired("e1", "deployed ok")], "e1"))
+      .toEqual({ ok: true, output: "deployed ok", kind: "fired", action: "run", at: 1 });
+  });
+
+  it("returns an errored edge's output, labelled errored, with its action and timestamp", () => {
+    expect(findEdgeOutput([errored("e1", "stack trace")], "e1"))
+      .toEqual({ ok: true, output: "stack trace", kind: "errored", action: "run", at: 2 });
+  });
+
+  it("prefers the edge's LATEST fired/errored line even when an earlier one is the only one carrying output", () => {
+    // A successful run's output, then a Reset, then a re-run that errored
+    // without capturing any output. The drawer's own step now reads "fail",
+    // and showing the earlier success's output under it would be exactly the
+    // stale-but-plausible answer this function is built to refuse.
+    const events = [
+      fired("e1", "first run output"),
+      { id: "r", at: 3, flow: "f1", kind: "reset" as const, edge: "e1" },
+      errored("e1"),
+    ];
+    expect(findEdgeOutput(events, "e1")).toEqual({ ok: false, reason: "no-output" });
+  });
+
+  it("returns the latest event's own output when a Reset separates two runs that both captured one", () => {
+    const events = [fired("e1", "old"), errored("e1", "new")];
+    expect(findEdgeOutput(events, "e1")).toEqual({ ok: true, output: "new", kind: "errored", action: "run", at: 2 });
+  });
+
+  it("ignores other edges when picking the latest", () => {
+    const events = [
+      fired("e2", "unrelated"),
+      { id: "a", at: 1, flow: "f1", kind: "armed" as const, armed: true, source: "toggle" },
+      fired("e1", "mine"),
+    ];
+    expect(findEdgeOutput(events, "e1")).toEqual({ ok: true, output: "mine", kind: "fired", action: "run", at: 1 });
+  });
+
+  it("ignores a LATER non-fired/errored line for the SAME edge when picking the latest", () => {
+    // The weak version of this test planted its non-matching kind on a
+    // DIFFERENT edge, so the `edge` half of the predicate excluded it on its
+    // own and the `kind` half was never actually exercised — mutating
+    // `e.kind === "fired" || e.kind === "errored"` to `true` still passed.
+    // `reset` carries a real `edge` field, same as `fired`/`errored` do, and
+    // sits LAST, so only the kind check can keep it from becoming "latest".
+    const events = [
+      fired("e2", "unrelated"),
+      fired("e1", "mine"),
+      { id: "r", at: 3, flow: "f1", kind: "reset" as const, edge: "e1" },
+    ];
+    expect(findEdgeOutput(events, "e1")).toEqual({ ok: true, output: "mine", kind: "fired", action: "run", at: 1 });
   });
 });

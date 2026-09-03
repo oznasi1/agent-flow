@@ -5,9 +5,20 @@
  * ways: an unexpected string fails, and so does a dead allowlist entry — which
  * is what stops this list rotting into a blanket suppression list.
  * See docs/superpowers/specs/2026-08-22-deck-session-semantics-design.md. */
+import * as fs from "fs";
 import * as path from "path";
 import { describe, expect, it } from "vitest";
-import { hasAgentWord, scanManifest, scanSources, userFacingStrings, type Hit } from "../_helpers/userFacingStrings";
+import {
+  allUiStrings,
+  functionSource,
+  hasAgentWord,
+  hasFlowWord,
+  jsxBlockAround,
+  scanManifest,
+  scanSources,
+  userFacingStrings,
+  type Hit,
+} from "../_helpers/userFacingStrings";
 
 describe("the user-facing string extractor", () => {
   it("finds plain strings, template chunks and JSX text", () => {
@@ -57,6 +68,30 @@ describe("the user-facing string extractor", () => {
     expect(hasAgentWord("agent-flow-base")).toBe(true); // hyphen IS a boundary
     expect(hasAgentWord("3 Agents")).toBe(true);
   });
+
+  it("matches the flow-word only on word boundaries", () => {
+    // "Workflow"/"Workflows" have no boundary before "flow" — the preceding
+    // letter is a word character too — so the UI's correct noun never trips
+    // this on its own, the same way "agentProvider" never trips hasAgentWord.
+    expect(hasFlowWord("Workflow")).toBe(false);
+    expect(hasFlowWord("Workflows")).toBe(false);
+    expect(hasFlowWord("flow-templates")).toBe(true); // hyphen IS a boundary
+    expect(hasFlowWord("3 flows")).toBe(true);
+  });
+
+  it("the flow-word match cannot itself tell a wrong label from a right one — only the allowlist can", () => {
+    // The real regression this gate exists to catch: a Templates-tab tablist
+    // shipped as `aria-label="Flow list"` (b65f8f4) and was fixed to
+    // "Workflow list" only later (8d6ec5b). The pre-existing Canvas/List
+    // toggle's `aria-label="Flow view"` is legitimate — a different control,
+    // on the flow-graph canvas, that predates this feature entirely. Both
+    // strings carry the same bare word, so `hasFlowWord` flags both alike;
+    // see the "template/workflow gate" describe below for how FLOW_LEGITIMATE
+    // is what actually tells them apart — by requiring a stated reason for
+    // "Flow view" while leaving no such entry for "Flow list" to hide behind.
+    expect(hasFlowWord("Flow list")).toBe(true);
+    expect(hasFlowWord("Flow view")).toBe(true);
+  });
 });
 
 const ROOT = path.join(__dirname, "../..");
@@ -89,6 +124,9 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "a blocked-reason code recorded for diagnostics, not rendered to the user — result.blocked has no reader in deckView.ts or any webview" },
   { location: "src/webview/orchestratorRule.ts", text: "agent-idle-over", why: "condition key, as above" },
   { location: "src/webview/CondParams.tsx", text: "agent-idle-over", why: "condition key, as above" },
+  // Task 1 (built-in starters): the shipped templates encode the same
+  // released condition key, three times over — one per starter that uses it.
+  { location: "src/engine/orchestrator/starters.ts", text: "agent-ended-turn", why: "condition key, as above" },
   // Task 7: host-side wire values and subagent references.
   { location: "src/config.ts", text: "agents",
     why: "the agentFlow.deckGrouping value normalized here — the stored setting, not copy" },
@@ -173,5 +211,157 @@ describe("the vocabulary gate", () => {
 
   it("states a reason for every allowlist entry", () => {
     expect(LEGITIMATE.filter((e) => e.why.trim().length < 10)).toEqual([]);
+  });
+});
+
+// ── Task 14: the template/workflow gate ──────────────────────────────────
+//
+// Card workflows added a second vocabulary rule (design doc
+// 2026-09-01-card-workflows-and-drawer-design.md §1): **Template** is the
+// reusable shape, **Workflow** is a template attached to one card, and a
+// template has no verbs in common with a workflow — it cannot be armed,
+// disarmed or detached, because it has no ticket and nothing to watch.
+//
+// The scan is deliberately NOT repo-wide the way the agent-word gate is.
+// `src/webview/OrchestratorDrawer.tsx` is the pre-existing flow-graph canvas —
+// it manages `Flow` objects generically, including ones bound to no card at
+// all, and its own header literally reads "Orchestrator". Relabelling that
+// whole screen is not this feature's job, and every "flow"/"Flow" string in
+// it below predates this feature (verified against the branch's merge-base
+// with main). What DOES have to hold the new line are the two surfaces this
+// feature actually built: the card drawer's workflow block (`WorkflowBlock.tsx`,
+// `DeckDetail.tsx`) must never call what it shows a "flow", and the Templates
+// tab this feature added to `OrchestratorDrawer.tsx` must never offer a
+// template a workflow verb.
+const FLOW_WORKFLOW_FILES = ["src/webview/WorkflowBlock.tsx", "src/webview/DeckDetail.tsx"];
+const FLOW_SCAN_FILES = [...FLOW_WORKFLOW_FILES, "src/webview/OrchestratorDrawer.tsx"];
+
+const flowHitsIn = (files: string[]): Hit[] => {
+  const hits: Hit[] = [];
+  for (const location of files) {
+    const text = fs.readFileSync(path.join(ROOT, location), "utf8");
+    for (const s of allUiStrings(location, text)) if (hasFlowWord(s)) hits.push({ location, text: s });
+  }
+  return hits;
+};
+
+/** Every place the flow-word is correct in the three scanned files, with the
+ * reason — same discipline, same set-equality checks, as LEGITIMATE above. */
+const FLOW_LEGITIMATE: { location: string; text: string; why: string }[] = [
+  // src/webview/DeckDetail.tsx: message-type wire values sent to the host.
+  // Same class of hit as the orchestrator condition keys in LEGITIMATE above —
+  // a value the code and the host must agree on byte-for-byte, not copy a
+  // reader sees. `flow:attach`/`flow:detach`/`flow:openOutput` are new to this
+  // feature; `flow:arm`/`flow:answerGate`/`flow:resetEdge` predate it.
+  { location: "src/webview/DeckDetail.tsx", text: "flow:arm", why: "message type sent to the host, a wire value" },
+  { location: "src/webview/DeckDetail.tsx", text: "flow:detach", why: "message type sent to the host, a wire value" },
+  { location: "src/webview/DeckDetail.tsx", text: "flow:answerGate",
+    why: "message type sent to the host, a wire value" },
+  { location: "src/webview/DeckDetail.tsx", text: "flow:resetEdge",
+    why: "message type sent to the host, a wire value" },
+  { location: "src/webview/DeckDetail.tsx", text: "flow:attach", why: "message type sent to the host, a wire value" },
+  { location: "src/webview/DeckDetail.tsx", text: "flow:openOutput",
+    why: "message type sent to the host, a wire value" },
+  // src/webview/OrchestratorDrawer.tsx: message-type wire values, same class
+  // as above. `flow:saveTemplate`/`flow:duplicateTemplate`/`flow:renameTemplate`/
+  // `flow:deleteTemplate` are new to this feature; the rest predate it.
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:saveCommand",
+    why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:addPlanned",
+    why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:answerGate",
+    why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:dryRun",
+    why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:saveTemplate",
+    why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:duplicateTemplate",
+    why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:renameTemplate",
+    why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:deleteTemplate",
+    why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:writeTemplate",
+    why: "message type sent to the host, a wire value — Task 13's canvas Save control while editing a template" },
+  // src/webview/OrchestratorDrawer.tsx: the flow-graph canvas's own
+  // pre-existing copy, confirmed present at this branch's merge-base with
+  // main — none of it was touched by this feature, and none of it is the
+  // card-facing "workflow" surface the new vocabulary rule governs.
+  //
+  // Task 9 (navigation) deleted the old "Flows · N ▾" disclosure and its
+  // `orch-flows` popover class entirely — replaced by a top-level tablist
+  // controlled by `view`/`onView` — so their allowlist entries are gone with
+  // them, not merely left here unused (the gate's own "no dead entry" check
+  // would fail on exactly that). Everything below still renders, unchanged
+  // in text, just relocated: the flow switcher (still "+ New flow") and
+  // "Delete flow" moved from the header's top row into the Canvas view's own
+  // flow-switcher row, and the Canvas/List toggle ("Flow view") and the
+  // rename field ("Flow name") are untouched.
+  { location: "src/webview/OrchestratorDrawer.tsx", text: " Delete flow ",
+    why: "pre-existing canvas header button (predates this feature) — deletes a Flow object, the canvas's own noun" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "Flow view",
+    why: "pre-existing Canvas/List toggle label (predates this feature); this is the ONE label this task's own code comment " +
+      "in OrchestratorDrawer.tsx says is deliberately left alone, distinct from the sibling Templates-tab tablist that " +
+      "must say Workflow" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "Flow name",
+    why: "pre-existing rename field on the flow-graph canvas (predates this feature)" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "+ New flow",
+    why: "pre-existing flow-switcher button (predates this feature) — creates a bare Flow, not a card workflow" },
+  // src/webview/OrchestratorDrawer.tsx: new for Task 8 (OrchTarget addressing).
+  // `target.kind === "flow"` compares OrchTarget's own discriminant tag — the
+  // same class of hit as the flow: message types above, not UI copy at all.
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow",
+    why: "OrchTarget's own kind discriminant, compared against — an internal tag, not user-facing copy" },
+];
+
+describe("the template/workflow gate", () => {
+  it("the UI never calls a workflow a flow", () => {
+    // Same discipline as session/agent: the code says `Flow`, the card's own
+    // UI says Workflow. Message names and pre-existing canvas copy are
+    // allowlisted with a reason, same mechanism as the agent-word gate.
+    const allowed = new Set(FLOW_LEGITIMATE.map(key));
+    const unexpected = flowHitsIn(FLOW_SCAN_FILES)
+      .filter((h) => !allowed.has(key(h)))
+      .map((h) => `${h.location}: ${JSON.stringify(h.text)}`);
+    expect(unexpected).toEqual([]);
+  });
+
+  it("has no dead entry in the flow-word allowlist", () => {
+    const live = new Set(flowHitsIn(FLOW_SCAN_FILES).map(key));
+    expect(FLOW_LEGITIMATE.filter((e) => !live.has(key(e))).map((e) => e.location)).toEqual([]);
+  });
+
+  it("states a reason for every flow-word allowlist entry", () => {
+    expect(FLOW_LEGITIMATE.filter((e) => e.why.trim().length < 10)).toEqual([]);
+  });
+
+  it("the UI never offers a template a workflow verb", () => {
+    // A Templates row offering Detach, or a template being armed, is a
+    // category error the reader has to untangle: a template has no ticket
+    // and nothing to watch (design doc §1).
+    //
+    // A first version of this test looked for one STRING containing both
+    // "template" and a verb — which a bare `Detach` button dropped into
+    // `TemplateRow` (the component that renders a template's own row of
+    // controls) would sail straight through, since neither "Detach" nor any
+    // sibling string in that button would need to mention "template" at all.
+    // Scoping by REGION instead of by a string's own content is what catches
+    // that: everything inside `TemplateRow`'s own render body is per-template
+    // controls by construction, so any verb found there is a verb offered to
+    // a template, whatever the string itself says.
+    //
+    // Two regions, because a stray verb button could land either inside the
+    // row component or as a sibling of it in the surrounding Templates-tab
+    // markup (the `orch-tmpl-list` wrapper — the empty state, or a future
+    // tab-level action):
+    const location = "src/webview/OrchestratorDrawer.tsx";
+    const source = fs.readFileSync(path.join(ROOT, location), "utf8");
+    const regions = [
+      functionSource(location, source, "TemplateRow"),
+      jsxBlockAround(location, source, "orch-tmpl-list"),
+    ];
+    const offenders = regions.flatMap((region) => allUiStrings(location, region))
+      .filter((s) => /\b(arm|disarm|detach)\b/i.test(s));
+    expect(offenders).toEqual([]);
   });
 });

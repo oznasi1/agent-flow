@@ -11,6 +11,13 @@ import type { UsageTotals } from "./engine/usage";
 // one door is easier to keep webview-safe than two.
 import type { BranchCiStatus } from "./engine/orchestrator/branchCi";
 export type { BranchCiStatus };
+// A template's shape and the save dialog's per-place answer — re-exported for the
+// same reason `BranchCiStatus` is: the webview needs both (the drawer's template
+// picker renders `FlowTemplate[]` off `deck:flows`; "Save as template" builds a
+// `DemotionChoice[]` to send back) and every other Deck type it needs already
+// comes from this module.
+import type { DemotionChoice, FlowTemplate } from "./engine/orchestrator/templates";
+export type { DemotionChoice, FlowTemplate };
 
 export type Filter = "unassigned" | "mine" | "mysprint" | "sprint" | "backlog" | "all";
 export type Size = "any" | "s" | "m" | "l"; // by original time estimate
@@ -300,13 +307,20 @@ export interface RunStatus {
    * mark rather than guessing from the current setting, which may have changed since the
    * launch or be `ask`. */
   provider?: AgentProvider;
-  /** A local card's ticket key, inferred from its branch name rather than from a
-   * launch — set only when the run is local and its url resolved to one. The
-   * branch could name a ticket somebody else owns, so the status shown on the
-   * card would then be theirs; the webview renders this key differently from a
-   * launched run's for exactly that reason. Computed host-side, through the
-   * connector (see `ticketKeyFor`), because the webview has no connector of its
-   * own to parse a url with — this is the one place that value crosses the wire. */
+  /** The ticket this run's url names, when that is NOT the record's own key —
+   * `ticketKeyFor`'s answer, computed host-side (see `deckView.ts`'s
+   * `ticketKeyPatch`, the one place it is set) because the webview has no
+   * connector of its own to parse a url with. Absent whenever the two agree,
+   * so `inferredTicketKey ?? run.key` reconstructs `ticketKeyFor` exactly —
+   * which is how `attach.ts`'s `boundTicketKeyOf` binds a workflow by the same
+   * key the host does.
+   *
+   * Two run shapes have one: a LOCAL card, whose key is a worktree hash and
+   * whose ticket was inferred from a branch name, and a Track-it card promoted
+   * under that same hash because a real run already owned the inferred key. An
+   * inferred key could name a ticket somebody else owns, so the status shown
+   * would then be theirs — the card renders it differently for that reason, and
+   * gates that rendering on the run being local rather than on this field. */
   inferredTicketKey?: string;
   /** Board or Recently-closed strip. Computed host-side because the rule needs
    * path ownership, which needs canonical paths and therefore `fs`. */
@@ -696,6 +710,16 @@ export type InboundMessage =
    * because that is where `gateAnswer` lives. First answer wins; see the
    * handler in deckView.ts. */
   | { type: "flow:answerGate"; id: string; edgeId: string; answer: "approved" | "rejected" }
+  /** Open one edge's command output in an editor tab. `edgeId` names the rule
+   * whose `fired`/`errored` journal line the host should read, most recent
+   * first — never a payload the webview builds itself: output can exceed the
+   * journal's own truncation window (see `OUTPUT_HEAD_BYTES`/`OUTPUT_TAIL_BYTES`
+   * in journal.ts) and the drawer is 620px wide, so the text goes straight from
+   * the journal to a document the host opens, never back across the wire to
+   * this message's sender. A flow/edge naming nothing on disk, or an edge that
+   * never captured output, is a silent refusal reported as a toast — see
+   * `findEdgeOutput` (journal.ts) and its handler in deckView.ts. */
+  | { type: "flow:openOutput"; id: string; edgeId: string }
   // The resume gate (Task 4): approving clears the gate so the next pass fires
   // normally; disarming turns the flow off instead. Neither message performs
   // anything itself — see DeckPanel.advanceArmedFlows.
@@ -717,6 +741,39 @@ export type InboundMessage =
   // host still validates all three as finite, non-negative numbers before they
   // reach an event, because a webview payload is untrusted whatever this type says.
   | { type: "flow:dryRun"; edges: number; fired: number; blocked: number }
+  // ── Workflow templates ──────────────────────────────────────────────
+  // Save the flow named `id` as a reusable template. `choices` answers, one per
+  // place the flow contains, the question `toTemplate` cannot answer on its
+  // own — see `DemotionChoice`'s own comment in templates.ts.
+  | { type: "flow:saveTemplate"; id: string; name: string; choices: DemotionChoice[] }
+  // The canvas's own save, for a template opened and edited there directly —
+  // distinct from `flow:saveTemplate` above, which converts an existing FLOW
+  // into a brand new template. Create and update-in-place are the same
+  // operation here: write this graph as this template. Absent `templateId`
+  // means mint a new template; present means overwrite that template's `flow`
+  // and `name` in place, keeping its `id` and `params`. The inner `flow.id` is
+  // inert (nothing resolves it — see `toTemplate`'s own comment) so the host
+  // normalizes it away rather than store whatever the canvas happened to be
+  // editing.
+  | { type: "flow:writeTemplate"; templateId?: string; name: string; flow: Flow }
+  // Instantiate `templateId` against the card named by `runKey`, binding the
+  // card's ticket to every planned node — see `instantiate` in templates.ts.
+  // `replace` detaches whatever workflow the card already carries first; its
+  // absence is a refusal, not a silent second attachment, when one is already
+  // there.
+  | { type: "flow:attach"; runKey: string; templateId: string; replace?: true }
+  // Remove the attached workflow named `id`. Detaching is deleting its flow
+  // file — attachment is derived from the graph (`attach.ts`), not stored, so
+  // there is no separate link to clear.
+  | { type: "flow:detach"; id: string }
+  | { type: "flow:renameTemplate"; templateId: string; name: string }
+  // Removes only the template. A workflow already instantiated from it keeps
+  // running untouched: `instantiate` COPIED the shape, so nothing it needs to run
+  // lives in the template. It does keep the template's id in `Flow.fromTemplate`
+  // — that is what the Templates tab's "on N cards" count reads — but a dangling
+  // id is only a count nobody asks for any more, never a broken workflow.
+  | { type: "flow:deleteTemplate"; templateId: string }
+  | { type: "flow:duplicateTemplate"; templateId: string }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }
@@ -915,10 +972,13 @@ export type OutboundMessage =
   // because it is flow data (its keys come from the rules themselves) and
   // because `postFlows` runs AFTER the pass that reads the verdicts, whereas
   // the `deck:runs` post happens before it.
+  // `templates` rides the same emptied-with-`flows` rule as `pendingResume` and
+  // for the same reason: with the setting off there is nothing to attach, and
+  // silence must not read as "not loaded yet".
   | {
       type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[];
       promptModes: FlowPromptMode[]; commands: FlowCommand[];
-      branchCi: Record<string, BranchCiStatus>;
+      branchCi: Record<string, BranchCiStatus>; templates: FlowTemplate[];
     }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }

@@ -29,9 +29,11 @@ const noop = () => {};
 const DRAG_SEP = "\0";
 
 const props = {
-  flows: [flow()], openId: "f1", runs: [], pendingResume: [], promptModes: [], commands: [], branchCi: {},
+  flows: [flow()], openId: { kind: "flow" as const, id: "f1" }, runs: [], pendingResume: [], promptModes: [], commands: [], branchCi: {}, templates: [], draftTemplate: null,
+  view: "canvas" as const, onView: noop, rows: [], onOpenCard: noop,
   onClose: noop, onCreate: noop, onOpen: noop, onRename: noop, onDelete: noop,
   onArm: noop, onResumeApprove: noop, onResumeDisarm: noop, onResetEdge: noop,
+  onNewTemplate: noop, onCancelTemplate: noop, onEditTemplate: noop,
 };
 
 /** The canvas's box once it has stopped moving. The drawer slides in

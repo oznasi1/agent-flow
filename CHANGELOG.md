@@ -7,6 +7,60 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Workflows on a card.** Save a workflow you liked as a reusable template, then attach it
+  to any card straight from that card's own drawer — no separate picker, no ticket to
+  choose. The workflow's rules show live in the drawer: which step it's on, why it's stuck if
+  it is, and Approve / Reject or Reset right where you noticed the problem. A chip on the
+  card itself says which workflow it carries and whether it needs you. Off by default,
+  behind `agentFlow.orchestrator`, same as the rest of the Orchestrator.
+- **A Templates tab** in the Workflows drawer, alongside the existing Running tab: rename,
+  duplicate and delete the shapes you've saved.
+- **Output on a workflow step.** A `run` rule that succeeded or failed now offers `Output`
+  right beside Reset in the card drawer: it reopens the command's captured stdout/stderr in
+  its own editor tab, headed with what ran and when, read from the flow journal, so you don't
+  have to have kept the Deck's output channel scrolled back to the moment it ran. A step with
+  nothing recorded says so honestly instead of opening an empty tab.
+- **Three ready-made workflows** — Ship it, Test & notify, and Review only — are built in and
+  attachable from the moment the Orchestrator is on, with no template to save first. They
+  can't be renamed, deleted, or edited in place; **Duplicate** makes a copy that's yours to
+  change, and an improved starter in a later release still reaches you on upgrade, since none
+  of them is ever copied into your own templates.
+- **Write a template from scratch.** `＋ New template…` opens a blank workflow to draw rules
+  on, held only in memory until you choose **Save** — cancel, or close the drawer, and nothing
+  was ever written to disk. Editing one this way hides every workflow control that assumes a
+  real card (arm, dry-run, resume, and the rest), since a template being authored has neither
+  a ticket nor anything to watch.
+- **Edit a template you own.** Every saved template's row now has **Edit**, which reopens its
+  graph on the canvas; Save writes it back in place, so anything already attached from it
+  still points at the same template. Built-ins stay read-only — Duplicate one and the copy
+  gets Edit.
+- **The attach picker says which templates are built in**, so a template of your own that
+  happens to share a starter's name is never mistaken for it.
+- **Two header buttons, Workflows and Templates, replace the single Orchestrator button.**
+  Workflows badges how many cards need you, or, quieter, how many carry a workflow at all;
+  Templates badges how many shapes are ready to attach, starters included. The old button
+  minted a blank workflow the moment you had none — leaving no way to reach Templates at
+  all — these two always open the view they name.
+- **An Active view lists every card carrying a workflow in one place** — its ticket, the
+  workflow's name, and where it stands — so a stuck step doesn't have to be found by opening
+  cards one at a time. Click a row to jump straight to that card.
+
+### Changed
+
+- **The card detail drawer** is wider and resizable, with its most-used actions — Open
+  workspace, Open PR, Diff, Address PR — promoted to the top and everything else moved
+  behind **More** rather than laid out as a flat list of buttons.
+- **Attaching a workflow now launches in the card's own repos and your own configured prompt
+  mode**, not whatever a template happened to be saved with — a template saved against one
+  repo no longer drags that repo onto a card in a different one. A template that already
+  names its own repos or mode is unaffected; this only fills in what a template leaves
+  blank, which is how the built-in starters can be attached at all.
+- **A card's attach picker no longer dead-ends when you have no templates of your own.** Its
+  empty state now offers an **Open Templates** button that takes you straight to the
+  Templates view instead of leaving flat text with nothing to click.
+
 ## [0.66.0] — 2026-09-01
 
 ### Added

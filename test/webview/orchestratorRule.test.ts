@@ -317,13 +317,19 @@ describe("gate nodes in the pickers", () => {
 
   it("says a gate is waiting on you rather than borrowing a session's wording", () => {
     expect(verdictWhy({ verdict: "blocked", reason: "awaiting-answer" } as RulePreview))
-      .toBe("it is waiting on your answer");
+      .toBe("waiting for your answer");
   });
 
-  it("still says the two things it always said", () => {
+  it("says a card that is gone can never be met, not merely absent right now", () => {
+    // Card-workflows' live stepper (WorkflowBlock.tsx) needed this same wording
+    // and its own draft disagreed with this file's on `gone` specifically:
+    // "gone" means the source cannot be observed at all, so the rule can never
+    // be met while that stays true (`preview.ts`'s own doc comment on
+    // `RulePreview.blocked`) — a dead end, not a transient absence. `reasonWhy`
+    // is now the one copy both readers call.
     expect(verdictWhy({ verdict: "blocked", reason: "gone" } as RulePreview))
-      .toBe("its card is not on the board right now");
+      .toBe("its card isn't on the board — this can never be met while that stays true");
     expect(verdictWhy({ verdict: "blocked", reason: "agent-state-unknown" } as RulePreview))
-      .toBe("its session activity cannot be read");
+      .toBe("can't tell what the session is doing right now");
   });
 });

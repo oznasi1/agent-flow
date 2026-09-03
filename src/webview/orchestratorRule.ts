@@ -27,6 +27,8 @@ import {
   FlowEdge,
   JoinMode,
   LaunchDest,
+  nextEdgeId,
+  nextNodeId,
   PlannedNode,
 } from "../engine/orchestrator/model";
 import { hasNote } from "../engine/prompt";
@@ -969,31 +971,10 @@ export function withoutEdge(flow: Flow, edgeId: string): Flow {
   return { ...flow, edges: flow.edges.filter((x) => x.id !== edgeId) };
 }
 
-/** The next unused `${prefix}N` id, scanning past whatever is already taken
- * rather than trusting the live count. A count alone drifts the moment
- * anything is deleted: three edges minus the middle one is a list of length
- * two, so `length + 1` mints the id the untouched third edge already has.
- * One minting strategy for both node and edge ids — see `nextNodeId` and
- * `nextEdgeId` below — shared by both presentations so a node or edge minted
- * from the canvas and one minted from the list can never collide. */
-function nextId(prefix: string, taken: Set<string>): string {
-  let n = 1;
-  while (taken.has(`${prefix}${n}`)) n++;
-  return `${prefix}${n}`;
-}
-
-/** An id unique within this flow. Node ids are local to a flow. */
-export function nextNodeId(flow: Flow): string {
-  return nextId("n", new Set(flow.nodes.map((x) => x.id)));
-}
-
-/** An id unique within this flow. Edge ids are local to a flow, and must stay
- * unique even after a delete: `deleteEdge`, `setCond` and the inspector's own
- * `flow.edges.find` all key off this id, so two edges sharing one silently
- * merge into whichever the code touches first. */
-export function nextEdgeId(flow: Flow): string {
-  return nextId("e", new Set(flow.edges.map((x) => x.id)));
-}
+// Moved to model.ts so `templates.ts` can mint ids without an engine module
+// importing from `src/webview/`. Re-exported because both presentations and
+// their tests import them from here.
+export { nextNodeId, nextEdgeId } from "../engine/orchestrator/model";
 
 /** A rule as one compact line, for a presentation with no room for the open
  * row's controls — the dry-run panel. Spends `endLabel`, `condOptionLabel` and
@@ -1036,16 +1017,37 @@ export function verdictLabel(v: RulePreview): string {
   }
 }
 
+/** `BlockedNote`'s three reason codes, in words. Shared by `verdictWhy` (the
+ * dry-run panel, below) and `WorkflowBlock.tsx` (the card drawer's live
+ * stepper) — the two are reading the same fact off the same field
+ * (`RulePreview.reason` / `StepState.reason`, both `BlockedNote["reason"]`)
+ * and drifted once already: an earlier draft of the block wrote its own copy
+ * of these three sentences, and its `"gone"` wording disagreed with this
+ * one's in MEANING, not just phrasing — this file's original said "not on the
+ * board right now" (transient), where `"gone"` actually means the source
+ * "cannot be observed at all, so it can never be met while that stays true"
+ * (`preview.ts`'s own doc comment on `RulePreview.blocked`). That is a dead
+ * end, not a queue, and only the block's wording said so — this is now the
+ * one copy, used by both.
+ *
+ * `waiting` is deliberately absent: its reason is what the source place
+ * currently LOOKS like, which is `observationOf`'s question, not this one. */
+export function reasonWhy(reason: NonNullable<RulePreview["reason"]>): string {
+  if (reason === "gone") return "its card isn't on the board — this can never be met while that stays true";
+  if (reason === "awaiting-answer") return "waiting for your answer";
+  return "can't tell what the session is doing right now";
+}
+
 /** Why a rule is in the state `verdictLabel` names, or `null` where the verdict
  * says everything there is to say. `waiting` is deliberately absent: its reason
  * is what the source place currently LOOKS like, which is `observationOf`'s
  * question, and the caller already has that pair to hand.
  *
- * `blocked`'s three reasons get their first user-facing wording here.
- * `BlockedNote` has been computed on every armed pass since the orchestrator
- * shipped and read by nothing — `evaluate.ts`'s own doc comment claims the
- * drawer's footer surfaces it, which was never true. The dry run is its first
- * consumer, so these two strings are new copy, not a move. */
+ * `blocked`'s three reasons get their first user-facing wording in `reasonWhy`
+ * above. `BlockedNote` has been computed on every armed pass since the
+ * orchestrator shipped and read by nothing — `evaluate.ts`'s own doc comment
+ * claims the drawer's footer surfaces it, which was never true. The dry run
+ * is its first consumer. */
 export function verdictWhy(v: RulePreview): string | null {
   if (v.verdict === "defer") {
     return `met, but ${MAX_LAUNCHES_PER_PASS} is this pass's cap — fires on a later pass`;
@@ -1054,8 +1056,6 @@ export function verdictWhy(v: RulePreview): string | null {
   // this exact string and the arm warning counts the rules it applies to, so a
   // third phrasing here would be a third claim about one fact.
   if (v.verdict === "unset") return v.blank ?? null;
-  if (v.verdict !== "blocked") return null;
-  if (v.reason === "gone") return "its card is not on the board right now";
-  if (v.reason === "awaiting-answer") return "it is waiting on your answer";
-  return "its session activity cannot be read";
+  if (v.verdict !== "blocked" || v.reason === undefined) return null;
+  return reasonWhy(v.reason);
 }

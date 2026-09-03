@@ -265,6 +265,19 @@ export interface Flow {
    * `launchConfirmedAt` into it would be inventing the consent this field exists to
    * require. */
   commandConfirmedAt?: number;
+  /** The template this workflow was instantiated from, when it was.
+   *
+   * Deliberately STORED rather than derived, unlike attachment (which is derived
+   * from the graph on purpose — see attach.ts): a workflow's origin leaves no
+   * trace in its own nodes and edges, so there is nothing to derive it from. The
+   * Templates tab reads it to answer "is this template in use, or did I abandon
+   * it?", and matching on name plus rule count instead would break the moment
+   * anyone renamed a template.
+   *
+   * Optional, and absent on every flow written before this field existed — which
+   * reads the same as "not from a template", the honest answer for a
+   * hand-drawn one. */
+  fromTemplate?: string;
 }
 
 export function emptyFlow(id: string, name: string, nowMs: number): Flow {
@@ -282,6 +295,30 @@ export function emptyFlow(id: string, name: string, nowMs: number): Flow {
  * defect — `armability.ts` used to check only `firedAt`. */
 export function isSettled(e: FlowEdge): boolean {
   return e.firedAt !== undefined || e.error !== undefined;
+}
+
+/** Every field the HOST stamps onto an edge as it acts, removed — so the edge is
+ * back to what the user configured. Two callers: `flow:resetEdge` (deckView.ts),
+ * putting one rule back in play, and `toTemplate` (templates.ts), saving a shape
+ * that must carry no history.
+ *
+ * Deliberately a DENY-list. It used to be an allow-list that rebuilt the edge
+ * from its known non-host fields, and that allow-list silently dropped `note` —
+ * the user's own words — every time anyone pressed Reset. A new host-owned field
+ * on `FlowEdge` is therefore forgotten in exactly one place, here, rather than in
+ * whichever of two call sites nobody remembered.
+ *
+ * `mode` and `note` survive on purpose: they are the user's configuration, not a
+ * mirror of anything the host decided, and a seed's mode has nowhere else to live. */
+export function stripHostStamps(e: FlowEdge): FlowEdge {
+  const kept: FlowEdge = { ...e };
+  delete kept.firedAt;
+  delete kept.firedNote;
+  delete kept.performed;
+  delete kept.error;
+  delete kept.action;
+  delete kept.gateAnswer;
+  return kept;
 }
 
 /** Does this action spend money — open a window, start a paid session? The ONE
@@ -429,4 +466,34 @@ export function condIncomplete(cond: Condition): string | undefined {
  * mean the same thing here anyway — nothing to match against. */
 function blank(v: unknown): boolean {
   return typeof v !== "string" || v.trim() === "";
+}
+
+/** The next unused `${prefix}N` id, scanning past whatever is already taken
+ * rather than trusting the live count. A count alone drifts the moment
+ * anything is deleted: three edges minus the middle one is a list of length
+ * two, so `length + 1` mints the id the untouched third edge already has.
+ * One minting strategy for both node and edge ids — see `nextNodeId` and
+ * `nextEdgeId` below — shared by both presentations so a node or edge minted
+ * from the canvas and one minted from the list can never collide. */
+function nextId(prefix: string, taken: Set<string>): string {
+  let n = 1;
+  while (taken.has(`${prefix}${n}`)) n++;
+  return `${prefix}${n}`;
+}
+
+/** An id unique within this flow. Node ids are local to a flow.
+ *
+ * Lives here rather than in `orchestratorRule.ts` because `templates.ts` mints
+ * ids too, and an engine leaf must not import from `src/webview/` — the webview
+ * bundles for a browser target and the dependency only runs the other way. */
+export function nextNodeId(flow: Flow): string {
+  return nextId("n", new Set(flow.nodes.map((x) => x.id)));
+}
+
+/** An id unique within this flow. Edge ids are local to a flow, and must stay
+ * unique even after a delete: `deleteEdge`, `setCond` and the inspector's own
+ * `flow.edges.find` all key off this id, so two edges sharing one silently
+ * merge into whichever the code touches first. */
+export function nextEdgeId(flow: Flow): string {
+  return nextId("e", new Set(flow.edges.map((x) => x.id)));
 }

@@ -51,6 +51,32 @@ export class Deck {
     return this.frame.locator(".dd");
   }
 
+  /** Opens the drawer's `More` disclosure — `<details className="dd-more">`
+   *  whose `<summary role="button">` reads "More — copy, per-repo diffs, spend
+   *  breakdown, forget" (DeckDetail.tsx:598-599). The drawer rebuild moved
+   *  every Copy row, the per-repo diffs, the spend table and Track it/Forget
+   *  behind this disclosure, closed by default — a caller after any of those
+   *  (`forget()` in `deck-lifecycle.e2e.ts` included) must call this first or
+   *  the target is not in the accessibility tree to click.
+   *
+   *  Waits for "Spend" (`.dd-lbl` text, unconditional inside the body) rather
+   *  than the `<details>` element's own `open` attribute — the same reasoning
+   *  `DeckDetail.test.tsx`'s own `openMore` helper states: the browser flips
+   *  `open` as part of the click's default action, a tick BEFORE the `toggle`
+   *  event that actually renders the body fires, so asserting on `open` alone
+   *  can resolve before the content exists. Spend's heading is present the
+   *  instant the body renders at all, whatever the card's PR/local/tracked
+   *  state, so it is a stable thing to wait on here too. */
+  async openMore(): Promise<void> {
+    const dd = this.detail();
+    await dd.getByRole("button", { name: /^More/ }).click();
+    // `exact: true` matters: the summary's own label text ("...spend
+    // breakdown, forget") also contains "spend" case-insensitively, so a
+    // loose match resolves to two elements (the summary plus this heading)
+    // and Playwright's strict mode rejects it.
+    await expect(dd.getByText("Spend", { exact: true })).toBeVisible({ timeout: 15_000 });
+  }
+
   /** Every row in the PR-review rail. `.rv-row` is the row itself
    *  (ReviewStrip.tsx:103); `.rv-box` is NOT the row — it is the optional
    *  comment textarea's wrapper, rendered only when a row is both expanded and
@@ -114,5 +140,26 @@ export class Deck {
    *  class rename — the button has no class of its own beyond the shared `.ctl`. */
   clearStale(): Locator {
     return this.frame.getByRole("button", { name: /clear stale/i });
+  }
+
+  /** The card drawer's Workflow block — `.wf-block` (`WorkflowBlock.tsx:190`,
+   *  rendered by `DeckDetail.tsx` under the `orchEnabled` gate). Present in
+   *  either its "none" shape (`.wf-none`, an "Attach workflow…" button) or its
+   *  attached shape (header name/status chip, a greyed-or-live stepper) — callers
+   *  distinguish the two the way `WorkflowBlock.tsx` itself does, by what is
+   *  inside, not by a second locator. Scoped to `detail()`: the board's OWN
+   *  workflow chip (`.c-wf`, see `boardWorkflowChip`) lives on the card, not in
+   *  this drawer, and the two must never be confused for one another. */
+  workflowBlock(): Locator {
+    return this.detail().locator(".wf-block");
+  }
+
+  /** The board's own workflow chip on one card's foot — `.c-wf`
+   *  (`DeckApp.tsx`'s `Card`, ~line 433). Absent entirely while nothing is
+   *  attached to that card (the span only renders `{workflow && (…)}`), which is
+   *  distinct from the drawer's `.wf-none` dash: the card has no "nothing here"
+   *  placeholder of its own. */
+  boardWorkflowChip(key: string): Locator {
+    return this.card(key).locator(".c-wf");
   }
 }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, incomingEdges,
-  actionFor, edgeAction, condIncomplete,
+  actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -230,5 +230,63 @@ describe("a gate node", () => {
   it("is recognised by isGate and by nothing else", () => {
     expect(isGate(gate("g"))).toBe(true);
     expect(isGate({ id: "n", kind: "notify", x: 0, y: 0, join: "any", message: "m" })).toBe(false);
+  });
+});
+
+describe("stripHostStamps", () => {
+  const stamped: FlowEdge = {
+    id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" },
+    action: "run", mode: "plan", note: "my own words",
+    firedAt: 1756200000000, firedNote: "ran · exit 0", performed: true,
+    gateAnswer: "approved", error: "exit 1",
+  };
+
+  it("drops every host-owned stamp", () => {
+    const out = stripHostStamps(stamped);
+    expect(out.firedAt).toBeUndefined();
+    expect(out.firedNote).toBeUndefined();
+    expect(out.performed).toBeUndefined();
+    expect(out.error).toBeUndefined();
+    expect(out.action).toBeUndefined();
+    expect(out.gateAnswer).toBeUndefined();
+  });
+
+  it("preserves the user's own configuration", () => {
+    // An allow-list implementation of this strip once silently dropped `note`
+    // on every Reset. `mode` has nowhere else to live for a seed.
+    const out = stripHostStamps(stamped);
+    expect(out.note).toBe("my own words");
+    expect(out.mode).toBe("plan");
+    expect(out.cond).toEqual({ kind: "pr-merged" });
+    expect(out.id).toBe("e1");
+    expect(out.from).toBe("n1");
+    expect(out.to).toBe("n2");
+  });
+
+  it("does not mutate its argument", () => {
+    stripHostStamps(stamped);
+    expect(stamped.firedAt).toBe(1756200000000);
+  });
+});
+
+describe("id minting", () => {
+  const flow = (nodeIds: string[], edgeIds: string[]): Flow => ({
+    id: "f1", name: "Ship it", armed: false, createdAt: 0,
+    nodes: nodeIds.map((id) => ({ id, x: 0, y: 0, join: "any", kind: "notify", message: "" })),
+    edges: edgeIds.map((id) => ({ id, from: "n1", to: "n2", cond: { kind: "pr-merged" } })),
+  });
+
+  it("mints the first free node id, not length + 1", () => {
+    // A flow whose n2 was deleted has n1 and n3; length + 1 would mint n3 again.
+    expect(nextNodeId(flow(["n1", "n3"], []))).toBe("n2");
+  });
+
+  it("mints the first free edge id", () => {
+    expect(nextEdgeId(flow([], ["e1", "e2"]))).toBe("e3");
+  });
+
+  it("mints n1 and e1 for an empty flow", () => {
+    expect(nextNodeId(flow([], []))).toBe("n1");
+    expect(nextEdgeId(flow([], []))).toBe("e1");
   });
 });

@@ -6,10 +6,13 @@ import { exec } from "child_process";
 import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction } from "./engine/orchestrator/model";
-import { defaultFlowsDir, readFlows, writeFlow, removeFlow } from "./engine/orchestrator/store";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps } from "./engine/orchestrator/model";
+import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
-import { appendEvent, truncateOutput, JournalEventInput } from "./engine/orchestrator/journal";
+import { appendEvent, truncateOutput, findEdgeOutput, readJournal, JournalEvent, JournalEventInput } from "./engine/orchestrator/journal";
+import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, normalizedTemplateFlow, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
+import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
+import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
 import { evaluateFlow } from "./engine/orchestrator/evaluate";
 import { unfirableRules } from "./engine/orchestrator/armability";
@@ -524,6 +527,9 @@ export class DeckPanel {
    * shape this file already uses for `defaultRunsDir()`. Resolved once, since
    * it never changes for the life of the panel. */
   private readonly flowsDir = defaultFlowsDir();
+  /** Templates sit beside flows on disk, read and written through the same
+   * `FlowIo` — see `store.ts`'s own comment on why the two share every rule. */
+  private readonly templatesDir = defaultTemplatesDir();
   private readonly flowIo = nodeFlowIo();
   /** The lock's IO. `this.log` is reached through an arrow rather than passed
    * directly so this initializer cannot depend on whether TypeScript assigns
@@ -688,12 +694,30 @@ export class DeckPanel {
     this.post({ type: "toast", level, message });
   }
 
+  /** Every template this build can resolve by id: the built-in starters plus
+   * whatever is on disk. Read paths (`postFlows`, `flow:attach`,
+   * `flow:duplicateTemplate`) use this — a starter is exactly as attachable or
+   * duplicable as a user template. WRITE paths (`flow:renameTemplate`,
+   * `flow:deleteTemplate`) must NOT use this: a starter has no file to write,
+   * so they guard on `isBuiltinTemplateId` and refuse instead. */
+  private allTemplates(): FlowTemplate[] {
+    return [...STARTERS, ...readTemplates(this.flowIo, this.templatesDir)];
+  }
+
   /** Read the flows store and post it. Cheap — a handful of small JSON files —
    * so it rides the same refresh as everything else rather than owning a cache. */
   private postFlows(): void {
     const cfg = getConfig();
     const enabled = cfg.orchestrator;
     const flows: Flow[] = enabled ? readFlows(this.flowIo, this.flowsDir) : [];
+    // Emptied alongside `flows`, for the same reason `pendingResume` below is:
+    // with the setting off there is nothing to attach, and silence must not read
+    // as "not loaded yet". Starters are prepended, not appended: they are the
+    // shapes a first-time user reads before they have any of their own, and a
+    // list that puts three built-ins after twenty user templates has hidden
+    // them again. `readTemplates` already skips any on-disk file claiming a
+    // `builtin-` id (store.ts), so disk and built-ins cannot collide by id.
+    const templates: FlowTemplate[] = enabled ? this.allTemplates() : [];
     // Emptied alongside `flows` when the setting is off, for the same reason:
     // silence must not be mistaken for "not loaded yet", and a stale hold from
     // before the setting was switched off has nothing left to be approved.
@@ -728,7 +752,7 @@ export class DeckPanel {
     // than narrowed — see the `deck:flows` member's own comment in types.ts.
     this.post({
       type: "deck:flows", flows, enabled, pendingResume, promptModes,
-      commands: cfg.commands, branchCi,
+      commands: cfg.commands, branchCi, templates,
     });
   }
 
@@ -3591,15 +3615,12 @@ export class DeckPanel {
       // A local card has no record on disk — `removeRun` would be a no-op but
       // `writeRun` would *create* one, promoting a card the user never tracked.
       if (runKind(run) === "local") {
-        // The webview has no connector of its own to parse run.url with, so the
-        // inferred key crosses the wire pre-computed — through the same
-        // connector and the same ticketKeyFor every other caller here uses,
-        // rather than a second parser living in the webview.
         // A local card exists only because a session is open in it, so it is on
         // the board by construction.
-        out.push(run.url
-          ? { ...status, shelf: "board" as const, inferredTicketKey: ticketKeyFor(run, this.connector), usage: this.usageByRun.get(run.key) }
-          : { ...status, shelf: "board" as const, usage: this.usageByRun.get(run.key) });
+        out.push({
+          ...status, ...this.ticketKeyPatch(run),
+          shelf: "board" as const, usage: this.usageByRun.get(run.key),
+        });
         // Included for the same reason the card is on the board unconditionally:
         // a live session, by construction. The badge's "local/untracked session
         // cards included" requirement (design doc) means a local card stalled or
@@ -3644,7 +3665,7 @@ export class DeckPanel {
         justLaunched,
         hasWorkToLose,
       });
-      const shelved = { ...status, shelf, usage: this.usageByRun.get(run.key) };
+      const shelved = { ...status, ...this.ticketKeyPatch(run), shelf, usage: this.usageByRun.get(run.key) };
       if (this.applyVerdict(run, this.verdictFor(shelved, livePlaces, now))) continue;
       // Counted, not cleared: this is exactly what Clear stale would take. The
       // second call is free of side effects — `verdictFor` is pure, and only
@@ -4134,7 +4155,7 @@ export class DeckPanel {
         const mine = new Map(existing.edges.map((e) => [e.id, e]));
         writeFlow(this.flowIo, this.flowsDir, {
           ...m.flow,
-          // The host owns five FLOW-level fields too, and a graph save has no
+          // The host owns six FLOW-level fields too, and a graph save has no
           // business carrying any of them. `armed` is written only by `flow:arm`
           // and `flow:resumeDisarm`: a save built from a `flow` prop captured
           // before a `deck:flows` post lands holds a stale value, so pressing
@@ -4152,6 +4173,13 @@ export class DeckPanel {
           createdAt: existing.createdAt,
           launchConfirmedAt: existing.launchConfirmedAt,
           commandConfirmedAt: existing.commandConfirmedAt,
+          // `fromTemplate` is written once, by `instantiate`, and read by the
+          // Templates tab's "on N cards" count — a webview save has no way to
+          // know it and nothing to say about it. It survives today only because
+          // every `with*` transform in the drawer spreads the whole flow; one
+          // reconstruction that did not, and a template would silently stop
+          // counting a workflow it made.
+          fromTemplate: existing.fromTemplate,
           edges: m.flow.edges.map((e) => {
             const host = mine.get(e.id);
             if (!host) return e;
@@ -4323,17 +4351,7 @@ export class DeckPanel {
           // readings ("it was saved as X but where it points now means Y"). `mode`
           // and `note` both survive: they are the user's own configuration, not a
           // mirror of anything, and a seed's mode has nowhere else to live.
-          edges: flow.edges.map((e) => {
-            if (e.id !== m.edgeId) return e;
-            const kept: FlowEdge = { ...e };
-            delete kept.firedAt;
-            delete kept.firedNote;
-            delete kept.performed;
-            delete kept.error;
-            delete kept.action;
-            delete kept.gateAnswer;
-            return kept;
-          }),
+          edges: flow.edges.map((e) => (e.id === m.edgeId ? stripHostStamps(e) : e)),
         });
         // The event this whole journal exists for. Reset's job is to DELETE the
         // edge's receipt — `firedAt`, `firedNote`, `error`, `performed` — so that
@@ -4381,6 +4399,70 @@ export class DeckPanel {
         this.postFlows();
         return;
       }
+      case "flow:openOutput": {
+        if (!getConfig().orchestrator) return;
+        // Host-ward, on purpose: output can be far larger than the receipt
+        // sentences that already ride `deck:flows`, and the drawer is 620px
+        // wide. Rather than shipping that payload back across the wire, this
+        // reads the journal here and opens an editor tab directly — the same
+        // shape `inspect`'s `diff` action already uses for a document nobody
+        // needs to keep once they've read it: `openTextDocument({ content })`
+        // with no `uri`, so nothing is written to the workspace and closing the
+        // tab is the whole cleanup.
+        let events: JournalEvent[];
+        try {
+          events = readJournal(this.journalIo, this.flowsDir, m.id);
+        } catch (e) {
+          // The one path `readJournal` does not swallow: `journalPath` throws
+          // for a flow id that fails `VALID_FLOW_ID`, and unlike every other
+          // reader of a flow id here, `m.id` comes straight off the wire rather
+          // than off disk. Every other failure to read — a missing file, an
+          // unreadable one — is deliberately NOT an error (see `JournalIo`'s
+          // own doc comment) and is indistinguishable from "nothing journaled
+          // yet" below, on purpose.
+          this.toast("error", `Couldn't read this workflow's journal — ${(e as Error).message}.`);
+          return;
+        }
+        const result = findEdgeOutput(events, m.edgeId);
+        if (!result.ok) {
+          // Three honest refusals, not one catch-all: which of them is true
+          // changes what the reader should conclude about the step they clicked
+          // Output on.
+          switch (result.reason) {
+            case "no-journal":
+              // Honest about the one thing `readJournal` cannot tell apart
+              // from its own contract: a missing/empty journal and one that
+              // failed to read both come back as `[]` — see `JournalIo`'s own
+              // doc comment. Claiming certainty here would be the dishonest
+              // half of the very posture this handler otherwise respects.
+              this.toast("info", "Nothing has been recorded for this workflow yet, or its journal could not be read.");
+              return;
+            case "no-event":
+              this.toast("info", "This step hasn't run yet, so there's no output to show.");
+              return;
+            case "no-output":
+              this.toast(
+                "info",
+                "No output was recorded for this run — it may have printed nothing, or its output predates this build.",
+              );
+              return;
+          }
+        }
+        // A short provenance header — what happened, on which rule, when —
+        // so two Output tabs (`Untitled-1`, `Untitled-2`; VS Code gives an
+        // opened-with-content document no better title) don't read as the
+        // same undifferentiated blob, and `preview: true` replacing one tab
+        // with another doesn't silently swap what a reader thinks they're
+        // looking at. One line, not a report: this is a pointer back to the
+        // journal line it came from, not a restatement of the receipt already
+        // on screen in the drawer.
+        const when = new Date(result.at).toISOString().slice(0, 19) + "Z";
+        const header = `# ${result.kind} · ${result.action} · ${m.edgeId} · ${when}\n\n`;
+        const doc = await vscode.workspace.openTextDocument({ content: header + result.output, language: "plaintext" });
+        await vscode.window.showTextDocument(doc, { preview: true });
+        trackEvent({ name: "flow_action", action: "open_output" });
+        return;
+      }
       case "flow:resumeApprove": {
         if (!getConfig().orchestrator) return;
         // An id nobody is holding is not this flow's approval to act on — most
@@ -4425,6 +4507,278 @@ export class DeckPanel {
           unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
           source: "resume-banner",
         });
+        this.postFlows();
+        return;
+      }
+      // ── Workflow templates ──────────────────────────────────────────────
+      case "flow:saveTemplate": {
+        if (!getConfig().orchestrator) return;
+        // Same membership check every other flow:* write in this file makes: the
+        // drawer can only ever be editing a flow the host gave it.
+        const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
+        if (!flow) return;
+        // The drawer already disables "Save as template…" for this shape
+        // (`canBindTicket`, templates.ts), but that guard lives in a webview
+        // that can be stale — open from before this shipped, or simply not
+        // re-rendered yet — and this handler is the one place that actually
+        // writes to disk. Refuse here too rather than trust the button: a
+        // command/gate/notify-only flow would otherwise save cleanly (
+        // `toTemplate` only ever throws on an EMPTY flow) and then fail
+        // `instantiate` at every single future attach, forever.
+        if (!canBindTicket(flow)) {
+          this.post({
+            type: "toast", level: "error",
+            message: `"${flow.name}" has no step to bind a ticket to — add a place or a planned step first.`,
+          });
+          return;
+        }
+        const now = Date.now();
+        // `newFlowId` is probabilistic, not unique by construction: its salt space
+        // is 36^4, so two templates minted in the same millisecond CAN collide, and
+        // a collision here would silently overwrite an existing template, since the
+        // store writes by id. Re-mint against what is already on disk. Bounded
+        // rather than a while-loop so a pathological `Math.random()` cannot hang
+        // the extension host.
+        const taken = new Set(readTemplates(this.flowIo, this.templatesDir).map((t) => t.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
+        let saved: FlowTemplate;
+        try {
+          // `toTemplate` throws for a flow with no steps at all, or for a place
+          // node the drawer sent no demotion choice for — both refusals written
+          // for a human, not a stack trace, so they are surfaced rather than
+          // left to escape into the Deck's refresh.
+          saved = toTemplate(flow, m.name, id, now, m.choices);
+        } catch (e) {
+          this.post({ type: "toast", level: "error", message: (e as Error).message });
+          return;
+        }
+        writeTemplate(this.flowIo, this.templatesDir, saved);
+        // The template's own name is the user's text; only the gesture is reported.
+        trackEvent({ name: "flow_action", action: "save_template" });
+        this.postFlows();
+        return;
+      }
+      case "flow:writeTemplate": {
+        if (!getConfig().orchestrator) return;
+        // Same built-in refusal every other template WRITE in this file makes
+        // (`flow:renameTemplate`, `flow:deleteTemplate`): a starter has no file
+        // on disk to overwrite, and the canvas can be stale about which
+        // template it opened. Verbatim message — not a new sentence — so the
+        // toast reads the same everywhere this refusal happens.
+        if (m.templateId !== undefined && isBuiltinTemplateId(m.templateId)) {
+          this.post({
+            type: "toast", level: "error",
+            message: "That is a built-in template. Duplicate it to make a version you can change.",
+          });
+          return;
+        }
+        // The same recheck `flow:saveTemplate` makes, and for the same reason:
+        // the canvas's own button can be stale, and this handler is the one
+        // place that actually writes to disk. A command/gate/notify-only
+        // graph would otherwise save cleanly and then fail `instantiate` at
+        // every future attach, forever.
+        if (!canBindTicket(m.flow)) {
+          this.post({
+            type: "toast", level: "error",
+            message: `"${m.flow.name}" has no step to bind a ticket to — add a place or a planned step first.`,
+          });
+          return;
+        }
+        const now = Date.now();
+        // The same normalization `toTemplate` applies when converting a flow
+        // into a template — shared as `normalizedTemplateFlow` so the two
+        // write paths for a template's inner flow cannot drift on what
+        // "normalized" means: id cleared (nothing resolves it — `instantiate`
+        // mints a fresh one), disarmed, createdAt zeroed, and every edge's
+        // host stamps (firedAt/firedNote/performed/error/action/gateAnswer)
+        // stripped. The FLOW-level consent stamps — launchConfirmedAt and
+        // commandConfirmedAt — are dropped too, but structurally: they live
+        // on `m.flow` itself, not on any edge, so `stripHostStamps` never
+        // touches them; `normalizedTemplateFlow`'s own fresh six-field
+        // literal is what leaves them out. Storing any of that verbatim would
+        // leak a live workflow's history — or a stale consent — into a
+        // template that outlives it.
+        const flow: Flow = normalizedTemplateFlow(m.flow, m.name, m.flow.nodes);
+        const existing = m.templateId
+          ? readTemplates(this.flowIo, this.templatesDir).find((t) => t.id === m.templateId)
+          : undefined;
+        if (existing) {
+          writeTemplate(this.flowIo, this.templatesDir, { ...existing, name: m.name, flow, savedAt: now });
+          trackEvent({ name: "flow_action", action: "write_template" });
+          this.postFlows();
+          return;
+        }
+        // The same bounded re-mint discipline `flow:saveTemplate` and
+        // `flow:attach` use: `newFlowId` is probabilistic, not unique by
+        // construction, and a collision here would silently overwrite an
+        // existing template. Bounded rather than a while-loop so a
+        // pathological `Math.random()` cannot hang the extension host.
+        const taken = new Set(readTemplates(this.flowIo, this.templatesDir).map((t) => t.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
+        const saved: FlowTemplate = { schema: TEMPLATE_SCHEMA, id, name: m.name, params: {}, savedAt: now, flow };
+        writeTemplate(this.flowIo, this.templatesDir, saved);
+        trackEvent({ name: "flow_action", action: "write_template" });
+        this.postFlows();
+        return;
+      }
+      case "flow:attach": {
+        const cfg = getConfig();
+        if (!cfg.orchestrator) return;
+        // `this.run` is the same lookup every other card action uses — a local
+        // card has no record on disk, so the last refresh's synthetic runs are
+        // the only place to find it. A run this panel does not know about still
+        // gets an attach attempt: `ticketKeyFor` needs a `Run` to read a url off,
+        // but the runKey itself is exactly what a ticket-less lookup falls back
+        // to, so there is nothing more accurate to fall back to here either.
+        const run = this.run(m.runKey);
+        const ticketKey = run ? ticketKeyFor(run, this.connector) : m.runKey;
+        const t = this.allTemplates().find((x) => x.id === m.templateId);
+        if (!t) {
+          this.post({ type: "toast", level: "error", message: "That template is no longer on disk." });
+          return;
+        }
+        // Re-read immediately before deciding — the discipline every other
+        // user-driven flow write in this file follows (see the note on
+        // `advanceArmedFlows` explaining why these writes are UNLOCKED): another
+        // window may have attached or detached a workflow to this same card
+        // since the drawer rendered its button.
+        const flows = readFlows(this.flowIo, this.flowsDir);
+        const existing = attachedWorkflows(flows, m.runKey, ticketKey);
+        if (existing.length > 0 && !m.replace) {
+          this.post({
+            type: "toast", level: "error",
+            message: `${m.runKey} already has the "${existing[0].name}" workflow attached.`,
+          });
+          return;
+        }
+        const now = Date.now();
+        // `newFlowId` is probabilistic, not unique by construction: its salt space
+        // is 36^4, so two flows minted in the same millisecond CAN collide, and a
+        // collision here would silently overwrite the user's existing flow, since
+        // the store writes by id. Re-mint against what is already on disk. Bounded
+        // rather than a while-loop so a pathological `Math.random()` cannot hang
+        // the extension host.
+        const taken = new Set(flows.map((f) => f.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
+        let fresh: Flow;
+        try {
+          // `instantiate` throws for a template with no planned step: there is
+          // nothing to bind the ticket to. Caught here, rather than left to
+          // escape into the Deck's refresh, because the message is written for
+          // a human to read.
+          // `run.repos[].name` is the SAME identifier `PlannedNode.repos` holds only
+          // for a run Agent Flow itself launched, where it IS the checkout name —
+          // but for a LOCAL card (`localRuns.ts`) it is synthesized from the
+          // worktree's own folder path (`path.basename(root) || root`), a different
+          // namespace that can name a folder `discoverRepos` does not recognize (a
+          // hand-made worktree, or a repo outside `agentFlow.reposRoot`). Passing
+          // that name through unchecked let `instantiate` succeed here and the
+          // launch rule fail ~6s later with "isn't checked out under your repos
+          // root" — the card looked attached, then latched stopped with no
+          // actionable moment. Intersecting with `discoverRepos` (the same
+          // resolver every other repo-name lookup in this file already goes
+          // through) is what makes an unresolvable repo a refusal AT THE CLICK,
+          // where `instantiate`'s own "no repo to launch in" message can reach the
+          // user — see this file's other `discoverRepos` call sites (attach
+          // targets, doctor) for the same pattern.
+          const onDisk = new Set(discoverRepos(cfg.reposRoot, cfg.repoBlocklist).map((r) => r.name));
+          fresh = instantiate(t, ticketKey, id, now, {
+            repos: run ? run.repos.map((r) => r.name).filter((n) => onDisk.has(n)) : [],
+            modes: cfg.promptModes.map((m) => m.id),
+          });
+        } catch (e) {
+          this.post({ type: "toast", level: "error", message: (e as Error).message });
+          return;
+        }
+        // Detach the old workflow(s) only once the new one is known to build —
+        // a refusal above must leave the card's existing workflow untouched.
+        for (const old of m.replace ? existing : []) removeFlow(this.flowIo, this.flowsDir, old.id);
+        writeFlow(this.flowIo, this.flowsDir, fresh);
+        trackEvent({ name: "flow_action", action: "attach" });
+        this.postFlows();
+        return;
+      }
+      case "flow:detach": {
+        if (!getConfig().orchestrator) return;
+        // The same membership check flow:delete makes: an id not on disk is not
+        // a detach to carry out. Attachment is derived from the graph
+        // (attach.ts), never stored, so removing the flow file is the whole of
+        // detaching — there is no separate link to clear.
+        const existing = readFlows(this.flowIo, this.flowsDir).some((f) => f.id === m.id);
+        if (!existing) return;
+        removeFlow(this.flowIo, this.flowsDir, m.id);
+        trackEvent({ name: "flow_action", action: "detach" });
+        this.postFlows();
+        return;
+      }
+      case "flow:renameTemplate": {
+        if (!getConfig().orchestrator) return;
+        // A stale drawer — open from before this shipped, or simply not
+        // re-rendered since — can still send a rename for a built-in even
+        // though the button is disabled (Task 14). Refuse here too, the same
+        // discipline `flow:saveTemplate`'s `canBindTicket` recheck follows: a
+        // starter has no file on disk to overwrite.
+        if (isBuiltinTemplateId(m.templateId)) {
+          this.post({
+            type: "toast", level: "error",
+            message: "That is a built-in template. Duplicate it to make a version you can change.",
+          });
+          return;
+        }
+        const existing = readTemplates(this.flowIo, this.templatesDir).find((t) => t.id === m.templateId);
+        if (!existing) return;
+        writeTemplate(this.flowIo, this.templatesDir, { ...existing, name: m.name });
+        trackEvent({ name: "flow_action", action: "rename_template" });
+        this.postFlows();
+        return;
+      }
+      case "flow:deleteTemplate": {
+        if (!getConfig().orchestrator) return;
+        // Removes only the template. A workflow already made from it keeps
+        // running untouched: `instantiate` COPIED the shape, so nothing the flow
+        // needs lives in the template file. It does still carry the template's id
+        // in `Flow.fromTemplate` (the Templates tab's "on N cards" count reads
+        // it), so a delete leaves that id dangling — a count nobody asks for any
+        // more, never a broken workflow.
+        if (isBuiltinTemplateId(m.templateId)) {
+          this.post({
+            type: "toast", level: "error",
+            message: "That is a built-in template. Duplicate it to make a version you can change.",
+          });
+          return;
+        }
+        const existing = readTemplates(this.flowIo, this.templatesDir).some((t) => t.id === m.templateId);
+        if (!existing) return;
+        removeTemplate(this.flowIo, this.templatesDir, m.templateId);
+        trackEvent({ name: "flow_action", action: "delete_template" });
+        this.postFlows();
+        return;
+      }
+      case "flow:duplicateTemplate": {
+        if (!getConfig().orchestrator) return;
+        // Deliberately NOT guarded on `isBuiltinTemplateId`: duplicating a
+        // built-in is the supported path to owning one, so the lookup must
+        // resolve a starter as well as an on-disk template.
+        const existing = this.allTemplates().find((t) => t.id === m.templateId);
+        if (!existing) return;
+        // The same re-mint-past-a-collision discipline `flow:create` uses:
+        // `newFlowId` is probabilistic, and a collision here must not silently
+        // overwrite an unrelated template instead of creating a copy. Collision
+        // is checked against disk only — `newFlowId` always starts with "f",
+        // never `BUILTIN_PREFIX`, so it cannot collide with a starter id.
+        const now = Date.now();
+        const taken = new Set(readTemplates(this.flowIo, this.templatesDir).map((t) => t.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
+        writeTemplate(this.flowIo, this.templatesDir, { ...existing, id, name: `${existing.name} copy`, savedAt: now });
+        trackEvent({ name: "flow_action", action: "duplicate_template" });
         this.postFlows();
         return;
       }
@@ -4699,6 +5053,28 @@ export class DeckPanel {
     removePrEntries(defaultPrFactsDir(), key);
     this.localRuns.delete(key);
     await this.refreshBusy();
+  }
+
+  /** The `inferredTicketKey` half of a `RunStatus`, and the ONE place it is set.
+   *
+   * Present exactly when `ticketKeyFor` resolves the run's url to a key that is
+   * not the record's own — which is the whole information the webview lacks,
+   * since it has no connector to parse a url with. Absent otherwise, so that
+   * `inferredTicketKey ?? run.key` (the webview's `boundTicketKeyOf`, attach.ts)
+   * reconstructs `ticketKeyFor(run, this.connector)` exactly, for every run
+   * shape. That equality is what keeps `flow:attach` — which binds a planned node
+   * by `ticketKeyFor` — from writing a workflow the card it was attached to
+   * cannot see.
+   *
+   * Not only for local runs, which is what this was: a Track-it card promoted
+   * while another run already owned its inferred key keeps a `local-<hash>` KEY
+   * and carries its ticket only in the url (see `track`), so a webview reading
+   * `run.key` there looks for the hash while the host binds the ticket. The
+   * card's own inferred-key chip is still local-only — `DeckApp.tsx` guards that
+   * on `runKind`, not on this field's presence. */
+  private ticketKeyPatch(run: Run): { inferredTicketKey?: string } {
+    const key = ticketKeyFor(run, this.connector);
+    return key === run.key ? {} : { inferredTicketKey: key };
   }
 
   /** The run a card's action acts on. A local card has no record on disk — it is

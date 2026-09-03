@@ -762,14 +762,64 @@ export const DECK_CSS = `
     to { transform: translateX(100%); opacity: 0; }
   }
 
-  /* The selected card's detail. 460px is the narrowest width at which a
-     .pr-block's label column and value column both fit without wrapping.
+  /* The selected card's detail. \`--dd-w\` carries the live value — resized by
+     drag or arrow key, defaulting to 620px (drawerResize.ts's \`ddResize.DEFAULT\`).
+     Unlike \`--orch-w\` (orchestratorStyles.ts), it is NOT declared anywhere in
+     this sheet: it's set imperatively on \`document.documentElement\` by
+     DeckDetail.tsx's own resize effect, not as an inline style on this
+     element. \`.board.dd-open\` below has to track this same width, and
+     \`.board\` is this drawer's SIBLING in \`DeckApp.tsx\`, not its descendant —
+     a custom property only cascades to descendants of wherever it's declared,
+     so an inline style here could never have reached it. \`:root\` is the one
+     ancestor both share. (This is also why \`--dd-w\` is in \`tokens.test.ts\`'s
+     \`RUNTIME_ONLY\` allowlist alongside \`--zone\`, rather than declared as a
+     literal default the way \`--orch-w\` is — there is no rule in this sheet
+     that would own such a declaration.) The \`620px\` in \`var(--dd-w, 620px)\`
+     below is the fallback for the instant before that effect has run at all.
+     460px — narrow enough to still hold the header row without wrapping or
+     clipping, see \`.dd-hd .k\` below — is the floor \`ddResize\`'s own \`min\`
+     enforces, not a number repeated here. */
+  .dd { width: var(--dd-w, 620px); }
+  /* The resize grip, centred ON the left border rather than beside it, same as
+     the Orchestrator drawer's own \`.orch-grip\` (orchestratorStyles.ts) — half
+     outside the drawer's box, half inside, so it never nudges the header,
+     body, or action row's own layout. One quiet, permanent affordance (three
+     dots) rather than a hover-only tint, for the same reason that file gives:
+     a control that only reveals itself on touch is a control nobody finds.
 
-     \`hidden auto\`, not \`auto\`: the drawer is a fixed-width panel of rows that all
-     ellipsize, so sideways scroll here is never a feature — it is always a row that
-     failed to shrink (a long mono key did exactly that), and it takes the close
-     button off-screen with it. Vertical scroll is the only axis it needs. */
-  .dd { width: 460px; overflow: hidden auto; }
+     Unlike \`.orch-grip\`, this one is NOT a child of the element that scrolls
+     (see \`.dd-scroll\` below): \`.dd\`, the element it's positioned relative to,
+     carries no \`overflow\` of its own any more. \`.orch\` never scrolled as a
+     whole to begin with, so copying this rule onto \`.dd\` verbatim while \`.dd\`
+     still owned \`overflow: hidden auto\` clipped the grip's own \`left: -4px\`
+     (only half the "half outside" it claimed) and carried it up and down with
+     whatever the drawer's content did — nearly out of reach the moment
+     \`More\` opened. Splitting the scrolling region into its own child fixes
+     both at once: the grip is bounded only by \`.dd\` itself now, which never
+     scrolls and never clips. */
+  .dd-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 9px; z-index: 1;
+    background: transparent; border: 0; padding: 0; cursor: ew-resize; }
+  .dd-grip::after {
+    content: ""; position: absolute; left: 50%; top: 50%; width: 3px; height: 21px;
+    transform: translate(-50%, -50%); pointer-events: none;
+    background-image: radial-gradient(circle, var(--dim) 1px, transparent 1.4px);
+    background-size: 3px 7px; background-repeat: repeat-y; opacity: .6; }
+  .dd-grip:hover, .dd-grip:focus-visible { background: color-mix(in srgb, var(--vscode-foreground) 10%, transparent); }
+  .dd-grip:hover::after, .dd-grip:focus-visible::after { opacity: .9; }
+  .dd-grip:focus-visible { outline: none;
+    box-shadow: inset 0 0 0 1px var(--vscode-focusBorder); }
+  /* The one element that actually scrolls and clips — a sibling of \`.dd-grip\`
+     inside \`.drawer.dd\`, holding everything else. \`flex: 1 1 auto\` claims the
+     rest of the column \`.drawer\` lays out (see deckStyles.ts's own \`.drawer\`
+     rule); \`min-height: 0\` is load-bearing on a flex item that needs to
+     scroll — without it a flex child's automatic minimum size is its own
+     content height, which would grow the whole drawer instead of scrolling
+     inside it. \`hidden auto\`, not \`auto\`: this drawer is a panel of rows that
+     all ellipsize, so sideways scroll here is never a feature — it is always a
+     row that failed to shrink (a long mono key did exactly that), and it
+     takes the close button off-screen with it. Vertical scroll is the only
+     axis it needs. */
+  .dd-scroll { flex: 1 1 auto; min-height: 0; overflow: hidden auto; }
   /* Two rows, and the header is the block that stacks them: \`.dd-id\` carries the
      identity (mark, key, tracker status, close) and the title takes the next row
      whole.
@@ -829,8 +879,46 @@ export const DECK_CSS = `
   .dd-sec + .dd-sec { border-top: 1px solid var(--hair); }
   .dd-lbl { font-size: 10.5px; letter-spacing: .06em; text-transform: uppercase;
     color: var(--dim); opacity: .8; margin-bottom: 7px; }
-  .dd-count { padding: 9px 12px 0; margin: 0; }
   .dd-none { font-size: var(--t-body); color: var(--dim); }
+
+  /* The promoted action row: the drawer's busiest controls, above the fold and
+     always visible — everything else waits behind \`More\` (\`.dd-more\` below).
+     Real buttons, not \`.dd-act\` list rows: there are at most four of them, so
+     a row-per-action list would be mostly empty space, and a control this
+     frequently used earns a bordered target rather than a hover-only one. */
+  .dd-acts { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px;
+    border-bottom: 1px solid var(--hair); }
+  .dd-pact { flex: 1 1 auto; min-width: 0; padding: 6px 10px; border-radius: var(--r-ctl);
+    border: 1px solid var(--edge); background: none; color: var(--vscode-foreground);
+    font-size: var(--t-body); cursor: pointer; text-align: center;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .dd-pact:hover { background: var(--vscode-toolbar-hoverBackground); }
+  .dd-pact:focus-visible { outline: 1px solid var(--vscode-focusBorder); outline-offset: -1px; }
+
+  /* A single-line fact: the section's own \`.dd-lbl\` shares its row with the
+     one line of content that names it, rather than heading a block of rows.
+     Only Work uses this, and only Work was meant to: its content (branch,
+     elapsed time) is genuinely one line. Pull requests' own facts stay a
+     labelled column, which \`.pr-block\`'s comment defends as reading like a
+     table rather than sentences; Sessions stays EXPANDED (\`defaultOpen\` in
+     DeckDetail.tsx), because the width this drawer gained was spent precisely
+     on showing per-session detail without a second click. */
+  .dd-strip { display: flex; align-items: baseline; gap: 8px; }
+  .dd-strip .dd-lbl { margin-bottom: 0; flex: none; }
+
+  /* Everything below the fold: copy, per-repo diffs, the spend breakdown,
+     forget. A real disclosure widget rather than a bespoke toggle, for its
+     keyboard and accessibility behavior alone — \`role="button"\` on the
+     summary is still needed on top of that, since neither jsdom's nor a real
+     screen reader's role mapping treats a bare \`<summary>\` as one. */
+  .dd-more { border-top: 1px solid var(--hair); }
+  .dd-more > summary { list-style: none; cursor: pointer; padding: 9px 12px;
+    font-size: var(--t-body); color: var(--dim); }
+  .dd-more > summary::-webkit-details-marker { display: none; }
+  .dd-more > summary:hover { color: var(--vscode-foreground);
+    background: var(--vscode-toolbar-hoverBackground); }
+  .dd-more[open] > summary { border-bottom: 1px solid var(--hair); }
+
   /* A list row, not a button slab: twelve bordered controls in a column would
      read as twelve competing calls to action. */
   .dd-act { display: flex; align-items: baseline; gap: 8px; width: 100%; text-align: left;
@@ -877,11 +965,19 @@ export const DECK_CSS = `
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
   /* At any realistic panel width there is no arrangement in which four columns
-     and a 460px drawer all fit — something is always off-screen. .board is
+     and the drawer both fit — something is always off-screen. .board is
      already a horizontal scroller, so this does not MOVE the columns: it adds
      scroll run-out past the last one, which is what lets a covered column be
-     scrolled clear of the drawer. Nothing becomes unreachable. */
-  .board.dd-open { padding-right: 470px; }
+     scrolled clear of the drawer. Nothing becomes unreachable. Tracks \`--dd-w\`
+     rather than a fixed figure now that the drawer is resizable — this reads
+     it correctly (not just its 620px fallback) only because DeckDetail.tsx
+     sets it on \`document.documentElement\`, an ancestor \`.board\` actually has;
+     see \`.dd\`'s own comment above for why an inline style on the drawer
+     itself could never have reached this sibling rule. The 620px fallback
+     covers the instant before that effect has run at all, and the case where
+     no card is selected and no drawer has ever set the property in this
+     session. */
+  .board.dd-open { padding-right: calc(var(--dd-w, 620px) + 10px); }
 
   /* The two-tier card. A floor with no flex column would hang dead space under
      the last row; making the card a column is what lets the footer's margin-top:
@@ -944,6 +1040,34 @@ export const DECK_CSS = `
 
   .c-foot2 { display: flex; gap: 5px; margin-top: auto; padding-top: 2px; }
 
+  /* The workflow chip: name and state, no progress count — "2 of 5" is drawer
+     information, and a card already carries a kind mark, a key, a status pill
+     and a lane rail, so a pip count would be a fifth thing to parse. English,
+     not mono, since it reads as a name and a sentence fragment, never an
+     identifier. \`margin-right: auto\` is the whole layout trick: as the first
+     child of a flex row it pushes Open/Diff to the far end without a wrapper.
+     One line, ellipsized — a long gate question must not push the card's own
+     actions off the edge.
+
+     Hues, and why: \`--c-progress\` for advancing and \`--c-done\` for done read
+     as ordinary board colours already spent elsewhere on this card. Amber and
+     red are spent more carefully — \`--c-attn\` for waiting-on-you and
+     \`--c-danger\` for stopped are the only two states that genuinely want a
+     human, so they are the only two chips that borrow attention, glyph
+     included (! / ✕, prepended in DeckApp.tsx, matching WorkflowBlock's own
+     per-step marks). A workflow that is merely attached and fine is neither —
+     it takes the quiet blue rather than a colour already spoken for elsewhere
+     on the board. Disarmed gets no colour at all: --dim, the same ink the rest
+     of the card's quiet text uses, because a disarmed workflow is inert and
+     should read that way at a glance. */
+  .c-wf { flex: 0 1 auto; min-width: 0; margin-right: auto; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; font-size: var(--t-body); }
+  .c-wf.advancing { color: var(--c-progress); }
+  .c-wf.done { color: var(--c-done); }
+  .c-wf.disarmed { color: var(--dim); }
+  .c-wf.waiting-on-you { color: var(--c-attn); font-weight: 600; }
+  .c-wf.stopped { color: var(--c-danger); font-weight: 600; }
+
   /* The spend figure. A count, so it is mono — the deck's rule is mono for
      identifiers and counts, prose in the UI font. It sits in the footer's dead
      right side: on the top row it wraps the ticket key onto a second line
@@ -983,4 +1107,102 @@ export const DECK_CSS = `
      is not a place to put the board's accent. */
   .c-row .ok { color: var(--c-done); }
   .c-row .act { margin-left: auto; flex: none; height: 20px; padding: 0 7px; font-size: 11px; }
+
+  /* WorkflowBlock — the card drawer's live stepper. Sits second in the drawer,
+     directly under the promoted actions (see DeckDetail.tsx's anatomy). The
+     empty ("no workflow") row and the attached header/steps share the outer
+     ".wf-block" padding so neither one jumps when a workflow is attached. */
+  .wf-block { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px;
+    border-bottom: 1px solid var(--hair); }
+  .wf-none { flex-direction: row; align-items: center; gap: 10px; }
+  .wf-dash { color: var(--dim); border-bottom: 1px dashed var(--hair); padding-bottom: 1px; }
+
+  .wf-hd { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+  .wf-name { font-weight: 600; }
+  .wf-count { font-family: var(--vscode-editor-font-family); color: var(--dim);
+    font-variant-numeric: tabular-nums; }
+  .wf-extra { color: var(--dim); }
+  .wf-hd-acts { display: flex; gap: 6px; margin-left: auto; }
+
+  /* The status chip. Hues are the same load-bearing set the card chip (Task 12)
+     will use: amber and red are already spoken for elsewhere on this board, so
+     a workflow that is merely attached and fine — disarmed or advancing — never
+     borrows either. */
+  .wf-chip { font-size: var(--t-micro); padding: 1px 6px; border-radius: var(--r-chip);
+    border: 1px solid var(--hair); color: var(--dim); }
+  .wf-chip.wf-advancing { color: var(--c-progress); border-color: color-mix(in srgb, var(--c-progress) 45%, var(--hair)); }
+  .wf-chip.wf-waiting-on-you { color: var(--c-attn); border-color: color-mix(in srgb, var(--c-attn) 45%, var(--hair)); }
+  .wf-chip.wf-stopped { color: var(--c-danger); border-color: color-mix(in srgb, var(--c-danger) 45%, var(--hair)); }
+  .wf-chip.wf-done { color: var(--c-done); border-color: color-mix(in srgb, var(--c-done) 45%, var(--hair)); }
+
+  .wf-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  /* Attaching leaves a workflow disarmed and every rule greyed (design doc §3) —
+     one dimming rule on the list rather than a second, muted copy of each
+     state's own color, so a step's hue always means the same thing whether or
+     not the workflow is currently spending anything. */
+  .wf-steps.wf-greyed .wf-step { opacity: .55; }
+
+  .wf-step { display: flex; align-items: baseline; gap: 8px; }
+  .wf-mark { flex: none; width: 1.2em; text-align: center; color: var(--dim); }
+  /* "waiting" — merely not yet — takes no color at all: the one state this
+     block must not make loud. */
+  .wf-step.wf-done .wf-mark { color: var(--c-done); }
+  .wf-step.wf-now .wf-mark { color: var(--c-progress); }
+  .wf-step.wf-you .wf-mark { color: var(--c-attn); }
+  .wf-step.wf-fail .wf-mark { color: var(--c-danger); }
+
+  .wf-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1 1 auto; }
+  .wf-rule { overflow-wrap: anywhere; }
+  .wf-receipt { color: var(--dim); font-size: var(--t-body); }
+  .wf-step.wf-fail .wf-receipt { color: var(--c-danger); }
+
+  .wf-step-acts { display: flex; gap: 6px; flex: none; }
+
+  /* The attach picker — search-and-pick, same visual family as combo.tsx's
+     MultiCombo (ORCH_CSS's .combo-search/.combo-opt), but a plain block
+     rather than a floating popover: it opens from a button already inside
+     ".wf-block", not a trigger of its own, so there is no anchor to position
+     a ".combo-pop" against. Picking a row commits immediately — see
+     WorkflowPicker's own doc comment for why this is not a second MultiCombo. */
+  .wf-picker { display: flex; flex-direction: column; gap: 6px; margin-top: 4px;
+    padding: 6px; border: 1px solid var(--hair); border-radius: var(--r-chip); }
+  .wf-picker-search { display: flex; align-items: center; gap: 6px; }
+  .wf-picker-search input { flex: 1; min-width: 0; border: 1px solid var(--hair);
+    border-radius: var(--r-chip); background: transparent; color: inherit;
+    font: inherit; padding: 3px 7px; }
+  .wf-picker-search input::placeholder { color: var(--vscode-input-placeholderForeground, var(--dim)); }
+  .wf-picker-close { flex: none; border: 0; background: transparent; color: var(--dim);
+    cursor: pointer; padding: 2px 4px; }
+  .wf-picker-close:hover { color: var(--vscode-foreground); }
+  .wf-picker-list { display: flex; flex-direction: column; max-height: 190px; overflow-y: auto; }
+  .wf-picker-opt { text-align: left; border: 0; background: transparent; color: inherit;
+    font: inherit; padding: 5px 7px; border-radius: var(--r-chip); cursor: pointer; }
+  .wf-picker-opt:hover { background: var(--vscode-list-hoverBackground); }
+  /* Quiet, not a state: a built-in is neither a failure nor something that
+     needs you, so no status hue — the same dim treatment the Templates view's
+     own "Built-in" marker uses. */
+  .wf-picker-bi { margin-left: 8px; font-size: var(--t-micro); color: var(--dim); }
+  .wf-picker-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
+    padding: 7px; font-size: var(--t-body); color: var(--dim); }
+
+  /* WorkflowList — the Active list: every card carrying a workflow, one row
+     each, so a reader does not have to open each drawer to see where its
+     workflow stands. Reuses \`.wf-name\`, \`.wf-chip.wf-*\` and \`.wf-count\`
+     verbatim from \`WorkflowBlock\` above rather than a second copy of the
+     same three rules — same words, same hues, in a new place. The row itself
+     is one big button (the whole row opens the card, not just the ticket
+     key), styled to disappear into a plain list line until hovered. */
+  .wfl-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+  .wfl-row { border-bottom: 1px solid var(--hair); }
+  .wfl-row:last-child { border-bottom: 0; }
+  .wfl-open { display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 8px 4px; border: 0; background: transparent; color: inherit;
+    font: inherit; text-align: left; cursor: pointer; }
+  .wfl-open:hover { background: var(--vscode-list-hoverBackground); }
+  /* A ticket key is an identifier, so mono; the title beside it is a sentence
+     fragment and stays in the UI font, matching the deck's standing rule. */
+  .wfl-ticket { flex: none; font-family: var(--mono); color: var(--dim); }
+  .wfl-title { flex: 1 1 auto; min-width: 0; overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap; }
+  .wfl-empty { color: var(--dim); padding: 8px 4px; }
 `;
