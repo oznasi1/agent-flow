@@ -1,0 +1,13 @@
+diff --git a/src/webview/App.tsx b/src/webview/App.tsx
+index d1584e03..c979c29f 100644
+--- a/src/webview/App.tsx
++++ b/src/webview/App.tsx
+@@ -583,7 +583,7 @@ export function App(): JSX.Element {
+       <div className="lenses">
+         <div className="lens">
+           <div className="seg" role="group" aria-label="Task filter">
+-            {visibleFilters(caps.supportedFilters).map((id) => (
++            {visibleFilters(DEFAULT_CAPS.supportedFilters).map((id) => (
+               <button
+                 key={id}
+                 aria-pressed={activeFilter === id}
