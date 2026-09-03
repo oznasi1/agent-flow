@@ -21,12 +21,12 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `sidebar-two-tabs` | GUIDE § What it does | The sidebar panel has two tabs, Tasks and Notepad; the project key and your name live in the view title bar | todo |
 | `sidebar-window-gauge` | GUIDE § What it does | The open-window gauge sits at the end of the tab row | todo |
 | `sidebar-explore-button` | GUIDE § What it does | Explore sits at the end of the tab row beside the gauge | todo |
-| `task-pool-filter-lenses` | GUIDE § What it does | The pool renders the filter tabs My sprint · Unassigned · Mine · Sprint · Backlog, but only those the connector declares in `caps.supportedFilters` (the fixture connector shows no Unassigned, Sprint or Backlog) | todo |
-| `task-default-filter` | SETTINGS § table | `agentFlow.defaultFilter` picks the lens the panel opens on (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`) | todo |
-| `task-size-lens` | GUIDE § What it does | A size lens (S/M/L by original estimate, an 8-hour workday) renders only when the connector has estimates and `agentFlow.filters.size` is on | todo |
-| `task-status-lens` | GUIDE § What it does | The status chip row renders, and `agentFlow.filters.status: false` hides it | todo |
-| `task-repo-search` | GUIDE § What it does | The repo multiselect narrows the pool to tasks inferred onto that repo; `agentFlow.filters.repo: false` hides it | todo |
-| `task-title-search` | README § Tasks — the pool | The fuzzy title search narrows the pool (a misspelt title still matches); `agentFlow.filters.search: false` hides the box | todo |
+| `task-pool-filter-lenses` | GUIDE § What it does | The pool renders the filter tabs My sprint · Unassigned · Mine · Sprint · Backlog, but only those the connector declares in `caps.supportedFilters` (the fixture connector shows no Unassigned, Sprint or Backlog) | e2e: only the lenses the connector declares render |
+| `task-default-filter` | SETTINGS § table | `agentFlow.defaultFilter` picks the lens the panel opens on (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`) | e2e: defaultFilter picks the lens the panel opens on |
+| `task-size-lens` | GUIDE § What it does | A size lens (S/M/L by original estimate, an 8-hour workday) renders only when the connector has estimates and `agentFlow.filters.size` is on | e2e: the size lens renders only when the connector has estimates |
+| `task-status-lens` | GUIDE § What it does | The status chip row renders, and `agentFlow.filters.status: false` hides it | e2e: filters.status false hides the status lens |
+| `task-repo-search` | GUIDE § What it does | The repo multiselect narrows the pool to tasks inferred onto that repo; `agentFlow.filters.repo: false` hides it | e2e: the repo lens narrows the pool to tasks inferred onto that repo |
+| `task-title-search` | README § Tasks — the pool | The fuzzy title search narrows the pool (a misspelt title still matches); `agentFlow.filters.search: false` hides the box | e2e: title search narrows the pool fuzzily |
 | `task-card-detail` | README § Tasks — the pool | Clicking a card opens its detail panel with the ticket's description | e2e: the detail panel renders the task's description |
 | `task-detail-fetch-failure` | CONNECTORS § 2. `TaskProvider` | A task whose detail cannot be fetched shows an error toast, not a blank panel, and the card stays in the pool | todo |
 | `task-repo-chips-inference` | README § Tasks — the pool | The repos a ticket touches are pre-selected from its components, labels and text matched against local checkouts | todo |
@@ -296,8 +296,8 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `connector-agile-error-envelope` | CONNECTORS § 9. Connector #2 | A failing query's JSON envelope on stdout reaches the user, not a generic error | e2e: JSON envelope on stdout reaches the user |
 | `connector-agile-live-org` | CONNECTORS § 9. Connector #2 | The describe-driven SOQL and namespace detection behave against a live Salesforce org | untestable: live Agile Accelerator API |
 | `connector-fixture` | CONTRIBUTING § The E2E fixture connector | `agentFlow.taskSource: "fixture"` with `AGENT_FLOW_FIXTURE_DIR` set reads `tasks.json` and appends every write to `writes.jsonl`; a real host boots it and renders the fixture task | e2e: the pool renders the fixture task |
-| `cap-supported-filters` | CONNECTORS § 3. The capability table | Only lenses in `caps.supportedFilters` render; an unlisted tab never renders, not even disabled; `"all"` is never a sixth tab | todo |
-| `cap-sizes` | CONNECTORS § 3. The capability table | The size control renders only with `caps.sizes`; `estimateSeconds` is rendered against an 8-hour workday | unit: test/webview/helpers.test.ts |
+| `cap-supported-filters` | CONNECTORS § 3. The capability table | Only lenses in `caps.supportedFilters` render; an unlisted tab never renders, not even disabled; `"all"` is never a sixth tab | e2e: dropping mysprint from supportedFilters removes that lens |
+| `cap-sizes` | CONNECTORS § 3. The capability table | The size control renders only with `caps.sizes`; `estimateSeconds` is rendered against an 8-hour workday | e2e: the size lens renders only when the connector has estimates |
 | `cap-sprints` | CONNECTORS § 3. The capability table | Without `caps.sprints` the add, remove and reorder affordances all disappear; a direct handler call reports "{label} doesn't have sprints." | todo |
 | `cap-components` | CONNECTORS § 3. The capability table | Without `caps.components` every repo chip renders plain — no dash, no `↑`, no title — while the selection stays editable | unit: test/webview/App.test.tsx |
 | `cap-labels` | CONNECTORS § 3. The capability table | Without `caps.labels` provenance stamping is a silent no-op: the status change succeeds with no `addLabel` and no toast | todo |
@@ -388,12 +388,12 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-worktree` | SETTINGS § table | `agentFlow.worktree` isolates the task in a git worktree at `.claude/worktrees/<KEY>`, git-excluded | e2e: worktree mode takes the task in a real git worktree |
 | `set-child-worktrees` | package.json | `agentFlow.childWorktrees` offers a worktree per child or one orchestrator session when a ticket has children | e2e: taking a parent offers its tree |
 | `set-track-open-windows` | SETTINGS § table | `agentFlow.trackOpenWindows` lists your open Agent Flow windows as destinations; off, no live windows are read | unit: test/unit/engine/openTarget.test.ts |
-| `set-default-filter` | SETTINGS § table | `agentFlow.defaultFilter` is the lens the panel opens on | todo |
+| `set-default-filter` | SETTINGS § table | `agentFlow.defaultFilter` is the lens the panel opens on | e2e: defaultFilter picks the lens the panel opens on |
 | `set-refetch-interval-minutes` | package.json | `agentFlow.refetchIntervalMinutes` refetches the current lens in the background without a spinner, stops while hidden, `0` turns it off | todo |
-| `set-filters-size` | GUIDE § What it does | `agentFlow.filters.size: false` hides the size lens | todo |
-| `set-filters-status` | GUIDE § What it does | `agentFlow.filters.status: false` hides the status chip row | todo |
-| `set-filters-repo` | GUIDE § What it does | `agentFlow.filters.repo: false` hides the repo multiselect | todo |
-| `set-filters-search` | package.json | `agentFlow.filters.search: false` hides the fuzzy title search box | todo |
+| `set-filters-size` | GUIDE § What it does | `agentFlow.filters.size: false` hides the size lens | e2e: filters.size false hides the size lens even when the connector has estimates |
+| `set-filters-status` | GUIDE § What it does | `agentFlow.filters.status: false` hides the status chip row | e2e: filters.status false hides the status lens |
+| `set-filters-repo` | GUIDE § What it does | `agentFlow.filters.repo: false` hides the repo multiselect | e2e: filters.repo false hides the repo lens |
+| `set-filters-search` | package.json | `agentFlow.filters.search: false` hides the fuzzy title search box | e2e: filters.search false hides the search box |
 | `set-seed-agent` | SETTINGS § table | `agentFlow.seedAgent` pre-fills the session's panel or terminal after opening | unit: test/unit/engine/workspace.test.ts |
 | `set-agent-provider` | SETTINGS § table | `agentFlow.agentProvider`: `claude-code`, `copilot`, `cursor`, `codex` or `ask`, each falling back to Claude Code where the editor cannot run it | e2e: a cursor provider setting degrades to Claude Code |
 | `set-agent-surface` | SETTINGS § table | `agentFlow.agentSurface`: `extension` for the chat panel, `terminal` for the CLI | e2e: the opened window seeds the agent prompt into a real integrated terminal |
@@ -503,7 +503,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `reach-failure-issue` | REACH § When the collector stops | A failing run opens or comments on a `reach: the collector is failing` issue and closes it on the next success | untestable: maintainer tooling, not shipped |
 | `reach-stale-banner` | REACH § When the collector stops | The page shows a warning banner once `meta.lastRun` is two or more days old | unit: test/unit/reach/staleBanner.test.ts |
 | `reach-schedule-caveats` | REACH § Scheduling caveats | GitHub disables the cron after 60 quiet days; a daily schedule leaves margin inside the 14-day window | untestable: maintainer tooling, not shipped |
-| `gap-no-sixth-tab` | CONNECTORS § 3. The capability table | `"all"` in `supportedFilters` never renders as a sixth tab | todo |
+| `gap-no-sixth-tab` | CONNECTORS § 3. The capability table | `"all"` in `supportedFilters` never renders as a sixth tab | e2e: the "all" filter never renders as a sixth tab |
 | `gap-no-microphone` | GUIDE § The Notepad | Agent Flow ships no microphone button; a webview cannot reach the microphone | untestable: documented absence |
 | `gap-notify-messages-nobody` | GUIDE § The Deck | A notify node sends no Slack DM or email — only a VS Code notification | untestable: documented absence |
 | `gap-no-branch-ci-picker` | ORCHESTRATOR_COMMANDS § You cannot | `branch CI passed`, `session idle over…` and `ticket status is…` have no picker and must be hand-written; hand-authored rules render and run | untestable: documented absence |
