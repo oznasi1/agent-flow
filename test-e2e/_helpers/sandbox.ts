@@ -2,6 +2,9 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import type { FixtureConfig } from "../../src/tasks/fixture/connector";
+
+export type { FixtureConfig };
 
 export interface Sandbox {
   root: string;
@@ -80,6 +83,15 @@ export function seedClaudeAssets(dir: string): void {
     path.join(commands, "refit.md"),
     "---\ndescription: Refit the landing gear.\n---\n\nRun the refit checklist.\n",
   );
+}
+
+/** Configure the fixture connector's capabilities and failures by writing
+ *  `<fixtureDir>/config.json`. Call before `launchHost` for knobs the webview
+ *  reads once at init (caps, supportedFilters, sizes); knobs the connector reads
+ *  per call (statusTargets, reject, failDetail, me) may be flipped mid-test.
+ *  Absent file = the shipped connector, so no existing journey needs this. */
+export function writeFixtureConfig(sb: Sandbox, cfg: FixtureConfig): void {
+  fs.writeFileSync(path.join(sb.fixtureDir, "config.json"), JSON.stringify(cfg, null, 2));
 }
 
 export function makeSandbox(settingsOverride: Record<string, unknown> = {}): Sandbox {

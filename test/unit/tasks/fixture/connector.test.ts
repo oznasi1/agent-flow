@@ -157,3 +157,59 @@ describe("the registry gate", () => {
     expect(conn.id).toBe("jira");
   });
 });
+
+describe("the fixture connector's config.json", () => {
+  const cfg = (c: Record<string, unknown>) => fs.writeFileSync(path.join(dir, "config.json"), JSON.stringify(c));
+
+  it("is byte-identical to the shipped defaults when absent", async () => {
+    const c = makeFixtureConnector(dir);
+    const p = c.provider();
+    expect(p.caps.supportedFilters).toEqual(["mine", "all", "mysprint"]);
+    expect(p.caps.sizes).toBe(false);
+    expect(p.caps.sprints && p.caps.labels && p.caps.components && p.caps.children).toBeTruthy();
+    expect(await p.me()).toEqual({ id: "fixture-user", displayName: "Fixture User" });
+    expect((await p.statusTargets("E2E-1")).map((t) => t.id)).toEqual(["in-progress", "done"]);
+  });
+
+  it("drops capabilities the config turns off", () => {
+    cfg({ supportedFilters: ["mine", "all"], sizes: true, caps: { sprints: false, labels: false, components: false, children: false } });
+    const p = makeFixtureConnector(dir).provider();
+    expect(p.caps.supportedFilters).toEqual(["mine", "all"]);
+    expect(p.caps.sizes).toBe(true);
+    expect(p.caps.sprints).toBeUndefined();   // absent, not false — the seam's contract
+    expect(p.caps.labels).toBeUndefined();
+    expect(p.caps.components).toBeUndefined();
+    expect(p.caps.children).toBeUndefined();
+  });
+
+  it("answers me() from the config, including a name-only identity", async () => {
+    cfg({ me: { id: "", displayName: "Nameless" } });
+    expect(await makeFixtureConnector(dir).provider().me()).toEqual({ id: "", displayName: "Nameless" });
+    cfg({ me: null });
+    expect(await makeFixtureConnector(dir).provider().me()).toBeNull();
+  });
+
+  it("serves configured status targets and rejects moveTo with retryWith", async () => {
+    const field = { kind: "pick" as const, id: "resolution", name: "Resolution", choices: [{ name: "Fixed" }] };
+    cfg({ statusTargets: [{ id: "done", toName: "Done", toCategory: "done", fields: [field] }],
+          reject: { moveTo: { message: "Resolution is required", retryWith: [field] } } });
+    const p = makeFixtureConnector(dir).provider();
+    expect(await p.statusTargets("E2E-1")).toEqual([{ id: "done", toName: "Done", toCategory: "done", fields: [field] }]);
+    await expect(p.moveTo("E2E-1", "done", {})).rejects.toMatchObject({ name: "TaskWriteError", message: "Resolution is required", retryWith: [field] });
+    // A rejection is still recorded, so a journey can prove the attempt was made.
+    const lines = fs.readFileSync(path.join(dir, "writes.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(lines.at(-1)).toMatchObject({ op: "moveTo", key: "E2E-1", targetId: "done", rejected: true });
+  });
+
+  it("throws from detail() for keys listed in failDetail", async () => {
+    cfg({ failDetail: ["E2E-1"] });
+    await expect(makeFixtureConnector(dir).provider().detail("E2E-1")).rejects.toThrow(/E2E-1/);
+  });
+
+  it("re-reads the file on every call, so a journey can flip it mid-session", async () => {
+    const p = makeFixtureConnector(dir).provider();
+    expect((await p.statusTargets("E2E-1")).length).toBe(2);
+    cfg({ statusTargets: [] });
+    expect(await p.statusTargets("E2E-1")).toEqual([]);
+  });
+});
