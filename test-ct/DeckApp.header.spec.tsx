@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import * as React from "react";
 import { DeckApp } from "../src/webview/DeckApp";
 import { host } from "./_helpers/host";
-import { mkStatus, runsMsg, flowsMsg, shipItOn } from "./_helpers/deckFixtures";
+import { mkStatus, runsMsg, flowsMsg, shipItOn, gateOn } from "./_helpers/deckFixtures";
 
 /**
  * `deckStyles.ts`'s own comment on `.hd` ("without this it clips its right
@@ -83,4 +83,51 @@ test("at a narrow width the two header buttons stay intact and the stats wrap fi
   // cramped line with them, this would fail.
   expect(statsBox.y + statsBox.height).toBeLessThanOrEqual(wfBox.y);
   expect(sameLine(statsBox, wfBox)).toBe(false);
+});
+
+// A "needs you" badge (`gateOn` -- a waiting-on-you workflow) widens the
+// Workflows button enough that it no longer shares a line with Templates at
+// 320px (see `mountNarrow`'s own comment above for the measured shape of
+// that fold). Nobody filing this task could confirm by eye whether that
+// wider button CLIPS off the edge of the viewport or genuinely wraps onto
+// its own line, because this environment has no display -- so this is the
+// one place that question gets a real answer, from real Chromium geometry,
+// not a guess. If this ever measures actual clipping (a button's right edge
+// past the viewport, or document-level horizontal overflow), that is a real
+// layout defect: STOP, do not adjust the CSS and do not loosen this
+// assertion to match what broke -- report the measured numbers instead.
+test("at a narrow width with a needs-you badge, the header wraps rather than clips", async ({ mount, page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await mount(<DeckApp />);
+  await host(page, flowsMsg([gateOn("PROJ-142")]));
+  await host(page, runsMsg([mkStatus({ run: { ...mkStatus().run, key: "PROJ-142" } })]));
+
+  const workflows = page.getByRole("button", { name: /Workflows/ });
+  const templates = page.getByRole("button", { name: /Templates/ });
+  await expect(workflows).toBeVisible();
+  await expect(templates).toBeVisible();
+  // The full badge text is still there, not swallowed by an ellipsis or a
+  // clipped box -- a truncated label would still satisfy `toBeVisible()`.
+  await expect(workflows).toContainText("Workflows");
+  await expect(workflows).toContainText("needs you");
+  await expect(templates).toHaveText("Templates");
+
+  const [wfBox, tmplBox] = await Promise.all([
+    workflows.boundingBox(), templates.boundingBox(),
+  ]) as [Box, Box];
+
+  // Overflow geometry, not a class name: whichever line each button lands
+  // on, neither box may extend past the 320px viewport...
+  expect(wfBox.x).toBeGreaterThanOrEqual(0);
+  expect(tmplBox.x).toBeGreaterThanOrEqual(0);
+  expect(wfBox.x + wfBox.width).toBeLessThanOrEqual(320);
+  expect(tmplBox.x + tmplBox.width).toBeLessThanOrEqual(320);
+  // ...and the document itself never grows a horizontal scrollbar -- the
+  // page-level signature of "clips its right end off-screen" that a single
+  // element's own box can miss (e.g. an ancestor with `overflow: hidden`
+  // silently eating the excess instead of the browser folding the line).
+  const overflow = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth,
+  }));
+  expect(overflow.scroll).toBeLessThanOrEqual(overflow.client);
 });
