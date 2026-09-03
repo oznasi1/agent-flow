@@ -1461,18 +1461,32 @@ export function DeckApp(): JSX.Element {
           onRename={(id, name) => send({ type: "flow:rename", id, name })}
           // Every graph edit on the canvas — drag, add a node, edit a
           // field — goes through this one prop. A `flow` target sends it
-          // straight to the host, same as always; but the OPEN draft
-          // template has no file on disk for `flow:save` to find (the host
-          // silently refuses a write against an id it does not recognise —
-          // see that handler's own membership check), and "silently refuse"
-          // is not "nothing happened": the edit would vanish, since nothing
-          // else holds it either. So an edit to the draft's own flow is kept
+          // straight to the host, same as always; but ANY template target
+          // has no file on disk for `flow:save` to find (the host silently
+          // refuses a write against an id it does not recognise — see that
+          // handler's own membership check), and "silently refuse" is not
+          // "nothing happened": the edit would vanish, since nothing else
+          // holds it either. So an edit to a template's own flow is kept
           // right here instead, in `draftTemplate` state, and never reaches
           // `send` at all — which is the same property "＋ New template…"
           // itself promises (see `mintDraftTemplate`'s own doc comment).
+          //
+          // Keyed on `openFlowId?.kind === "template"` alone, NOT on whether
+          // the target's id matches `draftTemplate.id` — today the two are
+          // always the same thing, since minting a fresh draft is the only
+          // way a template target is ever constructed (there is no "Open a
+          // saved template" affordance yet). But a guard keyed on the id
+          // would silently stop working the moment one is wired: every
+          // canvas edit on a REOPENED template would fall through to
+          // `flow:save` with the reopened flow's own `id: ""` (every stored
+          // template's inner flow has that same blank id —
+          // `normalizedTemplateFlow`), the host would refuse it, and the
+          // canvas would snap back after every edit. Keying on `kind` instead
+          // means this stays correct the day Open lands, with no one having
+          // to remember to revisit this line.
           onSave={(flow) => {
-            if (draftTemplate && openFlowId?.kind === "template" && openFlowId.id === draftTemplate.id) {
-              setDraftTemplate({ ...draftTemplate, flow });
+            if (openFlowId?.kind === "template") {
+              if (draftTemplate) setDraftTemplate({ ...draftTemplate, flow });
               return;
             }
             send({ type: "flow:save", flow });

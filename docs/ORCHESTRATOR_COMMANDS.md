@@ -324,16 +324,29 @@ never the card the template happened to be saved from.
 
 **＋ New template…**, on the Templates view and on an empty Canvas, opens a
 fresh draft held only in memory — nothing reaches `~/.agentflow/templates/`
-until Save is pressed. The draft is edited exactly like any other flow (add a
-place, a command, a gate, wire rules between them), but with every workflow
-verb hidden: arm, disarm, dry-run, resume, save-as-template, and attach all
-assume a live card with a ticket to watch, and a draft has neither. Only
-**Cancel** and **Save** are offered. Save sends `flow:writeTemplate` with the
-draft's flow and a name; the host normalizes it the same way
-`flow:saveTemplate` does (ids cleared, disarmed, every host stamp stripped)
-and writes it. Saving again after further edits overwrites the same
-template rather than minting a second one. Closing the drawer, or Cancel,
-discards the draft outright — there was never anything on disk to clean up.
+until Save is pressed. The draft's SHAPE can be built up the same way any
+flow's can — add a notify, a gate, a command, or another planned step, and
+wire rules between them — but every WORKFLOW verb is hidden: arm, disarm,
+dry-run, resume, save-as-template, and **attach** (offered elsewhere as
+"+ Add place…") all assume a live card with a ticket to watch, and a draft
+has neither. Only **Cancel** and **Save** are offered.
+
+Save sends `flow:writeTemplate` with the draft's flow and a name; the host
+normalizes it the same way `flow:saveTemplate` does (ids cleared, disarmed,
+every host stamp stripped) and writes it, then closes the draft back to the
+Templates view. This is **create-only** today: there is no "Open" affordance
+on a saved template's own row (`TemplateRow` offers Duplicate, Rename and
+Delete), so nothing ever constructs a canvas target naming an already-saved
+template, and `flow:writeTemplate`'s own update-in-place branch (`templateId`
+present) is unreachable from the UI — every Save mints a fresh template.
+Reopening a saved template for further edits is a known gap, not yet built.
+
+**Cancel** discards the draft outright — there was never anything on disk to
+clean up. Closing the drawer a different way (the panel's own Close, or
+selecting a card) does **not**: the draft survives in memory, and the next
+**＋ New template…** click reopens that same half-drawn draft rather than
+minting a blank one — see `draftTemplate`'s own doc comment in `DeckApp.tsx`
+for why only one can exist at a time.
 
 ### Reaching Templates from a stuck attach picker
 
