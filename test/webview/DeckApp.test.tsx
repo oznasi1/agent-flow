@@ -1855,9 +1855,14 @@ const firedFlow = (): Flow => ({
 
 // `pendingResume` defaults empty: the resume gate (Task 4) is host-side state
 // with no rendering yet (Task 6 wires the banner) — every existing fixture here
-// predates the field and has nothing to hold.
-const flowsMsg = (flows: Flow[], enabled = true): OutboundMessage =>
-  ({ type: "deck:flows", commands: [], branchCi: {}, flows, enabled, pendingResume: [], promptModes: [], templates: [] });
+// predates the field and has nothing to hold. `templates` defaults empty for
+// the same reason and is the one field a caller can override positionally
+// (rather than by spreading this function's own result, which loses the
+// discriminant `OutboundMessage` needs — this return type is the whole union,
+// not narrowed to the `deck:flows` member) — see "survives the Deck's own 6s
+// deck:flows refresh" for the one test that needs a non-empty list.
+const flowsMsg = (flows: Flow[], enabled = true, templates: FlowTemplate[] = []): OutboundMessage =>
+  ({ type: "deck:flows", commands: [], branchCi: {}, flows, enabled, pendingResume: [], promptModes: [], templates });
 
 /** The drawer itself, not either header button that opens onto it. */
 const drawer = () => screen.queryByRole("complementary", { name: "Orchestrator" });
@@ -2223,6 +2228,45 @@ describe("＋ New template… — a draft that never touches disk", () => {
     fireEvent.click(newTemplateBtn()); // and back to Canvas
     // The typed name survived — this is the SAME draft, not a fresh blank one.
     expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it fast");
+    expect(sent).not.toHaveBeenCalled();
+  });
+
+  it("survives the Deck's own 6s deck:flows refresh, not only a manual reopen", () => {
+    // The reopen test above only proves the draft outlives a NAVIGATION away
+    // and back. The Deck posts `deck:flows` on its own timer regardless of
+    // what the user is doing (roughly every 6s) — a draft that could not
+    // survive THAT would be destroyed mid-authoring, silently, which is
+    // exactly the failure an on-disk draft was rejected to avoid (see
+    // `draftTemplate`'s own module comment). Two posts here, not one: an
+    // empty `templates` list (this draft never appears in it — see "never
+    // offers the draft in a card's attach picker") and then a non-empty one
+    // (a real save landing from another window mid-edit), so neither shape
+    // of a routine refresh is the one that was left uncovered.
+    openTemplatesView();
+    fireEvent.click(newTemplateBtn());
+    fireEvent.change(screen.getByLabelText("Flow name"), { target: { value: "Ship it fast" } });
+    fireEvent.blur(screen.getByLabelText("Flow name"));
+    expect(screen.getAllByText(/1 node · 0 rules/)).toHaveLength(2);
+    sent.mockClear();
+
+    host(flowsMsg([])); // an ordinary refresh, templates still empty
+    // The drawer's own landmark, not just its contents: a `setOpenFlowId(null)`
+    // regression here starts `useDrawerExit`'s slide-out immediately, which
+    // freezes the LAST rendered flow on screen (Drawer.tsx's own doc comment)
+    // for `DRAWER_ANIM_MS` — long enough that a bare content assertion right
+    // after `host()` would still see the typed name and pass anyway. The
+    // landmark goes `aria-hidden` the instant that slide-out starts, which
+    // `queryByRole` respects, so checking IT is what actually tells the two
+    // cases apart.
+    expect(drawer()).not.toBeNull();
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it fast");
+    expect(screen.getAllByText(/1 node · 0 rules/)).toHaveLength(2);
+    expect(sent).not.toHaveBeenCalled();
+
+    host(flowsMsg([], true, [makeTemplate("t1", "Ship it")])); // another, templates now non-empty
+    expect(drawer()).not.toBeNull();
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it fast");
+    expect(screen.getAllByText(/1 node · 0 rules/)).toHaveLength(2);
     expect(sent).not.toHaveBeenCalled();
   });
 
