@@ -44,8 +44,10 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `task-my-sprint-reorder` | CONNECTORS § 3. The capability table | Dragging in the My sprint lens reorders the pool, and the order survives a refresh | e2e: reordering the pool survives a refresh |
 | `task-reset-order` | GUIDE § What it does | Reset order restores the source order | e2e: reset restores source order |
 | `task-address-pr-sidebar` | GUIDE § What it does | The sidebar's Address PR button appears when the task reaches `agentFlow.prReviewStatus` (case-insensitive) and kicks off a session in a fresh worktree | e2e: seeds the PR-review prompt in a forced worktree |
+| `task-address-pr-sidebar-gate` | GUIDE § What it does | The sidebar's Address PR button is present only while the task's status equals `agentFlow.prReviewStatus` compared case-insensitively (`to do` matches `To Do`), and is absent from every card on a non-matching status | e2e: Address PR appears only when the status matches prReviewStatus |
 | `task-address-pr-behaviour` | GUIDE § What it does | The Address PR session is told to find the PR by Jira key, check out its branch, assess readiness and, with `agentFlow.prReviewAutoFix` on, implement the changes | e2e: Address PR seeds the PR-review prompt |
-| `task-address-pr-assess-only` | SETTINGS § table | `agentFlow.prReviewAutoFix: false` seeds an assess-only prompt, and a custom `agentFlow.prReviewPrompt` is what gets seeded | todo |
+| `task-address-pr-assess-only` | SETTINGS § table | `agentFlow.prReviewAutoFix: false` seeds an assess-only prompt — the shipped assess wording without the implement clause | e2e: prReviewAutoFix off seeds an assess-only prompt |
+| `task-address-pr-custom-prompt` | SETTINGS § table | A custom `agentFlow.prReviewPrompt` is what gets seeded, placeholders substituted, in place of the shipped default | e2e: a custom prReviewPrompt is what gets seeded |
 | `task-launch-in-parallel` | GUIDE § What it does | Ticking several cards and Launch in parallel gives every task its own git worktree and branch, one window per task by default | e2e: opens a window per task, each in its own worktree |
 | `task-launch-in-parallel-shared-window` | GUIDE § What it does | The one-shared-window layout stacks every task's worktree in one window with a session seeded per task, in the order picked | todo |
 | `task-launch-in-parallel-no-repo` | GUIDE § What it does | A task touching none of the filtered repos launches in all of them, so no task launches with no repo | todo |
@@ -426,9 +428,9 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-forge` | SETTINGS § table | `agentFlow.forge`: `github`, `gitlab` or `bitbucket`; everything that reads a PR goes through it | e2e: the Deck card shows the MR the GitLab forge reports |
 | `set-pr-facts` | SETTINGS § table | `agentFlow.prFacts` reads PR state onto Deck cards through the forge CLI | e2e: Deck card shows the PR the GitHub forge reports for the run's branch |
 | `set-pr-facts-ttl-seconds` | SETTINGS § table | `agentFlow.prFactsTtlSeconds` (120, minimum 30) is how stale a cached PR fact may be; fetched only while the Deck is open | unit: test/unit/engine/pr/store.test.ts |
-| `set-pr-review-status` | SETTINGS § table | `agentFlow.prReviewStatus` (case-insensitive) gates the sidebar's Address PR button, not the Deck's | e2e: Address PR seeds the PR-review prompt in a forced |
-| `set-pr-review-auto-fix` | SETTINGS § table | `agentFlow.prReviewAutoFix: false` makes the Address PR session assess only | todo |
-| `set-pr-review-prompt` | SETTINGS § table | `agentFlow.prReviewPrompt` is the Address PR kick-off prompt, with a fixing instruction appended when auto-fix is on | todo |
+| `set-pr-review-status` | SETTINGS § table | `agentFlow.prReviewStatus` (case-insensitive) gates the sidebar's Address PR button, not the Deck's | e2e: Address PR appears only when the status matches prReviewStatus |
+| `set-pr-review-auto-fix` | SETTINGS § table | `agentFlow.prReviewAutoFix: false` makes the Address PR session assess only | e2e: prReviewAutoFix off seeds an assess-only prompt |
+| `set-pr-review-prompt` | SETTINGS § table | `agentFlow.prReviewPrompt` is the Address PR kick-off prompt, with a fixing instruction appended when auto-fix is on | e2e: a custom prReviewPrompt is what gets seeded |
 | `set-review-requests` | SETTINGS § table | `agentFlow.reviewRequests` shows the Deck's review-requests strip | todo |
 | `set-review-requests-always-visible` | package.json | `agentFlow.reviewRequestsAlwaysVisible: false` hides the strip while no PR is waiting | todo |
 | `set-review-requests-ttl-seconds` | SETTINGS § table | `agentFlow.reviewRequestsTtlSeconds` (300, minimum 60) is how stale the cached queue may be | unit: test/unit/engine/review/store.test.ts |

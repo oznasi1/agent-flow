@@ -1,0 +1,15 @@
+diff --git a/src/webview/helpers.ts b/src/webview/helpers.ts
+index d165d5d1..fc3e9d32 100644
+--- a/src/webview/helpers.ts
++++ b/src/webview/helpers.ts
+@@ -184,8 +184,8 @@ export function matchesStatus(task: Task, selected: ReadonlySet<string>): boolea
+ /** Is this task in the configured PR-review status? Case-insensitive, whitespace-trimmed.
+  *  Both sides must be non-empty. Drives the "Address PR" card action. Pure. */
+ export function isPrReviewStatus(status: string, configured: string): boolean {
+-  const a = (status || "").trim().toLowerCase();
+-  const b = (configured || "").trim().toLowerCase();
++  const a = (status || "").trim();
++  const b = (configured || "").trim();
+   return a.length > 0 && b.length > 0 && a === b;
+ }
+ 
