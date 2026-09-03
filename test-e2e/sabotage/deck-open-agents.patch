@@ -1,0 +1,13 @@
+diff --git a/src/deckView.ts b/src/deckView.ts
+index a8b4a7aa..f2fc835a 100644
+--- a/src/deckView.ts
++++ b/src/deckView.ts
+@@ -3464,7 +3464,7 @@ export class DeckPanel {
+     // a card it doesn't belong to. `.get` returning undefined for a tracked run
+     // is exactly "no restriction" — every one of its repos still counts, unchanged.
+     const localActiveRootsByKey = new Map<string, ReadonlySet<string>>();
+-    const unclaimed = [...places.keys()].filter((place) => !claimed.has(place));
++    const unclaimed = [...places.keys()].filter((place) => !claimed.has(place)).filter(() => false);
+     // A window holding two repos is one place to work, not two: fold its session
+     // directories into a single card that names the workspace and carries both
+     // roots. Anything a live multi-root window does not list — including a place
