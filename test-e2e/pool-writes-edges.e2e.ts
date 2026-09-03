@@ -210,7 +210,10 @@ describeWithHost("pool writes · edges", { "agentFlow.provenanceLabel": "e2e-bot
       statusTargets: [DONE],
       reject: { moveTo: { message: "Resolution is required", retryWith: [RESOLUTION] } },
     });
-    const pool = new Pool(ctx.page());
+    // No card count: E2E-2 was retired by the previous test in a shared run, and
+    // both cards are here under `-g` — `Pool.open` without `n` only guarantees the
+    // sidebar is open, which is all the next click needs.
+    const pool = await Pool.open(ctx.page());
     await pool.statusButton(FIXTURE_TASK.key).click();
     const quickInput = ctx.page().locator(".quick-input-widget");
     await expect(quickInput).toBeVisible({ timeout: 15_000 });
@@ -246,7 +249,7 @@ describeWithHost("pool writes · edges", { "agentFlow.provenanceLabel": "e2e-bot
   test("Remove from sprint offers Undo, and Undo puts the card back", async ({}, testInfo) => {
     // The fixture never mutates tasks.json, so the lens refetch brings back both
     // cards even after the two done-moves above retired them from the webview.
-    const pool = new Pool(ctx.page());
+    const pool = await Pool.open(ctx.page());
     await pool.selectLens("My sprint", 2);
     await pool.removeFromSprintButton(FIXTURE_TASK_2.key).click();
     await expect.poll(() => writes(ctx.sb().fixtureDir).filter((w) => w.op === "removeFromSprint" && w.key === FIXTURE_TASK_2.key))
