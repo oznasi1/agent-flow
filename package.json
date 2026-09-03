@@ -905,6 +905,7 @@
     "test:ct": "playwright test -c playwright-ct.config.ts",
     "test:e2e": "npm run build && playwright test -c playwright-e2e.config.ts",
     "e2e:report": "node scripts/verify-report.mjs",
+    "e2e:merge": "PLAYWRIGHT_JSON_OUTPUT_NAME=test-results/e2e-results.json PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-e2e-report PLAYWRIGHT_HTML_OPEN=never playwright merge-reports --reporter json,html all-blobs",
     "sabotage": "node scripts/sabotage.mjs",
     "typecheck": "tsc --noEmit",
     "vscode:prepublish": "npm run build -- --production",

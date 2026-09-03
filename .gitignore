@@ -18,6 +18,9 @@ playwright/.cache/
 # E2E host downloads and reports.
 .vscode-test/
 playwright-e2e-report/
+# Sharded E2E (PW_BLOB): per-shard blobs, and the merge input dir CI downloads them into.
+blob-report/
+all-blobs/
 
 # Local scratch output dir suggested by docs/REACH.md for running the reach
 # collector by hand — never meant to be committed to this repo.
