@@ -5994,6 +5994,99 @@ describe("orchestrator flows", () => {
     });
   });
 
+  describe("flow:writeTemplate — the canvas's own save, create and update in one message (Task 12b)", () => {
+    // A graph the canvas could plausibly have open: one planned node, so
+    // `canBindTicket` passes. `id` is deliberately a real-looking flow id —
+    // the whole point of the normalization under test is that it never
+    // survives into the saved template.
+    const okFlow: Flow = {
+      id: "canvas-draft", name: "Ship it", armed: true, createdAt: 1_000,
+      nodes: [
+        { id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["aws-ops"], mode: "plan", dest: "worktree" },
+      ],
+      edges: [],
+    };
+
+    it("create (no templateId): mints a fresh, non-built-in id and normalizes the inner flow.id away", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:writeTemplate", name: "New template", flow: okFlow });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const t = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(t.id).not.toBe("");
+      expect(t.id.startsWith("builtin-")).toBe(false);
+      expect(t.name).toBe("New template");
+      // The inner flow's id is inert (nothing resolves it) and leaking the
+      // canvas's real on-disk flow id into a saved template would be
+      // misleading — normalized away exactly as `toTemplate` normalizes it.
+      expect(t.flow.id).toBe("");
+      expect(t.flow.nodes).toEqual(okFlow.nodes);
+    });
+
+    it("update (templateId present and on disk): preserves id and params, replaces name and graph", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Old name")];
+      const { send } = await openPanel();
+      await send({ type: "flow:writeTemplate", templateId: "k1", name: "New name", flow: okFlow });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const t = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(t.id).toBe("k1");
+      expect(t.name).toBe("New name");
+      expect(t.params).toEqual({});
+      expect(t.flow.id).toBe("");
+      expect(t.flow.nodes).toEqual(okFlow.nodes);
+    });
+
+    it("a templateId that names nothing on disk falls through to create, rather than silently doing nothing", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:writeTemplate", templateId: "not-on-disk", name: "New template", flow: okFlow });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const t = h.writeTemplate.mock.calls.at(-1)![2] as FlowTemplate;
+      expect(t.id).not.toBe("not-on-disk");
+    });
+
+    // A built-in is never on disk, so without the `isBuiltinTemplateId` guard
+    // this id would ALSO fall through to the not-on-disk create path above and
+    // silently mint a brand new template — a write, not a no-op, and the
+    // opposite of "refused". Asserting the specific toast is what tells
+    // "refused because built-in" apart from "wrote nothing", so this fails
+    // the moment the guard is removed rather than only when writeTemplate is
+    // asserted not-called.
+    it("refuses a built-in templateId with the specific built-in toast, and writes nothing", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      await send({ type: "flow:writeTemplate", templateId: "builtin-ship-it", name: "x", flow: okFlow });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast).toMatchObject({
+        level: "error",
+        message: "That is a built-in template. Duplicate it to make a version you can change.",
+      });
+    });
+
+    it("refuses a graph with no place or planned node — nothing to ever bind a ticket to — and writes nothing", async () => {
+      setConfig({ orchestrator: true });
+      const { p, send } = await openPanel();
+      const badFlow: Flow = {
+        id: "x", name: "Notify only", armed: false, createdAt: 0,
+        nodes: [{ id: "n1", x: 0, y: 0, join: "any", kind: "notify", message: "done" }],
+        edges: [],
+      };
+      await send({ type: "flow:writeTemplate", name: "Notify only", flow: badFlow });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/nothing to bind|no step/i);
+    });
+
+    it("does nothing when the orchestrator setting is off", async () => {
+      setConfig({ orchestrator: false });
+      const { send } = await openPanel();
+      await send({ type: "flow:writeTemplate", name: "New template", flow: okFlow });
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+  });
+
   describe("flow:renameTemplate, flow:deleteTemplate, flow:duplicateTemplate (Task 8)", () => {
     it("flow:renameTemplate changes only the name", async () => {
       setConfig({ orchestrator: true });

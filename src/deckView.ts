@@ -10,7 +10,7 @@ import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, Planned
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, findEdgeOutput, readJournal, JournalEvent, JournalEventInput } from "./engine/orchestrator/journal";
-import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, toTemplate } from "./engine/orchestrator/templates";
+import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
 import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
@@ -4557,6 +4557,63 @@ export class DeckPanel {
         writeTemplate(this.flowIo, this.templatesDir, saved);
         // The template's own name is the user's text; only the gesture is reported.
         trackEvent({ name: "flow_action", action: "save_template" });
+        this.postFlows();
+        return;
+      }
+      case "flow:writeTemplate": {
+        if (!getConfig().orchestrator) return;
+        // Same built-in refusal every other template WRITE in this file makes
+        // (`flow:renameTemplate`, `flow:deleteTemplate`): a starter has no file
+        // on disk to overwrite, and the canvas can be stale about which
+        // template it opened. Verbatim message — not a new sentence — so the
+        // toast reads the same everywhere this refusal happens.
+        if (m.templateId !== undefined && isBuiltinTemplateId(m.templateId)) {
+          this.post({
+            type: "toast", level: "error",
+            message: "That is a built-in template. Duplicate it to make a version you can change.",
+          });
+          return;
+        }
+        // The same recheck `flow:saveTemplate` makes, and for the same reason:
+        // the canvas's own button can be stale, and this handler is the one
+        // place that actually writes to disk. A command/gate/notify-only
+        // graph would otherwise save cleanly and then fail `instantiate` at
+        // every future attach, forever.
+        if (!canBindTicket(m.flow)) {
+          this.post({
+            type: "toast", level: "error",
+            message: `"${m.flow.name}" has no step to bind a ticket to — add a place or a planned step first.`,
+          });
+          return;
+        }
+        const now = Date.now();
+        // `flow.id` is not part of the shape — `toTemplate` writes `id: ""` for
+        // exactly this reason, and nothing resolves a template's inner flow id
+        // (`instantiate` mints a fresh one). Storing the canvas's live id would
+        // leak the identity of whatever on-disk flow it was last pointed at
+        // into a template that outlives it.
+        const flow: Flow = { ...m.flow, id: "" };
+        const existing = m.templateId
+          ? readTemplates(this.flowIo, this.templatesDir).find((t) => t.id === m.templateId)
+          : undefined;
+        if (existing) {
+          writeTemplate(this.flowIo, this.templatesDir, { ...existing, name: m.name, flow, savedAt: now });
+          trackEvent({ name: "flow_action", action: "write_template" });
+          this.postFlows();
+          return;
+        }
+        // The same bounded re-mint discipline `flow:saveTemplate` and
+        // `flow:attach` use: `newFlowId` is probabilistic, not unique by
+        // construction, and a collision here would silently overwrite an
+        // existing template. Bounded rather than a while-loop so a
+        // pathological `Math.random()` cannot hang the extension host.
+        const taken = new Set(readTemplates(this.flowIo, this.templatesDir).map((t) => t.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
+        const saved: FlowTemplate = { schema: TEMPLATE_SCHEMA, id, name: m.name, params: {}, savedAt: now, flow };
+        writeTemplate(this.flowIo, this.templatesDir, saved);
+        trackEvent({ name: "flow_action", action: "write_template" });
         this.postFlows();
         return;
       }
