@@ -1129,14 +1129,37 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       nodes: [...flow.nodes, { id: nextNodeId(flow), kind: "gate", x: 320, y: 24, join: "any", question: "ok to continue?" }],
     });
 
-  // Unlike every other node this drawer builds, a `planned` node cannot be
-  // assembled here: it names a ticket, and the webview has no task connector
-  // to ask for one — it must not import `fs`/`os`/`path`/`child_process`, even
-  // transitively, and a connector reaches all four. So this sends only the
-  // flow's own id; the host runs the actual picker (a sequence of native
-  // QuickPicks) and appends the whole node in one write. See deckView.ts's
-  // `addPlanned`.
-  const addPlanned = () => send({ type: "flow:addPlanned", id: flow.id });
+  // Unlike every other node this drawer builds, a `planned` node ordinarily
+  // cannot be assembled here: it names a ticket, and the webview has no task
+  // connector to ask for one — it must not import `fs`/`os`/`path`/
+  // `child_process`, even transitively, and a connector reaches all four. So
+  // the ordinary path sends only the flow's own id; the host runs the actual
+  // picker (a sequence of native QuickPicks) and appends the whole node in
+  // one write. See deckView.ts's `addPlanned`.
+  //
+  // A template draft is the one case that cannot go through that host round
+  // trip: its inner `flow.id` is `""` (`mintDraftTemplate`'s own doc
+  // comment), and `readFlows(...).find(f => f.id === "")` on the host side
+  // can never find it — a click here would authenticate the connector, run
+  // four QuickPicks, and then silently do nothing. A template's planned node
+  // has no ticket to look up anyway (`instantiate` fills `ticketKey`/`repos`/
+  // `mode` in at attach time, the same fallback `mintDraftTemplate` relies
+  // on), so this mints the node locally with exactly the blank shape
+  // `mintDraftTemplate` seeds, the same way `addNotify`/`addGate` already
+  // mint their own nodes without a host round trip.
+  const addPlanned = () => {
+    if (editingTemplate) {
+      addAndSelect({
+        ...flow,
+        nodes: [
+          ...flow.nodes,
+          { id: nextNodeId(flow), kind: "planned", x: 320, y: 24, join: "any", ticketKey: "", repos: [], mode: "", dest: "worktree" },
+        ],
+      });
+      return;
+    }
+    send({ type: "flow:addPlanned", id: flow.id });
+  };
 
   /** Open the Save-as-template dialog, seeded with one row per place this
    * save will have to demote. Prefilled, never invented: the configured

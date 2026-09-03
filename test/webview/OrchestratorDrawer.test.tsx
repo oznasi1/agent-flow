@@ -2920,6 +2920,37 @@ describe("template authoring mode", () => {
     expect(screen.getByRole("button", { name: "+ Gate" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "+ Add planned work" })).toBeTruthy();
   });
+
+  it("+ Add planned work in template mode adds a planned node locally, with no host round trip", () => {
+    // Presence alone was the whole bug: the button rendered while editing a
+    // draft (`flow.id === ""`) and, ungated, sent `flow:addPlanned` — a
+    // message the host answers with `readFlows(...).find(f => f.id === "")`,
+    // which can never match a template's inner flow. Four QuickPicks, no
+    // node, no toast. What actually matters is the EFFECT of the click, not
+    // whether the control exists — see this test file's own module comment
+    // on `send` for why the ordinary (non-template) path goes through it.
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({
+      flows: [], openId: { kind: "template", id: "t1" }, templates: [shipItTemplate()], onSave,
+    })} />);
+    fireEvent.click(screen.getByRole("button", { name: "+ Add planned work" }));
+    expect(send).not.toHaveBeenCalled();
+    expect(onSave).toHaveBeenCalledTimes(1);
+    const saved = onSave.mock.calls[0][0] as Flow;
+    // shipItTemplate() seeds exactly one planned node (n1); the click must add
+    // a second one rather than replacing it or doing nothing.
+    expect(saved.nodes).toHaveLength(2);
+    const added = saved.nodes.find((n) => n.id !== "n1");
+    expect(added?.kind).toBe("planned");
+    // The exact blank shape `mintDraftTemplate` seeds (DeckApp.tsx) — bound at
+    // attach time by `instantiate`, never guessed here.
+    if (added?.kind === "planned") {
+      expect(added.ticketKey).toBe("");
+      expect(added.repos).toEqual([]);
+      expect(added.mode).toBe("");
+      expect(added.dest).toBe("worktree");
+    }
+  });
 });
 
 describe("Reset", () => {
