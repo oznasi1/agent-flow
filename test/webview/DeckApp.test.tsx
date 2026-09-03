@@ -2294,6 +2294,65 @@ describe("＋ New template… — a draft that never touches disk", () => {
     expect(msg.templateId).toBeUndefined();
   });
 
+  // Editing a SAVED template is the half of "directly authorable" that the
+  // draft alone does not cover. Three properties, each its own mutation-catcher:
+  // the edit must actually STICK on screen (the drawer resolves the working
+  // copy ahead of the saved one — resolve them the other way and the name
+  // input snaps back to "Ship it" after every keystroke while the edit piles
+  // up unseen in state); Save must send the UPDATE shape, `flow:writeTemplate`
+  // WITH `templateId`, not mint a second template; and the whole thing must
+  // send nothing until Save, exactly like a new draft.
+  // `makeTemplate` deliberately holds an EMPTY flow (it exists for the badge
+  // count), so its Save would be disabled by `canBindTicket` and a click
+  // would prove nothing. A saved template a user can actually reopen and
+  // save again carries a planned node — the shape `instantiate` needs.
+  const savedShipIt = (): FlowTemplate => ({ ...makeTemplate("t1", "Ship it"), flow: plannedFlow("", "Ship it", "") });
+
+  it("Edit on a saved template opens its own graph, keeps the edit on screen, and saves in place", () => {
+    render(<DeckApp />);
+    host(flowsMsg([], true, [savedShipIt()]));
+    fireEvent.click(templatesBtn());
+    const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    sent.mockClear();
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    const nav = screen.getByRole("tablist", { name: "Orchestrator" });
+    expect(within(nav).getByRole("tab", { name: "Canvas" })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it");
+    expect(sent).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText("Flow name"), { target: { value: "Ship it v2" } });
+    fireEvent.blur(screen.getByLabelText("Flow name"));
+    // The edit is visible — the working copy won the resolution.
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it v2");
+    // And it survives the Deck's own refresh re-posting the SAVED copy.
+    host(flowsMsg([], true, [savedShipIt()]));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it v2");
+    expect(sent).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(sent).toHaveBeenCalledTimes(1);
+    const [msg] = sent.mock.calls[0] as [Record<string, unknown>];
+    expect(msg.type).toBe("flow:writeTemplate");
+    expect(msg.templateId).toBe("t1");
+    expect(msg.name).toBe("Ship it v2");
+  });
+
+  // `draftTemplate` now holds EITHER a new draft or a saved template's
+  // working copy. "＋ New template…" pressed while a saved one is open must
+  // mint a fresh blank — reusing the slot would hand back the saved
+  // template's shape under a new-template label.
+  it("＋ New template… while editing a saved template mints a fresh blank, not that template", () => {
+    render(<DeckApp />);
+    host(flowsMsg([], true, [savedShipIt()]));
+    fireEvent.click(templatesBtn());
+    const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("Ship it");
+    fireEvent.click(templatesBtn());
+    fireEvent.click(screen.getByRole("button", { name: "＋ New template…" }));
+    expect(screen.getByLabelText("Flow name")).toHaveValue("");
+  });
+
   it("discards the draft on Cancel, leaving the Templates list unchanged", () => {
     // Cancel drops `openFlowId` to `null` while the drawer stays open on
     // Templates (`orchOpen` is untouched — see `onCancelTemplate`'s own

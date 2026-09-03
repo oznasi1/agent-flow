@@ -32,6 +32,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   was ever written to disk. Editing one this way hides every workflow control that assumes a
   real card (arm, dry-run, resume, and the rest), since a template being authored has neither
   a ticket nor anything to watch.
+- **Edit a template you own.** Every saved template's row now has **Edit**, which reopens its
+  graph on the canvas; Save writes it back in place, so anything already attached from it
+  still points at the same template. Built-ins stay read-only — Duplicate one and the copy
+  gets Edit.
+- **The attach picker says which templates are built in**, so a template of your own that
+  happens to share a starter's name is never mistaken for it.
 - **Two header buttons, Workflows and Templates, replace the single Orchestrator button.**
   Workflows badges how many cards need you, or, quieter, how many carry a workflow at all;
   Templates badges how many shapes are ready to attach, starters included. The old button

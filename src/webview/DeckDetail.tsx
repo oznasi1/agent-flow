@@ -13,6 +13,7 @@ import { createDrawerResize, RESIZE_STEP } from "./drawerResize";
 import { keyLabel, timeAgo } from "./helpers";
 import type { Flow } from "../engine/orchestrator/model";
 import { boundTicketKeyOf, cardWorkflow } from "../engine/orchestrator/attach";
+import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { WorkflowBlock } from "./WorkflowBlock";
 
 export interface DeckDetailProps {
@@ -168,6 +169,12 @@ function WorkflowPicker({
         {filtered.map((t) => (
           <button key={t.id} type="button" className="wf-picker-opt" onClick={() => onPick(t.id)}>
             {t.name}
+            {/* A user's own template may share a name with a starter — three
+                ship, and "Ship it" is a name anyone might pick — and this list
+                shows names alone, so without a marker the two rows are
+                indistinguishable. The same word the Templates view already
+                uses, derived from the same predicate the host checks. */}
+            {isBuiltinTemplateId(t.id) && <span className="wf-picker-bi">Built-in</span>}
           </button>
         ))}
       </div>

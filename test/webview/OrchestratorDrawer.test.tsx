@@ -127,7 +127,7 @@ const props = (over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = 
   onClose: vi.fn(), onCreate: vi.fn(), onOpen: vi.fn(),
   onRename: vi.fn(), onSave: vi.fn(), onDelete: vi.fn(),
   onArm: vi.fn(), onResumeApprove: vi.fn(), onResumeDisarm: vi.fn(), onResetEdge: vi.fn(),
-  onNewTemplate: vi.fn(), onCancelTemplate: vi.fn(),
+  onNewTemplate: vi.fn(), onCancelTemplate: vi.fn(), onEditTemplate: vi.fn(),
   ...over,
 });
 
@@ -4678,7 +4678,9 @@ describe("the Templates tab", () => {
     expect(within(row).queryByRole("button", { name: /^Arm$/i })).toBeNull();
     expect(within(row).queryByRole("button", { name: /disarm/i })).toBeNull();
     expect(within(row).queryByRole("button", { name: /detach/i })).toBeNull();
-    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Rename", "Delete"]);
+    // Edit is a TEMPLATE verb (it reopens the shape itself), not a workflow one,
+    // so it belongs on this row exactly as Duplicate/Rename/Delete do.
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Edit", "Rename", "Delete"]);
   });
 
   it("duplicates a template", async () => {
@@ -4778,11 +4780,26 @@ describe("the Templates tab", () => {
   // full verb set. (The same shape `shipItTemplate()` already pins via the
   // "offers no way to attach…" test above; this one isolates just the
   // three-button claim under this task's own name.)
-  it("offers all three verbs — Duplicate, Rename, Delete — on a user template", async () => {
+  it("offers all four verbs — Duplicate, Edit, Rename, Delete — on a user template", async () => {
     openTemplatesTab({ templates: [shipItTemplate()] });
     await screen.findByText("Ship it");
     const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
-    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Rename", "Delete"]);
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Edit", "Rename", "Delete"]);
+  });
+
+  // Edit is the other half of "directly authorable", and what makes the
+  // built-in refusal's own advice ("Duplicate it to make a version you can
+  // change") true: a saved template the user owns can be reopened. The row
+  // only ASKS — `DeckApp` owns the copy-into-draft and the target — so this
+  // pins the wiring by id, the same way the Duplicate/Rename/Delete tests
+  // above pin theirs.
+  it("Edit on a user template asks DeckApp to open that template by id", async () => {
+    const onEditTemplate = vi.fn();
+    openTemplatesTab({ templates: [shipItTemplate()], onEditTemplate });
+    await screen.findByText("Ship it");
+    const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    fireEvent.click(within(row).getByRole("button", { name: "Edit" }));
+    expect(onEditTemplate).toHaveBeenCalledWith("t1");
   });
 
   // `onCards` is a lookup the CALLER does (`Flow.fromTemplate === t.id`) and

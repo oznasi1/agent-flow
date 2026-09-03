@@ -25,7 +25,7 @@ const props = {
   view: "canvas" as const, onView: noop, rows: [], onOpenCard: noop,
   onClose: noop, onCreate: noop, onOpen: noop, onRename: noop, onDelete: noop,
   onArm: noop, onResumeApprove: noop, onResumeDisarm: noop, onResetEdge: noop,
-  onNewTemplate: noop, onCancelTemplate: noop,
+  onNewTemplate: noop, onCancelTemplate: noop, onEditTemplate: noop,
 };
 
 /** The node's box once the drawer's slide-in has finished moving it. */

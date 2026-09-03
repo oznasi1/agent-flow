@@ -64,7 +64,7 @@ test("the rows scroll and the disclaimer stays put", async ({ mount, page }) => 
     view="canvas" onView={noop} rows={[]} onOpenCard={noop}
     onClose={noop} onCreate={noop} onOpen={noop} onRename={noop} onSave={noop}
     onDelete={noop} onArm={noop} onResumeApprove={noop} onResumeDisarm={noop} onResetEdge={noop}
-    onNewTemplate={noop} onCancelTemplate={noop}
+    onNewTemplate={noop} onCancelTemplate={noop} onEditTemplate={noop}
   />);
 
   await page.getByRole("button", { name: /what would fire/i }).click();

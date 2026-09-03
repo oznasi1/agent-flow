@@ -44,6 +44,7 @@ import type { DeckCard } from "../../src/webview/deckCards";
 import { ticketKeyFor, type FlowTemplate, type PrEntryMap, type PrFacts, type RunStatus } from "../../src/types";
 import type { UsageTotals } from "../../src/engine/usage";
 import type { Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
+import { STARTERS } from "../../src/engine/orchestrator/starters";
 import { instantiate } from "../../src/engine/orchestrator/templates";
 
 const sent = vi.mocked(send);
@@ -960,6 +961,21 @@ describe("DeckDetail — Workflow section", () => {
     await waitFor(() => expect(sent).toHaveBeenCalledWith(
       { type: "flow:attach", runKey: "PROJ-142", templateId: "k1" },
     ));
+  });
+
+  // A user's own template may share a name with a starter — "Ship it" is one
+  // anyone might pick — and the picker shows names alone, so the two rows
+  // would be indistinguishable without a marker. The same word the Templates
+  // view uses, from the same predicate the host checks.
+  it("the picker marks a built-in starter, and not a user's own template", async () => {
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [STARTERS[0], shipItTemplate], orchEnabled: true });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    const opts = screen.getAllByRole("button", { name: /Ship it/ });
+    const builtin = opts.find((o) => o.textContent?.includes("Built-in"));
+    const own = opts.find((o) => !o.textContent?.includes("Built-in"));
+    expect(builtin).toBeTruthy();
+    expect(own).toBeTruthy();
+    expect(opts).toHaveLength(2);
   });
 
   it("the picker filters by name", async () => {

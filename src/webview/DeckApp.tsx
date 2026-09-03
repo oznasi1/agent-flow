@@ -6,6 +6,7 @@ import { ClosedRow, ClosedStrip } from "./ClosedStrip";
 import type { Flow } from "../engine/orchestrator/model";
 import { bindsRun, boundTicketKeyOf, cardWorkflow, rankByState, type CardWorkflow, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
 import { TEMPLATE_SCHEMA } from "../engine/orchestrator/templates";
+import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { DeckCard, laneOf, projectCards } from "./deckCards";
 // Same import deckCards.ts makes, and safe for the same reason: bucket.ts is kept
 // free of fs-touching imports, which bucket.test.ts enforces.
@@ -1508,9 +1509,37 @@ export function DeckApp(): JSX.Element {
           // instead. This mints a TEMPLATE, in memory, and sends nothing.
           onNewTemplate={() => {
             setSelId(null);
-            const draft = draftTemplate ?? mintDraftTemplate();
-            if (!draftTemplate) setDraftTemplate(draft);
+            // Reopen an in-flight NEW draft, but never a saved template's
+            // working copy: `draftTemplate` also holds the copy Edit makes of
+            // a saved template (see `onEditTemplate` below), and "＋ New
+            // template…" pressed while one of those is open must mint a fresh
+            // blank, not hand back someone else's shape under a new-template
+            // label. Membership in `templates` is what tells the two apart —
+            // a new draft's id never appears there (`mintDraftTemplate`).
+            const inFlight = draftTemplate && !templates.some((t) => t.id === draftTemplate.id) ? draftTemplate : null;
+            const draft = inFlight ?? mintDraftTemplate();
+            if (draft !== draftTemplate) setDraftTemplate(draft);
             setOpenFlowId({ kind: "template", id: draft.id });
+            setOrchView("canvas");
+            setOrchOpen(true);
+          }}
+          // Edit a SAVED template. The template is copied into `draftTemplate`
+          // — nodes and edges spread so no edit can reach the copy `deck:flows`
+          // handed us — and opened on Canvas under its OWN id. From there every
+          // piece already works unchanged: `onSave` above routes edits into the
+          // copy because the target's kind is "template"; the drawer resolves
+          // the working copy ahead of the saved one; and its Save finds the id
+          // in `templates` and sends `flow:writeTemplate` WITH `templateId`,
+          // the update-in-place branch. A built-in never gets here — its row
+          // offers no Edit — but the guard stays, because a stale webview
+          // could still ask and the host would refuse the write anyway.
+          onEditTemplate={(id) => {
+            if (isBuiltinTemplateId(id)) return;
+            const t = templates.find((x) => x.id === id);
+            if (!t) return;
+            setSelId(null);
+            setDraftTemplate({ ...t, flow: { ...t.flow, nodes: [...t.flow.nodes], edges: [...t.flow.edges] } });
+            setOpenFlowId({ kind: "template", id });
             setOrchView("canvas");
             setOrchOpen(true);
           }}

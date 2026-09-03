@@ -1178,6 +1178,10 @@ export const DECK_CSS = `
   .wf-picker-opt { text-align: left; border: 0; background: transparent; color: inherit;
     font: inherit; padding: 5px 7px; border-radius: var(--r-chip); cursor: pointer; }
   .wf-picker-opt:hover { background: var(--vscode-list-hoverBackground); }
+  /* Quiet, not a state: a built-in is neither a failure nor something that
+     needs you, so no status hue — the same dim treatment the Templates view's
+     own "Built-in" marker uses. */
+  .wf-picker-bi { margin-left: 8px; font-size: var(--t-micro); color: var(--dim); }
   .wf-picker-empty { display: flex; flex-direction: column; align-items: flex-start; gap: 6px;
     padding: 7px; font-size: var(--t-body); color: var(--dim); }
 

@@ -233,11 +233,15 @@ function SaveCommandRow({ runNow }: { runNow: () => string }): JSX.Element {
  * survive switching tabs and leak a half-confirmed delete onto the wrong
  * template if the list re-orders under it. */
 function TemplateRow({
-  t, onCards, onDuplicate, onRename, onDelete,
+  t, onCards, onDuplicate, onEdit, onRename, onDelete,
 }: {
   t: FlowTemplate;
   onCards: number;
   onDuplicate: () => void;
+  /** Open this template's own graph on Canvas to change it. Absent on a
+   * built-in for the same reason Rename and Delete are — the host refuses
+   * to overwrite one — and Duplicate is the way to an editable copy. */
+  onEdit: () => void;
   onRename: (name: string) => void;
   onDelete: () => void;
 }): JSX.Element {
@@ -301,6 +305,7 @@ function TemplateRow({
               component's own doc comment for why. */}
           {!builtin && (
             <>
+              <button type="button" className="orch-mini" onClick={onEdit}>Edit</button>
               <button type="button" className="orch-mini" onClick={() => setRenaming(true)}>Rename</button>
               <button type="button" className="orch-mini" onClick={() => setConfirming(true)}>Delete</button>
             </>
@@ -474,6 +479,13 @@ export interface OrchestratorDrawerProps {
    * right after Save sends `flow:writeTemplate` (see `DeckApp`'s own
    * doc comment on its identical prop). */
   onCancelTemplate: () => void;
+  /** Open a SAVED template on Canvas to change it — the other half of
+   * "directly authorable", and what makes the built-in refusal's own advice
+   * ("Duplicate it to make a version you can change") true. `DeckApp` copies
+   * the template into `draftTemplate` so edits accumulate off-disk exactly
+   * as a new draft's do; Save then sends `flow:writeTemplate` WITH the id,
+   * which is the update-in-place branch that message has carried unused. */
+  onEditTemplate: (id: string) => void;
 }
 
 export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | null {
@@ -506,11 +518,14 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       ? undefined
       : target.kind === "flow"
         ? p.flows.find((f) => f.id === target.id)
-        // A saved template first, and the in-flight draft only as a
-        // fallback: a real save always wins, and a draft never collides
-        // with one anyway (its id never matches anything `deck:flows` ever
-        // posts — see `mintDraftTemplate`'s own doc comment).
-        : (p.templates.find((t) => t.id === target.id) ?? (p.draftTemplate?.id === target.id ? p.draftTemplate : undefined))?.flow;
+        // The in-flight working copy FIRST, the saved template only as a
+        // fallback. `draftTemplate` is where every unsaved edit lives (see
+        // `DeckApp`'s `onSave`) — for a new draft and for a reopened saved
+        // template alike, which share an id with their saved twin in the
+        // second case. Resolving the saved copy first would paint a canvas
+        // that snaps back to disk after every keystroke while the edits
+        // piled up unseen in state; the working copy is the truth until Save.
+        : ((p.draftTemplate?.id === target.id ? p.draftTemplate : undefined) ?? p.templates.find((t) => t.id === target.id))?.flow;
   /** The flow the drawer keeps painting while it slides back out, and whether it
    * is doing that — both from the shared drawer seam, so this drawer and the
    * card detail leave the board the same way. Frozen and unreachable for that
@@ -847,6 +862,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                     t={t}
                     onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
                     onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
+                    onEdit={() => p.onEditTemplate(t.id)}
                     onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
                     onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
                   />

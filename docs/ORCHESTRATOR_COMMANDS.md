@@ -340,19 +340,29 @@ has neither. Only **Cancel** and **Save** are offered.
 Save sends `flow:writeTemplate` with the draft's flow and a name; the host
 normalizes it the same way `flow:saveTemplate` does (ids cleared, disarmed,
 every host stamp stripped) and writes it, then closes the draft back to the
-Templates view. This is **create-only** today: there is no "Open" affordance
-on a saved template's own row (`TemplateRow` offers Duplicate, Rename and
-Delete), so nothing ever constructs a canvas target naming an already-saved
-template, and `flow:writeTemplate`'s own update-in-place branch (`templateId`
-present) is unreachable from the UI — every Save mints a fresh template.
-Reopening a saved template for further edits is a known gap, not yet built.
+Templates view.
+
+**Edit**, on a saved template's own row, reopens that template on Canvas to
+change it. The template is copied into the same in-memory draft a new one
+uses, so edits accumulate off disk exactly as a fresh draft's do, and the
+canvas paints the working copy rather than the saved one — a `deck:flows`
+refresh landing mid-edit re-posts the saved copy without disturbing what you
+have typed. Save then sends `flow:writeTemplate` **with** `templateId`, the
+update-in-place branch: the template keeps its id (so any workflow's
+`fromTemplate` and the row's "on N cards" count still point at it) and its
+graph is replaced. A built-in has no Edit — the host refuses to overwrite one —
+which is why its refusal says to **Duplicate** it first: the duplicate is
+yours, and Edit appears on it.
 
 **Cancel** discards the draft outright — there was never anything on disk to
 clean up. Closing the drawer a different way (the panel's own Close, or
 selecting a card) does **not**: the draft survives in memory, and the next
 **＋ New template…** click reopens that same half-drawn draft rather than
 minting a blank one — see `draftTemplate`'s own doc comment in `DeckApp.tsx`
-for why only one can exist at a time.
+for why only one can exist at a time. The one exception: if what is open is a
+saved template being edited (not a new draft), **＋ New template…** mints a
+fresh blank rather than handing that template back under a new-template
+label.
 
 ### Reaching Templates from a stuck attach picker
 

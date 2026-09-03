@@ -95,7 +95,7 @@ const props = {
   view: "canvas" as const, onView: noop, rows: [], onOpenCard: noop,
   onClose: noop, onCreate: noop, onOpen: noop, onRename: noop, onSave: noop, onDelete: noop,
   onArm: noop, onResumeApprove: noop, onResumeDisarm: noop, onResetEdge: noop,
-  onNewTemplate: noop, onCancelTemplate: noop,
+  onNewTemplate: noop, onCancelTemplate: noop, onEditTemplate: noop,
 };
 
 /** The drawer slides in the same way the card drawer does (`ORCH_ANIM_MS` —
