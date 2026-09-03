@@ -293,8 +293,14 @@ disclosure that buried Templates behind Canvas:
 
 Three shapes ship inside the extension itself, never written to
 `~/.agentflow/templates/`: **Ship it** (launch → `npm test` → ask to open a
-PR), **Test & merge** (launch → `npm test` → notify), and **Review only**
+PR), **Test & notify** (launch → `npm test` → notify), and **Review only**
 (launch → notify) — see `STARTERS` in `src/engine/orchestrator/starters.ts`.
+**Test & notify** neither checks branch CI nor merges anything, despite the
+similar name; it names honestly what a built-in CAN do without the user's own
+settings — run the tests, then say so. The shape that would actually gate on
+CI and merge needs a `branch-ci-passed` condition parameterised by
+`{ repo, branch }`, which is unknowable before the user's own repo exists —
+the same reason every starter's `planned` node ships empty `repos`/`mode`.
 They carry a `builtin-` id prefix rather than a flag, so they are ordinary
 `FlowTemplate` records everywhere one is read — `flow:attach`,
 `flow:duplicateTemplate`, the Templates list — but every WRITE path

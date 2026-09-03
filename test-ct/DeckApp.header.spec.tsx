@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import * as React from "react";
 import { DeckApp } from "../src/webview/DeckApp";
 import { host } from "./_helpers/host";
-import { mkStatus, runsMsg, flowsMsg, shipItOn, gateOn } from "./_helpers/deckFixtures";
+import { mkStatus, runsMsg, flowsMsg, shipItOn, gateOn, makeTemplate } from "./_helpers/deckFixtures";
 
 /**
  * `deckStyles.ts`'s own comment on `.hd` ("without this it clips its right
@@ -126,6 +126,58 @@ test("at a narrow width with a needs-you badge, the header wraps rather than cli
   // page-level signature of "clips its right end off-screen" that a single
   // element's own box can miss (e.g. an ancestor with `overflow: hidden`
   // silently eating the excess instead of the browser folding the line).
+  const overflow = await page.evaluate(() => ({
+    scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth,
+  }));
+  expect(overflow.scroll).toBeLessThanOrEqual(overflow.client);
+});
+
+// The fixture gap this whole-branch review caught: every test above sends
+// `templates: []` (`flowsMsg`'s own default), so the Templates button never
+// renders WITH a badge in this file — but starters (three built-in shapes,
+// always present once the Orchestrator is on) mean `templates.length` is
+// really ≥3 the instant these buttons render at all. A header measured only
+// with an empty Templates badge is a narrower case than the one every real
+// user actually sees. This is the realistic shape: three cards genuinely
+// waiting on the reader ("3 needs you", widening Workflows exactly as the
+// single-badge test above does) alongside a dozen saved templates
+// ("Templates 12"), both badges present together at the narrowest common
+// device viewport.
+test("at a narrow width with both badges at realistic counts, the header wraps rather than clips", async ({ mount, page }) => {
+  await page.setViewportSize({ width: 320, height: 800 });
+  await mount(<DeckApp />);
+  const flows = ["PROJ-1", "PROJ-2", "PROJ-3"].map((key, i) => ({ ...gateOn(key), id: `f${i + 1}` }));
+  const templates = Array.from({ length: 12 }, (_, i) => makeTemplate(`t${i + 1}`, `Template ${i + 1}`));
+  await host(page, { ...flowsMsg(flows), templates });
+  await host(page, runsMsg(
+    ["PROJ-1", "PROJ-2", "PROJ-3"].map((key) => mkStatus({ run: { ...mkStatus().run, key } })),
+  ));
+
+  const workflows = page.getByRole("button", { name: /Workflows/ });
+  const templatesBtn = page.getByRole("button", { name: /Templates/ });
+  await expect(workflows).toBeVisible();
+  await expect(templatesBtn).toBeVisible();
+  // The full badge text on both, not swallowed by an ellipsis or a clipped box.
+  await expect(workflows).toContainText("Workflows");
+  await expect(workflows).toContainText("3 needs you");
+  await expect(templatesBtn).toContainText("Templates");
+  await expect(templatesBtn).toContainText("12");
+
+  const [wfBox, tmplBox] = await Promise.all([
+    workflows.boundingBox(), templatesBtn.boundingBox(),
+  ]) as [Box, Box];
+
+  // Overflow geometry, not a class name: whichever line each button lands
+  // on, neither box may extend past the 320px viewport...
+  expect(wfBox.x).toBeGreaterThanOrEqual(0);
+  expect(tmplBox.x).toBeGreaterThanOrEqual(0);
+  expect(wfBox.x + wfBox.width).toBeLessThanOrEqual(320);
+  expect(tmplBox.x + tmplBox.width).toBeLessThanOrEqual(320);
+  // ...and the document itself never grows a horizontal scrollbar. If this
+  // ever measures actual clipping (a button's right edge past the viewport,
+  // or document-level horizontal overflow), that is a real layout defect:
+  // STOP, do not adjust the CSS and do not loosen this assertion to match
+  // what broke -- report the measured numbers instead.
   const overflow = await page.evaluate(() => ({
     scroll: document.documentElement.scrollWidth, client: document.documentElement.clientWidth,
   }));

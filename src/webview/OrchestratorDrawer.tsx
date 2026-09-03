@@ -809,50 +809,59 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               own region scan (`jsxBlockAround(..., "orch-tmpl-list")`) still
               finds this exact content. */}
           {p.view === "templates" && (
-            <div className="orch-tmpl-list">
-              {/* A template is never attached from here — one entry point,
-                  the card that needs a workflow, and this screen offering a
-                  second, worse way to do what the card already does would be
-                  a category error this feature's own naming rule calls out by
-                  name: this screen offers Duplicate/Rename/Delete and nothing
-                  that arms, disarms, or attaches anything. */}
-              {p.templates.map((t) => (
-                <TemplateRow
-                  key={t.id}
-                  t={t}
-                  onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
-                  onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
-                  onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
-                  onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
-                />
-              ))}
-              {/* A button with this exact name used to live here and was
-                  removed (Task 12's own review round) — it called `onCreate`,
-                  which mints an ordinary WORKFLOW: the panel would close,
-                  this screen would stay exactly as empty as before, and an
-                  untitled entry would appear on the board instead. The
-                  wrong verb for a first-time user on an empty Templates
-                  screen, so it was gone rather than fixed to do something
-                  else — building a workflow first and using its own "Save
-                  as template…" (below, on Canvas) remained the one way in.
-                  `onNewTemplate` is a different verb, not the same one
-                  restored: it mints a TEMPLATE, held only in `DeckApp`
-                  state (`draftTemplate` — see `mintDraftTemplate`'s own
-                  doc comment) and never written anywhere until its own
-                  Save is pressed, which is exactly the property that made
-                  the old button's `onCreate` wrong here in the first
-                  place. */}
-              <button type="button" className="orch-mini" onClick={p.onNewTemplate}>＋ New template…</button>
-              {/* `.orch-empty` is the same empty-state treatment the canvas
-                  itself uses. */}
-              {p.templates.length === 0 && (
-                <div className="orch-empty">
-                  No templates yet. Start with &ldquo;＋ New template&hellip;&rdquo;
-                  above, or build a workflow and use its own &ldquo;Save as
-                  template&hellip;&rdquo; to keep the shape.
-                </div>
-              )}
-            </div>
+            <>
+              {/* A button with this exact name used to live inside the
+                  scrolling list below and was removed once already (Task 12's
+                  own review round) for calling the wrong verb (`onCreate`,
+                  which mints an ordinary WORKFLOW — see the doc comment that
+                  used to sit here, now below on `onClick`). A SEPARATE defect
+                  this whole-branch review caught: `.orch-tmpl-list` scrolls
+                  (below), and this button rendered AFTER every row inside it —
+                  three starters plus a dozen user templates puts the branch's
+                  own new authoring entry point below the fold, the exact
+                  discoverability problem this feature exists to fix, one
+                  level down. Its own row, `flex: none` beside the scroller's
+                  `flex: 1` (`.orch-body`'s own flex column), keeps it visible
+                  regardless of how long the list below gets — no `position:
+                  sticky` needed when the simpler fix is not sharing a
+                  scroll container with the rows in the first place. */}
+              <div className="orch-bar">
+                {/* `onNewTemplate` mints a TEMPLATE, held only in `DeckApp`
+                    state (`draftTemplate` — see `mintDraftTemplate`'s own doc
+                    comment) and never written anywhere until its own Save is
+                    pressed — never `onCreate`, which would close this panel,
+                    leave this screen exactly as empty as before, and drop an
+                    untitled WORKFLOW on the board instead. */}
+                <button type="button" className="orch-mini" onClick={p.onNewTemplate}>＋ New template…</button>
+              </div>
+              <div className="orch-tmpl-list">
+                {/* A template is never attached from here — one entry point,
+                    the card that needs a workflow, and this screen offering a
+                    second, worse way to do what the card already does would be
+                    a category error this feature's own naming rule calls out by
+                    name: this screen offers Duplicate/Rename/Delete and nothing
+                    that arms, disarms, or attaches anything. */}
+                {p.templates.map((t) => (
+                  <TemplateRow
+                    key={t.id}
+                    t={t}
+                    onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
+                    onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
+                    onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
+                    onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
+                  />
+                ))}
+                {/* `.orch-empty` is the same empty-state treatment the canvas
+                    itself uses. */}
+                {p.templates.length === 0 && (
+                  <div className="orch-empty">
+                    No templates yet. Start with &ldquo;＋ New template&hellip;&rdquo;
+                    above, or build a workflow and use its own &ldquo;Save as
+                    template&hellip;&rdquo; to keep the shape.
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </div>
       </Drawer>

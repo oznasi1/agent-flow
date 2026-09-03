@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its own editor tab, headed with what ran and when, read from the flow journal, so you don't
   have to have kept the Deck's output channel scrolled back to the moment it ran. A step with
   nothing recorded says so honestly instead of opening an empty tab.
-- **Three ready-made workflows** — Ship it, Test & merge, and Review only — are built in and
+- **Three ready-made workflows** — Ship it, Test & notify, and Review only — are built in and
   attachable from the moment the Orchestrator is on, with no template to save first. They
   can't be renamed, deleted, or edited in place; **Duplicate** makes a copy that's yours to
   change, and an improved starter in a later release still reaches you on upgrade, since none

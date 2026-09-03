@@ -1,4 +1,5 @@
 import type { Flow, FlowEdge, FlowNode } from "../../src/engine/orchestrator/model";
+import { TEMPLATE_SCHEMA, type FlowTemplate } from "../../src/engine/orchestrator/templates";
 import type { OutboundMessage, RunStatus } from "../../src/types";
 
 /** Restated from `test/webview/DeckApp.test.tsx`'s own `mkStatus`, not
@@ -75,4 +76,13 @@ export const doneOn = (runKey: string): Flow => ({
   id: "f1", name: "Ship it", armed: true, createdAt: 100,
   nodes: [place("n1", runKey), notify("n2")],
   edges: [edge({ id: "e1", from: "n1", to: "n2", performed: true, firedAt: 1, firedNote: "merged" })],
+});
+
+/** A minimal saved template — restated from `DeckApp.test.tsx`'s own
+ *  `makeTemplate` (not imported, same reason `mkStatus`'s own doc comment
+ *  gives) for the Templates header badge count, which does not care what
+ *  shape any of them hold, only how many there are. */
+export const makeTemplate = (id: string, name: string): FlowTemplate => ({
+  schema: TEMPLATE_SCHEMA, id, name, params: {}, savedAt: 1_000,
+  flow: { id: "", name, armed: false, createdAt: 0, nodes: [], edges: [] },
 });

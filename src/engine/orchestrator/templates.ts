@@ -198,8 +198,19 @@ export function canBindTicket(flow: Flow): boolean {
  * fresh one), `armed` (a template is never armed — `instantiate` always builds
  * its copy disarmed regardless), `createdAt` (this flow was never created, only
  * the template was), and every edge's host stamps — `firedAt`/`firedNote`/
- * `error` and the consent stamps `launchConfirmedAt`/`commandConfirmedAt` —
- * via `stripHostStamps`.
+ * `performed`/`error`/`action`/`gateAnswer` — via `stripHostStamps`.
+ *
+ * The FLOW-level consent stamps, `launchConfirmedAt`/`commandConfirmedAt`, are
+ * dropped here too, but NOT by `stripHostStamps` — that function only ever
+ * touches a `FlowEdge`, and consent lives on `Flow` itself (`model.ts`).
+ * They are dropped structurally instead: the object literal below names
+ * exactly six fields, and neither consent stamp is one of them, so a flow
+ * carrying either loses it simply by not being copied into the result.
+ * Whoever "simplifies" this into a spread of `flow` (keeping only the fields
+ * that must change) would carry both straight through — multiplying one
+ * approved consent across every card the resulting template is ever attached
+ * to, the exact twenty-machines-one-click failure `instantiate`'s own doc
+ * comment (below) warns about.
  *
  * `nodes` is taken as given rather than derived from `flow`, because `toTemplate`
  * calls this with place-demoted nodes and deckView's `flow:writeTemplate`

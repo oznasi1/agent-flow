@@ -4592,10 +4592,14 @@ export class DeckPanel {
         // write paths for a template's inner flow cannot drift on what
         // "normalized" means: id cleared (nothing resolves it — `instantiate`
         // mints a fresh one), disarmed, createdAt zeroed, and every edge's
-        // host stamps (firedAt/firedNote/error, and the consent stamps
-        // launchConfirmedAt/commandConfirmedAt) stripped. Storing any of that
-        // verbatim would leak a live workflow's history — or a stale
-        // consent — into a template that outlives it.
+        // host stamps (firedAt/firedNote/performed/error/action/gateAnswer)
+        // stripped. The FLOW-level consent stamps — launchConfirmedAt and
+        // commandConfirmedAt — are dropped too, but structurally: they live
+        // on `m.flow` itself, not on any edge, so `stripHostStamps` never
+        // touches them; `normalizedTemplateFlow`'s own fresh six-field
+        // literal is what leaves them out. Storing any of that verbatim would
+        // leak a live workflow's history — or a stale consent — into a
+        // template that outlives it.
         const flow: Flow = normalizedTemplateFlow(m.flow, m.name, m.flow.nodes);
         const existing = m.templateId
           ? readTemplates(this.flowIo, this.templatesDir).find((t) => t.id === m.templateId)

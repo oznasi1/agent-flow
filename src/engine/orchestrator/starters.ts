@@ -54,8 +54,17 @@ const notify = (id: string, x: number, y: number, message: string): FlowNode => 
 const edge = (id: string, from: string, to: string, cond: FlowEdge["cond"]): FlowEdge =>
   ({ id, from, to, cond });
 
+// `id: ""` — the same blank every OTHER template's inner flow carries
+// (`normalizedTemplateFlow`, templates.ts): nothing resolves a template's
+// inner flow id, `instantiate` always mints a fresh one, so this is not a
+// placeholder that needs filling in. A non-empty id here used to be inert
+// only because nothing could reach it — `flow:duplicateTemplate` copies a
+// starter's inner flow verbatim, so duplicating one would have made it the
+// one user template on disk whose inner `flow.id` was not `""`, silently
+// wrong the day anything (e.g. an "Open a saved template" affordance) starts
+// trusting that field.
 const flow = (name: string, nodes: FlowNode[], edges: FlowEdge[]): Flow =>
-  ({ id: "builtin", name, armed: false, createdAt: 0, nodes, edges });
+  ({ id: "", name, armed: false, createdAt: 0, nodes, edges });
 
 const starter = (id: string, name: string, f: Flow): FlowTemplate =>
   ({ schema: 1, id: `${BUILTIN_PREFIX}${id}`, name, params: {}, savedAt: 0, flow: f });
@@ -71,7 +80,16 @@ export const STARTERS: readonly FlowTemplate[] = [
       edge("e1", "n1", "n2", { kind: "agent-ended-turn" }),
       edge("e2", "n2", "n3", { kind: "command-succeeded" }),
     ])),
-  starter("test-and-merge", "Test & merge", flow("Test & merge",
+  // Named "Test & merge" at first — wrong, since this shape neither checks CI
+  // nor merges anything; it runs the tests and tells you when they pass. The
+  // shape it would need to actually merge (a `branch-ci-passed` condition,
+  // parameterised by `{ repo, branch }`) is unknowable to a built-in for the
+  // same reason a starter's `planned` node ships empty `repos`/`mode` — the
+  // user's own settings don't exist yet when this file is loaded. The `id`
+  // keeps its released spelling regardless (`Flow.fromTemplate` references it,
+  // and the Templates tab's "on N cards" count depends on it); only the
+  // display name changed to say what this actually does.
+  starter("test-and-merge", "Test & notify", flow("Test & notify",
     [planned("n1", 0, 0), command("n2", 200, 0, "npm test"), notify("n3", 400, 0, "Green — ready to merge")],
     [
       edge("e1", "n1", "n2", { kind: "agent-ended-turn" }),
