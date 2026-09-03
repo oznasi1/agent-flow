@@ -87,6 +87,12 @@ shipped installs can never reach it. Tasks come from `<dir>/tasks.json`; every
 write the extension performs is appended to `<dir>/writes.jsonl` for tests to
 assert on. See `src/tasks/fixture/connector.ts` and `test-e2e/_helpers/sandbox.ts`.
 
+## The E2E coverage matrix
+
+`test-e2e/COVERAGE.md` maps every documented behaviour to the test that proves it.
+Adding a journey means adding (or updating) a row; `test/unit/e2eCoverage.test.ts`
+fails when a title is uncited, a proof points nowhere, or a manifest setting has no row.
+
 ## Running the extension
 
 Press **F5** in VS Code (the "Run Agent Flow Deck" launch config) to open an Extension Development
