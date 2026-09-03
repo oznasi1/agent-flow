@@ -33,12 +33,14 @@ describe("claudeState fixture helper", () => {
   describe("seedTranscript, read back through readSessionActivity", () => {
     const read = (sessionId: string) => readSessionActivity(projectsRoot(), cwd, sessionId, Date.now());
 
+    // Mutation-checked: wrote under the raw cwd instead of encodeProjectDir(cwd)
     it("writes the transcript where readSessionActivity looks for it", () => {
       const file = seedTranscript(sb(), { cwd, sessionId: "s-1", shape: "working" });
       expect(file).toBe(path.join(home, ".claude", "projects", realEncodeProjectDir(cwd), "s-1.jsonl"));
       expect(fs.existsSync(file)).toBe(true);
     });
 
+    // Mutation-checked: wrote under the raw cwd instead of encodeProjectDir(cwd)
     it("`working` reads as working, with work owed", () => {
       seedTranscript(sb(), { cwd, sessionId: "s-w", shape: "working" });
       const a = read("s-w");
@@ -46,6 +48,7 @@ describe("claudeState fixture helper", () => {
       expect(a.midWork).toBe(true);
     });
 
+    // Mutation-checked: ended-turn wrote stop_reason tool_use instead of end_turn
     it("`ended-turn` reads as needs-you — the turn handed control back", () => {
       seedTranscript(sb(), { cwd, sessionId: "s-e", shape: "ended-turn" });
       const a = read("s-e");
@@ -53,11 +56,13 @@ describe("claudeState fixture helper", () => {
       expect(a.midWork).toBe(false);
     });
 
+    // Mutation-checked: dropped the utimesSync, so the file's mtime stayed at now
     it("`idle` reads as idle — its default age is past the reader's working window", () => {
       seedTranscript(sb(), { cwd, sessionId: "s-i", shape: "idle" });
       expect(read("s-i").state).toBe("idle");
     });
 
+    // Mutation-checked: named the pending tool Read instead of Bash
     it("`pending-tool` reads as working and names the tool it waits on", () => {
       seedTranscript(sb(), { cwd, sessionId: "s-p", shape: "pending-tool" });
       const a = read("s-p");
@@ -66,12 +71,14 @@ describe("claudeState fixture helper", () => {
       expect(a.midWork).toBe(true);
     });
 
+    // Mutation-checked: wrote under the raw cwd instead of encodeProjectDir(cwd) (state stays unknown either way — this pins the empty file, not the address)
     it("`empty` reads as unknown — a file with no meaningful lines", () => {
       const file = seedTranscript(sb(), { cwd, sessionId: "s-0", shape: "empty" });
       expect(fs.readFileSync(file, "utf8")).toBe("");
       expect(read("s-0").state).toBe("unknown");
     });
 
+    // Mutation-checked: marked assistant lines isSidechain, which the model read skips
     it("every shape carries a main-chain model, so the drawer's model read is non-null", () => {
       for (const shape of ["working", "ended-turn", "idle", "pending-tool"] as TranscriptShape[]) {
         seedTranscript(sb(), { cwd, sessionId: `m-${shape}`, shape });
@@ -79,6 +86,7 @@ describe("claudeState fixture helper", () => {
       }
     });
 
+    // Mutation-checked: dropped the utimesSync; also caught the Bash→Read and end_turn→tool_use mutations
     it("`ageMs` lands on the file's mtime, which is what the reader ages by", () => {
       // The reader ignores line timestamps and ages the file by mtime
       // (deriveActivity's `at`), so a shape whose age is asserted through the
@@ -96,18 +104,21 @@ describe("claudeState fixture helper", () => {
       expect(read("a-4").state).toBe("needs-you"); // age never demotes a finished turn
     });
 
+    // Mutation-checked: ended-turn wrote stop_reason tool_use instead of end_turn
     it("re-seeding the same session replaces the transcript rather than appending", () => {
       seedTranscript(sb(), { cwd, sessionId: "r-1", shape: "working" });
       seedTranscript(sb(), { cwd, sessionId: "r-1", shape: "ended-turn" });
       expect(read("r-1").state).toBe("needs-you");
     });
 
+    // Mutation-checked: (type-level) a local copy of the function would not be the same reference
     it("re-exports the reader's own encodeProjectDir, not a copy", () => {
       expect(encodeProjectDir).toBe(realEncodeProjectDir);
     });
   });
 
   describe("seedSession, read back through readOpenSessionsProbe", () => {
+    // Mutation-checked: wrote kind "background", which the probe drops
     it("a record with a live pid is listed with the fields a card needs", () => {
       const file = seedSession(sb(), { pid: process.pid, cwd, id: "live-1" });
       expect(file).toBe(path.join(sessionsDir(), "live-1.json"));
@@ -119,6 +130,7 @@ describe("claudeState fixture helper", () => {
       expect(probe.sessions[0].name).toBeTruthy();
     });
 
+    // Mutation-checked: n/a — proves the reader's pidAlive drop, with DEAD_PID chosen above the OS pid ceiling
     it("a record with a dead pid is written but not listed — the directory still reads", () => {
       const file = seedSession(sb(), { pid: DEAD_PID, cwd, id: "dead-1" });
       expect(fs.existsSync(file)).toBe(true);
@@ -127,6 +139,7 @@ describe("claudeState fixture helper", () => {
       expect(probe.sessions).toEqual([]);
     });
 
+    // Mutation-checked: wrote kind "background", which the probe drops
     it("generates a distinct id per call when none is given, so one pid can hold several sessions", () => {
       const a = seedSession(sb(), { pid: process.pid, cwd });
       const b = seedSession(sb(), { pid: process.pid, cwd });
@@ -136,6 +149,7 @@ describe("claudeState fixture helper", () => {
       expect(new Set(ids).size).toBe(2);
     });
 
+    // Mutation-checked: ended-turn wrote stop_reason tool_use; also caught kind "background"
     it("the session id names the transcript readSessionActivity reads", () => {
       seedSession(sb(), { pid: process.pid, cwd, id: "pair-1" });
       seedTranscript(sb(), { cwd, sessionId: "pair-1", shape: "ended-turn" });
