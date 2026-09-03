@@ -78,14 +78,22 @@ function seedTemplate(sb: Sandbox, t: Record<string, unknown>): string {
  *  construction: no window opens, no session launches, and the rule simply sits
  *  "advancing" forever — exactly the stable state this spec wants to poll
  *  without racing a real agent. */
+// Named "E2E Ship it", not "Ship it" — the built-in starter templates
+// (src/engine/orchestrator/starters.ts) ship a starter of that exact name, and
+// once the card drawer's attach picker offers both a fixture and a starter
+// have the same accessible name, `getByRole("button", { name: "Ship it" })`
+// resolves to two elements. The starter's name is user-facing and shipped;
+// this fixture's is not, so it is the one that moves. Only the label changes
+// — the id (`e2e-ship-it`) and everything this template is used to assert
+// about stay the same.
 function shipItTemplate(id: string) {
   return {
-    schema: 1, id, name: "Ship it", params: {}, savedAt: Date.now(),
+    schema: 1, id, name: "E2E Ship it", params: {}, savedAt: Date.now(),
     flow: {
-      id: "", name: "Ship it", armed: false, createdAt: 0,
+      id: "", name: "E2E Ship it", armed: false, createdAt: 0,
       nodes: [
         { id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["rocket"], mode: "implementation", dest: "new-window" },
-        { id: "n2", x: 200, y: 0, join: "any", kind: "notify", message: "Ship it is done" },
+        { id: "n2", x: 200, y: 0, join: "any", kind: "notify", message: "E2E Ship it is done" },
       ],
       edges: [
         { id: "e1", from: "n1", to: "n2", cond: { kind: "agent-ended-turn" } },
@@ -146,7 +154,7 @@ test("attaching a template shows it disarmed, and arming turns the card's chip l
   await expect(block).toContainText("No workflow attached");
 
   await block.getByRole("button", { name: /attach workflow/i }).click();
-  await deck.detail().getByRole("button", { name: "Ship it" }).click();
+  await deck.detail().getByRole("button", { name: "E2E Ship it" }).click();
 
   // `flow:attach` mints a brand-new flow, and a NAIVE reading of
   // `DeckApp.tsx`'s `deck:flows` handler would auto-open the Orchestrator on
@@ -170,7 +178,7 @@ test("attaching a template shows it disarmed, and arming turns the card's chip l
   await expect(deck.detail()).not.toHaveClass(/closing/);
   await expect(block.locator(".wf-chip")).toHaveText(/disarmed/i, { timeout: 15_000 });
   await expect(deck.frame.locator(".orch")).toHaveCount(0);
-  await expect(block).toContainText("Ship it");
+  await expect(block).toContainText("E2E Ship it");
   await expect(block.getByRole("button", { name: "Arm" })).toBeVisible();
   await shot(launched.page, testInfo, "2 · attached, disarmed, card drawer never left");
 
@@ -180,7 +188,7 @@ test("attaching a template shows it disarmed, and arming turns the card's chip l
   // LIVE: its class flips from `disarmed` to `advancing`.
   const chip = deck.boardWorkflowChip("E2E-WF");
   await expect(chip).toBeVisible();
-  await expect(chip).toContainText("Ship it");
+  await expect(chip).toContainText("E2E Ship it");
   await expect(chip).toHaveClass(/disarmed/);
 
   await block.getByRole("button", { name: "Arm" }).click();
@@ -237,9 +245,22 @@ test("an attached workflow is a real flow in the Workflows drawer, and Detach cl
   // The Templates tab is the OTHER half of the round trip: the shape this
   // workflow came from is still a reusable template of its own, independent of
   // any card it has been attached to (design doc §8).
-  await orch.getByRole("button", { name: /flows ·/i }).click();
-  await deck.frame.getByRole("tab", { name: "Templates" }).click();
-  await expect(deck.frame.locator(".orch-tmpl-row")).toContainText("Nothing to do");
+  //
+  // The old "Flows · N ▾" disclosure this used to click through is gone —
+  // this branch promoted its Running/Templates panel to three top-level tabs
+  // (Active/Templates/Canvas) on a `role="tablist" aria-label="Orchestrator"`,
+  // shared by every one of the drawer's three screens (see
+  // `OrchestratorDrawer.test.tsx`'s "the three top-level views" describe
+  // block). Switch tabs directly rather than opening a control that no
+  // longer exists.
+  await orch.getByRole("tablist", { name: "Orchestrator" }).getByRole("tab", { name: "Templates" }).click();
+  // `.orch-tmpl-row` now also matches the three built-in starter templates
+  // (Ship it / Test & notify / Review only, src/engine/orchestrator/starters.ts)
+  // served alongside this fixture's own — scope to the row carrying THIS
+  // template's name so the assertion still means what the comment above says:
+  // this specific workflow's shape is a reusable template of its own.
+  const tmplRow = deck.frame.locator(".orch-tmpl-row", { hasText: "Nothing to do" });
+  await expect(tmplRow).toContainText("Nothing to do");
   await shot(launched.page, testInfo, "3 · the template, independent of the card");
 
   // Back to the card to arm from where the design's own controls live.

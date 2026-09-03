@@ -57,6 +57,26 @@ export function validTemplate(v: unknown): FlowTemplate | null {
   return t as FlowTemplate;
 }
 
+/** What `instantiate` cannot read off the template, and must be told.
+ *
+ * `PlannedNode` carries `repos` and `mode` — a `run.repos[].name` list and a
+ * `PromptMode` id — and both are `agentFlow.*` settings. A template saved by a
+ * user has them because the save dialog asked; a BUILT-IN starter cannot have
+ * them at all, because it ships before the user's configuration exists and
+ * baking either in would break the no-hardcoded-organization-values invariant.
+ *
+ * So they arrive here, from the card being attached to and the config the host
+ * already holds. Injected rather than imported for the same reason the flow id
+ * and clock are: the whole substitution stays table-testable from fixtures, with
+ * no filesystem, no panel and no `getConfig()`. */
+export interface InstantiateCtx {
+  /** `run.repos[].name` for the card being attached to. */
+  repos: string[];
+  /** Configured prompt-mode ids, in the user's own order. The first is the
+   * fallback for a node whose mode is empty or no longer configured. */
+  modes: string[];
+}
+
 /** A live workflow from a template, bound to one ticket.
  *
  * Pure over an injected flow id and clock for the reason `evaluateFlow` is: the
@@ -67,7 +87,9 @@ export function validTemplate(v: unknown): FlowTemplate | null {
  * template with no planned node has nothing to bind the ticket to, and the result
  * would be a graph of commands and notifications rooted at nothing, waiting
  * forever. */
-export function instantiate(t: FlowTemplate, ticketKey: string, flowId: string, nowMs: number): Flow {
+export function instantiate(
+  t: FlowTemplate, ticketKey: string, flowId: string, nowMs: number, ctx: InstantiateCtx,
+): Flow {
   if (!t.flow.nodes.some(isPlanned)) {
     throw new Error(`template ${JSON.stringify(t.name)} has no planned step: nothing to bind ${ticketKey} to`);
   }
@@ -86,7 +108,7 @@ export function instantiate(t: FlowTemplate, ticketKey: string, flowId: string, 
   for (const n of t.flow.nodes) {
     const id = nextNodeId(out);
     remap.set(n.id, id);
-    const bound: FlowNode = isPlanned(n) ? { ...n, id, ticketKey } : { ...n, id };
+    const bound: FlowNode = isPlanned(n) ? { ...n, id, ticketKey, ...boundLaunch(n, ctx) } : { ...n, id };
     out.nodes.push(bound);
   }
 
@@ -109,6 +131,26 @@ export function instantiate(t: FlowTemplate, ticketKey: string, flowId: string, 
   // deploy.sh on the strength of a single click made about a different ticket.
   // Simply never assigned here — the fresh object above has neither.
   return { ...out, fromTemplate: t.id };
+}
+
+/** `repos` and `mode` for one planned node: the template's own values when it has
+ * usable ones, the card's and the config's otherwise.
+ *
+ * Refuses rather than guessing. An empty `repos` with nothing to fall back on
+ * means a launch with no checkout; a mode nothing resolves means a launch with no
+ * prompt. `DemotionChoice`'s own comment gives the reason this is a throw and not
+ * a default: a guessed destination is a session launched into the window you are
+ * working in, months later, on someone else's ticket. */
+function boundLaunch(n: PlannedNode, ctx: InstantiateCtx): { repos: string[]; mode: string } {
+  const repos = n.repos.length > 0 ? n.repos : ctx.repos;
+  if (repos.length === 0) {
+    throw new Error("this card has no repo to launch in, and the template names none");
+  }
+  const mode = ctx.modes.includes(n.mode) ? n.mode : ctx.modes[0];
+  if (mode === undefined) {
+    throw new Error("no prompt mode is configured: set agentFlow.promptModes before attaching a workflow");
+  }
+  return { repos, mode };
 }
 
 /** What the save dialog must ask about one place it is demoting.
@@ -148,6 +190,43 @@ export function placesToDemote(flow: Flow): PlaceNode[] {
  * send the message. */
 export function canBindTicket(flow: Flow): boolean {
   return flow.nodes.some((n) => isPlace(n) || isPlanned(n));
+}
+
+/** A template's stored inner flow is a SHAPE, never a live workflow's history —
+ * so every field that only makes sense on something that has actually run gets
+ * cleared here: the flow `id` (not part of the shape; `instantiate` mints a
+ * fresh one), `armed` (a template is never armed — `instantiate` always builds
+ * its copy disarmed regardless), `createdAt` (this flow was never created, only
+ * the template was), and every edge's host stamps — `firedAt`/`firedNote`/
+ * `performed`/`error`/`action`/`gateAnswer` — via `stripHostStamps`.
+ *
+ * The FLOW-level consent stamps, `launchConfirmedAt`/`commandConfirmedAt`, are
+ * dropped here too, but NOT by `stripHostStamps` — that function only ever
+ * touches a `FlowEdge`, and consent lives on `Flow` itself (`model.ts`).
+ * They are dropped structurally instead: the object literal below names
+ * exactly six fields, and neither consent stamp is one of them, so a flow
+ * carrying either loses it simply by not being copied into the result.
+ * Whoever "simplifies" this into a spread of `flow` (keeping only the fields
+ * that must change) would carry both straight through — multiplying one
+ * approved consent across every card the resulting template is ever attached
+ * to, the exact twenty-machines-one-click failure `instantiate`'s own doc
+ * comment (below) warns about.
+ *
+ * `nodes` is taken as given rather than derived from `flow`, because `toTemplate`
+ * calls this with place-demoted nodes and deckView's `flow:writeTemplate`
+ * handler calls it with the flow's own nodes unchanged — this function only
+ * owns the normalization, not the demotion.
+ *
+ * The ONE normalization rule, shared by both write paths that produce a
+ * template's inner flow, so they cannot quietly drift on what "normalized"
+ * means: `toTemplate` (converting an existing flow into a new template) and
+ * `flow:writeTemplate` (deckView.ts — the canvas's own create/update save). */
+export function normalizedTemplateFlow(flow: Flow, name: string, nodes: FlowNode[]): Flow {
+  return {
+    id: "", name, armed: false, createdAt: 0,
+    nodes,
+    edges: flow.edges.map(stripHostStamps),
+  };
 }
 
 /** A template from a live workflow.
@@ -191,11 +270,6 @@ export function toTemplate(
     name,
     params: {},
     savedAt,
-    flow: {
-      // The flow id is not part of the shape; `instantiate` is given a fresh one.
-      id: "", name, armed: false, createdAt: 0,
-      nodes,
-      edges: flow.edges.map(stripHostStamps),
-    },
+    flow: normalizedTemplateFlow(flow, name, nodes),
   };
 }

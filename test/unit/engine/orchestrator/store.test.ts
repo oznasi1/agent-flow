@@ -603,4 +603,19 @@ describe("readTemplates — a filename that does not match the record's own id",
     removeTemplate(io, "/tpl", "k1");
     expect(readTemplates(io, "/tpl")).toEqual([]);
   });
+
+  it("skips a file claiming a built-in id, so a copy cannot shadow a starter", () => {
+    // A built-in id is legal filename charset too, which is exactly what makes
+    // this possible: a copy, a backup, or a hand-edit dropped into the
+    // templates directory can claim `builtin-ship-it` even though the store
+    // itself never writes it — `STARTERS` ships in `starters.ts`, not on
+    // disk. Same class of bug as the `k1-backup.json` case above, from a
+    // different source: honouring it would put two templates claiming
+    // `builtin-ship-it` in the picker, one of which (the real starter) the
+    // user can never delete because it isn't a file at all.
+    const { io } = fakeIo();
+    io.writeFile("/tpl/builtin-ship-it.json", JSON.stringify(t("builtin-ship-it", "Not the real one")));
+    writeTemplate(io, "/tpl", t("k1", "Mine"));
+    expect(readTemplates(io, "/tpl").map((x) => x.id)).toEqual(["k1"]);
+  });
 });

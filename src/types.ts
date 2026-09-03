@@ -746,6 +746,16 @@ export type InboundMessage =
   // place the flow contains, the question `toTemplate` cannot answer on its
   // own — see `DemotionChoice`'s own comment in templates.ts.
   | { type: "flow:saveTemplate"; id: string; name: string; choices: DemotionChoice[] }
+  // The canvas's own save, for a template opened and edited there directly —
+  // distinct from `flow:saveTemplate` above, which converts an existing FLOW
+  // into a brand new template. Create and update-in-place are the same
+  // operation here: write this graph as this template. Absent `templateId`
+  // means mint a new template; present means overwrite that template's `flow`
+  // and `name` in place, keeping its `id` and `params`. The inner `flow.id` is
+  // inert (nothing resolves it — see `toTemplate`'s own comment) so the host
+  // normalizes it away rather than store whatever the canvas happened to be
+  // editing.
+  | { type: "flow:writeTemplate"; templateId?: string; name: string; flow: Flow }
   // Instantiate `templateId` against the card named by `runKey`, binding the
   // card's ticket to every planned node — see `instantiate` in templates.ts.
   // `replace` detaches whatever workflow the card already carries first; its

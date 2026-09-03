@@ -117,7 +117,6 @@ export const ORCH_CSS = `
 
   .orch-hd { flex: none; padding: 13px 16px 11px; border-bottom: 1px solid var(--hair); }
   .orch-hd .row { display: flex; align-items: center; gap: 8px; }
-  .orch-hd .eyebrow { font-size: var(--t-micro); letter-spacing: .06em; text-transform: uppercase; color: var(--dim); }
   .orch-hd .sp { flex: 1; }
   .orch-x { width: 24px; height: 24px; border: 0; border-radius: var(--r-ctl); background: transparent;
     color: var(--dim); cursor: pointer; font-size: 14px; line-height: 1; }
@@ -154,48 +153,29 @@ export const ORCH_CSS = `
     display: flex; align-items: center; gap: 10px; font-size: var(--t-micro); color: var(--dim); }
   .orch-ft .sp { flex: 1; }
 
-  .orch-flows { position: absolute; right: 16px; top: 40px; z-index: 5; min-width: 220px; max-width: 320px;
-    border: 1px solid var(--edge); border-radius: var(--r-ctl); padding: 4px;
-    background: var(--vscode-editorWidget-background, var(--vscode-editor-background));
-    box-shadow: 0 6px 20px -8px rgba(0,0,0,.5); }
-  .orch-flows button { display: block; width: 100%; text-align: left; border: 0; background: transparent;
-    color: var(--vscode-foreground); font: inherit; font-size: var(--t-body);
-    padding: 5px 8px; border-radius: var(--r-chip); cursor: pointer; }
-  .orch-flows button:hover { background: var(--vscode-toolbar-hoverBackground); }
+  /* The Active screen (Task 9): \`WorkflowList\`'s own \`.wfl-*\` rules
+     (deckStyles.ts — it is also mounted there) do all the row styling; this
+     one rule is only what makes the list fill the drawer's body and scroll
+     inside it rather than inside \`.orch-body\`'s own \`overflow: hidden\`. */
+  .orch-active { flex: 1; min-height: 0; overflow-y: auto; }
 
-  /* Running/Templates share this one popover (see the \`orch-tabs\` tablist in
-     OrchestratorDrawer.tsx) rather than a second panel — one switcher, one
-     place to open a flow or start one. \`.orch-flows button\` above forces
-     every plain button in here to sit full-width and left-aligned, which is
-     right for a flow row that IS the button and wrong for a tab or a
-     Duplicate/Rename/Delete action sitting inline beside its siblings.
-     These two selectors carry two classes each, so they outrank that rule
-     regardless of where either sits in the sheet. */
-  .orch-flows .orch-tabs { display: flex; gap: 4px; padding: 0 2px 6px; margin-bottom: 4px;
-    border-bottom: 1px solid var(--hair); }
-  .orch-flows .orch-tabs button, .orch-flows .orch-tmpl-row button {
-    display: inline-flex; width: auto; text-align: center; }
-
-  .orch-tmpl-list { max-height: 260px; overflow-y: auto; }
+  /* The Templates screen. Was a small popover (\`.orch-flows\`, since removed)
+     capped at 260px; now a top-level view in its own right, so it fills the
+     body instead of scrolling inside a fixed-height box. */
+  .orch-tmpl-list { flex: 1; min-height: 0; overflow-y: auto; }
   .orch-tmpl-row { padding: 6px 4px; }
   .orch-tmpl-row + .orch-tmpl-row { border-top: 1px solid var(--hair); margin-top: 2px; padding-top: 8px; }
-  /* Every \`.orch-tmpl-row .row\` is ALSO an \`.orch-hd .row\` —
-     \`OrchestratorDrawer.tsx\` never closes its \`.orch-hd\` div until after the
-     whole flow-switcher popover, Templates tab included — and that ancestor
-     rule (above) already supplies \`display: flex\`/\`flex: 1\` to every \`.row\`
-     and \`.sp\` nested under it, this one included. So this rule is not what
-     stands between the name and the rule count jamming together; it exists
-     for its own \`gap: 6px\`, which DOES override the ancestor's \`8px\` (equal
-     specificity, later in the sheet). \`display: flex\` stays here anyway as
-     cheap insurance, not load-bearing today: the Templates tab living inside
-     \`.orch-hd\` is itself a little strange (\`.orch-tmpl-dialog\`, the Save
-     dialog for the very same tab, already lives in \`.orch-body\` instead), and
-     if a future refactor moves \`.orch-tmpl-list\` there too this rule keeps
-     working without anyone having to notice the ancestor's coverage went
-     with it. \`.orch-tmpl-row .sp\` carries no such difference from
-     \`.orch-hd .sp\` (same property, same value) and was removed as dead
-     weight. */
+  /* Load-bearing, unlike before Task 9: this row used to live inside
+     \`.orch-hd\`, whose own \`.row\`/\`.sp\` rules (above) supplied
+     \`display: flex\`/\`flex: 1\` for free. Promoting Templates to its own
+     top-level view moved this row into \`.orch-body\` instead, which has no
+     such rule of its own — so both declarations below now do the whole job
+     they used to only insure, not merely echo an ancestor. \`gap: 6px\` is
+     also a real difference from what \`.orch-hd .row\` supplies (8px), kept
+     for the same reason it always was: a tighter row here reads as one
+     unit against its own siblings. */
   .orch-tmpl-row .row { display: flex; align-items: center; gap: 6px; }
+  .orch-tmpl-row .sp { flex: 1; }
   .orch-tmpl-row .row + .row { margin-top: 4px; }
   .orch-tmpl-row .t { font-size: var(--t-body); font-weight: 600; }
   .orch-tmpl-row .meta { font-size: var(--t-micro); color: var(--dim); white-space: nowrap; }

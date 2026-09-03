@@ -124,6 +124,9 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "a blocked-reason code recorded for diagnostics, not rendered to the user — result.blocked has no reader in deckView.ts or any webview" },
   { location: "src/webview/orchestratorRule.ts", text: "agent-idle-over", why: "condition key, as above" },
   { location: "src/webview/CondParams.tsx", text: "agent-idle-over", why: "condition key, as above" },
+  // Task 1 (built-in starters): the shipped templates encode the same
+  // released condition key, three times over — one per starter that uses it.
+  { location: "src/engine/orchestrator/starters.ts", text: "agent-ended-turn", why: "condition key, as above" },
   // Task 7: host-side wire values and subagent references.
   { location: "src/config.ts", text: "agents",
     why: "the agentFlow.deckGrouping value normalized here — the stored setting, not copy" },
@@ -278,14 +281,22 @@ const FLOW_LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "message type sent to the host, a wire value" },
   { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:deleteTemplate",
     why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:writeTemplate",
+    why: "message type sent to the host, a wire value — Task 13's canvas Save control while editing a template" },
   // src/webview/OrchestratorDrawer.tsx: the flow-graph canvas's own
   // pre-existing copy, confirmed present at this branch's merge-base with
   // main — none of it was touched by this feature, and none of it is the
   // card-facing "workflow" surface the new vocabulary rule governs.
-  { location: "src/webview/OrchestratorDrawer.tsx", text: "orch-flows",
-    why: "CSS class name, an identifier in the stylesheet — renaming it is a style change, not a copy change" },
-  { location: "src/webview/OrchestratorDrawer.tsx", text: " Flows · ",
-    why: "pre-existing eyebrow toggle on the flow-graph canvas (predates this feature), not the card's workflow block" },
+  //
+  // Task 9 (navigation) deleted the old "Flows · N ▾" disclosure and its
+  // `orch-flows` popover class entirely — replaced by a top-level tablist
+  // controlled by `view`/`onView` — so their allowlist entries are gone with
+  // them, not merely left here unused (the gate's own "no dead entry" check
+  // would fail on exactly that). Everything below still renders, unchanged
+  // in text, just relocated: the flow switcher (still "+ New flow") and
+  // "Delete flow" moved from the header's top row into the Canvas view's own
+  // flow-switcher row, and the Canvas/List toggle ("Flow view") and the
+  // rename field ("Flow name") are untouched.
   { location: "src/webview/OrchestratorDrawer.tsx", text: " Delete flow ",
     why: "pre-existing canvas header button (predates this feature) — deletes a Flow object, the canvas's own noun" },
   { location: "src/webview/OrchestratorDrawer.tsx", text: "Flow view",
@@ -295,7 +306,12 @@ const FLOW_LEGITIMATE: { location: string; text: string; why: string }[] = [
   { location: "src/webview/OrchestratorDrawer.tsx", text: "Flow name",
     why: "pre-existing rename field on the flow-graph canvas (predates this feature)" },
   { location: "src/webview/OrchestratorDrawer.tsx", text: "+ New flow",
-    why: "pre-existing Running-tab button (predates this feature) — creates a bare Flow, not a card workflow" },
+    why: "pre-existing flow-switcher button (predates this feature) — creates a bare Flow, not a card workflow" },
+  // src/webview/OrchestratorDrawer.tsx: new for Task 8 (OrchTarget addressing).
+  // `target.kind === "flow"` compares OrchTarget's own discriminant tag — the
+  // same class of hit as the flow: message types above, not UI copy at all.
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow",
+    why: "OrchTarget's own kind discriminant, compared against — an internal tag, not user-facing copy" },
 ];
 
 describe("the template/workflow gate", () => {

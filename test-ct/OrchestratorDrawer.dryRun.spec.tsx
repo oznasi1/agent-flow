@@ -59,10 +59,12 @@ const noop = () => {};
 test("the rows scroll and the disclaimer stays put", async ({ mount, page }) => {
   const { flow, runs } = many();
   await mount(<OrchestratorDrawer
-    flows={[flow]} openId="f1" runs={runs} pendingResume={[]}
-    promptModes={[{ id: "quick", label: "Quick pass" }]} commands={[]} branchCi={{}} templates={[]}
+    flows={[flow]} openId={{ kind: "flow", id: "f1" }} runs={runs} pendingResume={[]}
+    promptModes={[{ id: "quick", label: "Quick pass" }]} commands={[]} branchCi={{}} templates={[]} draftTemplate={null}
+    view="canvas" onView={noop} rows={[]} onOpenCard={noop}
     onClose={noop} onCreate={noop} onOpen={noop} onRename={noop} onSave={noop}
     onDelete={noop} onArm={noop} onResumeApprove={noop} onResumeDisarm={noop} onResetEdge={noop}
+    onNewTemplate={noop} onCancelTemplate={noop}
   />);
 
   await page.getByRole("button", { name: /what would fire/i }).click();

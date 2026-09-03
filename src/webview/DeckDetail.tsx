@@ -60,6 +60,14 @@ export interface DeckDetailProps {
    * `openFlowId` also owns closing this drawer, the way its own Orchestrator
    * chip already does when it opens the drawer over a selected card. */
   onOpenWorkflow: (flowId: string) => void;
+  /** The attach picker's way out when the library is empty: switches the
+   * Orchestrator surface to its Templates screen, the same one the board's own
+   * "Templates" chip opens (`DeckApp.tsx`'s `onClick` there sets `orchView` and
+   * `orchOpen` the identical way). Never a fresh channel of its own — this
+   * mirrors `onOpenWorkflow` immediately above, which already asks `DeckApp`
+   * to move the Orchestrator surface rather than doing it here, for the same
+   * reason: this drawer does not own that state. */
+  onOpenTemplates: () => void;
 }
 
 /** The search-and-tick list `+ Add command…`/`+ Add place…` (`combo.tsx`'s
@@ -74,11 +82,13 @@ function WorkflowPicker({
   templates,
   onPick,
   onClose,
+  onOpenTemplates,
 }: {
   ticketKey: string;
   templates: FlowTemplate[];
   onPick: (templateId: string) => void;
   onClose: () => void;
+  onOpenTemplates: () => void;
 }): JSX.Element {
   const [q, setQ] = React.useState("");
   const rootRef = React.useRef<HTMLDivElement>(null);
@@ -137,7 +147,23 @@ function WorkflowPicker({
         <button type="button" className="wf-picker-close" aria-label="Cancel" onClick={onClose}>✕</button>
       </div>
       <div className="wf-picker-list">
-        {templates.length === 0 && <div className="wf-picker-empty">No templates saved yet</div>}
+        {/* The original dead end this whole feature exists to close: flat text,
+            no action, on a screen a user can still reach (their own templates
+            all deleted, or the setting just flipped on before the first
+            `deck:flows` post lands). The explanatory line stays its own text
+            node, unchanged from before this task — `DeckApp.test.tsx`'s own
+            "never offers the draft in a card's attach picker" reads it with an
+            exact `getByText` match — and the way out is a sibling element
+            rather than text folded into the same sentence, so adding it here
+            cannot perturb that string. `orch-mini` is the same quiet button
+            treatment the Orchestrator drawer's own empty state already uses
+            for "here's the verb that gets you unstuck". */}
+        {templates.length === 0 && (
+          <div className="wf-picker-empty">
+            <div>No templates saved yet</div>
+            <button type="button" className="orch-mini" onClick={onOpenTemplates}>Open Templates</button>
+          </div>
+        )}
         {templates.length > 0 && filtered.length === 0 && <div className="wf-picker-empty">No match for “{q}”</div>}
         {filtered.map((t) => (
           <button key={t.id} type="button" className="wf-picker-opt" onClick={() => onPick(t.id)}>
@@ -194,7 +220,7 @@ function copy(text: string): void {
 
 export function DeckDetail({
   card, sourceLabel, usage, closing = false, flows, templates, runs, branchCi, orchEnabled,
-  onClose, onForget, onOpenWorkflow,
+  onClose, onForget, onOpenWorkflow, onOpenTemplates,
 }: DeckDetailProps): JSX.Element {
   const r = card.status;
   const key = r.run.key;
@@ -510,6 +536,7 @@ export function DeckDetail({
                   setPickerOpen(false);
                 }}
                 onClose={() => setPickerOpen(false)}
+                onOpenTemplates={onOpenTemplates}
               />
             )}
           </div>

@@ -4,6 +4,7 @@
 import * as os from "os";
 import * as path from "path";
 import { ACTION_MISMATCH_PREFIX, edgeAction, Flow, FlowEdge, FlowNode, isSettled } from "./model";
+import { isBuiltinTemplateId } from "./starters";
 import { FlowTemplate, validTemplate } from "./templates";
 
 /** The only IO surface. Implementations return null / throw only from `readDir`;
@@ -288,7 +289,14 @@ export function readTemplates(io: FlowIo, dir: string): FlowTemplate[] {
     // resurrect in the list on every read, permanently stuck. Skip it, one
     // item lost, exactly like every other malformed record this reader
     // tolerates.
-    if (t && name === `${t.id}.json`) out.push(t);
+    if (!t || name !== `${t.id}.json`) continue;
+    // A built-in ships in `starters.ts` and is never written here, so a file
+    // claiming one of those ids is a copy, a backup, or a hand-edit — and
+    // honouring it would put two templates with the same id in the picker,
+    // one of which the user can never delete. Same failure the filename check
+    // above exists to stop.
+    if (isBuiltinTemplateId(t.id)) continue;
+    out.push(t);
   }
   return out;
 }

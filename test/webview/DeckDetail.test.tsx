@@ -86,7 +86,7 @@ const render1 = (
   onClose = vi.fn(),
   onForget = vi.fn(),
   usage?: UsageTotals | null,
-  wf: Partial<Pick<DeckDetailProps, "flows" | "templates" | "runs" | "branchCi" | "orchEnabled" | "onOpenWorkflow">> = {},
+  wf: Partial<Pick<DeckDetailProps, "flows" | "templates" | "runs" | "branchCi" | "orchEnabled" | "onOpenWorkflow" | "onOpenTemplates">> = {},
 ) =>
   render(<DeckDetail
     card={card} sourceLabel="Jira" usage={usage} onClose={onClose} onForget={onForget}
@@ -96,6 +96,7 @@ const render1 = (
     branchCi={wf.branchCi ?? {}}
     orchEnabled={wf.orchEnabled ?? false}
     onOpenWorkflow={wf.onOpenWorkflow ?? vi.fn()}
+    onOpenTemplates={wf.onOpenTemplates ?? vi.fn()}
   />);
 
 // Same minimal fixture shapes test/unit/engine/orchestrator/attach.test.ts and
@@ -150,7 +151,7 @@ const withGateOn = (runKey: string): Flow => ({
  * defaults — every test below is only ever exercising the Workflow section. */
 const renderWf = (
   card: DeckCard,
-  wf: Partial<Pick<DeckDetailProps, "flows" | "templates" | "runs" | "branchCi" | "orchEnabled" | "onOpenWorkflow">>,
+  wf: Partial<Pick<DeckDetailProps, "flows" | "templates" | "runs" | "branchCi" | "orchEnabled" | "onOpenWorkflow" | "onOpenTemplates">>,
 ) => render1(card, undefined, undefined, undefined, wf);
 
 /** A card whose run key is `key` — every test below binds a workflow by run
@@ -969,6 +970,39 @@ describe("DeckDetail — Workflow section", () => {
     expect(screen.getByText("Review only")).toBeTruthy();
   });
 
+  // The original dead end this feature exists to close: "No templates saved
+  // yet" with no action at all. Three starters ship and are served whenever
+  // `agentFlow.orchestrator` is on, so an empty `templates` list is rare in
+  // practice — but it stays reachable (a user deleted their own, or the
+  // setting just flipped on in a window that hasn't gotten a `deck:flows`
+  // post yet), and the empty state must offer a way out rather than strand
+  // the user here. `onOpenTemplates` is the SAME channel `onOpenWorkflow`
+  // uses one row up — DeckDetail asks DeckApp to move the Orchestrator
+  // surface rather than doing it here — so this test pins the wiring, not a
+  // new one.
+  it("offers a way to create one when no template matches", async () => {
+    const onOpenTemplates = vi.fn();
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [], orchEnabled: true, onOpenTemplates });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    expect(screen.getByText(/No templates saved yet/)).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Open Templates" }));
+    expect(onOpenTemplates).toHaveBeenCalled();
+  });
+
+  // The counterpart this task's own brief calls out by name: a failed SEARCH
+  // is not the same dead end, and must not grow the same exit — "No match
+  // for …" already tells the user how to get back (clear the search), and
+  // stacking a second affordance on it would suggest the library itself is
+  // empty when it demonstrably is not.
+  it("does not offer the same way out when a search merely finds nothing", async () => {
+    const onOpenTemplates = vi.fn();
+    renderWf(cardWithKey("PROJ-142"), { flows: [], templates: [shipItTemplate], orchEnabled: true, onOpenTemplates });
+    await userEvent.click(screen.getByRole("button", { name: "Attach workflow…" }));
+    await userEvent.type(screen.getByPlaceholderText("Choose a template for PROJ-142…"), "nope");
+    expect(await screen.findByText("No match for “nope”")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Open Templates" })).toBeNull();
+  });
+
   it("names a local card's inferred ticket in the picker's placeholder", async () => {
     // A local card's run key is a worktree slug, not a ticket — the picker asks
     // about the INFERRED ticket key (see DeckDetail.tsx's `boundTicketKey`),
@@ -999,7 +1033,7 @@ describe("DeckDetail — Workflow section", () => {
     const hostKey = ticketKeyFor(run, jiraish);
     // A template carries no place nodes, so this planned node's ticket key is
     // the ONLY thing binding the flow to the card.
-    const attached = instantiate(shipItTemplate, hostKey, "f-new", 100);
+    const attached = instantiate(shipItTemplate, hostKey, "f-new", 100, { repos: ["svc"], modes: ["plan"] });
     expect(attached.nodes.filter((n) => n.kind === "place")).toEqual([]);
     renderWf(localCard("PROJ-9"), { flows: [attached], orchEnabled: true });
     expect(screen.getByText("Ship it")).toBeTruthy();
@@ -1042,6 +1076,7 @@ describe("DeckDetail — Workflow section", () => {
     result.rerender(<DeckDetail
       card={cardWithKey("PROJ-9")} sourceLabel="Jira" onClose={vi.fn()} onForget={vi.fn()}
       flows={[]} templates={[shipItTemplate]} runs={[]} branchCi={{}} orchEnabled onOpenWorkflow={vi.fn()}
+      onOpenTemplates={vi.fn()}
     />);
     expect(screen.queryByPlaceholderText("Choose a template for PROJ-142…")).toBeNull();
     expect(screen.queryByPlaceholderText("Choose a template for PROJ-9…")).toBeNull();

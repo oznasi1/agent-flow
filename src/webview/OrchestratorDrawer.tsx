@@ -3,6 +3,7 @@ import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, GateNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
@@ -11,6 +12,7 @@ import { createDrawerResize, RESIZE_STEP } from "./drawerResize";
 import { Drawer, useDrawerExit } from "./Drawer";
 import { FlowList } from "./flowList";
 import { ORCH_EDGE_PAINT_DY } from "./orchestratorStyles";
+import { WorkflowList, WorkflowRow } from "./WorkflowList";
 import {
   ACTION_LABEL,
   addCommandNode,
@@ -198,17 +200,32 @@ function SaveCommandRow({ runNow }: { runNow: () => string }): JSX.Element {
 }
 
 /** One row on the Templates tab: a template's name, its rule count, how many
- * live workflows were built from it, and the three verbs a TEMPLATE offers —
- * Duplicate, Rename, Delete. Never Arm, disarm or Detach: a template is the
- * reusable SHAPE, not a workflow attached to a card, so those verbs do not
- * exist here (see this task's own vocabulary rule).
+ * live workflows were built from it, and the verbs a TEMPLATE offers —
+ * Duplicate always, Rename and Delete only for a template the user owns.
+ * Never Arm, disarm or Detach: a template is the reusable SHAPE, not a
+ * workflow attached to a card, so those verbs do not exist here (see this
+ * task's own vocabulary rule).
+ *
+ * Built-in-ness is derived from `isBuiltinTemplateId(t.id)` — the same
+ * predicate the HOST checks before refusing a rename/delete/overwrite — rather
+ * than a prop this component is handed. One source of truth: a second copy of
+ * "is this one of the three starters" could drift from the host's own check
+ * (e.g. after a duplicate strips the prefix), silently offering a control that
+ * fails server-side, or hiding one that would have succeeded.
+ *
+ * Rename and Delete are ABSENT on a built-in, not disabled: a disabled button
+ * still needs a reason shown somewhere (a title attribute, a tooltip) and
+ * invites a second copy of that reason to drift from this comment. Duplicate
+ * is the one supported path to owning an editable copy, and it stays enabled
+ * unconditionally — see its own line below.
  *
  * `onCards` is a lookup the caller already did (`Flow.fromTemplate === t.id`),
  * never a guess from this row: matching on name or rule count would silently
  * merge two unrelated templates that happen to look alike, and a workflow is
  * free to diverge from its template's shape the moment it is instantiated —
  * name and rule count are exactly the two things that can no longer be
- * trusted to agree.
+ * trusted to agree. Unaffected by built-in-ness: a starter is on cards the
+ * same way a user template is, and this row must keep saying so.
  *
  * Its own component, not inlined in the switcher panel below, so Rename and
  * the delete confirmation each get their own local state scoped to one row —
@@ -227,6 +244,7 @@ function TemplateRow({
   const [renaming, setRenaming] = React.useState(false);
   const [confirming, setConfirming] = React.useState(false);
   const ruleCount = t.flow.edges.length;
+  const builtin = isBuiltinTemplateId(t.id);
   return (
     <div className="orch-tmpl-row">
       <div className="row">
@@ -252,6 +270,11 @@ function TemplateRow({
         ) : (
           <span className="t">{t.name}</span>
         )}
+        {/* `.meta` — the same quiet, muted treatment this row already uses for
+            the rule count and card count below, not `--c-attn`/`--c-danger`:
+            being built-in is neither a warning nor a failure, just a fact
+            about where the template came from. */}
+        {builtin && <span className="meta">Built-in</span>}
         <div className="sp" />
         <span className="meta">{ruleCount} {ruleCount === 1 ? "rule" : "rules"}</span>
       </div>
@@ -274,8 +297,14 @@ function TemplateRow({
       ) : (
         <div className="row">
           <button type="button" className="orch-mini" onClick={onDuplicate}>Duplicate</button>
-          <button type="button" className="orch-mini" onClick={() => setRenaming(true)}>Rename</button>
-          <button type="button" className="orch-mini" onClick={() => setConfirming(true)}>Delete</button>
+          {/* Rename and Delete: absent, not disabled, on a built-in — see this
+              component's own doc comment for why. */}
+          {!builtin && (
+            <>
+              <button type="button" className="orch-mini" onClick={() => setRenaming(true)}>Rename</button>
+              <button type="button" className="orch-mini" onClick={() => setConfirming(true)}>Delete</button>
+            </>
+          )}
         </div>
       )}
     </div>
@@ -338,10 +367,51 @@ const STATE_HUE: Record<AgentState, string> = {
  * danger tint — colour here is attention debt, not decoration. */
 const BAD_CONDS = new Set<Condition["kind"]>(["ci-failed", "changes-requested", "pr-conflicting"]);
 
+/** What the drawer is addressed at: a saved `Flow` by id, or a `FlowTemplate`
+ * by id. A template's payload IS a `Flow` (`FlowTemplate.flow`), which is what
+ * lets one canvas serve both — see `openFlow` below. */
+export type OrchTarget = { kind: "flow"; id: string } | { kind: "template"; id: string };
+
+/** The drawer's three top-level screens. Active is every card carrying a
+ * workflow (`WorkflowList`, below); Templates is every reusable shape,
+ * starters included; Canvas is the flow-graph editor this drawer has always
+ * been. Owned by `DeckApp`, not local state — a later task adds two header
+ * buttons that set this from outside the drawer, and a screen only this
+ * component could change could never be reached from there. */
+export type OrchView = "active" | "templates" | "canvas";
+
 export interface OrchestratorDrawerProps {
   flows: Flow[];
-  /** Which flow is open. `null` closes the drawer. */
-  openId: string | null;
+  /** Which flow or template Canvas is addressing. `null` there means Canvas
+   * has nothing to show (`if (!flow) return null`, below) — but that is no
+   * longer the same claim as "the drawer is closed": Active and Templates
+   * need no flow addressed at all. See `open`, just below, for the signal
+   * that actually answers that question on their behalf. */
+  openId: OrchTarget | null;
+  /** Which of the three top-level screens is showing. See `OrchView`. */
+  view: OrchView;
+  onView: (v: OrchView) => void;
+  /** Is the drawer showing at all, for the Active/Templates screens
+   * specifically — Canvas needs no such signal, since whether a flow
+   * resolves already decides its visibility (`openId` above). Active and
+   * Templates have no flow to key off, so `DeckApp` hands this over
+   * explicitly instead. Optional, and treated as shown when absent
+   * (`p.open === false` is the one value that closes it): every test in this
+   * file predating the flag exercises Canvas, or an Active/Templates screen
+   * with no opinion on open/closed either way, and defaulting to shown keeps
+   * every one of them compiling and passing unmodified. */
+  open?: boolean;
+  /** The Active screen's own rows — one per card carrying a workflow,
+   * already sorted by the caller (see `WorkflowList`'s own contract: it
+   * renders what it is handed and does not sort). Empty until a later task
+   * derives the real rows from the board; this one only builds the shell
+   * that renders them. */
+  rows: WorkflowRow[];
+  /** Opens the card a workflow row named — closes this drawer and selects
+   * that card, the mirror image of `DeckDetail`'s own `onOpenWorkflow` (that
+   * one opens a workflow FROM a card; this one opens a card FROM its
+   * workflow, so the workflow is read where it lives). */
+  onOpenCard: (cardId: string) => void;
   /** Every card on the board, so the tray and canvas can resolve a node's live
    * state and the inspector can say what a condition is currently waiting on. */
   runs: RunStatus[];
@@ -376,6 +446,15 @@ export interface OrchestratorDrawerProps {
    * file's own closures need to wrap first, so no new prop callback exists
    * for any of the three. */
   templates: FlowTemplate[];
+  /** The one in-flight "＋ New template…" draft, or `null` — `DeckApp`'s own
+   * state (`mintDraftTemplate`'s own doc comment), handed in as a prop
+   * rather than reached for, so `openFlow` below can resolve a template
+   * target against it the exact same way it resolves one against
+   * `p.templates`: a draft is a `FlowTemplate` like any other, just one
+   * `deck:flows` will never carry. Never itself added to `p.templates` —
+   * that is what keeps a card's attach picker (`DeckDetail.tsx`, reading the
+   * very same `templates` list this drawer does) from ever offering it. */
+  draftTemplate: FlowTemplate | null;
   onClose: () => void;
   onCreate: () => void;
   onOpen: (id: string) => void;
@@ -386,10 +465,52 @@ export interface OrchestratorDrawerProps {
   onResumeApprove: (id: string) => void;
   onResumeDisarm: (id: string) => void;
   onResetEdge: (id: string, edgeId: string) => void;
+  /** "＋ New template…" — mints a fresh draft (or reopens the one already in
+   * flight) and opens it on Canvas. See `DeckApp`'s own `onNewTemplate` for
+   * why this is not `onCreate`: that verb mints a WORKFLOW, not a template. */
+  onNewTemplate: () => void;
+  /** Leave template-editing entirely, back to the Templates screen — the
+   * canvas's own Cancel button while `editingTemplate`, and also called
+   * right after Save sends `flow:writeTemplate` (see `DeckApp`'s own
+   * doc comment on its identical prop). */
+  onCancelTemplate: () => void;
 }
 
 export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | null {
-  const openFlow = p.flows.find((f) => f.id === p.openId);
+  const target = p.openId;
+  /** Editing a template, not a workflow — so every WORKFLOW verb is off.
+   *
+   * The vocabulary rule this file already states (see `TemplateRow`'s own doc
+   * comment on the Templates tab) enforced instead of described: a template
+   * has no ticket and nothing to watch, so it cannot be armed, disarmed,
+   * detached, approved or dry-run. One boolean rather than a check at each
+   * site, because the failure mode is a site nobody remembered — this file is
+   * 2,400+ lines and a verb gated by inspection is a verb someone will miss
+   * the next time one is added. Declared here, above both early returns
+   * (`p.view !== "canvas"` and `!flow`, below), even though it is not itself a
+   * hook: every value this component derives from `target` lives in one
+   * place, right beside `openKey`. */
+  const editingTemplate = target?.kind === "template";
+  /** Stable string form of `target`, for every hook below that needs a value
+   * to key an effect or `useDrawerExit` on rather than the target object's own
+   * identity — `DeckApp` has no reason to hand back the same object reference
+   * across renders for "the same" flow or template. */
+  const openKey = target && `${target.kind}:${target.id}`;
+  /** The flow the canvas is editing, whichever kind of thing the target names.
+   *
+   * A template's payload IS a `Flow` (`FlowTemplate.flow`), which is what makes
+   * one editor enough for both: the canvas never learns there are two kinds of
+   * target, and only the VERBS around it change (see `editingTemplate`, Task 12). */
+  const openFlow =
+    target === null
+      ? undefined
+      : target.kind === "flow"
+        ? p.flows.find((f) => f.id === target.id)
+        // A saved template first, and the in-flight draft only as a
+        // fallback: a real save always wins, and a draft never collides
+        // with one anyway (its id never matches anything `deck:flows` ever
+        // posts — see `mintDraftTemplate`'s own doc comment).
+        : (p.templates.find((t) => t.id === target.id) ?? (p.draftTemplate?.id === target.id ? p.draftTemplate : undefined))?.flow;
   /** The flow the drawer keeps painting while it slides back out, and whether it
    * is doing that — both from the shared drawer seam, so this drawer and the
    * card detail leave the board the same way. Frozen and unreachable for that
@@ -397,7 +518,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * reader, or a Tab. The click that closed it has already sent focus back to
    * the chip. `Drawer.tsx` holds the reasoning, including why the hook needs
    * both `openId` and the flow it resolves to. */
-  const { shown: flow, closing } = useDrawerExit(p.openId, openFlow);
+  const { shown: flow, closing } = useDrawerExit(openKey, openFlow);
   /** Canvas ⇄ list. The canvas is a board built from divs and pointer events —
    * no usable keyboard story — so `FlowList` (flowList.tsx) exists as the
    * keyboard path onto the exact same `Flow`. Canvas stays the default: this
@@ -405,7 +526,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * change it. Never persisted alongside `width` — reopening the drawer in a
    * fresh session should land on the canvas, not silently reopen on whichever
    * view a past session happened to be reading. */
-  const [view, setView] = React.useState<"canvas" | "list">("canvas");
+  const [canvasView, setCanvasView] = React.useState<"canvas" | "list">("canvas");
   // The dry run is a READ, so it is component state and nothing else: never
   // persisted, never posted, and deliberately not remembered across a reopen —
   // a verdict is about the board as it is right now, and one restored from a
@@ -418,21 +539,22 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // since a condition like `agent-idle-over` is answered against `Date.now()`.
   // A stale-by-one-render verdict beside a `waiting` reason line that reads a
   // fresh clock (`observationOf`, below) is two answers about one rule.
-  const dry = dryRun && flow ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : [];
+  // `!editingTemplate` sits beside `dryRun`/`flow` here, not only at the panel's
+  // render site further down: the toggle that sets `dryRun` true is itself
+  // hidden while editing a template (see the header block, below), but
+  // `dryRun` is local state that outlives an `openKey` change — nothing resets
+  // it when the target switches FROM an armed flow with the panel open TO a
+  // template. A dry run is a verdict about being armed, and a template cannot
+  // be armed, so it has nothing to verdict either way.
+  const dry = dryRun && flow && !editingTemplate ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : [];
   const firing = dry.filter((v) => v.verdict === "fire").length;
-  const [picking, setPicking] = React.useState(false);
-  /** Which half of the switcher panel is showing. Running is the default on
-   * every open — never persisted, never remembered across a reopen — because
-   * the switcher's whole existing job (open another flow, or start one) must
-   * not cost a click just because Templates now shares the panel with it. */
-  const [pickTab, setPickTab] = React.useState<"running" | "templates">("running");
   /** The Save-as-template dialog's own state: whether it is open, the name
    * typed so far, and one {mode, dest} choice per place node being demoted.
    * Keyed by node id rather than array index, so a re-render between opening
    * the dialog and pressing Save (the flow prop is live, same as everywhere
    * else in this file) cannot silently shift which row a stray edit lands on.
    * Cleared and reseeded every time the dialog opens (`openSaveTemplate`
-   * below), and also force-closed the moment `p.openId` changes (the effect
+   * below), and also force-closed the moment `openKey` changes (the effect
    * just below) — the switcher stays reachable while this dialog is open, and
    * without that second clear, switching to another flow mid-type would leave
    * the dialog open over the NEW flow: same typed name, now describing a
@@ -444,15 +566,17 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const [savingTemplate, setSavingTemplate] = React.useState(false);
   const [templateName, setTemplateName] = React.useState("");
   const [templateChoices, setTemplateChoices] = React.useState<Record<string, { mode: string; dest: LaunchDest }>>({});
-  // Keyed on `p.openId` alone, deliberately: this exists to catch the ID
+  // Keyed on `openKey` alone, deliberately: this exists to catch the target
   // itself changing under an open dialog, not to react to anything else
   // about the flow (an edit to the SAME flow while the dialog is open must
-  // not close it).
+  // not close it). A string key rather than `p.openId` itself, so a caller
+  // that hands back a fresh `OrchTarget` object for "the same" flow or
+  // template on every render cannot fire this spuriously.
   React.useEffect(() => {
     setSavingTemplate(false);
     setTemplateName("");
     setTemplateChoices({});
-  }, [p.openId]);
+  }, [openKey]);
   const [over, setOver] = React.useState(false);
   const [overGraph, setOverGraph] = React.useState(false);
   const graphRef = React.useRef<HTMLDivElement | null>(null);
@@ -569,7 +693,226 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     };
   }, [drag, flow, p]);
 
-  if (!flow) return null;
+  /** Hoisted above the `!flow` check below (their original home was right
+   * beside `startDrag`, which does need a flow) because the flow-less
+   * Active/Templates shell — the `p.view !== "canvas"` branch just below —
+   * needs them too, and none of the three touch `flow` at all: purely
+   * `width`/`resizing`/`expanded` state, unaffected by whether a flow is
+   * open. */
+  const startResize = (e: React.PointerEvent) => {
+    setResizing({ startX: e.clientX, startW: width });
+  };
+
+  /** ArrowLeft grows the drawer, ArrowRight shrinks it — the same mapping the
+   * pointer drag uses (see the resize effect's `move` above): pulling the
+   * left border further left is what makes the drawer wider. Persisted
+   * immediately, the same as a released drag, rather than waiting for the
+   * grip to lose focus — an arrow press IS the whole gesture, there is no
+   * separate "release" to persist on. */
+  const onGripKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const next = orchResize.clamp(e.key === "ArrowLeft" ? width + RESIZE_STEP : width - RESIZE_STEP);
+    setWidth(next);
+    orchResize.persist(next);
+  };
+
+  /** A pure boolean flip that never touches `width` — the functional-updater
+   * form so two activations landing in the same React batch (e.g. a rapid
+   * double click) still cancel out correctly instead of both reading the
+   * same stale `expanded` and racing to the same answer. Because expanding
+   * never writes into `width`, applying it again while already expanded is
+   * automatically idempotent: `renderWidth` below always recomputes
+   * `orchResize.full()` fresh, so there is nothing to compound or drift. */
+  const toggleExpanded = () => setExpanded((v) => !v);
+
+  /** What actually renders. Computed here, above the flow check below,
+   * rather than beside the canvas-only code that used to be its only
+   * reader: the flow-less Active/Templates render (just below) needs the
+   * exact same drawer width the canvas one does. */
+  const renderWidth = expanded ? orchResize.full() : width;
+
+  /** The three top-level tabs plus Expand/Close — identical whichever of
+   * the three screens is showing, and read from BOTH this component's
+   * flow-less return (just below, for Active/Templates) and its canvas one
+   * (further down): a single JSX value here rather than two copies of the
+   * same markup that could silently drift apart. `view` is `DeckApp`'s own
+   * state (see `OrchView`'s doc comment): the two header buttons `DeckApp`
+   * adds land here exactly the way a click on one of these three tabs
+   * already does. */
+  const topRow = (
+    <div className="row">
+      <span role="tablist" aria-label="Orchestrator" style={{ display: "flex", gap: 6 }}>
+        <button type="button" role="tab" aria-selected={p.view === "active"} className="orch-mini" onClick={() => p.onView("active")}>
+          Active
+        </button>
+        <button type="button" role="tab" aria-selected={p.view === "templates"} className="orch-mini" onClick={() => p.onView("templates")}>
+          Templates
+        </button>
+        <button type="button" role="tab" aria-selected={p.view === "canvas"} className="orch-mini" onClick={() => p.onView("canvas")}>
+          Canvas
+        </button>
+      </span>
+      <div className="sp" />
+      <button type="button" className="orch-mini" aria-pressed={expanded} onClick={toggleExpanded}>
+        Expand
+      </button>
+      <button type="button" className="orch-x" aria-label="Close" onClick={p.onClose}>✕</button>
+    </div>
+  );
+
+  /** Same resize grip in both renders, shared for the identical reason
+   * `topRow` is: nothing about it depends on a flow being open. See that
+   * control's own doc comment (further down, where it used to live alone)
+   * for the ARIA shape. */
+  const resizeGrip = !expanded && (
+    <div
+      className="orch-grip"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="Resize Orchestrator drawer"
+      aria-valuenow={Math.round(width)}
+      aria-valuemin={MIN_ORCH_W}
+      aria-valuemax={orchResize.ceiling()}
+      tabIndex={0}
+      onPointerDown={startResize}
+      onKeyDown={onGripKeyDown}
+    />
+  );
+
+  // Active and Templates are surfaces over the WHOLE workspace and need no flow
+  // resolved; only Canvas edits one. A branch above the canvas's own early return,
+  // rather than making `flow` optional below it: everything past this point
+  // dereferences `flow`, and threading undefined through it buys nothing.
+  if (p.view !== "canvas") {
+    // `DeckApp`'s own "is the drawer showing at all" signal — see `open`'s own
+    // doc comment for why Canvas needs no equivalent check.
+    if (p.open === false) return null;
+    return (
+      <Drawer surface="orch" label="Orchestrator" closing={closing} style={{ ["--orch-w" as any]: `${renderWidth}px` }}>
+        {resizeGrip}
+        <div className="orch-hd">{topRow}</div>
+        <div className="orch-body">
+          {/* The Active screen: every card carrying a workflow, in one place.
+              Pure presentation — `WorkflowList` renders exactly the rows it is
+              handed and does not sort them (see its own contract) — so this
+              component's only job is to hand it `p.rows` and wire a click back
+              through `p.onOpenCard`. */}
+          {p.view === "active" && (
+            <div className="orch-active">
+              <WorkflowList rows={p.rows} onOpen={p.onOpenCard} />
+            </div>
+          )}
+          {/* The Templates screen: every reusable shape, starters included.
+              `.orch-tmpl-list` is the same wrapper class the old Templates tab
+              used, kept unchanged so the template/workflow vocabulary gate's
+              own region scan (`jsxBlockAround(..., "orch-tmpl-list")`) still
+              finds this exact content. */}
+          {p.view === "templates" && (
+            <>
+              {/* A button with this exact name used to live inside the
+                  scrolling list below and was removed once already (Task 12's
+                  own review round) for calling the wrong verb (`onCreate`,
+                  which mints an ordinary WORKFLOW — see the doc comment that
+                  used to sit here, now below on `onClick`). A SEPARATE defect
+                  this whole-branch review caught: `.orch-tmpl-list` scrolls
+                  (below), and this button rendered AFTER every row inside it —
+                  three starters plus a dozen user templates puts the branch's
+                  own new authoring entry point below the fold, the exact
+                  discoverability problem this feature exists to fix, one
+                  level down. Its own row, `flex: none` beside the scroller's
+                  `flex: 1` (`.orch-body`'s own flex column), keeps it visible
+                  regardless of how long the list below gets — no `position:
+                  sticky` needed when the simpler fix is not sharing a
+                  scroll container with the rows in the first place. */}
+              <div className="orch-bar">
+                {/* `onNewTemplate` mints a TEMPLATE, held only in `DeckApp`
+                    state (`draftTemplate` — see `mintDraftTemplate`'s own doc
+                    comment) and never written anywhere until its own Save is
+                    pressed — never `onCreate`, which would close this panel,
+                    leave this screen exactly as empty as before, and drop an
+                    untitled WORKFLOW on the board instead. */}
+                <button type="button" className="orch-mini" onClick={p.onNewTemplate}>＋ New template…</button>
+              </div>
+              <div className="orch-tmpl-list">
+                {/* A template is never attached from here — one entry point,
+                    the card that needs a workflow, and this screen offering a
+                    second, worse way to do what the card already does would be
+                    a category error this feature's own naming rule calls out by
+                    name: this screen offers Duplicate/Rename/Delete and nothing
+                    that arms, disarms, or attaches anything. */}
+                {p.templates.map((t) => (
+                  <TemplateRow
+                    key={t.id}
+                    t={t}
+                    onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
+                    onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
+                    onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
+                    onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
+                  />
+                ))}
+                {/* `.orch-empty` is the same empty-state treatment the canvas
+                    itself uses. */}
+                {p.templates.length === 0 && (
+                  <div className="orch-empty">
+                    No templates yet. Start with &ldquo;＋ New template&hellip;&rdquo;
+                    above, or build a workflow and use its own &ldquo;Save as
+                    template&hellip;&rdquo; to keep the shape.
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </Drawer>
+    );
+  }
+
+  /** Canvas with nothing addressed — `target` was `null`, or named a flow or
+   * template that is not (or no longer) in the list `deck:flows` posts. This
+   * used to be `if (!flow) return null`, which is the exact dead end this
+   * whole feature exists to remove: once Active and Templates learned to
+   * render without a resolved flow (see `p.view !== "canvas"`'s own return,
+   * above), a click on Canvas's own tab with nothing open was the one
+   * remaining way to land on a blank drawer with no explanation and no way
+   * out. `.orch-empty` is the exact same empty-state treatment the
+   * Templates screen (above) and the empty graph (below, once a flow IS
+   * open) both use — not a new one invented for this case.
+   *
+   * The three ways out are the three that already exist elsewhere in this
+   * component, not new ones: pick an already-addressed workflow from
+   * Active, start a fresh one ("+ New flow", the exact string the
+   * flow-switcher row further down already spends — see FLOW_LEGITIMATE in
+   * vocabulary.test.ts), or start a template from nothing ("＋ New
+   * template…", wired the same way the Templates screen's own button
+   * above is).
+   *
+   * `p.open === false` closes this exactly the way the flow-less
+   * Active/Templates return (above) closes on it — required here for the
+   * identical reason: `DeckApp`'s own Close button (and Cancel, and a
+   * successful Save) clear `openFlowId` and `orchOpen` together but leave
+   * `orchView` sitting on whatever it last was, which is "canvas" every
+   * time a card's own workflow or a template was the thing just dismissed.
+   * Without this check a plain, deliberate Close would leave THIS empty
+   * state standing in the drawer's place rather than actually closing it —
+   * a new, smaller dead end sitting where the old one used to be. */
+  if (!flow) {
+    if (p.open === false) return null;
+    return (
+      <Drawer surface="orch" label="Orchestrator" closing={closing} style={{ ["--orch-w" as any]: `${renderWidth}px` }}>
+        {resizeGrip}
+        <div className="orch-hd">{topRow}</div>
+        <div className="orch-body">
+          <div className="orch-empty">
+            No workflow is open here. Pick one from{" "}
+            <button type="button" className="orch-mini" onClick={() => p.onView("active")}>Active</button>,{" "}
+            start a <button type="button" className="orch-mini" onClick={p.onCreate}>+ New flow</button>,{" "}
+            or <button type="button" className="orch-mini" onClick={p.onNewTemplate}>＋ New template…</button>.
+          </div>
+        </div>
+      </Drawer>
+    );
+  }
 
   /** How many nodes this flow HAS — every one the canvas draws, which is what the
    * header's and the footer's "N nodes" claim to count. It used to be
@@ -609,10 +952,27 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const failed = flow.edges.filter((e) => e.error !== undefined && !isMigrationNotice(e.error)).length;
   // Reported by the host on `deck:flows`, keyed by flow id — never a second
   // source of truth for whether rules are met, only for whether the user has
-  // yet said "go" on what already is.
-  const resume = p.pendingResume.find((r) => r.flowId === flow.id) ?? null;
+  // yet said "go" on what already is. `editingTemplate` short-circuits this
+  // BEFORE the lookup, not just at the render site below: a template's own
+  // inner flow has an empty `id` (`toTemplate` mints `id: ""`, templates.ts),
+  // and an armed real workflow could in principle report a pending resume
+  // keyed by that same empty string. A template has no ticket and nothing to
+  // watch, so there is no resume gate to show regardless of what `pendingResume`
+  // happens to contain — the rule holds even against a coincidental id match.
+  const resume = editingTemplate ? null : (p.pendingResume.find((r) => r.flowId === flow.id) ?? null);
 
+  /** Attaching binds a LIVE running card's repo into the graph as a `place`
+   * node — permanently, by that one card's own `runKey`. That is the opposite
+   * of what a template is for: a template's whole point is to be instantiated
+   * against a DIFFERENT ticket every time (`instantiate` in templates.ts binds
+   * a fresh `ticketKey` onto every `planned` node it copies), and a `place`
+   * baked into the shape would still name today's card no matter which
+   * ticket the template is later attached to. Refused here, at the one
+   * function both the tray's drop and the keyboard picker's `onCommit` call
+   * through — never at each call site — so a future third way to attach
+   * inherits the refusal for free. */
   const attachAt = (raw: string, x: number, y: number) => {
+    if (editingTemplate) return;
     const next = attached(flow, raw, x, y);
     if (next) p.onSave(next);
   };
@@ -625,8 +985,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    *
    * A key that no longer attaches (already a place, or unparseable) is skipped
    * rather than aborting the batch — `attached` already owns that judgement, and
-   * the picker's own candidate list excludes duplicates anyway. */
+   * the picker's own candidate list excludes duplicates anyway. Same
+   * template refusal as `attachAt`, and for the identical reason — see its
+   * own comment. */
   const attachMany = (keys: string[]) => {
+    if (editingTemplate) return;
     let next = flow;
     for (const raw of keys) {
       next = attached(next, raw, 24, 24 + next.nodes.length * 88) ?? next;
@@ -668,33 +1031,6 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     setSelEdge(id);
     setSel(null);
   };
-
-  const startResize = (e: React.PointerEvent) => {
-    setResizing({ startX: e.clientX, startW: width });
-  };
-
-  /** ArrowLeft grows the drawer, ArrowRight shrinks it — the same mapping the
-   * pointer drag uses (see the resize effect's `move` above): pulling the
-   * left border further left is what makes the drawer wider. Persisted
-   * immediately, the same as a released drag, rather than waiting for the
-   * grip to lose focus — an arrow press IS the whole gesture, there is no
-   * separate "release" to persist on. */
-  const onGripKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    const next = orchResize.clamp(e.key === "ArrowLeft" ? width + RESIZE_STEP : width - RESIZE_STEP);
-    setWidth(next);
-    orchResize.persist(next);
-  };
-
-  /** A pure boolean flip that never touches `width` — the functional-updater
-   * form so two activations landing in the same React batch (e.g. a rapid
-   * double click) still cancel out correctly instead of both reading the
-   * same stale `expanded` and racing to the same answer. Because expanding
-   * never writes into `width`, applying it again while already expanded is
-   * automatically idempotent: `renderWidth` below always recomputes
-   * `orchResize.full()` fresh, so there is nothing to compound or drift. */
-  const toggleExpanded = () => setExpanded((v) => !v);
 
   const startDrag = (id: string, e: React.PointerEvent) => {
     const node = flow.nodes.find((n) => n.id === id);
@@ -802,14 +1138,37 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       nodes: [...flow.nodes, { id: nextNodeId(flow), kind: "gate", x: 320, y: 24, join: "any", question: "ok to continue?" }],
     });
 
-  // Unlike every other node this drawer builds, a `planned` node cannot be
-  // assembled here: it names a ticket, and the webview has no task connector
-  // to ask for one — it must not import `fs`/`os`/`path`/`child_process`, even
-  // transitively, and a connector reaches all four. So this sends only the
-  // flow's own id; the host runs the actual picker (a sequence of native
-  // QuickPicks) and appends the whole node in one write. See deckView.ts's
-  // `addPlanned`.
-  const addPlanned = () => send({ type: "flow:addPlanned", id: flow.id });
+  // Unlike every other node this drawer builds, a `planned` node ordinarily
+  // cannot be assembled here: it names a ticket, and the webview has no task
+  // connector to ask for one — it must not import `fs`/`os`/`path`/
+  // `child_process`, even transitively, and a connector reaches all four. So
+  // the ordinary path sends only the flow's own id; the host runs the actual
+  // picker (a sequence of native QuickPicks) and appends the whole node in
+  // one write. See deckView.ts's `addPlanned`.
+  //
+  // A template draft is the one case that cannot go through that host round
+  // trip: its inner `flow.id` is `""` (`mintDraftTemplate`'s own doc
+  // comment), and `readFlows(...).find(f => f.id === "")` on the host side
+  // can never find it — a click here would authenticate the connector, run
+  // four QuickPicks, and then silently do nothing. A template's planned node
+  // has no ticket to look up anyway (`instantiate` fills `ticketKey`/`repos`/
+  // `mode` in at attach time, the same fallback `mintDraftTemplate` relies
+  // on), so this mints the node locally with exactly the blank shape
+  // `mintDraftTemplate` seeds, the same way `addNotify`/`addGate` already
+  // mint their own nodes without a host round trip.
+  const addPlanned = () => {
+    if (editingTemplate) {
+      addAndSelect({
+        ...flow,
+        nodes: [
+          ...flow.nodes,
+          { id: nextNodeId(flow), kind: "planned", x: 320, y: 24, join: "any", ticketKey: "", repos: [], mode: "", dest: "worktree" },
+        ],
+      });
+      return;
+    }
+    send({ type: "flow:addPlanned", id: flow.id });
+  };
 
   /** Open the Save-as-template dialog, seeded with one row per place this
    * save will have to demote. Prefilled, never invented: the configured
@@ -1068,12 +1427,6 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
     p.onSave(next);
   };
 
-  /** What actually renders. Expand does not touch `width` — see the
-   * `expanded` state's own doc comment — so this ternary IS the whole
-   * mechanism: collapsing needs no separate "restore" step because `width`
-   * was never overwritten to begin with. */
-  const renderWidth = expanded ? orchResize.full() : width;
-
   /** `.orch-body`'s own left+right padding (16px each, see orchestratorStyles.ts)
    * plus `.orch-graph`'s own 1px border on each side — the fixed horizontal
    * cost between the drawer's own width and the graph's actual content box.
@@ -1171,7 +1524,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               // must not offer a second, simultaneous pair for the same gate in
               // canvas view. List has no graph node to click, so the tray chip
               // is its only route to answering at all.
-              if (n.kind !== "gate" || view !== "list" || !st?.asked || st.answer || !st.edgeId) return null;
+              if (n.kind !== "gate" || canvasView !== "list" || !st?.asked || st.answer || !st.edgeId) return null;
               const edgeId = st.edgeId;
               return (
                 <>
@@ -1391,275 +1744,288 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       closing={closing}
       style={{ ["--orch-w" as any]: `${renderWidth}px` }}
     >
-      {/* role="separator" + aria-orientation is the ARIA shape App.tsx's own
-          controls already use (role="tablist"/"group" with aria-selected/
-          -pressed) — a real widget role plus the state attributes that make
-          it usable without a mouse, not a bespoke pattern. Keyboard-resizable
-          on purpose: this phase's whole point is that the drawer works
-          without one, so a grip only a mouse could move would contradict it.
-          Hidden rather than merely disabled while expanded — not styled
-          inert, not in the DOM at all — because there is nothing to drag TO:
-          the drawer is already at its widest legal width, so a grip sitting
-          at the very edge of the viewport with nowhere further to go would
-          be a control that does nothing, not a quiet one. The Expand toggle
-          below (aria-pressed) is the one way back to a custom width. */}
-      {!expanded && (
-        <div
-          className="orch-grip"
-          role="separator"
-          aria-orientation="vertical"
-          aria-label="Resize Orchestrator drawer"
-          aria-valuenow={Math.round(width)}
-          aria-valuemin={MIN_ORCH_W}
-          aria-valuemax={orchResize.ceiling()}
-          tabIndex={0}
-          onPointerDown={startResize}
-          onKeyDown={onGripKeyDown}
-        />
-      )}
+      {/* Shared with the flow-less (Active/Templates) return above — see
+          `resizeGrip`'s own doc comment for the ARIA shape and why it is
+          hidden rather than disabled while expanded. */}
+      {resizeGrip}
       <div className="orch-hd">
-        <div className="row">
-          <span className="eyebrow">Orchestrator</span>
-          <div className="sp" />
-          <button type="button" className="orch-mini" onClick={() => setPicking((v) => !v)}>
-            Flows · {p.flows.length} ▾
-          </button>
-          {/* Same quiet `orch-mini` as its neighbour, deliberately: a filled or
-              accented control is reserved for Arm — the drawer's one filled control,
-              shipped in this phase — and red is reserved for a real failure (an
-              errored rule, in the inspector below). Deleting closes the drawer rather than
-              leaving it aimed at a flow that is gone — the host's `deck:flows` post
-              would arrive and close it a round trip later anyway, and a drawer
-              rendering a deleted flow in the meantime is a lie. */}
-          <button
-            type="button"
-            className="orch-mini"
-            onClick={() => { p.onDelete(flow.id); p.onClose(); }}
-          >
-            Delete flow
-          </button>
-          {/* Same quiet `orch-mini` as its neighbours — Arm stays the surface's
-              only filled control (see its own comment below). aria-pressed
-              is the App.tsx idiom (its filter/size/status `.seg` groups use
-              exactly this attribute for on/off state) rather than a bespoke
-              one; CONTROLS_CSS's own on-state rule ("weight and foreground,
-              never a fill") is the visual language this borrows, even though
-              this button lives in a different sheet. The label stays
-              "Expand" in both states, the same way those `.seg` buttons never
-              rewrite their own text when pressed. */}
-          <button type="button" className="orch-mini" aria-pressed={expanded} onClick={toggleExpanded}>
-            Expand
-          </button>
-          <button type="button" className="orch-x" aria-label="Close" onClick={p.onClose}>✕</button>
-        </div>
-        {/* The keyboard path onto this same flow: a canvas built from divs and
-            pointer events has no usable keyboard story on its own (see
-            flowList.tsx's own header comment), so List is not a second editor,
-            it is the other way to reach the one this drawer already has.
-            `role="tablist"`/`role="tab"`/`aria-selected` is App.tsx's own idiom
-            for exactly this shape (see its Tasks/Notepad tabbar) — followed
-            here rather than invented fresh. Quiet `orch-mini` styling, same as
-            every neighbouring control on this header: Arm alone is filled. */}
-        <div className="row" style={{ marginTop: 6 }}>
-          <span role="tablist" aria-label="Flow view" style={{ display: "flex", gap: 6 }}>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === "canvas"}
-              className="orch-mini"
-              onClick={() => setView("canvas")}
-            >
-              Canvas
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={view === "list"}
-              className="orch-mini"
-              onClick={() => setView("list")}
-            >
-              List
-            </button>
-          </span>
-        </div>
-        {/* Rename on blur, not per keystroke: every keystroke would be a disk
-            write and a re-post, and the field would fight the re-render. */}
-        <input
-          className="orch-name"
-          aria-label="Flow name"
-          defaultValue={flow.name}
-          key={flow.id}
-          onBlur={(e) => {
-            const next = e.currentTarget.value.trim();
-            if (next && next !== flow.name) p.onRename(flow.id, next);
-          }}
-        />
-        <div className="row" style={{ marginTop: 8 }}>
-          <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>
-            {nodeCount} {nodeCount === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
-            {flow.edges.length === 1 ? "rule" : "rules"}
-          </span>
-          <div className="sp" />
-          {/* Beside the flow's own Arm/Delete controls, because saving a
-              template is a thing the OPEN WORKFLOW does — the same reasoning
-              that keeps "Delete flow" and Arm on this header rather than in
-              a menu. Quiet `orch-mini`, same as every neighbour: Arm alone is
-              filled. Disabled whenever `canBindTicket` says the saved
-              template could never be attached — an empty flow (`toTemplate`
-              itself refuses that one), or one built only of command / gate /
-              notify nodes, which `toTemplate` would save cleanly but
-              `instantiate` would then refuse at every attach forever. A
-              disabled control with a `title` is a clearer no, before the
-              click, than a toast the user has to read to learn the same
-              thing after it. */}
-          <button
-            type="button"
-            className="orch-mini"
-            disabled={!canBindTicket(flow)}
-            title={canBindTicket(flow) ? undefined : "Add a step (or a place) this template can bind a ticket to first"}
-            onClick={openSaveTemplate}
-          >
-            Save as template…
-          </button>
-          {/* The drawer's one filled control. Arm is the consent point for
-              everything a flow does, so it is the only thing here allowed to
-              be filled — armed is a state, not an invitation, so the fill goes
-              away and this becomes the quiet way back out (see .orch-arm.on). */}
-          {/* The dry run sits immediately before Arm because that is the decision
-              it serves: arming is the consent point for everything a flow does,
-              and until now the only thing standing behind it was a hold-on-first-
-              look. Quiet `orch-mini` like every other control on this header —
-              Arm stays the surface's one filled control (see below) — and
-              `aria-pressed` for its on/off state, the App.tsx idiom the Expand
-              button beside it already follows. */}
-          <button
-            type="button"
-            className="orch-mini"
-            aria-pressed={dryRun}
-            onClick={() => {
-              // Told to the host on the way IN, once, and never on the way out:
-              // closing the panel is not a dry run. Deliberately not posted from
-              // the `dry` computation above either — that recomputes on every
-              // render (see its comment), so a post from there would be a message
-              // per frame for as long as the panel stays open. `previewFlow` is
-              // pure and cheap enough to call a second time here rather than
-              // reach for a render-order dependency to reuse the first result.
-              //
-              // Counts only, and no telemetry import: the webview cannot reach
-              // the host's event catalog and has no business deciding what is
-              // recorded — it reports what it did, the host decides. `blocked` is
-              // every PENDING rule that would not fire on this pass — waiting,
-              // held by the cap, unobservable or blank alike — which is why it and
-              // `fired` need not add up to `edges`: a settled rule is in neither.
-              if (!dryRun) {
-                const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi);
-                send({
-                  type: "flow:dryRun",
-                  edges: flow.edges.length,
-                  fired: rows.filter((r) => r.verdict === "fire").length,
-                  blocked: rows.filter((r) => r.verdict !== "fire").length,
-                });
-              }
-              setDryRun((v) => !v);
-            }}
-          >
-            What would fire?
-          </button>
-          <button
-            type="button"
-            className={`orch-arm${flow.armed ? " on" : ""}`}
-            onClick={() => p.onArm(flow.id, !flow.armed)}
-          >
-            {flow.armed ? "Armed · disarm" : "Arm"}
-          </button>
-        </div>
-        {picking && (
-          <div className="orch-flows">
-            {/* Running is the default and MUST stay it: this panel is the one
-                and only way to switch flows or start a new one, and that job
-                predates Templates entirely — a user reopening it to do what
-                it always did must not land on an empty Templates tab first.
-                `role="tablist"`/`role="tab"`/`aria-selected` is this file's
-                own idiom (see the Canvas/List toggle above), not invented
-                fresh for this panel. */}
-            {/* "Workflow", not "Flow": the UI never says Flow or Orchestrator —
-                only the code keeps those names (see this task's own
-                vocabulary rule). The pre-existing "Flow view" label on the
-                Canvas/List toggle above predates that rule and is left alone;
-                this is a NEW screen-reader string, so it gets it right from
-                the start. */}
-            <div role="tablist" aria-label="Workflow list" className="orch-tabs">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={pickTab === "running"}
-                className="orch-mini"
-                onClick={() => setPickTab("running")}
-              >
-                Running
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={pickTab === "templates"}
-                className="orch-mini"
-                onClick={() => setPickTab("templates")}
-              >
-                Templates
-              </button>
+        {/* `topRow` (shared with the flow-less return above) is the three
+            top-level screens plus Expand/Close. `view` is `DeckApp`'s state,
+            not local: the two header buttons `DeckApp` adds land here the
+            same way a click on one of the three tabs does. */}
+        {topRow}
+        {p.view === "canvas" && (
+          <>
+            {/* The keyboard path onto this same flow: a canvas built from divs and
+                pointer events has no usable keyboard story on its own (see
+                flowList.tsx's own header comment), so List is not a second editor,
+                it is the other way to reach the one this drawer already has.
+                `role="tablist"`/`role="tab"`/`aria-selected` is App.tsx's own idiom
+                for exactly this shape (see its Tasks/Notepad tabbar) — followed
+                here rather than invented fresh. Quiet `orch-mini` styling, same as
+                every neighbouring control on this header: Arm alone is filled. */}
+            <div className="row" style={{ marginTop: 6 }}>
+              <span role="tablist" aria-label="Flow view" style={{ display: "flex", gap: 6 }}>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={canvasView === "canvas"}
+                  className="orch-mini"
+                  onClick={() => setCanvasView("canvas")}
+                >
+                  Canvas
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={canvasView === "list"}
+                  className="orch-mini"
+                  onClick={() => setCanvasView("list")}
+                >
+                  List
+                </button>
+              </span>
             </div>
-            {pickTab === "running" ? (
-              <>
+            {/* The flow switcher: pick another open flow, start a new one, or
+                delete this one — the old "Flows · N ▾" disclosure's own job,
+                moved here and left open rather than behind a click, now that
+                Templates has its own top-level screen and no longer shares
+                this panel with it. Deleting closes the WHOLE drawer rather
+                than merely leaving Canvas, same as it always has: the host's
+                `deck:flows` post would arrive and close it a round trip later
+                anyway, and a drawer painting a deleted flow in the meantime
+                is a lie. A separate row from Save-as-template/Arm below on
+                purpose — see that row's own test for why sharing a parent
+                with either would be the wrong claim.
+
+                Hidden while `editingTemplate`: every control here is a bare
+                `Flow` object's own verb — switch to another OPEN FLOW, start
+                one, delete this one — and a template's inner flow is none of
+                those things; it has no membership in `p.flows` at all (a
+                template lives in `p.templates`, or, for the draft, nowhere
+                `deck:flows` reaches yet — see `draftTemplate`'s own doc
+                comment), so `p.onDelete(flow.id)` here would ask the host to
+                delete a flow id that is either someone else's or nothing on
+                disk at all. */}
+            {!editingTemplate && (
+              <div className="row" style={{ marginTop: 6 }}>
                 {p.flows.map((f) => (
-                  <button type="button" key={f.id} onClick={() => { setPicking(false); p.onOpen(f.id); }}>
+                  <button
+                    type="button"
+                    key={f.id}
+                    className="orch-mini"
+                    aria-pressed={f.id === flow.id}
+                    onClick={() => p.onOpen(f.id)}
+                  >
                     {f.name}
                   </button>
                 ))}
-                <button type="button" onClick={() => { setPicking(false); p.onCreate(); }}>+ New flow</button>
-              </>
-            ) : (
-              <div className="orch-tmpl-list">
-                {/* A template is never attached from here — one entry point,
-                    the card that needs a workflow, and this panel offering a
-                    second, worse way to do what the card already does would
-                    be a category error this task's own brief calls out by
-                    name: this tab offers Duplicate/Rename/Delete and nothing
-                    that arms, disarms, or attaches anything. */}
-                {p.templates.map((t) => (
-                  <TemplateRow
-                    key={t.id}
-                    t={t}
-                    onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
-                    onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
-                    onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
-                    onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
-                  />
-                ))}
-                {/* A template is made by SAVING a workflow, never by a button
-                    on this tab — there used to be one here (＋ New template)
-                    that called `onCreate`, which builds an ordinary WORKFLOW:
-                    the panel would close, this tab would still be empty, and
-                    a new untitled entry would appear on Running instead. That
-                    is exactly the wrong verb for what a first-time user on an
-                    empty Templates tab is trying to do, so it is gone rather
-                    than fixed to do something else — creating a workflow
-                    already lives on the Running tab's own "+ New flow", and
-                    nothing is lost by not duplicating it here. `.orch-empty`
-                    is the same empty-state treatment the canvas itself uses. */}
-                {p.templates.length === 0 && (
-                  <div className="orch-empty">
-                    No templates yet. Build a workflow, then use its own
-                    &ldquo;Save as template&hellip;&rdquo; to keep the shape.
-                  </div>
-                )}
+                <button type="button" className="orch-mini" onClick={p.onCreate}>+ New flow</button>
+                <div className="sp" />
+                <button
+                  type="button"
+                  className="orch-mini"
+                  onClick={() => { p.onDelete(flow.id); p.onClose(); }}
+                >
+                  Delete flow
+                </button>
               </div>
             )}
-          </div>
+            {/* Rename on blur, not per keystroke: every keystroke would be a disk
+                write and a re-post, and the field would fight the re-render.
+                The SAME field doubles as the template's own name while
+                `editingTemplate` — `flow:writeTemplate`'s `name` (below) reads
+                it straight off `flow.name` — rather than a second input with
+                a second piece of state: `p.onRename` sends `flow:rename`,
+                which only ever finds a `Flow` already on disk (the same
+                membership check `flow:save` makes), so it cannot be what
+                names a template. `p.onSave` already IS the draft's own edit
+                path (see `DeckApp`'s doc comment on that prop) — a plain
+                object-spread rename is nothing more than one more field
+                changing on the same graph. `key={openKey}` (not `flow.id`,
+                which is always `""` for EVERY template's inner flow — see
+                `normalizedTemplateFlow`) so this remounts, and its
+                uncontrolled value resets, across two different templates or
+                two separate drafts rather than carrying the last one's typed
+                text into the next. */}
+            <input
+              className="orch-name"
+              aria-label="Flow name"
+              defaultValue={flow.name}
+              key={openKey}
+              onBlur={(e) => {
+                const next = e.currentTarget.value.trim();
+                if (next === flow.name) return;
+                if (editingTemplate) {
+                  p.onSave({ ...flow, name: next });
+                } else if (next) {
+                  p.onRename(flow.id, next);
+                }
+              }}
+            />
+            <div className="row" style={{ marginTop: 8 }}>
+              <span style={{ fontSize: "var(--t-micro)", color: "var(--dim)" }}>
+                {nodeCount} {nodeCount === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
+                {flow.edges.length === 1 ? "rule" : "rules"}
+              </span>
+              <div className="sp" />
+              {/* Every control in the `!editingTemplate` branch below is a
+                  WORKFLOW verb — Save-as-template makes a NEW template from
+                  an attached, ticket-bound flow; dry run and Arm both act on
+                  a live watch that a template has none of (see
+                  `editingTemplate`'s own doc comment). None of the three
+                  render at all while editing a template, rather than being
+                  disabled: a disabled-with-title control still answers a
+                  `getByRole("button", { name })` query, and this file's own
+                  vocabulary rule is that these verbs do not exist for a
+                  template, not that they exist and refuse.
+                  `editingTemplate`'s OWN two controls — Cancel and Save — take
+                  their place instead of sitting alongside them: nothing here
+                  arms, dry-runs or renames a bare flow, so nothing from that
+                  branch belongs beside them. */}
+              {editingTemplate ? (
+                <>
+                  <button type="button" className="orch-mini" onClick={p.onCancelTemplate}>Cancel</button>
+                  {/* Same `canBindTicket` gate `flow:writeTemplate`'s own host
+                      handler re-checks (deckView.ts) and `toTemplate`'s save
+                      dialog gates its own Save with, below — a disabled
+                      control with a `title` is a clearer no before the click
+                      than a toast the user has to read to learn the same
+                      thing after it. The typed name is read straight off
+                      `flow.name` (see the input above), so an untouched
+                      draft — blank by construction, `mintDraftTemplate`'s own
+                      doc comment — cannot be saved either, same reasoning. */}
+                  <button
+                    type="button"
+                    className="orch-mini"
+                    disabled={!flow.name.trim() || !canBindTicket(flow)}
+                    title={
+                      !canBindTicket(flow)
+                        ? "Add a step (or a place) this template can bind a ticket to first"
+                        : !flow.name.trim()
+                          ? "Name this template first"
+                          : undefined
+                    }
+                    onClick={() => {
+                      const name = flow.name.trim();
+                      if (!name || !canBindTicket(flow)) return;
+                      // `templateId` present only when this target already
+                      // names a SAVED template — the draft never does (its id
+                      // never appears in `p.templates`; see
+                      // `mintDraftTemplate`'s own doc comment), so this is
+                      // always the "create" branch for it, exactly the "no
+                      // `templateId`" shape this task's own tests pin.
+                      const templateId = p.templates.some((t) => t.id === target!.id) ? target!.id : undefined;
+                      send(
+                        templateId
+                          ? { type: "flow:writeTemplate", templateId, name, flow }
+                          : { type: "flow:writeTemplate", name, flow },
+                      );
+                      p.onCancelTemplate();
+                    }}
+                  >
+                    Save
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Beside the flow's own Arm control, because saving a
+                      template is a thing the OPEN WORKFLOW does. Quiet
+                      `orch-mini`, same as every neighbour: Arm alone is
+                      filled. Disabled whenever `canBindTicket` says the saved
+                      template could never be attached — an empty flow (`toTemplate`
+                      itself refuses that one), or one built only of command / gate /
+                      notify nodes, which `toTemplate` would save cleanly but
+                      `instantiate` would then refuse at every attach forever. A
+                      disabled control with a `title` is a clearer no, before the
+                      click, than a toast the user has to read to learn the same
+                      thing after it. */}
+                  <button
+                    type="button"
+                    className="orch-mini"
+                    disabled={!canBindTicket(flow)}
+                    title={canBindTicket(flow) ? undefined : "Add a step (or a place) this template can bind a ticket to first"}
+                    onClick={openSaveTemplate}
+                  >
+                    Save as template…
+                  </button>
+                  {/* The drawer's one filled control. Arm is the consent point for
+                      everything a flow does, so it is the only thing here allowed to
+                      be filled — armed is a state, not an invitation, so the fill goes
+                      away and this becomes the quiet way back out (see .orch-arm.on). */}
+                  {/* The dry run sits immediately before Arm because that is the decision
+                      it serves: arming is the consent point for everything a flow does,
+                      and until now the only thing standing behind it was a hold-on-first-
+                      look. Quiet `orch-mini` like every other control on this header —
+                      Arm stays the surface's one filled control (see below) — and
+                      `aria-pressed` for its on/off state, the App.tsx idiom the Expand
+                      button beside it already follows. */}
+                  <button
+                    type="button"
+                    className="orch-mini"
+                    aria-pressed={dryRun}
+                    onClick={() => {
+                      // Told to the host on the way IN, once, and never on the way out:
+                      // closing the panel is not a dry run. Deliberately not posted from
+                      // the `dry` computation above either — that recomputes on every
+                      // render (see its comment), so a post from there would be a message
+                      // per frame for as long as the panel stays open. `previewFlow` is
+                      // pure and cheap enough to call a second time here rather than
+                      // reach for a render-order dependency to reuse the first result.
+                      //
+                      // Counts only, and no telemetry import: the webview cannot reach
+                      // the host's event catalog and has no business deciding what is
+                      // recorded — it reports what it did, the host decides. `blocked` is
+                      // every PENDING rule that would not fire on this pass — waiting,
+                      // held by the cap, unobservable or blank alike — which is why it and
+                      // `fired` need not add up to `edges`: a settled rule is in neither.
+                      if (!dryRun) {
+                        const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi);
+                        send({
+                          type: "flow:dryRun",
+                          edges: flow.edges.length,
+                          fired: rows.filter((r) => r.verdict === "fire").length,
+                          blocked: rows.filter((r) => r.verdict !== "fire").length,
+                        });
+                      }
+                      setDryRun((v) => !v);
+                    }}
+                  >
+                    What would fire?
+                  </button>
+                  <button
+                    type="button"
+                    className={`orch-arm${flow.armed ? " on" : ""}`}
+                    onClick={() => p.onArm(flow.id, !flow.armed)}
+                  >
+                    {flow.armed ? "Armed · disarm" : "Arm"}
+                  </button>
+                </>
+              )}
+            </div>
+          </>
         )}
       </div>
 
       <div className="orch-body">
-        {savingTemplate && (
+        {/* Active and Templates are handled by the flow-less return above —
+            reaching this point at all means `p.view === "canvas"` (see the
+            early return's own comment). No `p.view` check needed here for
+            that reason, but the canvas content below is still wrapped in one
+            for symmetry with the header's own `p.view === "canvas"` block. */}
+        {p.view === "canvas" && (
+          <>
+        {savingTemplate && !editingTemplate && (
+          // `!editingTemplate` is belt-and-suspenders here, not the primary
+          // gate: the button that calls `openSaveTemplate` is itself hidden
+          // in the header block above, and the `[openKey]` effect near the
+          // top of this component already forces `savingTemplate` back to
+          // `false` the moment the target changes kind. Kept anyway, for the
+          // same reason `resume` and `dry` are gated at their own source
+          // rather than trusted to stay false by construction — a save-as-
+          // template dialog open over a TEMPLATE would create a template
+          // from a template, which is not a concept this feature has.
+          //
           // Same slot the resume banner and the dry-run panel below use for a
           // thing that briefly takes over this body without leaving the
           // drawer — first among them, since saving IS the reason the panel
@@ -1737,7 +2103,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             </div>
           </div>
         )}
-        {dryRun && (
+        {dryRun && !editingTemplate && (
+          // `!editingTemplate` here for the same reason `dry` itself is gated
+          // at its source, above: `dryRun` is local state that can outlive an
+          // `openKey` switch from an armed flow straight onto a template.
+          //
           // Between the resume gate and the graph, and above BOTH views on
           // purpose: a verdict about the graph should not cost you sight of it,
           // and it is the same answer whether you are editing on the canvas or in
@@ -1796,7 +2166,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             <div className="ft">Arming re-checks this every 6s. The first spend still asks.</div>
           </div>
         )}
-        {view === "list" ? (
+        {canvasView === "list" ? (
           <>
             {/* Add a node, from the keyboard. Notify and planned work already had
                 an ordinary button each (see the identical bar in the canvas
@@ -1815,24 +2185,32 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <button type="button" className="orch-mini" onClick={addGate}>+ Gate</button>
               <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
               {addCommandPicker}
-              <MultiCombo
-                trigger="+ Add place…"
-                ariaLabel="Add a place"
-                searchPlaceholder="Filter places…"
-                options={placeCandidates(flow, p.runs).map((c) => ({
-                  value: c.key,
-                  label: c.runKey,
-                  detail: c.repo,
-                  // A ticket key is an identifier; a command's label is not. See
-                  // `ComboOption.mono`.
-                  mono: true,
-                }))}
-                // Every board run is already attached, or the board is empty. Both
-                // are answered by the board, not in here, so the line says what is
-                // true rather than offering a search over nothing.
-                emptyLabel="Nothing left to attach — every place is already here"
-                onCommit={attachMany}
-              />
+              {/* A place binds a LIVE running card's `runKey` into the graph —
+                  see `attachAt`'s own comment for why that is the opposite of
+                  what a template is for. Hidden rather than left to hit
+                  `attachMany`'s own no-op refusal: an empty-looking picker
+                  that quietly does nothing on commit is worse than one that
+                  is not offered. */}
+              {!editingTemplate && (
+                <MultiCombo
+                  trigger="+ Add place…"
+                  ariaLabel="Add a place"
+                  searchPlaceholder="Filter places…"
+                  options={placeCandidates(flow, p.runs).map((c) => ({
+                    value: c.key,
+                    label: c.runKey,
+                    detail: c.repo,
+                    // A ticket key is an identifier; a command's label is not. See
+                    // `ComboOption.mono`.
+                    mono: true,
+                  }))}
+                  // Every board run is already attached, or the board is empty. Both
+                  // are answered by the board, not in here, so the line says what is
+                  // true rather than offering a search over nothing.
+                  emptyLabel="Nothing left to attach — every place is already here"
+                  onCommit={attachMany}
+                />
+              )}
             </div>
             {/* The same two blocks the canvas renders, in the same order they read
                 in: what the flow's rules ACT on, and the panel that configures
@@ -2394,8 +2772,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
         )}
           </>
         )}
+          </>
+        )}
       </div>
 
+      {p.view === "canvas" && (
       <div className="orch-ft">
         {/* An armed flow with an errored rule must not claim it is watching: that
             rule is settled and will never be evaluated again until Reset. It says
@@ -2425,6 +2806,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           {flow.edges.length === 1 ? "rule" : "rules"}
         </span>
       </div>
+      )}
     </Drawer>
   );
 }

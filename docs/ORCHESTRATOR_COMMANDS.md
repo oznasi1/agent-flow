@@ -263,6 +263,103 @@ any other flow. The names never appear in the source: the code keeps `Flow`,
   without capturing
   output — never a blank tab.
 
+### Finding them
+
+The Deck's header carries two buttons where a single "Orchestrator" chip used
+to sit: **Workflows** (badged `N needs you` once at least one workflow is
+`waiting-on-you` or `stopped`, else a plain count of every card carrying one)
+and **Templates** (badged with the total, starters included). Each opens the
+drawer straight to its own view — clicking Workflows a second time while
+Templates is showing switches to Active rather than closing, matching how the
+drawer's own in-panel tabs behave. Neither button ever mints a blank flow;
+the old chip's zero-flows click did, which meant "no flows yet" was also "no
+way to reach Templates at all".
+
+The drawer itself has three top-level views, replacing a "Flows · N ▾"
+disclosure that buried Templates behind Canvas:
+
+- **Active** lists every card carrying a workflow, one row per card, ranked
+  the same way the board's own chip ranks a card with several — `stopped` and
+  `waiting-on-you` first. Clicking a row closes the drawer and opens that
+  card. The Workflows button's own badge and the rows underneath it are read
+  from the same derivation, so the two can never name a different count.
+- **Templates** lists every reusable shape — the built-in starters below,
+  then whatever is saved to disk.
+- **Canvas** is the flow editor itself: drawing rules, arming, dry-running,
+  resuming, and now also drafting an unsaved template (below). With nothing
+  open it shows an explanation instead of a blank panel.
+
+### Built-in starters
+
+Three shapes ship inside the extension itself, never written to
+`~/.agentflow/templates/`: **Ship it** (launch → `npm test` → ask to open a
+PR), **Test & notify** (launch → `npm test` → notify), and **Review only**
+(launch → notify) — see `STARTERS` in `src/engine/orchestrator/starters.ts`.
+**Test & notify** neither checks branch CI nor merges anything, despite the
+similar name; it names honestly what a built-in CAN do without the user's own
+settings — run the tests, then say so. The shape that would actually gate on
+CI and merge needs a `branch-ci-passed` condition parameterised by
+`{ repo, branch }`, which is unknowable before the user's own repo exists —
+the same reason every starter's `planned` node ships empty `repos`/`mode`.
+They carry a `builtin-` id prefix rather than a flag, so they are ordinary
+`FlowTemplate` records everywhere one is read — `flow:attach`,
+`flow:duplicateTemplate`, the Templates list — but every WRITE path
+(`flow:renameTemplate`, `flow:deleteTemplate`, saving over one directly)
+checks the prefix and refuses: *"That is a built-in template. Duplicate it to
+make a version you can change."* **Duplicate** copies the shape into an
+ordinary, disk-backed template the user owns; the original stays exactly as
+shipped. Because none is ever copied into a user's own storage, a starter
+improved in a later release reaches every install on upgrade, not only a
+fresh one.
+
+A starter's `planned` node ships with empty `repos` and `mode` — it cannot
+know a checkout name or a configured prompt mode before the user's own
+settings exist, and baking either in would be exactly the kind of hardcoded
+value this project refuses to ship. `instantiate` fills both in at attach
+time from the card being bound to: `repos` from the card's own checkouts,
+`mode` from the configured prompt modes (falling back to the first one if the
+node's own is empty or no longer valid). A template saved with its own
+populated `repos` or a configured `mode` still wins — this fallback only
+fires when the template leaves either blank, which every starter does and any
+older user template might. One consequence worth stating plainly: a template
+saved against one repo no longer carries that repo onto a card attached in a
+different one — attaching always resolves against the card in front of you,
+never the card the template happened to be saved from.
+
+### Authoring a template directly
+
+**＋ New template…**, on the Templates view and on an empty Canvas, opens a
+fresh draft held only in memory — nothing reaches `~/.agentflow/templates/`
+until Save is pressed. The draft's SHAPE can be built up the same way any
+flow's can — add a notify, a gate, a command, or another planned step, and
+wire rules between them — but every WORKFLOW verb is hidden: arm, disarm,
+dry-run, resume, save-as-template, and **attach** (offered elsewhere as
+"+ Add place…") all assume a live card with a ticket to watch, and a draft
+has neither. Only **Cancel** and **Save** are offered.
+
+Save sends `flow:writeTemplate` with the draft's flow and a name; the host
+normalizes it the same way `flow:saveTemplate` does (ids cleared, disarmed,
+every host stamp stripped) and writes it, then closes the draft back to the
+Templates view. This is **create-only** today: there is no "Open" affordance
+on a saved template's own row (`TemplateRow` offers Duplicate, Rename and
+Delete), so nothing ever constructs a canvas target naming an already-saved
+template, and `flow:writeTemplate`'s own update-in-place branch (`templateId`
+present) is unreachable from the UI — every Save mints a fresh template.
+Reopening a saved template for further edits is a known gap, not yet built.
+
+**Cancel** discards the draft outright — there was never anything on disk to
+clean up. Closing the drawer a different way (the panel's own Close, or
+selecting a card) does **not**: the draft survives in memory, and the next
+**＋ New template…** click reopens that same half-drawn draft rather than
+minting a blank one — see `draftTemplate`'s own doc comment in `DeckApp.tsx`
+for why only one can exist at a time.
+
+### Reaching Templates from a stuck attach picker
+
+A card's attach picker used to dead-end on "No templates saved yet" whenever
+`templates` came back empty. It now offers an **Open Templates** button right
+there, which closes the picker and opens the drawer's Templates view instead.
+
 ## Boundaries
 
 ### You can
