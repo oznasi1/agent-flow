@@ -296,8 +296,10 @@ test("this-window in a window it cannot name opens a new window instead", async 
 
   await card.locator("button.take").click();
   // The toast fires from chooseOpenTarget, BEFORE the repo-confirm QuickPick a new window
-  // needs — so it is on screen by the time the picker is.
-  await expect(page.locator(".notifications-toasts")).toContainText("can't hold a session — opening a new window instead", { timeout: 15_000 });
+  // needs — so it is on screen by the time the picker is. `tasksView.toast` posts to the
+  // WEBVIEW, which renders `.toast-stack` (App.tsx:766 on 2026-09-03) and drops a non-error
+  // toast after 4.2s — so it is asserted here, straight after the gesture, not later.
+  await expect(tasksFrame(page).locator(".toast-stack")).toContainText("can't hold a session — opening a new window instead", { timeout: 15_000 });
   await shot(page, testInfo, "1 · the no-identity toast");
   await confirmRepos(page);
 
@@ -339,7 +341,9 @@ test("pick-existing adds only approved repos and skips same-name folders", async
   await shot(page, testInfo, "1 · both repos selected on the card");
 
   const { widget, row } = quickPick(page);
-  const toasts = page.locator(".notifications-toasts");
+  // The webview's own toast stack (App.tsx:766 on 2026-09-03); each toast lives 4.2s, so
+  // every toast assertion below starts polling the moment the pick that triggers it lands.
+  const toasts = tasksFrame(page).locator(".toast-stack");
 
   // Round 1 — decline. The file must come back byte-identical.
   await card.locator("button.take").click();
