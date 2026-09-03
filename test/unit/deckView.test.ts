@@ -5898,6 +5898,11 @@ describe("orchestrator flows", () => {
     it("attaches a built-in starter onto a card", async () => {
       setConfig({ orchestrator: true });
       h.runs = [mkRun()];
+      // `mkRun()`'s checkout is named "svc" — on disk here too, so the fallback
+      // onto the card's own repos (below) has something real to resolve to. See
+      // "refuses, at the click, when a local card's repos aren't on disk" for the
+      // case where it is not.
+      h.repos = [{ name: "svc", path: "/r/svc", isGit: true }];
       const { send } = await openPanel();
       await send({ type: "flow:attach", runKey: "PROJ-1", templateId: "builtin-ship-it" });
       expect(h.writeFlow).toHaveBeenCalledTimes(1);
@@ -5909,6 +5914,51 @@ describe("orchestrator flows", () => {
       // The starter's planned node ships with `repos: []` on purpose
       // (starters.ts) — `instantiate` falls back to the card's own repos,
       // which is `mkRun()`'s single "svc" checkout.
+      expect(planned?.repos).toEqual(["svc"]);
+    });
+
+    // The defect this task's own review found: `run.repos[].name` is the
+    // checkout name ONLY for a run Agent Flow itself launched. For a LOCAL
+    // card (localRuns.ts) it is synthesized from the worktree's folder path,
+    // which can name something `discoverRepos` does not recognize — a
+    // hand-made worktree, or a repo outside `agentFlow.reposRoot`. Before this
+    // fix, `instantiate` would happily build a workflow around that name, the
+    // card would look attached, and the launch rule would fail ~6s later with
+    // "isn't checked out under your repos root" — the edge latching stopped
+    // with no actionable moment. Now the mismatch is caught here, at the
+    // click, as instantiate's own "no repo to launch in" refusal.
+    it("refuses, at the click, when a local card's repos aren't on disk under agentFlow.reposRoot", async () => {
+      setConfig({ orchestrator: true });
+      // A local card whose checkout path.basename is "side-quest" — not
+      // reported by discoverRepos, which only sees what's under reposRoot.
+      h.runs = [mkRun({ repos: [{ name: "side-quest", path: "/elsewhere/side-quest", isGit: true, branch: "b" }] })];
+      h.repos = [{ name: "aws-ops", path: "/repos/aws-ops", isGit: true }];
+      const { p, send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-1", templateId: "builtin-ship-it" });
+      expect(h.writeFlow).not.toHaveBeenCalled();
+      const toast = posts(p).find((m) => m.type === "toast");
+      expect(toast?.message).toMatch(/no repo to launch in/i);
+    });
+
+    it("keeps only the repos that resolve on disk, rather than dropping the whole attach", async () => {
+      // A partial mismatch is worse silently: before this fix, an unresolved
+      // repo among several was dropped with only an output-channel line, and
+      // the session launched missing a repo the card claimed. Now the
+      // resolvable one still attaches (the template itself names no repos, so
+      // this exercises the fallback with a MIX of good and bad names).
+      setConfig({ orchestrator: true });
+      h.runs = [mkRun({
+        repos: [
+          { name: "svc", path: "/r/svc", isGit: true, branch: "b" },
+          { name: "side-quest", path: "/elsewhere/side-quest", isGit: true, branch: "b" },
+        ],
+      })];
+      h.repos = [{ name: "svc", path: "/r/svc", isGit: true }];
+      const { send } = await openPanel();
+      await send({ type: "flow:attach", runKey: "PROJ-1", templateId: "builtin-ship-it" });
+      expect(h.writeFlow).toHaveBeenCalledTimes(1);
+      const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+      const planned = written.nodes.find((n) => n.kind === "planned") as { repos: string[] } | undefined;
       expect(planned?.repos).toEqual(["svc"]);
     });
   });

@@ -4622,7 +4622,8 @@ export class DeckPanel {
         return;
       }
       case "flow:attach": {
-        if (!getConfig().orchestrator) return;
+        const cfg = getConfig();
+        if (!cfg.orchestrator) return;
         // `this.run` is the same lookup every other card action uses — a local
         // card has no record on disk, so the last refresh's synthetic runs are
         // the only place to find it. A run this panel does not know about still
@@ -4667,13 +4668,25 @@ export class DeckPanel {
           // nothing to bind the ticket to. Caught here, rather than left to
           // escape into the Deck's refresh, because the message is written for
           // a human to read.
+          // `run.repos[].name` is the SAME identifier `PlannedNode.repos` holds only
+          // for a run Agent Flow itself launched, where it IS the checkout name —
+          // but for a LOCAL card (`localRuns.ts`) it is synthesized from the
+          // worktree's own folder path (`path.basename(root) || root`), a different
+          // namespace that can name a folder `discoverRepos` does not recognize (a
+          // hand-made worktree, or a repo outside `agentFlow.reposRoot`). Passing
+          // that name through unchecked let `instantiate` succeed here and the
+          // launch rule fail ~6s later with "isn't checked out under your repos
+          // root" — the card looked attached, then latched stopped with no
+          // actionable moment. Intersecting with `discoverRepos` (the same
+          // resolver every other repo-name lookup in this file already goes
+          // through) is what makes an unresolvable repo a refusal AT THE CLICK,
+          // where `instantiate`'s own "no repo to launch in" message can reach the
+          // user — see this file's other `discoverRepos` call sites (attach
+          // targets, doctor) for the same pattern.
+          const onDisk = new Set(discoverRepos(cfg.reposRoot, cfg.repoBlocklist).map((r) => r.name));
           fresh = instantiate(t, ticketKey, id, now, {
-            // `run.repos[].name` is the same identifier `PlannedNode.repos` holds — a
-            // CHECKOUT name, not a GitHub owner/name. A card the panel has no record of
-            // contributes no repos, and `instantiate` refuses rather than launching
-            // nowhere.
-            repos: run ? run.repos.map((r) => r.name) : [],
-            modes: getConfig().promptModes.map((m) => m.id),
+            repos: run ? run.repos.map((r) => r.name).filter((n) => onDisk.has(n)) : [],
+            modes: cfg.promptModes.map((m) => m.id),
           });
         } catch (e) {
           this.post({ type: "toast", level: "error", message: (e as Error).message });
