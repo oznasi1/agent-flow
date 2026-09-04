@@ -146,16 +146,17 @@ This heading — and every `todo` — is removed in that plan's last task.
 
 | id | doc | claim | proof |
 |----|-----|-------|-------|
-| `review-queue-strip` | GUIDE § The Deck | Above the columns, the review queue lists every open PR asking for your review, found with one `gh` search; PRs in archived repositories are left out | todo |
-| `review-queue-rows` | GUIDE § The Deck | Each row carries repo, number, title, author, age, and size as `+409 −50 · 8 files` and an S/M/L bucket; every row stays visible in a height-capped, independently scrollable list | todo |
-| `review-queue-sort` | GUIDE § The Deck | Sort by oldest (what you owe most) or smallest (what you can clear first) | todo |
-| `review-row-expand` | GUIDE § The Deck | Expanding a row fetches which checks failed and how many threads are open, alongside decision and mergeability | todo |
+| `review-queue-strip` | GUIDE § The Deck | Above the columns, the review queue lists every open PR asking for your review, found with one `gh` search; PRs in archived repositories are left out | e2e: the strip omits requests from archived repositories |
+| `review-queue-rows` | GUIDE § The Deck | Each row carries repo, number, title, author, age, and size as `+409 −50 · 8 files` and an S/M/L bucket; every row stays visible in a height-capped, independently scrollable list | e2e: every row stays visible in a scrollable list |
+| `review-queue-sort` | GUIDE § The Deck | Sort by oldest — what you owe most | e2e: sort by oldest puts what you owe longest first |
+| `review-queue-sort-smallest` | GUIDE § The Deck | Sort by smallest — what you can clear first | e2e: sort by smallest puts the quickest review first |
+| `review-row-expand` | GUIDE § The Deck | Expanding a row fetches which checks failed and how many threads are open, alongside decision and mergeability | e2e: expanding a row fetches failed checks and open threads |
 | `review-with-tool` | GUIDE § The Deck | Review with … checks the PR out into a worktree, writes a brief and seeds a session to review the diff and write findings to `.pick-task/REVIEW-<number>.md` | e2e: launching a review opens its worktree, brief and plan handshake |
-| `review-row-play-glyph` | GUIDE § The Deck | The launch is also a play glyph at the end of every row, so clearing a queue needs no expanding | todo |
-| `review-row-in-flight` | GUIDE § The Deck | A row already being reviewed shows the loading mark and cannot be launched twice | todo |
-| `review-row-no-checkout` | GUIDE § The Deck | A row whose repo is not checked out locally is greyed but live, and says why on hover | todo |
+| `review-row-play-glyph` | GUIDE § The Deck | The launch is also a play glyph at the end of every row, so clearing a queue needs no expanding | e2e: a row already being reviewed cannot be launched |
+| `review-row-in-flight` | GUIDE § The Deck | A row already being reviewed shows the loading mark and cannot be launched twice | e2e: a row already being reviewed cannot be launched twice |
+| `review-row-no-checkout` | GUIDE § The Deck | A row whose repo is not checked out locally is greyed but live, and says why on hover | e2e: a row whose repo is not checked out is greyed but live, and says why |
 | `review-open-in` | SETTINGS § table | `agentFlow.reviewOpenIn` ships pinned to a new window; `ask`, `this-window` and `pick-existing` send the session elsewhere while the review still runs in its own worktree, named by absolute path in the prompt | todo |
-| `review-modes` | SETTINGS § table | One Full review mode ships; adding an entry to `agentFlow.reviewRequestModes` makes the launch ask which to seed, and `agentFlow.reviewRequestMode` pins one; `agentFlow.reviewRequestPrompt` empty uses the built-in default | todo |
+| `review-modes` | SETTINGS § table | One Full review mode ships; adding an entry to `agentFlow.reviewRequestModes` makes the launch ask which to seed (pinning one is `set-review-request-mode`; the empty-prompt default is `set-review-request-prompt`) | e2e: a custom review mode makes the launch ask which to seed |
 | `review-batch-select` | GUIDE § The Deck | Select turns carets into checkboxes, clicking picks a row, shift-click takes a range, and the bar launches one reviewer per PR with one worktree and one run record each | e2e: one worktree and one run record per PR |
 | `review-batch-read-only-mode` | GUIDE § The Deck | The batch offers a read-only review that checks nothing out and cannot run tests; it is never one of `agentFlow.reviewRequestModes` unless you add the `read-only` id yourself | unit: test/unit/engine/review/batch.test.ts |
 | `review-batch-layout` | GUIDE § The Deck | Landing in a new window with several PRs asks whether they share one window (a session each) or a window per PR | e2e: a batch review launches one worktree |
@@ -167,7 +168,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `review-writes-unmarked` | GUIDE § The Deck | `agentFlow.stampLabelOnWrite: false` sends that same draft body unmarked | e2e: stampLabelOnWrite off sends the body unmarked |
 | `review-writes-gitlab-request-changes` | SETTINGS § table | On GitLab, Request changes posts a note and withdraws any approval, and the confirmation says so | e2e: Request changes on GitLab warns that approval is withdrawn |
 | `review-writes-error-never-body` | FORGES § 4. Conventions | A rejected submit shows the CLI's stderr, never the review body | e2e: a rejected submit shows the CLI's stderr, never the body |
-| `review-strip-toggle` | GUIDE § The Deck | `agentFlow.reviewRequests: false` hides the strip; it also goes dark whenever `agentFlow.prFacts` is off; `agentFlow.reviewRequestsAlwaysVisible: false` hides it while empty | todo |
+| `review-strip-toggle` | GUIDE § The Deck | `agentFlow.reviewRequests: false` hides the strip and spends no forge read (the `agentFlow.prFacts` half is `deck-pr-facts-off-live`; the empty-queue half is `set-review-requests-always-visible`) | e2e: reviewRequests off hides the strip |
 | `review-strip-ttl` | SETTINGS § table | `agentFlow.reviewRequestsTtlSeconds` (default 300, minimum 60) governs how stale the cached queue may be; fetched only while the Deck is open | unit: test/unit/engine/review/store.test.ts |
 
 ## Marketplace
@@ -453,13 +454,13 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-pr-review-status` | SETTINGS § table | `agentFlow.prReviewStatus` (case-insensitive) gates the sidebar's Address PR button, not the Deck's | e2e: Address PR appears only when the status matches prReviewStatus |
 | `set-pr-review-auto-fix` | SETTINGS § table | `agentFlow.prReviewAutoFix: false` makes the Address PR session assess only | e2e: prReviewAutoFix off seeds an assess-only prompt |
 | `set-pr-review-prompt` | SETTINGS § table | `agentFlow.prReviewPrompt` is the Address PR kick-off prompt, with a fixing instruction appended when auto-fix is on | e2e: a custom prReviewPrompt is what gets seeded |
-| `set-review-requests` | SETTINGS § table | `agentFlow.reviewRequests` shows the Deck's review-requests strip | todo |
+| `set-review-requests` | SETTINGS § table | `agentFlow.reviewRequests` shows the Deck's review-requests strip | e2e: reviewRequests off hides |
 | `set-review-requests-always-visible` | package.json | `agentFlow.reviewRequestsAlwaysVisible: false` hides the strip while no PR is waiting | todo |
 | `set-review-requests-ttl-seconds` | SETTINGS § table | `agentFlow.reviewRequestsTtlSeconds` (300, minimum 60) is how stale the cached queue may be | unit: test/unit/engine/review/store.test.ts |
 | `set-review-writes` | SETTINGS § table | `agentFlow.reviewWrites` (off) allows approve / comment / request changes from the Deck | e2e: reviewWrites off shows no submit buttons |
 | `set-merge-writes` | SETTINGS § table | `agentFlow.mergeWrites` (off) shows Merge on a provably ready card | e2e: mergeWrites off shows no Merge button on a ready PR |
 | `set-merge-method` | SETTINGS § table | `agentFlow.mergeMethod`: `squash`, `merge` or `rebase`, named in the dialog every time | e2e: mergeMethod is named in the dialog and passed to gh |
-| `set-review-request-modes` | SETTINGS § table | `agentFlow.reviewRequestModes` layers your review modes over Full review | todo |
+| `set-review-request-modes` | SETTINGS § table | `agentFlow.reviewRequestModes` layers your review modes over Full review | e2e: a custom review mode makes the launch ask |
 | `set-review-request-mode` | SETTINGS § table | `agentFlow.reviewRequestMode` pins one review mode so no picker shows | e2e: launching a review opens its worktree |
 | `set-review-open-in` | SETTINGS § table | `agentFlow.reviewOpenIn` ships as `new-window`; `this-window`, `pick-existing` or `ask` | e2e: launching a review opens its worktree, brief |
 | `set-pr-work-open-in` | SETTINGS § table | `agentFlow.prWorkOpenIn`: `ask` or `its-window` for Fix CI / Resolve conflict / Address review | e2e: prWorkOpenIn its-window asks nothing |

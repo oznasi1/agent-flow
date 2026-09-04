@@ -119,9 +119,66 @@ export class Deck {
    *  collapsed row nor ever carries the row's `#<number>` text. The Skeleton
    *  shown while loading also renders `.rv-row` (ReviewStrip.tsx:274), but it
    *  and the real rows are mutually exclusive (`p.loading` gates one branch,
-   *  `!p.loading` the other), so this never double-counts. */
+   *  `!p.loading` the other), so this never double-counts.
+   *
+   *  It does, however, COLLIDE at three: the skeleton is exactly three rows, so
+   *  `toHaveCount(3)` is satisfied by a strip that is still shimmering and every
+   *  assertion chained after it then races the search rather than following it.
+   *  A skeleton row carries no `.rv-num`, so wait on `review(n)` for a row you
+   *  expect before trusting a count of three (`review-strip.e2e.ts`'s
+   *  `expectQueue` does exactly that, after being caught by it). */
   reviews(): Locator {
     return this.frame.locator(".rv-row");
+  }
+
+  /** The whole review rail — `.rv-strip` (ReviewStrip.tsx:311). `toHaveCount(0)`
+   *  on this is the honest "there is no rail at all": `ReviewStrip` returns null
+   *  outright when the queue is empty and neither loading, stale nor
+   *  `showWhenEmpty` (ReviewStrip.tsx:302), so a hidden rail leaves no header
+   *  behind for `reviews()` to under-count. Also the scope for the header's own
+   *  copy — the `N PRs waiting on your review` line and the `showing N of M`
+   *  note both live in `.rv-hd` inside it. */
+  reviewStrip(): Locator {
+    return this.frame.locator(".rv-strip");
+  }
+
+  /** The scroller the rows live in — `.rv-rows` (ReviewStrip.tsx:351), which owns
+   *  a `max-height` of ~6.5 rows and `overflow-y: auto` (deckStyles.ts:501-502).
+   *  The strip is the one place on this panel with a nested scroller, so this is
+   *  the element to measure `scrollHeight` against `clientHeight` on. Note the
+   *  skeleton renders its own `.rv-rows` (ReviewStrip.tsx:276) — mutually
+   *  exclusive with the real one, same as `reviews()`. */
+  reviewList(): Locator {
+    return this.frame.locator(".rv-rows");
+  }
+
+  /** Every row's PR-number chip in queue order — `.rv-num` (ReviewStrip.tsx:129).
+   *  `toHaveText([...])` on this asserts the ORDER, which is what the sort
+   *  control changes; `reviews()` only ever counts. */
+  reviewNumbers(): Locator {
+    return this.frame.locator(".rv-row .rv-num");
+  }
+
+  /** One of the header's two sort buttons — `.rv-sort button`, labelled `oldest`
+   *  and `smallest` (ReviewStrip.tsx:341-346). The active one carries class `on`.
+   *  Neither is rendered while `loading` (there is nothing to sort yet), so a
+   *  caller waits on rows first. */
+  reviewSort(which: "oldest" | "smallest"): Locator {
+    return this.frame.locator(`.rv-sort button:text-is("${which}")`);
+  }
+
+  /** One row's play control on the line itself — `.rv-go` (ReviewStrip.tsx:162-181).
+   *  Distinct from `reviewLaunch(n)`, which is the labelled button INSIDE an
+   *  expanded row: this one needs no expanding, which is the point of it.
+   *
+   *  Two shapes share the class, and the difference is load-bearing: a launchable
+   *  row renders a `<button class="rv-go">` (plus ` cold` when its repo is not
+   *  checked out), while a row already under review renders a `<span class="rv-go
+   *  busy">` holding the loading mark — a span, not a disabled button, so it takes
+   *  no click at all. Match `button.rv-go` when the distinction matters. Absent
+   *  entirely while the strip is in select mode. */
+  reviewGo(n: number): Locator {
+    return this.review(n).locator(".rv-go");
   }
 
   /** One review row, addressed by PR number. `.rv-num` renders the exact text
