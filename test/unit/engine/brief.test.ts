@@ -64,6 +64,24 @@ describe("briefMarkdown with children", () => {
     expect(md).toContain("| PROJ-4 | a \\| b | `p` | `br` |");
   });
 
+  // A summary that already carries a backslash used to defeat the pipe escape: the
+  // renderer read `a\\|b` as a literal backslash plus a live pipe, splitting the row.
+  it("escapes backslashes so they cannot swallow the pipe escape", () => {
+    const md = briefMarkdown(detail, "Claude Code", {
+      children: [{ key: "PROJ-5", summary: "path a\\|b end", path: "p", branch: "br" }],
+      parentBranch: "PROJ-1-parent-work",
+    });
+    expect(md).toContain("| PROJ-5 | path a\\\\\\|b end | `p` | `br` |");
+  });
+
+  it("folds a newline in a summary so it cannot end the row early", () => {
+    const md = briefMarkdown(detail, "Claude Code", {
+      children: [{ key: "PROJ-6", summary: "first\nsecond", path: "p", branch: "br" }],
+      parentBranch: "PROJ-1-parent-work",
+    });
+    expect(md).toContain("| PROJ-6 | first second | `p` | `br` |");
+  });
+
   it("keeps the ticket description above the children", () => {
     const md = briefMarkdown(detail, "Claude Code", { children, parentBranch: "PROJ-1-parent-work" });
     expect(md.indexOf("do the thing")).toBeLessThan(md.indexOf("## Children"));

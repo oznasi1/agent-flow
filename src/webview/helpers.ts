@@ -273,3 +273,31 @@ export function timeAgo(ms: number | null): string {
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 }
+
+// ── URL safety ────────────────────────────────────────────────────────────────
+// Both webviews render URLs they did not author: a task's `url` is whatever the
+// connector put on the ticket, and a notepad thumbnail's src is built from a stored
+// filename. A `javascript:` value in either is a script that runs with the webview's
+// privileges — the sidebar's capture-phase click handler only intercepts `https?:`,
+// so a hostile scheme is precisely the one it lets navigate. Both helpers therefore
+// allowlist rather than strip: an unrecognised scheme loses its link or its tile, and
+// nothing about it is passed through in a half-cleaned form.
+
+const HTTP_URL = /^https?:\/\//i;
+
+/** `url` if it is safe to use as an anchor `href`, otherwise `undefined` — which
+ * omits the attribute entirely, so the label renders as plain text rather than as a
+ * link that goes somewhere unexpected. */
+export function safeHref(url: string | undefined): string | undefined {
+  return url && HTTP_URL.test(url) ? url : undefined;
+}
+
+/** Schemes an image `src` may legitimately carry here. `asWebviewUri` returns
+ * `vscode-webview:`-family URIs on some hosts and an `https://…vscode-cdn.net` URL on
+ * others, and the same code renders data and blob URLs for an image held in memory. */
+const MEDIA_SRC = /^(?:https?:|blob:|data:image\/|vscode-(?:webview|webview-resource|resource|file):)/i;
+
+/** `uri` if it is safe to use as an image `src`, otherwise `undefined`. */
+export function safeMediaSrc(uri: string | undefined): string | undefined {
+  return uri && MEDIA_SRC.test(uri) ? uri : undefined;
+}

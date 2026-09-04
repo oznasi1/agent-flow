@@ -3,7 +3,7 @@ import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
 import {
   addOnce, deriveStatuses, effectiveFilter, fmtEst, gateCopy, isPrReviewStatus, isTopPriority,
-  keyMatches, matchesStatus, moveKey, railClass, ticketKind, visibleFilters,
+  keyMatches, matchesStatus, moveKey, railClass, safeHref, ticketKind, visibleFilters,
 } from "./helpers";
 import { Filter, FilterVisibility, Task, OutboundMessage, Size, NotepadItemView, NotepadSectionView } from "../types";
 import type { SerializedCaps } from "../tasks/provider";
@@ -893,7 +893,10 @@ function TaskCard(props: {
           <TypeIcon kind={ticketKind(task.type ?? "")} label={task.type || "unknown"} />
           <a
             className="key"
-            href={task.url}
+            // A connector's `url` is third-party text. `safeHref` drops the attribute
+            // for anything that is not http(s), so a `javascript:` ticket URL renders
+            // as an inert key instead of navigating — or running — inside the webview.
+            href={safeHref(task.url)}
             title={gateCopy(sourceLabel).openIn}
             onClick={(e) => e.stopPropagation() /* don't toggle expand; global handler opens externally */}
           >{task.key}</a>

@@ -2,7 +2,7 @@ import * as React from "react";
 import { send } from "./vscodeApi";
 import { NotepadImage, NotepadItemView, NotepadRunStatus, NotepadSectionView } from "../types";
 import { DotsIcon, ImageIcon, PenIcon, PlayIcon, TrashIcon } from "./icons";
-import { moveKey } from "./helpers";
+import { moveKey, safeMediaSrc } from "./helpers";
 import { useOverflowing } from "./useOverflowing";
 
 /** Which notes the list shows. Local state, defaulting to Active on every mount:
@@ -514,7 +514,11 @@ function ImageStrip({ note, onRemove }: {
   return (
     <div className="np-images">
       {images.map((image: NotepadImage, i: number) => {
-        const uri = uris[i];
+        // An unusable src is treated exactly like a missing one — the tile is dropped
+        // rather than rendered half-formed. `safeMediaSrc` rejects any scheme outside
+        // the webview-resource family, so a stored filename can never smuggle a
+        // `javascript:` src into the DOM.
+        const uri = safeMediaSrc(uris[i]);
         if (!uri) return null;
         return (
           <span className="np-thumb-wrap" key={image.id}>

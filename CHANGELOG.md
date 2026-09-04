@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- **A workspace path can no longer run a shell command when a task is taken.**
+  `openInEditor` built `open -a "<app>" "<target>"` as a string and handed it to a
+  shell. The target is a path derived from a task key, a notepad title or a repo
+  name, and double quotes leave `$(…)`, backticks and `\` live — so a ticket that
+  named a repo `$(curl …|sh)` would execute on Take. `open` is now spawned with an
+  argv array and no shell at all.
+- **A ticket URL that is not http(s) no longer becomes a link.** A connector's
+  `url` is third-party text, and the sidebar's click interceptor only catches
+  `https?:` — so a `javascript:` URL was the one scheme it let navigate the webview,
+  which is arbitrary script. The key now renders without an `href` instead.
+  A notepad thumbnail's `src` is checked the same way, against the URI shapes
+  `asWebviewUri` actually returns.
+- **CI's `GITHUB_TOKEN` is now read-only.** The workflow inherited the repository
+  default; every other workflow already declared its own scope.
+
+### Fixed
+
+- **A child summary containing a backslash no longer breaks the brief's table.**
+  Escaping only the pipe left `a\|b` rendering as a literal backslash plus a live
+  pipe, shifting every column after it; a newline in a summary ended the row
+  outright. Both are now folded before the row is built.
+- **The E2E report escapes quotes.** A test title or attachment name carrying a
+  double quote closed the `alt="…"` attribute it was written into.
+
 ## [0.67.1] — 2026-09-04
 
 ### Changed

