@@ -32,8 +32,21 @@ import { expect, type Page } from "@playwright/test";
  *  scattered match on the title) and opens the sidebar instead.
  *
  *  The chord is `ControlOrMeta+Shift+P` — Cmd on macOS (the dev platform), Ctrl
- *  on Linux (CI). A literal `Control` modifier opens nothing on macOS. */
-export async function runCommand(page: Page, title: string): Promise<void> {
+ *  on Linux (CI). A literal `Control` modifier opens nothing on macOS.
+ *
+ *  `opts.thenTitle` is for a command that REPLACES the palette with its own
+ *  quick input — `agentFlow.setup`'s first input box, `agentFlow.doctor`'s
+ *  QuickPick. Both render in the same `.quick-input-widget`, so the widget never
+ *  goes hidden and the default wait below would time out on a command that in
+ *  fact ran perfectly. Pass the title the command's own box carries and that
+ *  becomes the acceptance signal instead — a positive one, so it cannot pass
+ *  while the palette is still sitting there unaccepted (the palette itself
+ *  renders no `.quick-input-title`). */
+export async function runCommand(
+  page: Page,
+  title: string,
+  opts: { thenTitle?: string } = {},
+): Promise<void> {
   await expect(page.locator('.activitybar [aria-label*="Agent Flow"]').first())
     .toBeVisible({ timeout: 60_000 });
 
@@ -45,6 +58,10 @@ export async function runCommand(page: Page, title: string): Promise<void> {
   await page.keyboard.type(title);
   await expect(rows.first()).toContainText(title, { timeout: 15_000 });
   await page.keyboard.press("Enter");
+  if (opts.thenTitle !== undefined) {
+    await expect(palette.locator(".quick-input-title")).toContainText(opts.thenTitle, { timeout: 30_000 });
+    return;
+  }
   // The palette closing is the signal the command was actually accepted; without
   // it a journey can race ahead and assert against the pre-command UI.
   await expect(palette).toBeHidden({ timeout: 15_000 });
