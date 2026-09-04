@@ -394,3 +394,139 @@ test("Reset on the asking rule poses the gate's question again", async ({}, test
   await expect(approve).toBeVisible({ timeout: 30_000 });
   await shot(page, testInfo, "2 · the question, posed again");
 });
+
+// ── command ───────────────────────────────────────────────────────────────────
+
+/** Three facts in one one-liner, all of them files on disk afterwards:
+ *  - `pwd` — which directory the command ran in (`commandCwd`'s "the repo of the
+ *    place the rule came from", with no `cwdRepo` set);
+ *  - `$0` — WHICH SHELL. ORCHESTRATOR_COMMANDS § "Not yet proven" names this as
+ *    unproven precisely because no shell is specified: it is Node's default, and
+ *    `sh -c` reports its own path in `$0`;
+ *  - the marker itself, through `tee` so the same bytes reach STDOUT as well and
+ *    there is real output for the journal and the output channel to carry.
+ *
+ *  `$HOME` is the sandbox (launchHost points it there), so every path below is
+ *  inside the temp root `sb.dispose()` removes. */
+const CMD_RUN = (marker: string) =>
+  `pwd > "$HOME/cwd.txt"; echo "$0" > "$HOME/shell.txt"; echo ${marker} | tee "$HOME/cmd.txt"`;
+
+const COMMAND_FLOW = (id: string, name: string, key: string, run: string, extra: Record<string, unknown> = {}) => ({
+  id, name, armed: false, createdAt: Date.now(),
+  nodes: [
+    { id: "n1", x: 0, y: 0, join: "any", kind: "place", runKey: key, repo: "rocket" },
+    { id: "n2", x: 220, y: 0, join: "any", kind: "command", run },
+  ],
+  edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "tree-clean" } }],
+  ...extra,
+});
+
+const fileText = (p: string): string => (fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "");
+
+// Mutation-checked: `spendTarget`'s `run` arm (deckView.ts) `return { action: "run",
+// … }` → `return undefined`, which is the documented "run without consent" break:
+// the command ran unattended on the pass after Go, the dialog never appeared, and
+// the wait for it timed out.
+test("a command node asks consent and act runs it through /bin/sh", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot();
+  seedCard(sb, "E2E-CMD");
+  seedFlow(sb, COMMAND_FLOW("e2e-cmd", "E2E Command", "E2E-CMD", CMD_RUN("E2E-CMD-OK")));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-CMD");
+  await armAndGo(deck, block);
+
+  // Consent gate two of two. `commandConfirmedAt` is absent on this flow, so the
+  // first `run` it would attempt asks — and the modal names the RESOLVED COMMAND
+  // TEXT, not the node's label, because approving "Deploy" is not approving
+  // `deploy.sh --env=prod`.
+  const box = dialog(page);
+  await expect(box).toBeVisible({ timeout: 60_000 });
+  await expect(box).toContainText("E2E Command is ready to run");
+  await expect(box).toContainText("echo E2E-CMD-OK | tee");
+  // "It will still ask before it starts a session" — this answer authorises shell
+  // and nothing else, which is the whole reason the two gates are separate.
+  await expect(box).toContainText("before it starts a session");
+  // The pass that asks performs NOTHING. Nothing has run at this point, and the
+  // modal is still up — so this is the state of the machine, not a race.
+  expect(fileText(path.join(sb.home, "cmd.txt"))).toBe("");
+  expect(readFlow(sb, "e2e-cmd").commandConfirmedAt).toBeUndefined();
+  await shot(page, testInfo, "1 · the consent dialog names the command text");
+
+  // `ACT` is "Run" for a command (`askFirstSpend`, deckView.ts:1466) — "Act" is
+  // this spec's own word, not the button's.
+  await box.getByRole("button", { name: "Run" }).click();
+  await expect.poll(() => readFlow(sb, "e2e-cmd").commandConfirmedAt, { timeout: 30_000 }).toBeGreaterThan(0);
+
+  // THE assertion of record: a file this machine's shell wrote.
+  await expect.poll(() => fileText(path.join(sb.home, "cmd.txt")), { timeout: 90_000 }).toContain("E2E-CMD-OK");
+  // /bin/sh, read out of the process itself rather than assumed from the platform.
+  expect(fileText(path.join(sb.home, "shell.txt")).trim()).toBe("/bin/sh");
+  // …in the source place's checkout. `fs.realpathSync` on both sides: the sandbox
+  // root is under /var, which is a symlink to /private/var on macOS, and `pwd`
+  // reports the resolved path.
+  expect(fs.realpathSync(fileText(path.join(sb.home, "cwd.txt")).trim()))
+    .toBe(fs.realpathSync(sb.repoPath));
+
+  // The receipt names the command and the repo — "ran deploy" in a flow touching
+  // three checkouts does not say what happened.
+  const done = readFlow(sb, "e2e-cmd");
+  expect(done.edges[0].firedNote).toMatch(/^ran .* in rocket$/);
+  expect(done.edges[0].error).toBeUndefined();
+
+  // The journal carries the whole gesture: asked, answered, ran — with the
+  // command's own stdout on the `fired` line, which is what `flow:openOutput`
+  // later reads back.
+  const lines = journal(sb, "e2e-cmd");
+  expect(lines.filter((l) => l.kind === "consent-asked" && l.action === "run")).toHaveLength(1);
+  expect(lines.filter((l) => l.kind === "consented" && l.answer === "act")).toHaveLength(1);
+  const fired = lines.filter((l) => l.kind === "fired" && l.edge === "e1");
+  expect(fired).toHaveLength(1);
+  expect(fired[0].action).toBe("run");
+  expect(String(fired[0].output)).toContain("E2E-CMD-OK");
+  // And the output channel, the other half of "read the output" — a real file
+  // under the session's log directory.
+  expect(outputChannelText()).toContain("running: pwd > ");
+  await shot(page, testInfo, "2 · ran, with a receipt and its output journalled");
+});
+
+// Mutation-checked: `askFirstSpend`'s (deckView.ts) `else if (answer === DISARM)`
+// arm deleted, so Disarm wrote nothing; the flow stayed armed, the next pass asked
+// again and the poll for `armed: false` timed out.
+test("disarm in the consent dialog disarms the flow", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot();
+  seedCard(sb, "E2E-CDIS");
+  seedFlow(sb, COMMAND_FLOW("e2e-cmd-disarm", "E2E Disarm", "E2E-CDIS", CMD_RUN("E2E-DISARM-RAN")));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-CDIS");
+  await armAndGo(deck, block);
+
+  const box = dialog(page);
+  await expect(box).toBeVisible({ timeout: 60_000 });
+  await shot(page, testInfo, "1 · the dialog, before Disarm");
+  await box.getByRole("button", { name: "Disarm" }).click();
+
+  // Disarm writes `armed: false` and NOTHING else: no consent stamp, so a later
+  // re-arm asks again rather than inheriting an approval nobody gave.
+  await expect.poll(() => readFlow(sb, "e2e-cmd-disarm").armed, { timeout: 30_000 }).toBe(false);
+  expect(readFlow(sb, "e2e-cmd-disarm").commandConfirmedAt).toBeUndefined();
+  expect(journal(sb, "e2e-cmd-disarm").filter((l) => l.kind === "consented" && l.answer === "disarm"))
+    .toHaveLength(1);
+
+  // Two more polls' worth of nothing happening. A disarmed flow is not evaluated
+  // at all (`evaluateFlow` returns empty for `!flow.armed`), so the file the
+  // command would have written never appears.
+  await page.waitForTimeout(15_000);
+  expect(fileText(path.join(sb.home, "cmd.txt"))).toBe("");
+  expect(readFlow(sb, "e2e-cmd-disarm").edges[0].firedAt).toBeUndefined();
+  await shot(page, testInfo, "2 · disarmed, and nothing ran");
+});
