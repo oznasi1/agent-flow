@@ -261,3 +261,136 @@ test("a notify rule fires once, pops a VS Code notification and stamps a receipt
     .toHaveCount(1, { timeout: 15_000 });
   await shot(page, testInfo, "3 · one notification, one receipt, after two more polls");
 });
+
+// ── gate ──────────────────────────────────────────────────────────────────────
+
+/** place —tree-clean→ gate —gate-approved→ notify. The gate is the only node
+ *  whose state a PERSON rather than the world decides (`GateNode`, model.ts), so
+ *  the notify terminal downstream is how "your answer moved the flow on" becomes
+ *  something outside the flow file can see. */
+const GATE_FLOW = (key: string) => ({
+  id: "e2e-gate", name: "E2E Gate", armed: false, createdAt: Date.now(),
+  nodes: [
+    { id: "n1", x: 0, y: 0, join: "any", kind: "place", runKey: key, repo: "rocket" },
+    { id: "n2", x: 220, y: 0, join: "any", kind: "gate", question: "E2E-GATE-Q" },
+    { id: "n3", x: 440, y: 0, join: "any", kind: "notify", message: "E2E-GATE-FIRED" },
+  ],
+  edges: [
+    { id: "e1", from: "n1", to: "n2", cond: { kind: "tree-clean" } },
+    { id: "e2", from: "n2", to: "n3", cond: { kind: "gate-approved" } },
+  ],
+});
+
+// Mutation-checked: `gateAnswer` (evaluate.ts) `return performer?.gateAnswer` →
+// `return undefined`, so an approved gate never satisfied `gate-approved`; the
+// downstream notification never appeared and the wait for it timed out.
+test("a gate asks once and Approve fires the downstream rule", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot();
+  seedCard(sb, "E2E-GATE");
+  seedFlow(sb, GATE_FLOW("E2E-GATE"));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-GATE");
+  await armAndGo(deck, block);
+
+  // The ask fires the moment the condition is met — `ask` spends nothing
+  // (`isSpendAction` excludes it), so no consent modal stands between arming and
+  // the question. `performedNote` stamps the question itself as the receipt,
+  // because "a gate's whole receipt is the question".
+  await expect.poll(() => readFlow(sb, "e2e-gate").edges[0].firedNote, { timeout: 60_000 })
+    .toBe("asked you: E2E-GATE-Q");
+  const asked = readFlow(sb, "e2e-gate");
+  expect(asked.edges[0].performed).toBe(true);
+  expect(asked.edges[1].firedAt).toBeUndefined();
+
+  // Approve and Reject, on the gate node itself, with the question as their
+  // accessible names (`OrchestratorDrawer.tsx`:2413-2419 on 2026-09-04).
+  const approve = deck.frame.getByRole("button", { name: "Approve E2E-GATE-Q" });
+  await expect(approve).toBeVisible({ timeout: 30_000 });
+  await expect(deck.frame.getByRole("button", { name: "Reject E2E-GATE-Q" })).toBeVisible();
+  // A gate asks IN THE DRAWER and nowhere else: no workbench notification is
+  // raised for the question. Safe as a negative because the ask is already on
+  // disk above — the pass that would have notified has been and gone.
+  await expect(notifications(page, "E2E-GATE-Q")).toHaveCount(0);
+  await shot(page, testInfo, "1 · the gate, asked and waiting on an answer");
+
+  await approve.click();
+  await expect.poll(() => readFlow(sb, "e2e-gate").edges[0].gateAnswer, { timeout: 30_000 }).toBe("approved");
+  expect(journal(sb, "e2e-gate").filter((l) => l.kind === "answered" && l.answer === "approved")).toHaveLength(1);
+
+  // The downstream rule reads that answer off the ask edge and fires — which is
+  // the whole point of two nodes rather than one.
+  await expect(notifications(page, "E2E Gate: E2E-GATE-FIRED")).toBeVisible({ timeout: 60_000 });
+  const after = readFlow(sb, "e2e-gate");
+  expect(after.edges[1].firedNote).toBe("told you: E2E-GATE-FIRED");
+  // Latched: the ask was not re-posed to carry the answer forward, so its own
+  // stamp is byte-identical to the one taken before Approve.
+  expect(after.edges[0].firedAt).toBe(asked.edges[0].firedAt);
+  expect(journal(sb, "e2e-gate").filter((l) => l.kind === "fired" && l.edge === "e1")).toHaveLength(1);
+  await shot(page, testInfo, "2 · approved, and the downstream rule fired");
+});
+
+/** The same shape with nothing downstream: this spec is about the ask edge's own
+ *  Reset, and a notify terminal would only add a rule that fires while the
+ *  question is being re-posed. */
+const GATE_ONLY_FLOW = (key: string) => ({
+  id: "e2e-gate-reset", name: "E2E Gate Reset", armed: false, createdAt: Date.now(),
+  nodes: [
+    { id: "n1", x: 0, y: 0, join: "any", kind: "place", runKey: key, repo: "rocket" },
+    { id: "n2", x: 220, y: 0, join: "any", kind: "gate", question: "E2E-RESET-Q" },
+  ],
+  edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "tree-clean" } }],
+});
+
+// Mutation-checked: `stripHostStamps` (model.ts) — the deny-list `flow:resetEdge`
+// calls — with `delete kept.gateAnswer;` removed, so Reset cleared the receipt but
+// left the answer behind; the re-asked edge read as already answered and the
+// Approve button never came back.
+test("Reset on the asking rule poses the gate's question again", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot();
+  seedCard(sb, "E2E-GRST");
+  seedFlow(sb, GATE_ONLY_FLOW("E2E-GRST"));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-GRST");
+  await armAndGo(deck, block);
+
+  const approve = deck.frame.getByRole("button", { name: "Approve E2E-RESET-Q" });
+  await expect(approve).toBeVisible({ timeout: 60_000 });
+  await approve.click();
+  await expect.poll(() => readFlow(sb, "e2e-gate-reset").edges[0].gateAnswer, { timeout: 30_000 }).toBe("approved");
+  // Answered: the buttons are gone, because `gateStateOf` reports an answer and
+  // both renders key off its absence.
+  await expect(approve).toHaveCount(0);
+  await shot(page, testInfo, "1 · answered, so the gate stops asking");
+
+  // The Actions tray is how a node is SELECTED in either view — its identifier is
+  // a real button whose accessible name is `Configure ${endLabel(...)}`, and
+  // `endLabel` returns the bare word "gate" for a gate node
+  // (orchestratorRule.ts:402 on 2026-09-04).
+  await deck.frame.getByRole("button", { name: "Configure gate" }).click();
+  const insp = deck.frame.locator('[data-testid="orch-node-inspector"]');
+  await expect(insp).toContainText("approved");
+  await insp.getByRole("button", { name: "Reset to ask again" }).click();
+
+  // Reset drops the whole set of host stamps — receipt, performer flag and the
+  // answer — so the next pass finds an unsettled rule whose condition is still
+  // met and poses the question again. The assertion of record is the journal:
+  // a SECOND `fired` line for the same edge, which is the one thing Reset's
+  // "keeps your configuration, drops the record" promise makes visible on disk.
+  await expect.poll(() => journal(sb, "e2e-gate-reset").filter((l) => l.kind === "fired" && l.edge === "e1").length,
+    { timeout: 60_000 }).toBe(2);
+  const reasked = readFlow(sb, "e2e-gate-reset");
+  expect(reasked.edges[0].gateAnswer).toBeUndefined();
+  expect(reasked.edges[0].firedNote).toBe("asked you: E2E-RESET-Q");
+  await expect(approve).toBeVisible({ timeout: 30_000 });
+  await shot(page, testInfo, "2 · the question, posed again");
+});

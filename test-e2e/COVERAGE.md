@@ -239,7 +239,8 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `orch-node-place-seed` | GUIDE § The Deck | A rule pointed at a place that already exists seeds a second session there | unit: test/unit/engine/orchestrator/runner.test.ts |
 | `orch-node-command-run` | GUIDE § The Deck | A rule pointed at a command node runs a shell command from `agentFlow.commands` (`id`, `label`, `run`, optional `detail`) or free text; `{note}` is replaced with the rule's note, spliced in unquoted | todo |
 | `orch-node-notify` | GUIDE § The Deck | A notify node pops a VS Code notification in your own window and stamps a receipt — it messages nobody | e2e: a notify rule fires once, pops a VS Code notification |
-| `orch-node-gate` | GUIDE § The Deck | A gate node shows Approve and Reject with an amber dot; it asks once and latches; a later rule fires on you-approved or you-rejected; Reset on the asking rule poses the question again; there is no notification | todo |
+| `orch-node-gate` | GUIDE § The Deck | A gate node shows Approve and Reject with an amber dot; it asks once and latches; a later rule fires on you-approved or you-rejected; there is no notification | e2e: a gate asks once and Approve fires the downstream rule |
+| `orch-node-gate-reset` | GUIDE § The Deck | Reset on a gate's asking rule drops the answer and poses the question again | e2e: Reset on the asking rule poses the gate's question again |
 | `orch-rule-note` | GUIDE § The Deck | A launch or seed rule's note is folded into the prompt mode it uses | unit: test/unit/engine/orchestrator/launch.test.ts |
 | `orch-cond-merged-pr` | GUIDE § The Deck | Condition: a merged PR | unit: test/unit/engine/orchestrator/conditions.test.ts |
 | `orch-cond-failing-ci` | GUIDE § The Deck | Condition: failing CI | unit: test/unit/engine/orchestrator/conditions.test.ts |
