@@ -449,4 +449,29 @@ export class Deck {
   reviewLine(n: number): Locator {
     return this.review(n).locator(".rv-line");
   }
+
+  /** One row's file-count chip — `.rv-files`, the exact text `{changedFiles} files`
+   *  (ReviewStrip.tsx:145 on 2026-09-04). Renders on every row whether or not a
+   *  size has been read, so `0 files` is the honest "not filled in yet" and a
+   *  `toHaveText` on it is a value assertion, never a presence one. */
+  reviewFiles(n: number): Locator {
+    return this.review(n).locator(".rv-files");
+  }
+
+  /** One row's line-count pair — `.rv-diff`, holding `.add` (`+{additions}`) and
+   *  `.del` (`−{deletions}`) as separate elements (ReviewStrip.tsx:139-143 on
+   *  2026-09-04). Two nodes rather than one string so each is queryable, which is
+   *  what lets a forge that can only fill the file count be asserted on. */
+  reviewDiff(n: number): Locator {
+    return this.review(n).locator(".rv-diff");
+  }
+
+  /** One row's CI chip — `.rv-ci` (ReviewStrip.tsx:146 on 2026-09-04). Always
+   *  present; the VERDICT is in its text and its class, and `none` is drawn as an
+   *  EMPTY chip with no class at all (`CI_GLYPH`, ReviewStrip.tsx:21-26). So "no
+   *  CI" is `toHaveText("")` plus the absence of `pr-ok`/`pr-bad`, never a
+   *  `toHaveCount(0)` — the element does not go away. */
+  reviewCi(n: number): Locator {
+    return this.review(n).locator(".rv-ci");
+  }
 }
