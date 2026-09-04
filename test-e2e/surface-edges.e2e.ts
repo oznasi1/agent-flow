@@ -38,6 +38,21 @@ async function terminalText(win: Page): Promise<string> {
   return (await rows.count()) ? await rows.innerText() : "";
 }
 
+/** The same screen with the terminal's own hard wrap taken back out.
+ *
+ *  xterm wraps at the terminal's width and `innerText` gives every VISUAL row its
+ *  own line, so a phrase arrives split by a newline that is nowhere in the text.
+ *  Where the split falls is decided by the shell prompt in front of it —
+ *  `runner@<hostname>:<sandbox>/repos/rocket$ ` — so it moves with the hostname of
+ *  whichever machine ran the job, and a phrase can sit safely mid-line for months
+ *  before a runner with a name one character longer breaks it in half. Assertions
+ *  about what the terminal SAYS go through here; the raw screen is still what you
+ *  want for anything about its layout. The rows are joined with nothing because
+ *  that is what a hard wrap is: no character was inserted to make it. */
+function unwrapped(screen: string): string {
+  return screen.replace(/\n/g, "");
+}
+
 /** Collect every window the app opens from launch onward. A one-shot
  *  `waitForEvent("window")` can only catch one window and races a second; and
  *  every window has to be awaited to its `.activitybar` before `afterEach`
@@ -137,7 +152,7 @@ test("a terminal surface with no CLI on PATH says command not found and keeps th
   // on the shell line under the error.
   await expect.poll(() => terminalText(opened), { timeout: 30_000 }).toContain(`Jira ${FIXTURE_TASK.key}`);
   const screen = await terminalText(opened);
-  expect(screen).toContain("rocket telemetry");
+  expect(unwrapped(screen)).toContain("rocket telemetry");
   // And it really was no CLI at all — not the shim, and not a developer's real one.
   expect(screen).not.toContain("CLAUDE-SHIM-READY");
   await shot(opened, testInfo, "1 · command not found, prompt kept");

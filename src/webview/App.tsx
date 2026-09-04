@@ -834,7 +834,12 @@ function TaskCard(props: {
   // js/client-side-unvalidated-url-redirection firing on a line that is already safe.
   // The Notepad's equivalent guard can stay in a helper because its early `return
   // null` is a barrier CodeQL does follow.
-  const href = task.url && /^https?:\/\//i.test(task.url) ? task.url : undefined;
+  // Read once into a local: the guard and the use then share one SSA variable,
+  // which is the shape CodeQL's barrier reasoning actually follows — testing
+  // `task.url` and then passing `task.url` is two separate property reads to it,
+  // and the barrier does not carry across them.
+  const ticketUrl = task.url;
+  const href = ticketUrl && /^https?:\/\//i.test(ticketUrl) ? ticketUrl : undefined;
   const armed = React.useRef(false); // true only while a drag started from the grip
 
   const take = (e: React.MouseEvent) => {
