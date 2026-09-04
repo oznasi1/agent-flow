@@ -1,0 +1,13 @@
+diff --git a/src/tasksView.ts b/src/tasksView.ts
+index a6b17e7c..9218ed47 100644
+--- a/src/tasksView.ts
++++ b/src/tasksView.ts
+@@ -853,7 +853,7 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
+               { summary: detail.summary, descriptionText: detail.descriptionText, labels: detail.labels, components: detail.components },
+               repos,
+             ),
+-          ).map((r) => r.service.name);
++          ).map((r) => r.service.name).slice(0, 0);
+           // After the issue read, never before: the component list swallows every
+           // failure including a 401, so the detail read is what lets a dead token
+           // reach the catch below and re-gate the panel. A source with no components
