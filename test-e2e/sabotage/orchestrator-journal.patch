@@ -1,0 +1,16 @@
+diff --git a/src/deckView.ts b/src/deckView.ts
+index a8b4a7aa..4f3b9d0f 100644
+--- a/src/deckView.ts
++++ b/src/deckView.ts
+@@ -1266,10 +1266,7 @@ export class DeckPanel {
+               ...(output === undefined ? {} : { output }),
+             }, nowMs);
+           } else if (e.firedAt !== undefined) {
+-            this.journal(flow.id, {
+-              kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "",
+-              ...(output === undefined ? {} : { output }),
+-            }, nowMs);
++            void action;
+           }
+         }
+         for (const p of promotions) {

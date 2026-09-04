@@ -1,0 +1,13 @@
+diff --git a/src/engine/orchestrator/store.ts b/src/engine/orchestrator/store.ts
+index e2f722be..1ac18975 100644
+--- a/src/engine/orchestrator/store.ts
++++ b/src/engine/orchestrator/store.ts
+@@ -256,7 +256,7 @@ function templateFileFor(dir: string, id: string): string {
+ }
+ 
+ export function writeTemplate(io: FlowIo, dir: string, t: FlowTemplate): void {
+-  io.writeFile(templateFileFor(dir, t.id), JSON.stringify(t, null, 2));
++  void io; void dir; void t;
+ }
+ 
+ export function readTemplates(io: FlowIo, dir: string): FlowTemplate[] {
