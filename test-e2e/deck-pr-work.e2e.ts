@@ -122,6 +122,42 @@ function ghAnswers(prList: unknown, o: { reviews?: string } = {}): ForgeAnswerMa
  *  `readOpenSessions`' `pidAlive` probe needs (see claudeState.ts). */
 const pidOf = (a: ElectronApplication): number => a.process().pid!;
 
+/** One presence record: another Agent Flow window, open on `identity`.
+ *
+ *  Written by hand into `~/.agentflow/windows` — the same registry the extension
+ *  writes on activation (`writePresence`, presence.ts:88) and the same technique
+ *  `seedSession` uses for Claude Code's own registry, not a seam. A record is only
+ *  live while its `pid` is (`readLiveWindows` prunes any other, presence.ts:137), so
+ *  it carries the launched host's pid; and the picker lists Agent Flow windows OTHER
+ *  than this one (`liveWindowsElsewhere`, openTargetHost.ts:26), which is why the
+ *  identity has to be a folder the test window is not open on. The filename is the
+ *  pid in real life; a suffix keeps this record from colliding with the one the
+ *  running window writes for itself under the same pid. */
+function seedPresence(sandbox: Sandbox, o: { identity: string; pid: number }): string {
+  const dir = path.join(sandbox.home, ".agentflow", "windows");
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${o.pid}-elsewhere.json`);
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      identity: o.identity, kind: "folder", label: path.basename(o.identity),
+      folders: 1, roots: [o.identity], pid: o.pid, updatedAt: Date.now(),
+    }, null, 2),
+  );
+  return file;
+}
+
+/** Wait for `count` windows to have opened AND reached `.activitybar`.
+ *
+ *  Called in the BODY of every journey whose click opens a window, not left to the
+ *  teardown: `app.close()` hangs on a window still mid-activation
+ *  (review-launch.e2e.ts learned this the hard way), and a window that has not even
+ *  been reported yet when teardown starts is one nothing waited for. */
+async function settleWindows(count: number): Promise<void> {
+  await expect.poll(() => windows.length, { timeout: 90_000 }).toBeGreaterThanOrEqual(count);
+  for (const w of windows.slice(0, count)) await w.locator(".activitybar").waitFor({ timeout: 60_000 });
+}
+
 /** Every plan file written for `key`, oldest first. `~/.agentflow/plans` under the
  *  sandbox HOME (workspace.ts:19), named `<key>-<createdAt>.json`. */
 function plans(sandbox: Sandbox, key: string): { matches: { matchPath: string; prompt: string }[] }[] {
@@ -156,7 +192,9 @@ const BRIEF_PROMPT = 'PR-WORK {key} ({url}) "{summary}" — brief at {brief}.{fi
 
 test.afterEach(async () => {
   if (heartbeat) { clearInterval(heartbeat); heartbeat = undefined; }
-  for (const w of windows) await w.locator(".activitybar").waitFor({ timeout: 60_000 }).catch(() => {});
+  // Bounded: a journey that opens a window settles it in the body (`settleWindows`),
+  // so this is only a backstop for a window nothing expected.
+  for (const w of windows) await w.locator(".activitybar").waitFor({ timeout: 20_000 }).catch(() => {});
   windows = [];
   await app?.close();
   app = undefined;
@@ -249,8 +287,13 @@ test("Fix CI seeds a session pointed at the brief by absolute path", async ({}, 
   installForgeShims(sb, {
     gh: ghAnswers([ghPrViewAnswer({ number: 41, failing: ["build"], passing: 1, decision: "REVIEW_REQUIRED" })]),
   });
+  // A folder no run here owns, standing in for the other Agent Flow window the
+  // picker's last group lists.
+  const elsewhere = path.join(sb.root, "another-window");
+  fs.mkdirSync(elsewhere, { recursive: true });
 
   const { page, deck } = await boot(sb, { folder: sb.repoPath });
+  seedPresence(sb, { identity: fs.realpathSync(elsewhere), pid: pidOf(app!) });
   await expect(prWorkButton(deck, "E2E-BRIEF", "Fix CI")).toBeVisible({ timeout: 90_000 });
   await prWorkButton(deck, "E2E-BRIEF", "Fix CI").click();
 
@@ -262,10 +305,11 @@ test("Fix CI seeds a session pointed at the brief by absolute path", async ({}, 
   await expect(row("Its own window")).toHaveCount(1);
   await expect(row("This window")).toHaveCount(1);
   await expect(row("Existing workspace")).toHaveCount(1);
-  // "an Agent Flow window that is already open": this window's own presence record
-  // (`agentFlow.trackOpenWindows` defaults on), listed with `liveWindowItems`'
-  // "open now" detail (openTarget.ts:66-70).
-  await expect(rows.filter({ hasText: "open now" })).not.toHaveCount(0);
+  // "an Agent Flow window that is already open" — the seeded record's own window,
+  // named by its folder and detailed "open now" (`liveWindowItems`, openTarget.ts:66-70).
+  // Listed only because `agentFlow.trackOpenWindows` defaults on (config.ts:820).
+  await expect(row("another-window")).toHaveCount(1);
+  await expect(rows.filter({ hasText: "open now" })).toHaveCount(1);
   await shot(page, testInfo, "2 · Fix CI asks where");
   await row("This window").click();
 
@@ -276,11 +320,16 @@ test("Fix CI seeds a session pointed at the brief by absolute path", async ({}, 
   const [plan] = plans(sb, "E2E-BRIEF");
   expect(plan.matches).toHaveLength(1);
   expect(fs.realpathSync(plan.matches[0].matchPath)).toBe(fs.realpathSync(sb.repoPath));
-  expect(plan.matches[0].prompt).toContain(fs.realpathSync(brief));
-  expect(plan.matches[0].prompt).toMatch(/^PR-WORK E2E-BRIEF /);
-  // And what is wrong leads the prompt, naming the check by name (prWorkClause,
-  // prompt.ts:136-141) — the seeded session is told the situation, not just the ticket.
-  expect(plan.matches[0].prompt).toContain("CI is failing on this PR (build)");
+  // The run's own `briefPaths[0]`, verbatim — an absolute path, where a `stay` seat
+  // would have rendered the relative `.pick-task/TASK.md` (see the `its-window`
+  // journey below, which asserts exactly that contrast).
+  expect(path.isAbsolute(brief)).toBe(true);
+  expect(plan.matches[0].prompt).toContain(`brief at ${brief}.`);
+  // And what is wrong LEADS the prompt, naming the check by name (prWorkClause,
+  // prompt.ts:136-141), with the configured PR-work template after it — the seeded
+  // session is told the situation, not just the ticket.
+  expect(plan.matches[0].prompt).toMatch(/^CI is failing on this PR \(build\)\./);
+  expect(plan.matches[0].prompt).toContain("PR-WORK E2E-BRIEF (");
   await shot(page, testInfo, "3 · seeded in this window");
 });
 
@@ -343,7 +392,7 @@ test("Resolve conflict and Address review seed their own prompts", async ({}, te
 // setting (`if (cfg.prWorkOpenIn !== "ask")` → `if (false)`) — the picker opened,
 // no plan file ever landed, and the poll below failed.
 test("prWorkOpenIn its-window asks nothing", async ({}, testInfo) => {
-  test.setTimeout(240_000);
+  test.setTimeout(300_000);
   sb = makeSandbox({
     "agentFlow.worktree": "always", "agentFlow.prFacts": true,
     "agentFlow.prWorkOpenIn": "its-window", "agentFlow.prReviewPrompt": BRIEF_PROMPT,
@@ -373,13 +422,16 @@ test("prWorkOpenIn its-window asks nothing", async ({}, testInfo) => {
   expect(plan.matches[0].prompt).toContain("brief at .pick-task/TASK.md.");
   expect(plan.matches[0].prompt).not.toContain(path.join(fs.realpathSync(sb.repoPath), ".pick-task"));
   await shot(page, testInfo, "6 · seeded with no question asked");
+  // `stay` opens (or focuses) the run's own window — settled here so teardown has
+  // nothing mid-activation to close.
+  await settleWindows(1);
 });
 
 // Mutation-checked: prWorkPlan's `stay` case (engine/prWork.ts) returned
 // `elsewhere(run.repos[0].path + "-wt")` — the plan's matchPath was a path the run
 // does not own and this test failed on the matchPath equality.
 test("the Deck's Address PR re-seeds the run's workspace in place", async ({}, testInfo) => {
-  test.setTimeout(240_000);
+  test.setTimeout(300_000);
   // `agentFlow.worktree: "always"` is the strong fixture here, not "never": the
   // sidebar's Address PR forces a worktree whatever the setting says
   // (address-pr.e2e.ts), so proving the DECK's Address PR creates none while the
@@ -420,6 +472,7 @@ test("the Deck's Address PR re-seeds the run's workspace in place", async ({}, t
   expect(fs.existsSync(path.join(sb.repoPath, ".claude", "worktrees"))).toBe(false);
   expect(git(sb.repoPath, ["worktree", "list", "--porcelain"]).match(/^worktree /gm)).toHaveLength(1);
   await shot(page, testInfo, "8 · seeded in place, no worktree");
+  await settleWindows(1);
 });
 
 // ── When the read fails, and when it is switched off ──────────────────────────
