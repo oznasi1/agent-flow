@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Every documented behaviour is now tested in a real editor, or says why it is not.**
+  The real-host E2E lane went from 44 journeys to 222, and `test-e2e/COVERAGE.md` maps
+  every claim in the README and `docs/` to the test that proves it — an E2E title, a unit
+  or component test, or a stated reason it cannot be proven here.
+  `test/unit/e2eCoverage.test.ts` checks that map both ways, so a new journey with no
+  documented claim behind it, a proof pointing nowhere, or a setting with no row all fail
+  the build. The lane runs in four CI shards and merges into the one report, so the
+  required check keeps its previous wall-clock.
+
+### Fixed
+
+- **Docs that had drifted from the product.** `docs/ORCHESTRATOR_COMMANDS.md` no longer
+  claims the command path has never run in a real editor: which shell you get
+  (`/bin/sh`), the Save-to-settings write, and the chained `place → command → command`
+  shape are all driven in a sandboxed VS Code now, and none of them was broken — Windows
+  is what remains unproven. `docs/GUIDE.md` also quoted the dry run as saying "it is
+  waiting on your answer" where the product says "waiting for your answer".
+
+### Known issues
+
+Found by the coverage work above, each pinned as a failing test so it stays visible:
+
+- **A Deck card's own Approve and Reject do nothing.** The gate's buttons on the card's
+  Workflow block send the edge leaving the gate, but only the edge that asked is
+  accepted, so the answer is silently dropped. The Orchestrator drawer's own gate node
+  is unaffected — use that until this is fixed.
+- **A Copilot batch does seed a chat panel.** `docs/SETTINGS.md` says a batch under
+  Copilot's `extension` surface seeds none; that is true only of a shared window. In the
+  default separate-windows layout each window seeds its own.
+- **A task touching none of the filtered repos cannot be batched.** `docs/GUIDE.md` says
+  it launches in all of them; the fallback exists, but the sidebar hides such a card
+  under the repo lens, so the gesture cannot reach it.
+- **A disabled Marketplace row is not struck through** — only its `disabled` badge is.
+
 ## [0.67.0] — 2026-09-03
 
 ### Added
