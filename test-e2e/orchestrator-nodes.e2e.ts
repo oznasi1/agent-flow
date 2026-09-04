@@ -655,3 +655,183 @@ test("command succeeded chains a second command", async ({}, testInfo) => {
   expect(journal(sb, "e2e-chain").filter((l) => l.kind === "fired")).toHaveLength(2);
   await shot(page, testInfo, "1 · both commands ran, in order, in one checkout");
 });
+
+// ── reading the output back ───────────────────────────────────────────────────
+
+/** Leave the drawer and come back to the card. The Output button lives on the
+ *  card's own Workflow block, not in the drawer — and `onOpenWorkflow` cleared
+ *  the card selection on the way in (`DeckApp.tsx`:1585 on 2026-09-04), so the
+ *  card has to be clicked again rather than merely revealed. */
+async function backToCard(deck: Deck, key: string): Promise<Locator> {
+  await deck.frame.locator(".orch-hd").getByRole("button", { name: "Close" }).click();
+  await expect(deck.frame.locator(".orch-hd")).toHaveCount(0);
+  return openCard(deck, key);
+}
+
+/** Every editor tab in the workbench. The Deck itself is one (a webview panel in
+ *  the editor area), so this is never empty — which is exactly why the negative
+ *  in the toast spec below counts UNTITLED tabs rather than tabs. */
+const untitledTabs = (page: Page): Locator => page.locator(".tabs-container .tab", { hasText: /Untitled/ });
+
+// Mutation-checked: `flow:openOutput` (deckView.ts) `const result = findEdgeOutput(events,
+// m.edgeId)` → `findEdgeOutput([], m.edgeId)`, so the journal it had just read was
+// thrown away: the handler took the `no-journal` refusal, no tab opened and the wait
+// for the Untitled tab timed out.
+test("a rule's output opens in an editor tab", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot();
+  seedCard(sb, "E2E-OUT");
+  seedFlow(sb, COMMAND_FLOW("e2e-out", "E2E Output", "E2E-OUT", CMD_RUN("E2E-OUTPUT-OK")));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  await armAndGo(deck, await openCard(deck, "E2E-OUT"));
+  await dialog(page).getByRole("button", { name: "Run" }).click();
+  await expect.poll(() => fileText(path.join(sb.home, "cmd.txt")), { timeout: 90_000 }).toContain("E2E-OUTPUT-OK");
+
+  const block = await backToCard(deck, "E2E-OUT");
+  // Offered on the `done` step of a rule whose target is a command node, and on
+  // no other rule kind — a launch, a seed, a notify or a gate's ask has no output
+  // to read (`canShowOutput`, WorkflowBlock.tsx:127 on 2026-09-04).
+  const output = block.getByRole("button", { name: "Output" });
+  await expect(output).toBeVisible({ timeout: 30_000 });
+  await shot(page, testInfo, "1 · the done step offers Output");
+  await output.click();
+
+  // Its own editor tab, never back across the wire to the 620px drawer.
+  await expect(untitledTabs(page)).toHaveCount(1, { timeout: 30_000 });
+  const editor = page.locator(".part.editor .monaco-editor").first();
+  // The one-line provenance header — `${kind} · ${action} · ${edgeId} · ${when}` —
+  // so two Output tabs do not read as the same undifferentiated blob.
+  await expect(editor).toContainText("fired · run · e1", { timeout: 15_000 });
+  // …and the command's actual stdout, read back out of the journal.
+  await expect(editor).toContainText("E2E-OUTPUT-OK");
+  await shot(page, testInfo, "2 · the journal's copy, in a tab of its own");
+});
+
+/** A command rule stamped fired on disk, on a flow that is NEVER armed — so no
+ *  pass ever runs and no journal is ever written. That is the one state
+ *  `findEdgeOutput`'s `no-journal` refusal is about, and the honest way to reach
+ *  it: the step reads `done` (its `firedAt` says so) with nothing behind it. */
+const NO_JOURNAL_FLOW = (key: string) => ({
+  id: "e2e-nojournal", name: "E2E No Journal", armed: false, createdAt: Date.now(),
+  nodes: [
+    { id: "n1", x: 0, y: 0, join: "any", kind: "place", runKey: key, repo: "rocket" },
+    { id: "n2", x: 220, y: 0, join: "any", kind: "command", run: `echo E2E-NEVER-RAN` },
+  ],
+  edges: [{
+    id: "e1", from: "n1", to: "n2", cond: { kind: "tree-clean" },
+    firedAt: Date.now(), firedNote: "ran echo E2E-NEVER-RAN in rocket", performed: true as const,
+  }],
+});
+
+// Mutation-checked: `findEdgeOutput` (journal.ts) `if (events.length === 0) return { ok:
+// false, reason: "no-journal" }` → `return { ok: true, output: "", … }`, which is the
+// blank tab this spec's title forbids: no toast appeared and `untitledTabs`
+// went to 1.
+test("with nothing journaled the output action is a toast, never a blank tab", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot();
+  seedCard(sb, "E2E-NOJ");
+  seedFlow(sb, NO_JOURNAL_FLOW("E2E-NOJ"));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-NOJ");
+  // Nothing on disk to read back: the flow was never armed, so no pass recorded
+  // anything for it.
+  expect(journal(sb, "e2e-nojournal")).toEqual([]);
+  await expect(untitledTabs(page)).toHaveCount(0);
+
+  const output = block.getByRole("button", { name: "Output" });
+  await expect(output).toBeVisible({ timeout: 30_000 });
+  await output.click();
+
+  // One of three honest refusals, and this is the one that also covers a journal
+  // that failed to read — `readJournal` cannot tell the two apart, and the
+  // wording says so rather than claiming certainty.
+  await expect(deckToast(deck, /Nothing has been recorded for this workflow yet/))
+    .toBeVisible({ timeout: 10_000 });
+  await expect(untitledTabs(page)).toHaveCount(0);
+  await shot(page, testInfo, "1 · a toast, and no tab");
+});
+
+// ── Save to settings ──────────────────────────────────────────────────────────
+
+const SAVE_RUN = "echo E2E-SAVED-CMD";
+
+const SAVE_FLOW = (key: string) => ({
+  id: "e2e-save", name: "E2E Save", armed: false, createdAt: Date.now(),
+  nodes: [
+    { id: "n1", x: 0, y: 0, join: "any", kind: "place", runKey: key, repo: "rocket" },
+    { id: "n2", x: 220, y: 0, join: "any", kind: "command", run: SAVE_RUN },
+  ],
+  edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "tree-clean" } }],
+});
+
+const settingsJson = (): Record<string, unknown> =>
+  JSON.parse(fs.readFileSync(path.join(sb.userDataDir, "User", "settings.json"), "utf8"));
+
+// Mutation-checked: `saveCommand` (deckView.ts) `const entries = authored ?? [...DEFAULT_COMMANDS]`
+// → `const entries = authored ?? []`, the exact break the doc's second bullet warns
+// about ("an explicit array replaces the default, and writing just your command
+// would have dropped the example out of the picker"). The shipped `verify-on-dev`
+// example vanished from settings.json and the `toContain("verify-on-dev")` failed.
+test("Save to settings writes agentFlow.commands into the real settings.json", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot();
+  seedCard(sb, "E2E-SAVE");
+  seedFlow(sb, SAVE_FLOW("E2E-SAVE"));
+  // The setting is UNTOUCHED to begin with — which is the case the doc's "seeded
+  // from the shipped example first" rule is about.
+  expect(settingsJson()["agentFlow.commands"]).toBeUndefined();
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-SAVE");
+  await block.getByRole("button", { name: /open in workflows/i }).click();
+  await expect(deck.frame.locator(".orch-hd")).toBeVisible({ timeout: 30_000 });
+
+  // The Actions tray is how a node is selected in either view; a free-text
+  // command node's own identifier IS its command text (`commandLabel`,
+  // orchestratorRule.ts:380 on 2026-09-04, under the 24-char cap here).
+  await deck.frame.getByRole("button", { name: `Configure ${SAVE_RUN}` }).click();
+  const insp = deck.frame.locator('[data-testid="orch-node-inspector"]');
+  await expect(insp).toBeVisible({ timeout: 15_000 });
+  await insp.getByLabel("Name for settings").fill("E2E Deploy");
+  await shot(page, testInfo, "1 · a free-text command, named");
+  await insp.getByRole("button", { name: "Save to settings" }).click();
+
+  // THE assertion of record, and the reason this spec exists: ORCHESTRATOR_COMMANDS
+  // § "Not yet proven" said this path had "only ever run against a mock
+  // configuration, never a real `settings.json`". This is a real one.
+  await expect.poll(() => JSON.stringify(settingsJson()["agentFlow.commands"] ?? null), { timeout: 30_000 })
+    .toContain("E2E Deploy");
+  const saved = settingsJson()["agentFlow.commands"] as { id: string; label: string; run: string }[];
+  // The list GAINED an entry: the shipped example is still in front of it, because
+  // an explicit array replaces the default and writing only the new command would
+  // have dropped the example out of the picker the user was looking at.
+  expect(saved.map((c) => c.id)).toEqual(["verify-on-dev", "e2e-deploy"]);
+  expect(saved[1]).toEqual({ id: "e2e-deploy", label: "E2E Deploy", run: SAVE_RUN });
+
+  // The NODE is left as free text. Saving means "keep this for next time", not
+  // "rewire this node" — and `resolveCommand` refuses a node carrying both.
+  const node = readFlow(sb, "e2e-save").nodes[1];
+  expect(node.run).toBe(SAVE_RUN);
+  expect(node.commandId).toBeUndefined();
+
+  // Once the text matches an entry the Save row gives way to the honest end
+  // state, which is also why pressing Save twice cannot fill the picker with
+  // duplicates.
+  await expect(deck.frame.locator('[data-testid="orch-command-saved"]'))
+    .toContainText("Saved in settings as", { timeout: 30_000 });
+  await expect(deck.frame.locator('[data-testid="orch-command-saved"]')).toContainText("E2E Deploy");
+  await expect(insp.getByRole("button", { name: "Save to settings" })).toHaveCount(0);
+  await shot(page, testInfo, "2 · saved, in the scope that holds the setting");
+});
