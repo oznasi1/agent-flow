@@ -1,0 +1,12 @@
+diff --git a/src/engine/review/glab/provider.ts b/src/engine/review/glab/provider.ts
+index 16ab691f..7e1c903d 100644
+--- a/src/engine/review/glab/provider.ts
++++ b/src/engine/review/glab/provider.ts
+@@ -202,6 +202,6 @@ export class GlabReviewProvider implements ReviewProvider {
+  * most. Documented in docs/FORGES.md. */
+ function readSize(raw: unknown): ReviewDetail["size"] {
+   if (typeof raw !== "string") return null;
+-  const n = parseInt(raw, 10);
++  const n = Number(raw);
+   return Number.isFinite(n) ? { additions: 0, deletions: 0, changedFiles: n } : null;
+ }

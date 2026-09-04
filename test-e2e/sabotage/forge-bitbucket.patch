@@ -1,0 +1,16 @@
+diff --git a/src/engine/pr/bb/provider.ts b/src/engine/pr/bb/provider.ts
+index f8851c7f..d8d0ecd3 100644
+--- a/src/engine/pr/bb/provider.ts
++++ b/src/engine/pr/bb/provider.ts
+@@ -65,9 +65,9 @@ export async function probeBb(run: Runner = execRunner, locate: Locate = locateB
+ export async function probeBbApi(run: Runner = execRunner, locate: Locate = locateBb): Promise<boolean> {
+   try {
+     await run(locate() ?? BB_BIN, ["bb", "api", "--help"], { cwd: process.cwd(), timeoutMs: BB_TIMEOUT_MS });
+-    return true;
+-  } catch {
+     return false;
++  } catch {
++    return true;
+   }
+ }
+ 
