@@ -268,9 +268,14 @@ test("arming a changes-requested rule on GitLab names it unfirable", async ({}, 
   ({ unknownLog } = installForgeShims(sb, {
     glab: {
       ...glabAnswers(),
-      // The card's own MR read (`mrListPath`, pr/glab/provider.ts:47-48). Empty:
-      // this journey is about what ARMING says, not about a merge request.
+      // The card's own MR read, BOTH selectors (`mrListPath`,
+      // pr/glab/provider.ts:47-48): the branch first, then the ticket key in the
+      // title when the branch found nothing — which is exactly what an empty
+      // first answer provokes. Both are answered so a slower pass cannot land an
+      // unfaked call in `unknown.jsonl` and fail this in teardown. Empty: this
+      // journey is about what ARMING says, not about a merge request.
       [`api ${FP}/merge_requests?source_branch=${BRANCH}&state=all&per_page=10`]: [],
+      [`api ${FP}/merge_requests?search=${KEY}&in=title&state=all&per_page=10`]: [],
     },
   }));
   const launched = await launchHost(sb);
