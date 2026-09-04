@@ -370,7 +370,7 @@ test("a custom review mode makes the launch ask which to seed", async ({}, testI
 });
 
 // Mutation-checked: dropped `this.reviewQueue` from reviewsEnabled
-// (src/deckView.ts:2409), so the strip stayed live with the setting off.
+// (src/deckView.ts:2409), so the strip came up with the setting off.
 test("reviewRequests off hides the strip", async ({}, testInfo) => {
   test.setTimeout(240_000);
   const { page, deck } = await boot({ "agentFlow.reviewRequests": false });
@@ -378,11 +378,37 @@ test("reviewRequests off hides the strip", async ({}, testInfo) => {
   // The board itself is up — otherwise "no strip" would just be "nothing has
   // rendered yet". `.stats` is the header's own sync line (DeckApp.tsx:1216-1222).
   await expect(deck.frame.locator(".stats")).toBeVisible({ timeout: 60_000 });
+
+  // The forge probe has RUN — `forgeReady()` returns false until `forge.probe()`
+  // settles (deckView.ts:2058-2063), and `gh auth status` is that probe
+  // (`probeGh`, src/engine/pr/provider.ts:108-117). Without waiting for it,
+  // "no strip" would be indistinguishable from "the probe has not come back
+  // yet", and this test would pass against a product with no gate at all —
+  // which is exactly what a first pass of it did.
+  await expect
+    .poll(() => forgeCalls(sb).filter((c) => c.cli === "gh" && c.argv[0] === "auth").length, { timeout: 60_000 })
+    .toBeGreaterThan(0);
+  // Two full board passes (one every 6s) after the probe settled. A hold rather
+  // than a poll because the claim is an absence; the live flip below is what
+  // makes the hold meaningful — it proves the queue, the CLI and the search were
+  // all in place the whole time, so nothing but the setting was withholding them.
+  await page.waitForTimeout(15_000);
   await expect(deck.reviewStrip()).toHaveCount(0);
   await expect(deck.reviews()).toHaveCount(0);
-
-  // And the setting is a read gate, not just a render one: with it off the search
-  // is never queued, so no `gh api graphql` is ever spent.
+  // A read gate, not just a render one: with the setting off the search is never
+  // queued, so no `gh api graphql` is spent on it.
   expect(searchQueries()).toHaveLength(0);
   await shot(page, testInfo, "9 · no strip, no search");
+
+  // The control. Flipped the way a person does it, by saving settings.json: the
+  // workbench raises `onDidChangeConfiguration` and `DeckPanel.onConfigChanged`
+  // re-seeds `reviewQueue` (deckView.ts:3969). The panel is never reopened.
+  const settingsPath = path.join(sb.userDataDir, "User", "settings.json");
+  const settings = JSON.parse(fs.readFileSync(settingsPath, "utf8")) as Record<string, unknown>;
+  settings["agentFlow.reviewRequests"] = true;
+  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+
+  await expect(deck.reviews()).toHaveCount(3, { timeout: 60_000 });
+  expect(searchQueries()).toHaveLength(1);
+  await shot(page, testInfo, "10 · flipped back on, the same panel");
 });

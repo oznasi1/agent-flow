@@ -1,0 +1,13 @@
+diff --git a/src/engine/review/search.ts b/src/engine/review/search.ts
+index 2bd82c35..af0dac04 100644
+--- a/src/engine/review/search.ts
++++ b/src/engine/review/search.ts
+@@ -23,7 +23,7 @@ export const REVIEW_SEARCH_QUERY =
+  * from this same search: excluding the rows server-side moves the count with
+  * them, where a client-side filter would leave a complete queue reading as
+  * "showing 9 of 10" — truncation that never happened. */
+-export const REVIEW_SEARCH_Q = "is:pr is:open review-requested:@me archived:false";
++export const REVIEW_SEARCH_Q = "is:pr is:open review-requested:@me";
+ 
+ export const REVIEW_SEARCH_LIMIT = 50;
+ 
