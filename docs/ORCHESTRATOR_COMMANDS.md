@@ -443,23 +443,34 @@ there, which closes the picker and opens the drawer's Templates view instead.
 | Consent prompts                | 2 per flow     | One for sessions, one for shell — asked once each, then remembered.  |
 | Telemetry about commands       | count only     | Never an id, a label, or the command text: a `run` string carries hostnames and sometimes tokens. |
 
-## Not yet proven
+## Proven in a real editor
 
-Everything above is what the code does, covered by the test suite. What no
-test can establish is behaviour that only exists in a real editor, and the
-command path has never run in one:
+Everything above is what the code does, covered by the test suite. The command
+path used to be unproven beyond that — no test could establish behaviour that
+only exists in a real editor, and it had never run in one. It has now:
+`test-e2e/orchestrator-nodes.e2e.ts` drives it in a real sandboxed VS Code.
 
-- **Which shell you actually get.** No shell is specified, so it is Node's
-  default — `/bin/sh` on macOS and Linux, `cmd.exe` on Windows. The Windows
-  path is unexercised, including `windowsHide`.
-- **The settings write.** Save to settings has only ever run against a mock
-  configuration, never a real `settings.json`.
-- **The chained shape end to end** — `place → deploy.sh → smoke.sh` — with a
-  real repo, a real condition, and a real process.
+- **Which shell you actually get.** `/bin/sh` — read from `$0` in the child, not
+  inferred from the platform.
+- **The settings write.** Save to settings writes a real `settings.json`: the
+  host's own file gains the `agentFlow.commands` entry, with the shipped
+  examples preserved and the node left as free text.
+- **The chained shape end to end** — `place → command → command`, with a real
+  repo, a real condition and real processes; the order is visible in the bytes
+  one command appends after the other, and the second inherits the first's
+  checkout.
 
-There is precedent for taking this seriously: an earlier provider shipped
-with the same kind of gap and its paths turned out never to have run in an
-editor at all.
+Consent, `agentFlow.neverAutoRun`, the gate's ask-once-and-latch, Reset, and the
+output tab are driven there too. Nothing in that pass found a defect.
+
+## Still not proven
+
+- **Windows.** That lane is macOS and Linux, so `cmd.exe` and `windowsHide`
+  remain unexercised.
+
+There is precedent for taking the remaining gap seriously: an earlier provider
+shipped with the same kind of gap and its paths turned out never to have run in
+an editor at all.
 
 ---
 
