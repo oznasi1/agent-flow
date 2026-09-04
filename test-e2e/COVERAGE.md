@@ -118,9 +118,12 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `deck-pr-facts` | GUIDE § The Deck | Each card carries the PR state of every repo it touches from the configured forge's CLI: number, CI, review decision with unresolved-thread count, mergeability (`agentFlow.prFacts`) | e2e: shows the PR the GitHub forge reports |
 | `deck-pr-facts-off-live` | GUIDE § The Deck | Turning `agentFlow.prFacts` off applies the moment you save: cards fall back to the git + Jira backbone and the review strip goes dark | todo |
 | `deck-pr-unread` | FORGES § 4. Conventions | A failing PR read keeps `error: true`, the card leads with `⚠ PR unread`, the footer counts the affected runs, and nothing acts on the carried-forward facts | todo |
-| `deck-merge-button` | SETTINGS § table | With `agentFlow.mergeWrites` on, a card whose one PR is provably ready shows Merge; a modal names the repo, number and strategy (`agentFlow.mergeMethod`) before `gh pr merge` runs; cancel runs nothing; two ready PRs or a sibling repo with an open PR show no button | todo |
-| `deck-merge-gitlab-rebase` | SETTINGS § table | On GitLab `agentFlow.mergeMethod: rebase` is refused with a message naming the setting, never substituted | todo |
-| `deck-merge-failure-surfaced` | PRIVACY | A merge failure reaches the user as a notification and is logged to the Agent Flow Deck output channel | todo |
+| `deck-merge-button` | SETTINGS § table | With `agentFlow.mergeWrites` on, a card whose one PR is provably ready shows Merge; a modal names the repo, number and strategy (`agentFlow.mergeMethod`) before `gh pr merge` runs; cancel runs nothing; two ready PRs or a sibling repo with an open PR show no button | e2e: Merge confirms with the repo, number and strategy |
+| `deck-merge-gitlab-rebase` | SETTINGS § table | On GitLab `agentFlow.mergeMethod: rebase` is refused with a message naming the setting, never substituted | e2e: GitLab refuses a rebase merge naming the setting |
+| `deck-merge-failure-surfaced` | PRIVACY | A merge failure reaches the user as a notification and is logged to the Agent Flow Deck output channel | e2e: a merge failure reaches the user and the output channel |
+| `deck-merge-cancel` | SETTINGS § table | Cancelling the merge confirmation runs nothing — no merge reaches the forge CLI | e2e: cancelling the merge dialog runs nothing |
+| `deck-merge-two-ready` | SETTINGS § table | A card with two provably ready pull requests shows no Merge button — choosing one of a coupled pair is not the Deck's to make | e2e: two ready PRs across repos show no Merge button |
+| `deck-merge-sibling-open` | SETTINGS § table | A card whose sibling repo still holds an open pull request shows no Merge button; every other repo's must already be merged | e2e: a sibling repo still holding an open PR blocks Merge |
 | `deck-pr-work-buttons` | SETTINGS § table | Fix CI, Resolve conflict and Address review seed a session for the run; `agentFlow.prWorkOpenIn: ask` offers the run's window, this window, a `.code-workspace` or a live window, `its-window` asks nothing; another destination points one session at the brief by absolute path | todo |
 | `deck-address-pr-in-place` | GUIDE § What it does | The Deck card's Address PR re-seeds the workspace the run already has — no new worktree | todo |
 | `deck-notify-action-required` | SETTINGS § table | `agentFlow.notifyOnActionRequired` raises one notification when a run parks, coalesces several parking in one pass, and does not repeat until answered and parked again | todo |
@@ -441,8 +444,8 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-review-requests-always-visible` | package.json | `agentFlow.reviewRequestsAlwaysVisible: false` hides the strip while no PR is waiting | todo |
 | `set-review-requests-ttl-seconds` | SETTINGS § table | `agentFlow.reviewRequestsTtlSeconds` (300, minimum 60) is how stale the cached queue may be | unit: test/unit/engine/review/store.test.ts |
 | `set-review-writes` | SETTINGS § table | `agentFlow.reviewWrites` (off) allows approve / comment / request changes from the Deck | todo |
-| `set-merge-writes` | SETTINGS § table | `agentFlow.mergeWrites` (off) shows Merge on a provably ready card | todo |
-| `set-merge-method` | SETTINGS § table | `agentFlow.mergeMethod`: `squash`, `merge` or `rebase`, named in the dialog every time | todo |
+| `set-merge-writes` | SETTINGS § table | `agentFlow.mergeWrites` (off) shows Merge on a provably ready card | e2e: mergeWrites off shows no Merge button on a ready PR |
+| `set-merge-method` | SETTINGS § table | `agentFlow.mergeMethod`: `squash`, `merge` or `rebase`, named in the dialog every time | e2e: mergeMethod is named in the dialog and passed to gh |
 | `set-review-request-modes` | SETTINGS § table | `agentFlow.reviewRequestModes` layers your review modes over Full review | todo |
 | `set-review-request-mode` | SETTINGS § table | `agentFlow.reviewRequestMode` pins one review mode so no picker shows | e2e: launching a review opens its worktree |
 | `set-review-open-in` | SETTINGS § table | `agentFlow.reviewOpenIn` ships as `new-window`; `this-window`, `pick-existing` or `ask` | e2e: launching a review opens its worktree, brief |
@@ -488,6 +491,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `priv-doctor-probes` | PRIVACY | Doctor makes two authenticated GETs and runs `gh auth status`, and writes nothing except the clipboard when asked to copy | todo |
 | `priv-pick-task-excluded` | PRIVACY | Briefs go in a git-excluded `.pick-task/`, so they are never committed | todo |
 | `priv-output-channel-log` | PRIVACY | Every review submit and merge attempt, success or failure, is logged to the Agent Flow Deck output channel | todo |
+| `priv-output-channel-merge` | PRIVACY | A merge that reaches the forge is logged to the Agent Flow Deck output channel with the strategy it used | e2e: Merge confirms with the repo, number and strategy, then runs gh pr merge |
 
 ## Meta
 

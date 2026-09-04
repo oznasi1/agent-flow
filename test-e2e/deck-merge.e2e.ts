@@ -147,7 +147,7 @@ function mergeCalls(): string[][] {
 
 /** The Agent Flow Deck output channel's text. VS Code backs every extension output
  *  channel with a file under the session's log directory
- *  (`<user-data-dir>/logs/<session>/exthost*/output_logging_*/N-Agent Flow Deck.log`),
+ *  (`<user-data-dir>/logs/<session>/exthost…/output_logging_…/N-Agent Flow Deck.log`),
  *  which is the durable record the PRIVACY doc points at — read as a file, the
  *  first choice of assertion, rather than scraped out of the Output panel's
  *  editor. Empty until the channel has been written to. */
