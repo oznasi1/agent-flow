@@ -91,8 +91,8 @@ This heading — and every `todo` — is removed in that plan's last task.
 | id | doc | claim | proof |
 |----|-----|-------|-------|
 | `deck-open` | GUIDE § The Deck | "Open the Deck (in-flight)" opens the board of everything launched | e2e: swept off the board and out of the store |
-| `deck-four-columns` | GUIDE § The Deck | Four columns — In progress · Action required · In review · Merge — attention rising left to right | todo |
-| `deck-header-count-tiles` | GUIDE § The Deck | Four header tiles count what the columns hold | todo |
+| `deck-four-columns` | GUIDE § The Deck | Four columns — In progress · Action required · In review · Merge — attention rising left to right | e2e: header tiles count what the columns hold |
+| `deck-header-count-tiles` | GUIDE § The Deck | Four header tiles count what the columns hold | e2e: header tiles count what the columns hold |
 | `deck-column-hues` | GUIDE § The Deck | Each column carries its own hue in its dot, header rule and tint; cards are monochrome except in Action required, which carries an orange rail | ct: test-ct/Workflow.hues.spec.tsx |
 | `deck-merge-lanes` | GUIDE § The Deck | Merge is split into `ready to merge` (approved, mergeable, green) and `merged · wrap up` lanes; only a merged PR makes a card say merged | unit: test/unit/engine/bucket.test.ts |
 | `deck-recently-closed` | GUIDE § The Deck | A ticket closed with nothing merged drops into the collapsed Recently closed strip under the board | e2e: a closed run collapses into the Recently closed strip |

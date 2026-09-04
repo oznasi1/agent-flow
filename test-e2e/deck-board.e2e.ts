@@ -263,7 +263,10 @@ test("the overflow menu offers Open in Jira and Forget", async ({}, testInfo) =>
   await shot(launched.page, testInfo, "10 · More menu: Open in …, Forget");
 });
 
-// Mutation-checked: DeckApp.tsx In progress tile counts `c.column === "review"` — the tile read 0 against a column of 1
+// Mutation-checked twice, once per assertion this test carries: DeckApp.tsx's
+// In progress tile counting `c.column === "review"` made it read 0 against a
+// column of 1; and reordering COLUMNS so Merge precedes In review broke the
+// column-order assertion.
 test("header tiles count what the columns hold", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox();
