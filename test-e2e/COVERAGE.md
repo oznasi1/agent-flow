@@ -100,8 +100,10 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `deck-column-hues` | GUIDE § The Deck | Each column carries its own hue in its dot, header rule and tint; cards are monochrome except in Action required, which carries an orange rail | ct: test-ct/Workflow.hues.spec.tsx |
 | `deck-merge-lanes` | GUIDE § The Deck | Merge is split into `ready to merge` (approved, mergeable, green) and `merged · wrap up` lanes; only a merged PR makes a card say merged | unit: test/unit/engine/bucket.test.ts |
 | `deck-recently-closed` | GUIDE § The Deck | A ticket closed with nothing merged drops into the collapsed Recently closed strip under the board | todo |
-| `deck-live-signal` | GUIDE § The Deck | A card reads `working · Ns ago`, `idle`, `ended turn` or `parked` from Claude Code's own transcripts; `parked` only when the transcript cannot be read or does not exist | todo |
-| `deck-action-required-semantics` | GUIDE § The Deck | Action required is session signals only — a session that ended its turn, stalled or exited — so Claude's asking and GitHub's asking stay under separate headers | todo |
+| `deck-live-signal` | GUIDE § The Deck | A card reads `working · Ns ago`, `idle`, `ended turn` or `parked` from Claude Code's own transcripts | e2e: a session mid-work reads working |
+| `deck-live-signal-parked` | GUIDE § The Deck | `parked` only when the transcript cannot be read or does not exist — the one route back to the git + Jira backbone; the session itself is still on the card | e2e: a run with no transcript reads parked |
+| `deck-action-required-semantics` | GUIDE § The Deck | Action required is session signals only — a session that ended its turn, stalled or exited — so Claude's asking and GitHub's asking stay under separate headers | e2e: a session that ended its turn lands the card in Action required |
+| `deck-ended-turn-parks` | GUIDE § The Deck | An ended turn reads `ended turn` and parks in In progress's `parked` lane, NOT Action required, which admits only `blocked` and `exited` (`deriveBucket`) — the row above pins the stale doc sentence with `test.fail` | e2e: an ended turn reads ended turn and parks |
 | `deck-fixes-needed-lane` | GUIDE § The Deck | A PR with failing required checks, requested changes or a conflict pulls its card into In review's `fixes needed` lane even while the session is still working | todo |
 | `deck-open-action` | GUIDE § The Deck | Open focuses the window if already open (never a duplicate) and opens it fresh otherwise; on a per-session card it acts on that session's own directory | todo |
 | `deck-diff-action` | GUIDE § The Deck | Diff shows the working diff | todo |
@@ -125,9 +127,9 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `deck-merge-failure-surfaced` | PRIVACY | A merge failure reaches the user as a notification and is logged to the Agent Flow Deck output channel | todo |
 | `deck-pr-work-buttons` | SETTINGS § table | Fix CI, Resolve conflict and Address review seed a session for the run; `agentFlow.prWorkOpenIn: ask` offers the run's window, this window, a `.code-workspace` or a live window, `its-window` asks nothing; another destination points one session at the brief by absolute path | todo |
 | `deck-address-pr-in-place` | GUIDE § What it does | The Deck card's Address PR re-seeds the workspace the run already has — no new worktree | todo |
-| `deck-notify-action-required` | SETTINGS § table | `agentFlow.notifyOnActionRequired` raises one notification when a run parks, coalesces several parking in one pass, and does not repeat until answered and parked again | todo |
-| `deck-activity-badge` | SETTINGS § table | The activity-bar badge counts waiting runs whether or not notifications are on and whether or not the Deck is open | todo |
-| `deck-copilot-no-session` | GUIDE § The Deck | A task launched under `agentFlow.agentProvider: copilot` still gets a card with the git + Jira + PR backbone but no session on it | todo |
+| `deck-notify-action-required` | SETTINGS § table | `agentFlow.notifyOnActionRequired` raises one notification when a run parks, coalesces several parking in one pass, and does not repeat until answered and parked again | e2e: notifyOnActionRequired raises one notification per park |
+| `deck-activity-badge` | SETTINGS § table | The activity-bar badge counts waiting runs whether or not notifications are on and whether or not the Deck is open | e2e: the activity-bar badge counts waiting runs |
+| `deck-copilot-no-session` | GUIDE § The Deck | A task launched under `agentFlow.agentProvider: copilot` still gets a card with the git + Jira + PR backbone but no session on it | e2e: a Copilot run gets the backbone but no session |
 | `deck-account-footer` | FORGES § 3. What GitLab and Bitbucket cannot answer | On GitHub the footer legend names the active `gh` account and offers a switch; on GitLab (`caps.accounts: false`) it names no identity and offers no switch | unit: test/unit/engine/forge/accounts.test.ts |
 | `deck-account-github-com-only` | FORGES § 3. What GitLab and Bitbucket cannot answer | Account enumeration reads only `github.com`, never a GHE host in the same `gh` config | untestable: documented absence |
 | `deck-usage-action` | TELEMETRY § Usage events | The card's usage action reads token totals from transcripts on demand; `agentFlow.deck.showTokenTotal` adds a Tokens on board header total (off by default) | unit: test/unit/engine/usage.test.ts |
@@ -368,7 +370,8 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `surface-press-enter` | SETTINGS § Where the session opens | Either way the prompt is pre-filled, not submitted — you press Enter | e2e: seeds the real Claude Code panel |
 | `surface-copilot-batch` | SETTINGS § Where the session opens | A batch under Copilot's `extension` surface seeds no chat panel (Copilot Chat is single-instance), writes every brief and shows a notification pointing at them | e2e: a Copilot extension-surface batch writes every brief |
 | `surface-all-launch-paths` | SETTINGS § Where the session opens | Both surfaces work for every launch path — take, batch, Explore, Notepad, Address PR | e2e: the opened window seeds the agent prompt |
-| `provider-x-live-cards` | SETTINGS § table | Neither Copilot nor Cursor sessions appear as live cards on the Deck, which reads Claude Code's session files | todo |
+| `provider-x-live-cards` | SETTINGS § table | A Copilot run's card carries no session, because the Deck reads Claude Code's session files and Copilot writes none | e2e: a Copilot run gets the backbone but no session |
+| `provider-x-live-cards-cursor` | SETTINGS § table | The same holds for Cursor | untestable: a Cursor session writes no `~/.claude/sessions` record, so the fixture would be the identical empty-registry setup as the Copilot row above — the harness cannot distinguish "Cursor wrote nothing" from "nothing ran" |
 | `provider-x-remote-control` | SETTINGS § Remote Control | Remote Control needs Claude Code; under Copilot, `on` refuses the launch and `ask` skips the picker | e2e: Copilot with Remote Control on refuses the launch |
 | `provider-x-marketplace` | GUIDE § The Marketplace | The Marketplace browses Claude Code's ecosystem whatever `agentFlow.agentProvider` says | todo |
 | `provider-x-review-button-label` | GUIDE § The Deck | The review button names the configured tool: Review with Claude Code / Cursor / Copilot | todo |
@@ -429,7 +432,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-retire-closed-after-hours` | SETTINGS § table | `agentFlow.retireClosedAfterHours` (24) keeps a closed run in Recently closed before its record is deleted | e2e: a run past its retire window is swept off the board |
 | `set-retire-in-place-after-hours` | SETTINGS § table | `agentFlow.retireInPlaceAfterHours` (0) is the window for a finished Explore or Notepad card | unit: test/unit/engine/retire.test.ts |
 | `set-inflight-show-all` | SETTINGS § table | `agentFlow.inflightShowAll` renders every run record as a card and retires nothing for being closed | todo |
-| `set-notify-on-action-required` | SETTINGS § table | `agentFlow.notifyOnActionRequired` notifies once when a run parks | todo |
+| `set-notify-on-action-required` | SETTINGS § table | `agentFlow.notifyOnActionRequired` notifies once when a run parks | e2e: coalescing several |
 | `set-orchestrator` | SETTINGS § table | `agentFlow.orchestrator` shows the Deck's Orchestrator drawer | e2e: an attached workflow is a real flow in the Workflows drawer, and Detach |
 | `set-never-auto-run` | ORCHESTRATOR_COMMANDS § Never, whatever you approved | `agentFlow.neverAutoRun` patterns outrank every approval | unit: test/unit/engine/orchestrator/neverAutoRun.test.ts |
 | `set-commands` | GUIDE § The Deck | `agentFlow.commands` entries (`id`, `label`, `run`, `detail`) feed the command picker; Save to settings appends to it | todo |
