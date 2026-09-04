@@ -889,3 +889,132 @@ test.fail("Approve on the card's own workflow block answers the gate", async ({}
     .toBe("approved");
   await shot(page, testInfo, "2 · answered");
 });
+
+// ── the picker ────────────────────────────────────────────────────────────────
+
+/** Three configured commands, so the picker has something to filter and to tick
+ *  more than once. `detail` is distinct from every label on purpose: the doc
+ *  claims search spans BOTH lines a row prints, and a query that matched a label
+ *  would not prove that. */
+const PICK_COMMANDS = [
+  { id: "e2e-deploy", label: "E2E Deploy", run: "echo deploy", detail: "stage the release" },
+  { id: "e2e-smoke", label: "E2E Smoke", run: "echo smoke", detail: "walk the launch pad" },
+  { id: "e2e-other", label: "E2E Other", run: "echo other" },
+];
+
+/** A one-node flow, so the drawer has a Canvas to open and the picker's Graph
+ *  bar renders. No edges: nothing here evaluates, arms or fires. */
+const PICK_FLOW = (key: string) => ({
+  id: "e2e-pick", name: "E2E Pick", armed: false, createdAt: Date.now(),
+  nodes: [{ id: "n1", x: 0, y: 0, join: "any", kind: "place", runKey: key, repo: "rocket" }],
+  edges: [],
+});
+
+// Mutation-checked: OrchestratorDrawer.tsx `addCommands` — `next = addCommandNode(next, …)` → `next = addCommandNode(flow, …)`, the exact "one node per trip" regression the fold exists to prevent; only the last tick survived, the flow held 2 nodes instead of 3 and the count assertion failed.
+test("Add command is a search-and-tick list that creates one node per tick in a single write", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot({ "agentFlow.commands": PICK_COMMANDS });
+  seedCard(sb, "E2E-PICK");
+  seedFlow(sb, PICK_FLOW("E2E-PICK"));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-PICK");
+  await block.getByRole("button", { name: /open in workflows/i }).click();
+  await expect(deck.frame.locator(".orch-hd")).toBeVisible({ timeout: 30_000 });
+
+  // The trigger is a `MultiCombo`, not a menu (combo.tsx:145-155): a button that
+  // opens a listbox, addressed by its aria-label so the "+ Add place…" combo
+  // beside it cannot be mistaken for it.
+  await deck.frame.getByRole("button", { name: "Add a command" }).click();
+  const pop = deck.frame.locator(".combo-pop");
+  await expect(pop).toBeVisible({ timeout: 15_000 });
+  // One tickable row per configured command, and NOT one for free text — that is
+  // the picker's footer action (combo.tsx:206-215), which is the doc's own point.
+  await expect(pop.getByRole("option")).toHaveCount(3);
+  await expect(pop.locator(".combo-foot").getByRole("button", { name: "Free-text command…" })).toBeVisible();
+  await shot(page, testInfo, "3 · three tickable commands, free text in the footer");
+
+  // Search spans both printed lines: "release" appears only in E2E Deploy's
+  // `detail`, so a label-only filter would find nothing here.
+  const search = pop.getByLabel("Filter commands…");
+  await search.fill("release");
+  await expect(pop.getByRole("option")).toHaveCount(1);
+  await pop.getByRole("option").first().click();
+  await expect(pop.getByRole("option").first()).toHaveAttribute("aria-selected", "true");
+
+  // Ticks accumulate across queries — the whole reason this is a list and not a
+  // menu. A second query, a second tick, one Add.
+  await search.fill("Smoke");
+  await expect(pop.getByRole("option")).toHaveCount(1);
+  await pop.getByRole("option").first().click();
+  await expect(pop.locator(".combo-n")).toHaveText("2 selected");
+  await shot(page, testInfo, "4 · two ticked across two queries");
+  await pop.locator(".combo-add").click();
+
+  // ONE node per tick. `commit` orders values by the options list, not by tick
+  // order (combo.tsx:136-141), so deploy precedes smoke whatever was clicked
+  // first.
+  await expect.poll(() => readFlow(sb, "e2e-pick").nodes.length, { timeout: 30_000 }).toBe(3);
+  const nodes = readFlow(sb, "e2e-pick").nodes as { id: string; kind: string; commandId?: string; y: number }[];
+  expect(nodes.slice(1).map((n) => [n.kind, n.commandId])).toEqual([
+    ["command", "e2e-deploy"],
+    ["command", "e2e-smoke"],
+  ]);
+  // A SINGLE write, and this is the observable difference: `addCommandNode`
+  // mints both `id` and `y` from the flow it is handed (orchestratorRule.ts:765-773),
+  // so two independent writes off the same flow would collide on both. Distinct
+  // ids and distinct rows is the fold having happened.
+  expect(nodes[1].id).not.toBe(nodes[2].id);
+  expect(nodes[1].y).not.toBe(nodes[2].y);
+  await shot(page, testInfo, "5 · two command nodes on the canvas");
+});
+
+// Mutation-checked: OrchestratorDrawer.tsx `attachMany` — folded over `flow` instead of its own output, the same break as the command picker's; only one place node landed and the count assertion failed.
+test("Add place is a search-and-tick list too, ticking two places in one write", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot();
+  // Two more cards, so `placeCandidates` (OrchestratorDrawer.tsx:124-136) has
+  // two rows: one per (run, repo) pair not already in the flow. The flow's own
+  // node already holds E2E-PICK/rocket, so that pair is deduped out.
+  seedCard(sb, "E2E-PICK");
+  seedCard(sb, "E2E-PLACE1");
+  seedCard(sb, "E2E-PLACE2");
+  seedFlow(sb, PICK_FLOW("E2E-PICK"));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-PICK");
+  await block.getByRole("button", { name: /open in workflows/i }).click();
+  await expect(deck.frame.locator(".orch-hd")).toBeVisible({ timeout: 30_000 });
+
+  // The place picker lives on the LIST view's Add bar only
+  // (OrchestratorDrawer.tsx:2205-2212) — the Canvas's Graph bar carries Tidy,
+  // Notify, Gate, planned work and the command picker, but no place one. The
+  // drawer opens on Canvas, so switch views first. (`+ Add place…` is also
+  // hidden outright while a TEMPLATE is being edited; this is a workflow.)
+  await deck.orchFlowViewTab("List").click();
+  await deck.frame.getByRole("button", { name: "Add a place" }).click();
+  const pop = deck.frame.locator(".combo-pop");
+  await expect(pop).toBeVisible({ timeout: 15_000 });
+  await expect(pop.getByRole("option")).toHaveCount(2);
+  // The repo lives on the row's SECOND line, and the search reaches it — "a
+  // place's repo is findable and not merely visible".
+  await pop.getByLabel("Filter places…").fill("rocket");
+  await expect(pop.getByRole("option")).toHaveCount(2);
+  await pop.getByRole("option").nth(0).click();
+  await pop.getByRole("option").nth(1).click();
+  await expect(pop.locator(".combo-n")).toHaveText("2 selected");
+  await pop.locator(".combo-add").click();
+
+  await expect.poll(() => readFlow(sb, "e2e-pick").nodes.length, { timeout: 30_000 }).toBe(3);
+  const nodes = readFlow(sb, "e2e-pick").nodes as { id: string; kind: string; runKey?: string; y: number }[];
+  expect(nodes.slice(1).map((n) => n.kind)).toEqual(["place", "place"]);
+  expect(new Set(nodes.slice(1).map((n) => n.runKey))).toEqual(new Set(["E2E-PLACE1", "E2E-PLACE2"]));
+  expect(nodes[1].id).not.toBe(nodes[2].id);
+  await shot(page, testInfo, "6 · two place nodes from one Add");
+});

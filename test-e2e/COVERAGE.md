@@ -18,9 +18,9 @@ This heading — and every `todo` — is removed in that plan's last task.
 
 | id | doc | claim | proof |
 |----|-----|-------|-------|
-| `sidebar-two-tabs` | GUIDE § What it does | The sidebar panel has two tabs, Tasks and Notepad; the project key and your name live in the view title bar | todo |
-| `sidebar-window-gauge` | GUIDE § What it does | The open-window gauge sits at the end of the tab row | todo |
-| `sidebar-explore-button` | GUIDE § What it does | Explore sits at the end of the tab row beside the gauge | todo |
+| `sidebar-two-tabs` | GUIDE § What it does | The sidebar panel has two tabs, Tasks and Notepad; the source's scope (a Jira install's project key) and your name live in the view title bar | e2e: the sidebar panel has two tabs |
+| `sidebar-window-gauge` | GUIDE § What it does | The open-window gauge sits at the end of the tab row | e2e: the open-window gauge sits at the end of the tab row |
+| `sidebar-explore-button` | GUIDE § What it does | Explore sits at the end of the tab row beside the gauge, on both tabs | e2e: Explore sits at the end of the tab row beside the gauge |
 | `task-pool-filter-lenses` | GUIDE § What it does | The pool renders the filter tabs My sprint · Unassigned · Mine · Sprint · Backlog, but only those the connector declares in `caps.supportedFilters` (the fixture connector shows no Unassigned, Sprint or Backlog) | e2e: only the lenses the connector declares render |
 | `task-default-filter` | SETTINGS § table | `agentFlow.defaultFilter` picks the lens the panel opens on (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`) | e2e: defaultFilter picks the lens the panel opens on |
 | `task-size-lens` | GUIDE § What it does | A size lens (S/M/L by original estimate, an 8-hour workday) renders only when the connector has estimates and `agentFlow.filters.size` is on | e2e: the size lens renders only when the connector has estimates |
@@ -29,7 +29,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `task-title-search` | README § Tasks — the pool | The fuzzy title search narrows the pool (a misspelt title still matches); `agentFlow.filters.search: false` hides the box | e2e: title search narrows the pool fuzzily |
 | `task-card-detail` | README § Tasks — the pool | Clicking a card opens its detail panel with the ticket's description | e2e: the detail panel renders the task's description |
 | `task-detail-fetch-failure` | CONNECTORS § 2. `TaskProvider` | A task whose detail cannot be fetched shows an error toast, not a blank panel, and the card stays in the pool | e2e: a task whose detail cannot be fetched shows a toast, not a blank panel |
-| `task-repo-chips-inference` | README § Tasks — the pool | The repos a ticket touches are pre-selected from its components, labels and text matched against local checkouts | todo |
+| `task-repo-chips-inference` | README § Tasks — the pool | The repos a ticket touches are pre-selected from its components, labels and text matched against local checkouts — one reason each, in that precedence (`confirmedServices` keeps only the component matches where a ticket has any) | e2e: a card's repos arrive selected from the ticket's components, labels and text |
 | `task-component-push` | CONNECTORS § 3. The capability table | A repo chip not on the ticket is dashed with a `↑` that pushes it as a component; the delta the picker produced is what gets written | e2e: records the delta the picker produced |
 | `task-take` | README § Tasks — the pool | Take writes a `.pick-task/TASK.md` brief into each repo, opens a window, and lands the plan handshake | e2e: lands the brief + plan handshake on disk |
 | `task-change-status` | GUIDE § What it does | Changing a card's status records the transition through the connector | e2e: records the transition and the claude-code provenance label |
@@ -38,7 +38,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `task-status-field-retry` | CONNECTORS § 2. `TaskProvider` | A `TaskWriteError` with `retryWith` re-prompts only the field it names, and the second attempt carries the answer | e2e: a rejected write re-prompts only the field it names |
 | `task-provenance-label` | GUIDE § What it does | A status change stamps the provenance label (default `claude-code`) when `agentFlow.stampLabelOnWrite` is on | e2e: changing a card's status records the transition and the claude-code provenance label |
 | `task-provenance-custom-label` | SETTINGS § table | `agentFlow.provenanceLabel` names the label that is stamped (`set-stamp-label-on-write` covers switching the stamp off) | e2e: provenanceLabel names the label that is stamped |
-| `task-assign-to-me` | CONNECTORS § 2. `TaskProvider` | Add to my sprint assigns the task to you first; a connector with no assignment concept accepts the call and does nothing | todo |
+| `task-assign-to-me` | CONNECTORS § 2. `TaskProvider` | Add to my sprint pairs its sprint write with an assignment to you, passing the `me()` id through so the second lookup cannot disagree; a connector with no assignment concept accepts the call and does nothing (that half: `unit: test/unit/tasks/agileAccelerator/provider.test.ts`) | e2e: Add to my sprint pairs the sprint write with an assignment to you |
 | `task-add-to-my-sprint` | CONNECTORS § 3. The capability table | Add to my sprint records `addToSprint` and stamps the provenance label | e2e: records addToSprint and stamps the provenance label |
 | `task-add-to-my-sprint-assigned-elsewhere` | CONNECTORS § 3. The capability table | Add to my sprint is absent on a task assigned to someone else | e2e: Add to my sprint is absent on a task assigned to someone else |
 | `task-add-to-sprint-name-only-identity` | CONNECTORS § 2. `TaskProvider` | A `me()` with `id: ""` refuses the sprint write with "Couldn't resolve your {label} account." and writes nothing | e2e: a name-only identity refuses the sprint write and says so |
@@ -108,15 +108,15 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `deck-ended-turn-parks` | GUIDE § The Deck | An ended turn reads `ended turn` and parks in In progress's `parked` lane, NOT Action required, which admits only `blocked` and `exited` (`deriveBucket`) — the row above pins the stale doc sentence with `test.fail` | e2e: an ended turn reads ended turn and parks |
 | `deck-fixes-needed-lane` | GUIDE § The Deck | A PR with failing required checks, requested changes or a conflict pulls its card into In review's `fixes needed` lane even while the session is still working | e2e: failing required checks pull a working session into fixes needed |
 | `deck-open-action` | GUIDE § The Deck | Open focuses the window already running a task rather than opening a duplicate | e2e: Open focuses an already-open window instead of duplicating it |
-| `deck-open-action-fresh` | GUIDE § The Deck | Open opens the task's window fresh when none is already holding it | todo |
-| `deck-open-action-per-session` | GUIDE § The Deck | On a per-session card Open and Diff act on that session's own directory | todo |
+| `deck-open-action-fresh` | GUIDE § The Deck | Open opens the task's window fresh when none is already holding it | e2e: Open opens the task's window fresh when no window is holding it |
+| `deck-open-action-per-session` | GUIDE § The Deck | On a per-session card Open and Diff act on that session's own directory | e2e: on a per-session card Open and Diff act on that session's own directory |
 | `deck-diff-action` | GUIDE § The Deck | Diff shows the working diff | e2e: Diff opens the working diff |
 | `deck-card-overflow-menu` | GUIDE § The Deck | Forget removes the run's record without touching its neighbour | e2e: forget removes a run's record without touching its neighbour |
 | `deck-card-overflow-rows` | GUIDE § The Deck | The card's overflow offers Open in Jira (the task source's own label) and Forget — today the card-detail drawer's `More` disclosure, not a ⋯ on the card | e2e: the overflow menu offers Open in Jira and Forget |
 | `deck-grouping-lens` | GUIDE § The Deck | The board opens one card per session; switching the header control to Workspaces gives one card per launched task with sessions nested, and the choice sticks across a reopen (`agentFlow.deckGrouping`) | e2e: the Sessions / Workspaces grouping sticks across a reopen |
 | `deck-refresh` | GUIDE § The Deck | The header refresh reports when it last synced (`synced Ns ago`) | e2e: the refresh control reports when it last synced |
 | `deck-card-facts` | GUIDE § The Deck | Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, the Jira status, and Open / Diff | e2e: the Deck card shows the PR the GitHub forge reports |
-| `deck-notepad-marker` | GUIDE § The Deck | A note started from the Notepad sits among the tickets marked `notepad` | todo |
+| `deck-notepad-marker` | GUIDE § The Deck | A note started from the Notepad sits among the tickets marked `notepad` | e2e: a note started from the Notepad sits among the tickets marked notepad |
 | `deck-run-retirement` | GUIDE § The Deck | Run records retire once a task is provably over; uncommitted or unpushed work always stops retirement, and retirement deletes only the record, never a worktree, branch or commit | e2e: a run past its retire window is swept off the board and out of the store |
 | `deck-retire-windows` | SETTINGS § table | `agentFlow.retireFinishedAfterHours`, `agentFlow.retireClosedAfterHours` and `agentFlow.retireAbandonedAfterDays` each set a window, `0` retires on sight or disables | unit: test/unit/engine/retire.test.ts |
 | `deck-clear-stale` | GUIDE § The Deck | Clear stale appears in the header when records are only waiting out their window, takes them on the spot, and leaves live runs alone | e2e: clear stale leaves live runs alone |
@@ -158,7 +158,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `review-row-play-glyph` | GUIDE § The Deck | The launch is also a play glyph at the end of every row, so clearing a queue needs no expanding | e2e: a row already being reviewed cannot be launched |
 | `review-row-in-flight` | GUIDE § The Deck | A row already being reviewed shows the loading mark and cannot be launched twice | e2e: a row already being reviewed cannot be launched twice |
 | `review-row-no-checkout` | GUIDE § The Deck | A row whose repo is not checked out locally is greyed but live, and says why on hover | e2e: a row whose repo is not checked out is greyed but live, and says why |
-| `review-open-in` | SETTINGS § table | `agentFlow.reviewOpenIn` ships pinned to a new window; `ask`, `this-window` and `pick-existing` send the session elsewhere while the review still runs in its own worktree, named by absolute path in the prompt | todo |
+| `review-open-in` | SETTINGS § table | `agentFlow.reviewOpenIn` ships pinned to a new window; `ask`, `this-window` and `pick-existing` send the session elsewhere while the review still runs in its own worktree, named by absolute path in the prompt | e2e: reviewOpenIn this-window seeds the session here and names the worktree by absolute path |
 | `review-modes` | SETTINGS § table | One Full review mode ships; adding an entry to `agentFlow.reviewRequestModes` makes the launch ask which to seed (pinning one is `set-review-request-mode`; the empty-prompt default is `set-review-request-prompt`) | e2e: a custom review mode makes the launch ask which to seed |
 | `review-batch-select` | GUIDE § The Deck | Select turns carets into checkboxes, clicking picks a row, and the bar launches one session per PR with one worktree and one run record each | e2e: one worktree and one run record per PR |
 | `review-batch-select-range` | GUIDE § The Deck | Shift-click takes the whole range of rows between the last one picked and this one | e2e: shift-click selects a range of rows |
@@ -236,7 +236,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `doctor-actions` | TELEMETRY § Usage events | Picking a row runs its action — a command, a setting (opens Settings on that id), an extension or a URL; Copy report fills the clipboard and writes nothing else | e2e: picking a setting row opens Settings on that id |
 | `doctor-gh-where` | ORCHESTRATOR_COMMANDS § Numbers | Doctor says where `gh` was found, the case a bare launchd PATH makes invisible | unit: test/unit/engine/doctor.test.ts |
 | `command-refresh` | TELEMETRY § Usage events | Refresh re-fetches the pool for the current lens | e2e: reordering the pool survives a refresh, and reset |
-| `command-take-task` | TELEMETRY § Usage events | The `agentFlow.takeTask` palette command takes a task without the card | todo |
+| `command-take-task` | TELEMETRY § Usage events | The `agentFlow.takeTask` palette command takes a task without the card | e2e: the takeTask palette command takes a task without the card |
 
 ## Orchestrator
 
@@ -297,7 +297,8 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `orch-command-output-refusal` | ORCHESTRATOR_COMMANDS § flow:openOutput | With nothing journaled the Output action is a toast naming which of three things is true, never a blank tab | e2e: with nothing journaled the output action is a toast |
 | `orch-command-output-refusal-kinds` | ORCHESTRATOR_COMMANDS § flow:openOutput | The other two refusals are distinguished: this edge never ran, or it ran without capturing output | unit: test/unit/engine/orchestrator/journal.test.ts |
 | `orch-save-to-settings` | ORCHESTRATOR_COMMANDS § Saving a command | Save to settings appends the command to `agentFlow.commands` in the scope that holds it (seeding the shipped example first), leaves the node as free text, then shows `Saved in settings as "…"` | e2e: Save to settings writes agentFlow.commands |
-| `orch-picker` | ORCHESTRATOR_COMMANDS § The picker | + Add command… and + Add place… are search-and-tick lists that create one node per tick in a single write; free text is a footer action | todo |
+| `orch-picker` | ORCHESTRATOR_COMMANDS § The picker | + Add command… is a search-and-tick list — search spans both printed lines — that creates one node per tick in a single write; free text is a footer action, never a tickable row | e2e: Add command is a search-and-tick list that creates one node per tick in a single write |
+| `orch-picker-places` | ORCHESTRATOR_COMMANDS § The picker | + Add place… is the same search-and-tick list, its search reaching the repo on the row's second line, and Add creates one place node per tick in a single write | e2e: Add place is a search-and-tick list too |
 | `orch-dry-run` | GUIDE § The Deck | A dry run reports waiting gates in words ("it is waiting on your answer") | ct: test-ct/OrchestratorDrawer.dryRun.spec.tsx |
 | `orch-dry-run-gate-wording` | GUIDE § The Deck | A rule waiting on an unanswered gate reads "waiting for your answer" in the dry run | e2e: a dry run reports a waiting gate in words |
 | `orch-templates` | ORCHESTRATOR_COMMANDS § Templates and workflows | A template is a flow with no ticket, saved for reuse; attaching one instantiates it disarmed against a card, binding the ticket to every planned node | e2e: attaching a template shows it disarmed |
@@ -366,7 +367,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 |----|-----|-------|-------|
 | `forge-selection` | FORGES § 1. What a forge is | `agentFlow.forge` selects `github` (default, via `gh`), `gitlab` (via `glab`) or `bitbucket` (via `atlassian-cli`); a change requires a window reload | e2e: the Deck card shows the PR the GitHub forge |
 | `forge-registry` | FORGES § 1. What a forge is | `FORGE_IDS` derives from the registry, and the manifest, telemetry allowlist and registry test all use it | unit: test/unit/engine/forge/registry.test.ts |
-| `forge-cli-requirement` | README § Requirements | The forge CLI is optional: without it the Deck falls back to git + Jira | todo |
+| `forge-cli-requirement` | README § Requirements | The forge CLI is optional: without it the Deck falls back to git + Jira, with a legend note naming the missing CLI and no read attempted | e2e: without the forge CLI the Deck falls back to the git and task-source backbone |
 | `forge-cli-resolution` | FORGES § 4. Conventions | The CLI is located through `resolveBin`, whose Homebrew/MacPorts fallbacks cover the bare launchd PATH | unit: test/unit/engine/pr/which.test.ts |
 | `forge-probe` | FORGES § 4. Conventions | `probe()` asks a global question (CLI present, signed in) and cannot see a per-repository answer | unit: test/unit/engine/forge/seam.test.ts |
 | `forge-fetch-contract` | FORGES § 4. Conventions | `null` from `reviews.search()` means the attempt failed, `[]` means an empty queue; `{ ok: false }` from `prs.fetch()` means failure and `{ ok: true, facts: null }` means no PR; `branchCi` answers `unknown` rather than throwing, and `unknown` is not green | unit: test/unit/engine/pr/store.failure.test.ts |
@@ -423,7 +424,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 |----|-----|-------|-------|
 | `set-task-source` | SETTINGS § table | `agentFlow.taskSource` picks the connector (`jira` default, `agileAccelerator`, `fixture` under the E2E env) and requires a reload | e2e: a real host boots the extension and the pool renders |
 | `set-jira-base-url` | README § Settings | `agentFlow.jira.baseUrl` is the Jira Cloud site the connector signs in to and reads from | e2e: signing in round-trips through SecretStorage and signing out |
-| `set-jira-project` | README § Settings | `agentFlow.jira.project` is the project key the pool is built from and the key a local card's branch is matched against | todo |
+| `set-jira-project` | README § Settings | `agentFlow.jira.project` is the project key the pool is built from and the key a local card's branch is matched against (the pool half is Jira-only, which the fixture-connector lane cannot reach) | e2e: shows an inferred key only when a Jira project is set |
 | `set-agile-accelerator-instance-url` | package.json | `agentFlow.agileAccelerator.instanceUrl` is the Lightning URL the connector links work items to | e2e: reads work items through a real `sf` |
 | `set-agile-accelerator-team` | package.json | `agentFlow.agileAccelerator.team` bounds every query to your scrum team | e2e: the Agile Accelerator connector reads work items through |
 | `set-agile-accelerator-target-org` | package.json | `agentFlow.agileAccelerator.targetOrg` names the `sf` org alias, blank for the default org | e2e: Agile Accelerator connector reads work items through a real |
@@ -439,7 +440,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-child-worktrees` | package.json | `agentFlow.childWorktrees` offers a worktree per child or one orchestrator session when a ticket has children | e2e: taking a parent offers its tree |
 | `set-track-open-windows` | SETTINGS § table | `agentFlow.trackOpenWindows` lists your open Agent Flow windows as destinations; off, no live windows are read | unit: test/unit/engine/openTarget.test.ts |
 | `set-default-filter` | SETTINGS § table | `agentFlow.defaultFilter` is the lens the panel opens on | e2e: defaultFilter picks the lens the panel opens on |
-| `set-refetch-interval-minutes` | package.json | `agentFlow.refetchIntervalMinutes` refetches the current lens in the background without a spinner, stops while hidden, `0` turns it off | todo |
+| `set-refetch-interval-minutes` | package.json | `agentFlow.refetchIntervalMinutes` refetches the current lens in the background without a spinner, stops while hidden, `0` turns it off | unit: test/unit/tasksView.test.ts |
 | `set-filters-size` | GUIDE § What it does | `agentFlow.filters.size: false` hides the size lens | e2e: filters.size false hides the size lens even when the connector has estimates |
 | `set-filters-status` | GUIDE § What it does | `agentFlow.filters.status: false` hides the status chip row | e2e: filters.status false hides the status lens |
 | `set-filters-repo` | GUIDE § What it does | `agentFlow.filters.repo: false` hides the repo multiselect | e2e: filters.repo false hides the repo lens |
@@ -453,15 +454,15 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-batch-launch-confirm-threshold` | GUIDE § What it does | `agentFlow.batchLaunchConfirmThreshold` (default 6): larger task or review batches confirm first | e2e: a batch larger than the threshold asks first |
 | `set-explore-prompt` | package.json | `agentFlow.explorePrompt` is the legacy Explore prompt, migrated into the knowledge action when customized | unit: test/unit/config.test.ts |
 | `set-explore-mode` | SETTINGS § table | `agentFlow.exploreMode` pins one Explore action or `ask` shows the picker | e2e: an explorePrompts override lands in the plan |
-| `set-explore-prompts-jira-ticket` | package.json | `agentFlow.explorePrompts.jiraTicket` is the prompt for Open a Jira ticket | todo |
-| `set-explore-prompts-knowledge` | package.json | `agentFlow.explorePrompts.knowledge` is the prompt for Enhance knowledge / flow | todo |
-| `set-explore-prompts-debug` | package.json | `agentFlow.explorePrompts.debug` is the prompt for Debug | todo |
+| `set-explore-prompts-jira-ticket` | package.json | `agentFlow.explorePrompts.jiraTicket` is the prompt for Open a Jira ticket | e2e: each explorePrompts entry is the prompt its own Explore kind seeds |
+| `set-explore-prompts-knowledge` | package.json | `agentFlow.explorePrompts.knowledge` is the prompt for Enhance knowledge / flow | e2e: each explorePrompts entry is the prompt its own Explore kind seeds |
+| `set-explore-prompts-debug` | package.json | `agentFlow.explorePrompts.debug` is the prompt for Debug | e2e: each explorePrompts entry is the prompt its own Explore kind seeds |
 | `set-explore-prompts-general` | package.json | `agentFlow.explorePrompts.general` is the prompt for General, and the one a Notepad run borrows | e2e: an explorePrompts override lands in the plan |
-| `set-explore-prompts-supervise` | package.json | `agentFlow.explorePrompts.supervise` is the prompt for Supervise running tasks, whose brief lists your other active tasks | todo |
+| `set-explore-prompts-supervise` | package.json | `agentFlow.explorePrompts.supervise` is the prompt for Supervise running tasks, whose brief lists your other active tasks | e2e: each explorePrompts entry is the prompt its own Explore kind seeds |
 | `set-explore-prompts-verify` | package.json | `agentFlow.explorePrompts.verify` is the read-only prompt for Verify on an environment with `{env}` | e2e: a verify session is seeded read-only against the chosen environment |
-| `set-explore-slack-dm` | package.json | `agentFlow.exploreSlackDm` per action asks the session to send a Slack DM summary when it ends (off by default) | todo |
+| `set-explore-slack-dm` | package.json | `agentFlow.exploreSlackDm` per action asks the session to send a Slack DM summary when it ends (off by default) | e2e: exploreSlackDm asks the session for a Slack DM when it ends |
 | `set-environments` | SETTINGS § table | `agentFlow.environments` are offered by Verify on an environment, plus Custom… | e2e: Verify on an environment asks which, from the environments setting plus Custom |
-| `set-deck-show-token-total` | package.json | `agentFlow.deck.showTokenTotal` adds a Tokens on board header total (off by default) | todo |
+| `set-deck-show-token-total` | package.json | `agentFlow.deck.showTokenTotal` adds a Tokens on board header total (off by default) | e2e: showTokenTotal adds a Tokens on board total to the header |
 | `set-open-agents` | SETTINGS § table | `agentFlow.openAgents` shows every Claude Code session on this machine, on cards and as `local` cards | e2e: openAgents off removes local cards without reopening the panel |
 | `set-deck-grouping` | SETTINGS § table | `agentFlow.deckGrouping`: `agents` (one card per session) or `workspaces`; the board's control writes it | e2e: the Sessions / Workspaces grouping sticks across a reopen |
 | `set-retire-finished-after-hours` | SETTINGS § table | `agentFlow.retireFinishedAfterHours` (24) keeps landed work on the board after its last session closes | unit: test/unit/engine/retire.test.ts |
@@ -480,7 +481,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-pr-review-auto-fix` | SETTINGS § table | `agentFlow.prReviewAutoFix: false` makes the Address PR session assess only | e2e: prReviewAutoFix off seeds an assess-only prompt |
 | `set-pr-review-prompt` | SETTINGS § table | `agentFlow.prReviewPrompt` is the Address PR kick-off prompt, with a fixing instruction appended when auto-fix is on | e2e: a custom prReviewPrompt is what gets seeded |
 | `set-review-requests` | SETTINGS § table | `agentFlow.reviewRequests` shows the Deck's review-requests strip | e2e: reviewRequests off hides |
-| `set-review-requests-always-visible` | package.json | `agentFlow.reviewRequestsAlwaysVisible: false` hides the strip while no PR is waiting | todo |
+| `set-review-requests-always-visible` | package.json | `agentFlow.reviewRequestsAlwaysVisible: false` hides the strip while no PR is waiting | e2e: reviewRequestsAlwaysVisible false hides the strip while no PR is waiting |
 | `set-review-requests-ttl-seconds` | SETTINGS § table | `agentFlow.reviewRequestsTtlSeconds` (300, minimum 60) is how stale the cached queue may be | unit: test/unit/engine/review/store.test.ts |
 | `set-review-writes` | SETTINGS § table | `agentFlow.reviewWrites` (off) allows approve / comment / request changes from the Deck | e2e: reviewWrites off shows no submit buttons |
 | `set-merge-writes` | SETTINGS § table | `agentFlow.mergeWrites` (off) shows Merge on a provably ready card | e2e: mergeWrites off shows no Merge button on a ready PR |
@@ -489,7 +490,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-review-request-mode` | SETTINGS § table | `agentFlow.reviewRequestMode` pins one review mode so no picker shows | e2e: launching a review opens its worktree |
 | `set-review-open-in` | SETTINGS § table | `agentFlow.reviewOpenIn` ships as `new-window`; `this-window`, `pick-existing` or `ask` | e2e: launching a review opens its worktree, brief |
 | `set-pr-work-open-in` | SETTINGS § table | `agentFlow.prWorkOpenIn`: `ask` or `its-window` for Fix CI / Resolve conflict / Address review | e2e: prWorkOpenIn its-window asks nothing |
-| `set-review-request-prompt` | package.json | `agentFlow.reviewRequestPrompt` overrides the review prompt; empty uses the built-in default | todo |
+| `set-review-request-prompt` | package.json | `agentFlow.reviewRequestPrompt` overrides the review prompt, migrated into the Full review mode; empty uses the built-in default (`review-with-tool` proves that half) | e2e: a customized reviewRequestPrompt is what the review launch seeds |
 | `set-telemetry-enabled` | TELEMETRY § Turning it off | `agentFlow.telemetry.enabled` (true) is re-read per event; off discards the in-memory queue | unit: test/unit/telemetry/telemetry.test.ts |
 | `open-in-pick-existing` | SETTINGS § Where a task opens | `pick-existing` opens the task into a chosen `.code-workspace`: same-name folders are skipped and named in the toast, new repos are added only after approval, declining leaves the file byte-identical | e2e: pick-existing adds only approved repos |
 | `open-in-this-window` | SETTINGS § Where a task opens | `this-window` never replaces what is open; a window Agent Flow cannot name is not offered This window, and `this-window` opens a new window instead | e2e: this-window in a window it cannot name |
@@ -526,7 +527,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `priv-secretstorage` | PRIVACY | Jira credentials live in VS Code SecretStorage, never in `settings.json` | e2e: signing in round-trips through SecretStorage and signing out re-gates |
 | `priv-read-only-default` | README § Privacy | Jira and the forge are read-only by default; the only writes are ones you trigger — with `agentFlow.reviewWrites` off, an expanded review row offers no way to write at all (`set-merge-writes` is the merge half, `priv-read-only-review-modal` the modal) | e2e: reviewWrites off shows no submit buttons |
 | `priv-read-only-review-modal` | README § Privacy | With `agentFlow.reviewWrites` on, a review submit reaches the forge only through a modal confirmation | e2e: Approve confirms with the verb, repo and number before gh pr review runs |
-| `priv-open-agents-reads` | PRIVACY | With `agentFlow.openAgents` on the Deck reads `~/.claude/sessions`, and with `agentFlow.prFacts` also on runs `gh pr list` in a live session's directory even one you never pointed it at | todo |
+| `priv-open-agents-reads` | PRIVACY | With `agentFlow.openAgents` on the Deck reads `~/.claude/sessions`, and with `agentFlow.prFacts` also on runs `gh pr list` in a live session's directory even one you never pointed it at | e2e: a live session's own directory gets a gh pr list of its own |
 | `priv-review-strip-shared-gate` | PRIVACY | `agentFlow.reviewRequests` only produces a forge read while `agentFlow.prFacts` is on | e2e: turning prFacts off drops PR facts and darkens the review strip live |
 | `priv-doctor-probes` | PRIVACY | Doctor makes two authenticated GETs and runs `gh auth status`, and writes nothing except the clipboard when asked to copy | e2e: Copy report fills the clipboard and writes nothing else |
 | `priv-pick-task-excluded` | PRIVACY | Briefs go in a git-excluded `.pick-task/`, so they are never committed | e2e: the brief directory is git-excluded |

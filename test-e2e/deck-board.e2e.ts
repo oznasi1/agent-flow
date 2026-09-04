@@ -4,7 +4,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { makeSandbox, FIXTURE_TASK, type Sandbox } from "./_helpers/sandbox";
 import { launchHost, openTasksView, tasksFrame } from "./_helpers/host";
-import { seedSession, seedTranscript } from "./_helpers/claudeState";
+import { encodeProjectDir, seedSession, seedTranscript } from "./_helpers/claudeState";
 import { Deck } from "./_helpers/po/deck";
 import { shot } from "./_helpers/shot";
 
@@ -330,4 +330,222 @@ test("the refresh control reports when it last synced", async ({}, testInfo) => 
   await expect(synced).toHaveText(/^(syncing…|synced [0-2]s ago)$/, { timeout: 30_000 });
   await expect(synced).toHaveText(/^synced \d+s ago$/, { timeout: 60_000 });
   await shot(launched.page, testInfo, "13 · re-synced on demand");
+});
+
+// Mutation-checked: deckView.ts `inspect`'s open branch — `openInEditor(target)` → `openInEditor(path.join(target, "..", "nope"))`; `vscode.openFolder` on a path that does not exist opened no window and the window-count assertion failed
+test("Open opens the task's window fresh when no window is holding it", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = makeSandbox();
+  seedRun(sb, baseRun(sb, "E2E-14", { createdAt: Date.now() }));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  await expect(deck.card("E2E-14")).toBeVisible({ timeout: 60_000 });
+
+  // Nothing holds the run's repo: this window is empty (launchHost passes no
+  // folder), so presence reports no window for it and the button is NOT `live`
+  // — the other half of `deck-board`'s focus test above, where it is.
+  const open = deck.openButton("E2E-14");
+  await expect(open).not.toHaveClass(/\blive\b/);
+  expect(app.windows().length).toBe(1);
+  await shot(page, testInfo, "14 · Open, with no window holding the run");
+
+  // `openInEditor` (engine/workspace.ts:368) shells `open -a` first — the
+  // sandbox's shim makes that fail (sandbox.ts) — and falls back to
+  // `vscode.openFolder{forceNewWindow:true}`, which mints a window inside this
+  // same Electron app where Playwright can see it.
+  const appeared = app.waitForEvent("window", { timeout: 60_000 });
+  await open.click();
+  const opened = await appeared;
+  await opened.locator(".activitybar").waitFor({ timeout: 60_000 });
+  expect(app.windows().length).toBe(2);
+  // And it is the RUN's own directory: the workbench titles a folder window
+  // after its root.
+  await expect.poll(() => opened.title(), { timeout: 30_000 }).toContain("rocket");
+  await shot(page, testInfo, "15 · a fresh window on the run's repo");
+});
+
+// Mutation-checked: DeckApp.tsx:547-552 — the `...(agent?.repo ? { repo: agent.repo } : {})` spread dropped from BOTH the Open and the Diff message; `inspect` fell back to `run.repos[0]` (rocket) and both the diff-title and the window-title assertions failed
+test("on a per-session card Open and Diff act on that session's own directory", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = makeSandbox();
+  const telemetry = secondRepo(sb, "telemetry");
+  // ONE run spanning two repos, `rocket` first — so a card acting on
+  // `run.repos[0]` would act on rocket, and only a card reading its own
+  // session's `repo` can act on telemetry (types.ts:281-289 `CardAgent.repo`).
+  seedRun(sb, baseRun(sb, "E2E-15", {
+    createdAt: Date.now(),
+    repos: [
+      { name: "rocket", path: sb.repoPath, isGit: true, branch: "main" },
+      { name: "telemetry", path: telemetry, isGit: true, branch: "main" },
+    ],
+  }));
+  // An uncommitted edit in telemetry ONLY: `openTaskDiff` toasts "no changes"
+  // for a clean repo, so this is also what makes a wrong-directory Diff
+  // observable rather than merely different.
+  fs.appendFileSync(path.join(telemetry, "README.md"), "\nThe feed points at the live endpoint now.\n");
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  // Two sessions in the one run, in two directories AND two columns — the
+  // Sessions lens gives one card per column (`projectCards`, deckCards.ts:76-88),
+  // so two columns is what makes two per-session cards at all.
+  const pid = launched.app.process().pid!;
+  seedSession(sb, { pid, cwd: sb.repoPath, id: "e2e-rocket" });
+  seedTranscript(sb, { cwd: sb.repoPath, sessionId: "e2e-rocket", shape: "working" });
+  seedSession(sb, { pid, cwd: telemetry, id: "e2e-telemetry" });
+  seedTranscript(sb, { cwd: telemetry, sessionId: "e2e-telemetry", shape: "pending-tool", ageMs: 800_000 });
+
+  const deck = await Deck.open(page);
+  await expect(deck.cards()).toHaveCount(2, { timeout: 60_000 });
+  // The telemetry session is the blocked one, so its card is the Action
+  // required one; rocket's working session holds the In progress card.
+  const card = deck.cardIn("Action required", "E2E-15");
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  await shot(page, testInfo, "16 · two per-session cards for one two-repo run");
+
+  // Open FIRST, and the order is load-bearing: Diff opens the workbench's
+  // multi-file diff editor in THIS window, which takes the editor area from the
+  // Deck panel — after that the card's own buttons are no longer visible and the
+  // Open click times out (observed live). Open costs the Deck nothing: the window
+  // it mints is a second one.
+  //
+  // The same `repo` rides on the message (DeckApp.tsx:547), so the window lands
+  // on telemetry rather than on the run's first repo.
+  const appeared = app.waitForEvent("window", { timeout: 60_000 });
+  await card.locator(".c-foot2 .act.primary").click();
+  const opened = await appeared;
+  await opened.locator(".activitybar").waitFor({ timeout: 60_000 });
+  await expect.poll(() => opened.title(), { timeout: 30_000 }).toContain("telemetry");
+  await shot(page, testInfo, "17 · Open on the telemetry session's own repo");
+
+  // Diff: `diffTitle` names the repos actually being diffed (diffView.ts:56-64),
+  // so the tab title is the record of which directory the card acted on.
+  await card.locator(".c-foot2 .act", { hasText: "Diff" }).click();
+  const tab = page.locator(".tab", { hasText: "Changes in E2E-15" });
+  await expect(tab).toBeVisible({ timeout: 30_000 });
+  await expect(tab).toContainText("telemetry");
+  await expect(tab).not.toContainText("rocket");
+  await shot(page, testInfo, "18 · Diff on the telemetry session's own repo");
+});
+
+// Mutation-checked: webview/helpers.ts:262 — `if (runKind(run) === "notepad") return "notepad";` removed; the card's key slot fell through to the raw `notepad-…` key and the assertion failed
+test("a note started from the Notepad sits among the tickets marked notepad", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = makeSandbox();
+  // A ticket run and a notepad run on the same board — "among the tickets" is
+  // the claim, so a board with only the note would not prove it.
+  seedRun(sb, baseRun(sb, "E2E-16", { createdAt: Date.now() }));
+  // The shape `runNotepadItem` writes (tasksView.ts:1688-1696): kind "notepad",
+  // an empty url (so `isTicketRun` is false) and a `notepad-<slug>-<id>` key.
+  seedRun(sb, baseRun(sb, "notepad-refit-the-strut-n1", {
+    createdAt: Date.now(), kind: "notepad", url: "", summary: "Refit the strut assembly",
+  }));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const deck = await Deck.open(launched.page);
+  await expect(deck.cards()).toHaveCount(2, { timeout: 60_000 });
+
+  // `keyLabel` (webview/helpers.ts:258-264) puts the word in the key slot,
+  // because the record's own key is a slug no reader can use. The ticket run
+  // beside it keeps its key — as a `button.key`, since it is tracked.
+  const note = deck.card("Refit the strut assembly");
+  await expect(note.locator(".hd-k .key")).toHaveText("notepad");
+  await expect(deck.card("E2E-16").locator("button.key")).toHaveText("E2E-16");
+  await shot(launched.page, testInfo, "19 · a notepad card beside a ticket card");
+});
+
+// Mutation-checked: deckView.ts:1976 — `if (getConfig().showTokenTotal) {` → `if (false) {`; the board-wide sweep never ran, `boardEq` stayed 0 and the tile never rendered
+test("showTokenTotal adds a Tokens on board total to the header", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = makeSandbox({ "agentFlow.deck.showTokenTotal": true });
+  seedRun(sb, baseRun(sb, "E2E-17", { createdAt: Date.now() }));
+  // A transcript carrying `message.usage`, which `seedTranscript`'s shapes
+  // deliberately do not (claudeState.ts lists only the activity fields). The
+  // sweep reads every transcript under the run's repos' project dirs
+  // (deckView.ts `sweepUsage` → engine/usageFs.ts `readRun`), with no session
+  // record needed, and `accumulateUsage` (engine/usage.ts) sums the four
+  // billing classes off exactly these fields.
+  const dir = path.join(sb.home, ".claude", "projects", encodeProjectDir(sb.repoPath));
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(
+    path.join(dir, "e2e-spend.jsonl"),
+    JSON.stringify({
+      type: "assistant", requestId: "req_e2e_1", isSidechain: false, cwd: sb.repoPath,
+      message: { role: "assistant", model: "claude-fixture", id: "msg_e2e_1", usage: { input_tokens: 4_000, output_tokens: 2_000, cache_creation_input_tokens: 1_000, cache_read_input_tokens: 40_000 } },
+    }) + "\n",
+  );
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const deck = await Deck.open(launched.page);
+  await expect(deck.card("E2E-17")).toBeVisible({ timeout: 60_000 });
+
+  // A fifth header tile, labelled and effort-weighted (DeckApp.tsx:1125-1136).
+  // 4000×1 + 1000×1.25 + 40000×0.1 + 2000×5 = 19,250 eq, which `formatEq`
+  // (engine/usage.ts:99-103) rounds to the nearest thousand: "19k", with the
+  // unit as a nested span so the slot's text reads "19keq".
+  const tile = deck.frame.locator(".stats .stat", { has: deck.frame.locator(".l", { hasText: "Tokens on board" }) });
+  await expect(tile).toBeVisible({ timeout: 90_000 });
+  await expect(tile.locator(".n")).toHaveText("19keq");
+  await shot(launched.page, testInfo, "20 · the Tokens on board tile");
+});
+
+// Mutation-checked: deckView.ts `forgeReady` — `return this.forgeGap === null` → `return true`; the read was then attempted, ENOENT'd, and the card's signal line grew `⚠ PR unread`. (Checked twice: with the sandbox's remote-less `rocket` the same mutation SURVIVED, because `prEligible` refuses a repo with no resolvable default branch — hence the remote and the off-default branch below.)
+test("without the forge CLI the Deck falls back to the git and task-source backbone", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = makeSandbox({ "agentFlow.prFacts": true });
+  // The repo must be PR-ELIGIBLE, or this test proves nothing: `prEligible`
+  // (engine/git.ts:205-209) refuses a repo whose default branch cannot be
+  // resolved, and the sandbox's `rocket` has no remote at all — so no read
+  // would be attempted whatever `forgeReady` said, and the "no read attempted"
+  // half of the claim would hold vacuously. Confirmed: with the plain fixture
+  // the test survived a `forgeReady() → true` mutation. A remote, an
+  // `origin/HEAD` to derive the default from, and a branch that differs from it
+  // is what makes an attempt possible.
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/oznasi1/rocket.git"], { cwd: sb.repoPath });
+  const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: sb.repoPath, encoding: "utf8" }).trim();
+  execFileSync("git", ["update-ref", "refs/remotes/origin/main", sha], { cwd: sb.repoPath });
+  execFileSync("git", ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], { cwd: sb.repoPath });
+  execFileSync("git", ["checkout", "-q", "-b", "E2E-18-fix"], { cwd: sb.repoPath });
+  seedRun(sb, baseRun(sb, "E2E-18", {
+    createdAt: Date.now(),
+    repos: [{ name: "rocket", path: sb.repoPath, isGit: true, branch: "E2E-18-fix" }],
+  }));
+  // "Not installed" is a `spawn … ENOENT`, and that is precisely how the
+  // product defines it: `probeGh` (engine/pr/provider.ts:105-122) reads
+  // `code === "ENOENT"` as `missing` and anything else as `signed-out`. The
+  // harness cannot take a CLI off the machine — `resolveBin` (engine/pr/which.ts)
+  // searches /opt/homebrew/bin and /usr/local/bin after PATH, absolute paths
+  // outside the sandbox — so it puts a `gh` on the sandbox's own PATH dir that
+  // cannot execute: a shebang naming an interpreter that does not exist makes
+  // execve return ENOENT, exactly as a missing binary does. Verified live on
+  // darwin; execve answers the same on linux.
+  fs.writeFileSync(path.join(sb.root, "bin", "gh"), "#!/nonexistent/interpreter\n", { mode: 0o755 });
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const deck = await Deck.open(launched.page);
+  const card = deck.card("E2E-18");
+  await expect(card).toBeVisible({ timeout: 60_000 });
+
+  // The legend says which gap, in the CLI's own name (deckView.ts:90-93
+  // FORGE_NOTES, rendered at DeckApp.tsx:1381). Its `missing` wording is what
+  // separates "not installed" from "not signed in".
+  await expect(deck.frame.locator(".legend .note.warn")).toHaveText("gh CLI not found — PR facts off. Run Doctor", { timeout: 90_000 });
+  // And the card is the backbone: its signal line carries the branch git read,
+  // and it does NOT carry `⚠ PR unread` — `forgeReady` false means no fetch was
+  // ever queued, so no repo is carried forward as unreadable. That bit is a
+  // `.c-sig` text bit (webview/deckSignal.ts:66), not a `.c-rows` action row,
+  // and it is the assertion that makes "no read attempted" falsifiable: with
+  // the eligible repo above, a `forgeReady() → true` mutation attempts the read,
+  // it ENOENTs, and this bit appears.
+  await expect(card.locator(".c-sig")).toContainText("E2E-18-fix");
+  await expect(card.locator(".c-sig")).not.toContainText("PR unread");
+  await expect(card.locator(".c-rows")).toHaveCount(0);
+  await shot(launched.page, testInfo, "21 · no gh: the git + Fixture backbone, and the note that says so");
 });

@@ -199,3 +199,86 @@ test("a batch review launches one worktree and one run record per PR", async ({}
   // — see `waitForWindows`'s doc comment on the single-launch test.
   await waitForWindows(windows, 2, 120_000);
 });
+
+/** Overwrite one setting in the sandbox's `settings.json` before `launchHost`
+ *  reads it. `beforeEach` above builds the sandbox (and its forge shims) with
+ *  `reviewOpenIn: "new-window"`; a test that needs a different answer patches
+ *  the file rather than rebuilding the sandbox, which would drop the shims. */
+function patchSettings(sandbox: Sandbox, over: Record<string, unknown>): void {
+  const file = path.join(sandbox.userDataDir, "User", "settings.json");
+  const settings = JSON.parse(fs.readFileSync(file, "utf8")) as Record<string, unknown>;
+  fs.writeFileSync(file, JSON.stringify({ ...settings, ...over }, null, 2));
+}
+
+/** Every plan the handshake has landed, as one string — the seeded prompts
+ *  included (`writePlanFile`, engine/workspace.ts, stores each match's rendered
+ *  prompt in `matches[].prompt`). */
+function plansText(sandbox: Sandbox): string {
+  const dir = path.join(sandbox.home, ".agentflow", "plans");
+  if (!fs.existsSync(dir)) return "";
+  return fs.readdirSync(dir).map((f) => fs.readFileSync(path.join(dir, f), "utf8")).join("\n");
+}
+
+// Mutation-checked: engine/review/launch.ts:113-118 — `landsElsewhere` forced to `false`; the seeded prompt lost its "Work in `<worktree>`" prefix and the absolute-path assertion failed, while the worktree assertion still passed (so the two halves are independent)
+test("reviewOpenIn this-window seeds the session here and names the worktree by absolute path", async ({}, testInfo) => {
+  test.setTimeout(300_000);
+  patchSettings(sb, { "agentFlow.reviewOpenIn": "this-window" });
+  // A window with a FOLDER, not the empty one every other journey boots:
+  // `chooseOpenTarget` refuses to offer "This window" to a window Agent Flow
+  // cannot name (engine/openTarget.ts, and COVERAGE's `open-in-this-window`
+  // row), and `this-window` then opens a new window instead — which would
+  // quietly make this test prove the default again.
+  const launched = await launchHost(sb, { folder: sb.repoPath });
+  app = launched.app;
+  const windows = collectWindows(app);
+  const deck = await Deck.open(launched.page);
+
+  await expect(deck.review(41)).toBeVisible({ timeout: 60_000 });
+  await deck.expandReview(41);
+  await deck.reviewLaunch(41).click();
+
+  // The review still runs in its own worktree — that half is unchanged by the
+  // destination, which is the point of the setting.
+  await expect.poll(() => worktrees(sb.repoPath), { timeout: 120_000 }).toContain("review-rocket-41");
+  const wt = path.join(sb.repoPath, ".claude", "worktrees", "review-rocket-41");
+
+  // And the session that lands elsewhere is TOLD where the worktree is, by
+  // absolute path, prefixed onto the rendered template (launch.ts:106-118) —
+  // because the shipped prompts are cwd-relative and this cwd is not the
+  // worktree.
+  await expect.poll(() => plansText(sb), { timeout: 90_000 }).toContain("gh pr checkout 41");
+  const plans = plansText(sb);
+  // Backtick-quoted in the product string, so build it by concatenation rather
+  // than nesting escapes inside a template literal.
+  expect(plans).toContain("Work in `" + wt + "` — the git worktree made for this review.");
+  await shot(launched.page, testInfo, "5 · seeded here, pointed at the worktree by absolute path");
+
+  // No second window was minted: the destination was this one.
+  expect(windows).toHaveLength(0);
+  expect(app.windows()).toHaveLength(1);
+});
+
+// Mutation-checked: config.ts:865-866 — `const legacy = explicitConfigValue<string>(c, "reviewRequestPrompt")` → `const legacy = undefined`; the shipped Full-review prompt was seeded instead and the marker never appeared
+test("a customized reviewRequestPrompt is what the review launch seeds", async ({}, testInfo) => {
+  test.setTimeout(300_000);
+  // The deprecated single-prompt setting, still honoured: `getConfig` migrates a
+  // customized value into the first stock review mode (config.ts:855-866), which
+  // `reviewRequestMode: "full"` then pins. `{files}` is kept so the anchor
+  // `insertBeforeFiles` uses is where the shipped prompt has it.
+  patchSettings(sb, { "agentFlow.reviewRequestPrompt": "E2E-REVIEW-PROMPT-MARKER for {repo}#{number} by {author}.{files}" });
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const windows = collectWindows(app);
+  const deck = await Deck.open(launched.page);
+
+  await expect(deck.review(41)).toBeVisible({ timeout: 60_000 });
+  await deck.expandReview(41);
+  await deck.reviewLaunch(41).click();
+
+  await expect.poll(() => plansText(sb), { timeout: 120_000 }).toContain("E2E-REVIEW-PROMPT-MARKER for oznasi1/rocket#41 by octo.");
+  // Wholesale replacement, not a layer: the shipped wording is gone.
+  expect(plansText(sb)).not.toContain("Do not post anything to GitHub");
+  await shot(launched.page, testInfo, "6 · the customized review prompt, seeded");
+
+  await waitForWindows(windows, 1, 90_000);
+});

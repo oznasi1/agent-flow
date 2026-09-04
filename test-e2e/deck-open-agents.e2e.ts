@@ -6,6 +6,7 @@ import { makeSandbox, type Sandbox } from "./_helpers/sandbox";
 import { launchHost } from "./_helpers/host";
 import { seedSession } from "./_helpers/claudeState";
 import { Deck } from "./_helpers/po/deck";
+import { forgeCalls, ghPrViewAnswer, ghReviewThreadsAnswer, installForgeShims } from "./_helpers/forgeShim";
 import { shot } from "./_helpers/shot";
 
 /** GUIDE § The Deck — "every Claude Code session open on this machine", on a real
@@ -257,4 +258,58 @@ test("a local card disappears when its last session dies", async ({}, testInfo) 
   expect(fs.readdirSync(path.join(sb.home, ".claude", "sessions"))).toHaveLength(1);
   await expect(deck.cards()).toHaveCount(0, { timeout: 30_000 });
   await shot(launched.page, testInfo, "9 · gone with its session");
+});
+
+// Mutation-checked: engine/pr/provider.ts:150 — `GhProvider.list`'s `{ cwd: repoPath }` → `{ cwd: process.cwd() }`; the per-checkout answer no longer matched, the plain empty `pr list` answer served instead and `#77` never appeared on the card
+test("with prFacts on, a live session's own directory gets a gh pr list of its own", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  // Both switches on — `openAgents` and `prFacts` are the two the PRIVACY page
+  // names, and both are on by default (config.ts), so this sandbox pins only the
+  // review strip OFF: the strip's search and the per-PR threads query share the
+  // one `api graphql` signature, and this journey wants that signature to serve
+  // the threads query alone.
+  sb = makeSandbox({ "agentFlow.prFacts": true, "agentFlow.openAgents": true, "agentFlow.reviewRequests": false });
+  // A checkout nobody pointed Agent Flow at: no run record anywhere in this
+  // sandbox, and it is never taken. On a branch that DIFFERS from the repo's
+  // default, because `prEligible` (deckView.ts) spends no forge read on a repo
+  // sitting on its own default branch — with `main` checked out there would be
+  // no `pr list` to observe at all.
+  const scratch = makeScratch(sb, "feat/telemetry");
+  git(scratch, ["remote", "add", "origin", "https://github.com/oznasi1/scratch.git"]);
+  const sha = git(scratch, ["rev-parse", "HEAD"]).trim();
+  git(scratch, ["update-ref", "refs/remotes/origin/main", sha]);
+  git(scratch, ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"]);
+
+  // The `@scratch` suffix keys an answer on the BASENAME of the directory the
+  // CLI was spawned in (`splitCwdKey`, forgeShim.ts) — which is the only way to
+  // tell one cwd from another, since the argv is identical everywhere. The plain
+  // answer is an empty queue, so `#77` can ONLY have come from a `gh pr list`
+  // that ran inside the session's own directory.
+  installForgeShims(sb, {
+    gh: {
+      "auth status": "{}",
+      "pr list": "[]",
+      "pr list @scratch": JSON.stringify([ghPrViewAnswer({ number: 77, branch: "feat/telemetry" })]),
+      "api graphql": ghReviewThreadsAnswer(0),
+    },
+  });
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  seedSession(sb, { pid: launched.app.process().pid!, cwd: scratch });
+  const deck = await Deck.open(launched.page);
+
+  // Half one: the Deck read `~/.claude/sessions` — nothing else in this sandbox
+  // can put a card on the board.
+  const card = deck.card("local");
+  await expect(card).toBeVisible({ timeout: 60_000 });
+  await expect(card).toContainText("scratch");
+  await shot(launched.page, testInfo, "10 · a local card for a directory nobody pointed us at");
+
+  // Half two: and it ran the forge CLI in that directory. PR facts arrive on the
+  // Deck's own refresh beat, so poll generously.
+  await expect(card.getByText("#77")).toBeVisible({ timeout: 90_000 });
+  // The argv, for the record — `--head` names the session directory's own branch.
+  expect(forgeCalls(sb).some((c) => c.cli === "gh" && c.argv[0] === "pr" && c.argv[1] === "list" && c.argv.includes("feat/telemetry"))).toBe(true);
+  await shot(launched.page, testInfo, "11 · gh pr list ran in the session's own checkout");
 });
