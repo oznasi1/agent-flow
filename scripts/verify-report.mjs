@@ -46,6 +46,13 @@ function collect(suite, file, acc) {
         // that needs a second attempt is a flake, and an invisible flake becomes
         // permanent background noise.
         flaky: outcome === "flaky",
+        // A test that never ran, because it declared itself out of scope for this
+        // platform — `test.skip(process.platform !== "darwin", …)` on the two
+        // clipboard journeys, which pbpaste makes macOS-only. Not a pass (nothing
+        // was proven) and emphatically not a failure, so it needs its own verdict:
+        // rendered as a failure it turned a fully green CI run's headline red,
+        // which is the same "worse than no report" trap the comment above records.
+        skipped: outcome === "skipped",
         status: outcome === "unexpected" ? (r.status ?? "failed") : outcome,
         ms: r.duration ?? 0,
         // Buffer attachments (testInfo.attach with body) arrive base64 in
@@ -71,6 +78,8 @@ const sections = rows
       .join("\n");
     const badge = row.pinned
       ? `<span class="badge pinned">PINNED</span>`
+      : row.skipped
+      ? `<span class="badge skipped">SKIPPED</span>`
       : row.flaky
         ? `<span class="badge flaky">FLAKY</span>`
         : row.ok
@@ -86,14 +95,19 @@ ${strip || "<p class='meta'>no step screenshots attached</p>"}
 const passed = rows.filter((r) => r.ok).length;
 const pinned = rows.filter((r) => r.pinned).length;
 const flaky = rows.filter((r) => r.flaky).length;
+const skipped = rows.filter((r) => r.skipped).length;
+// The denominator is what this run could actually judge. A platform skip is not a
+// journey that failed to pass, so counting it against the total reads as a red run.
+const judged = rows.length - skipped;
 const stamp = data.stats?.startTime ?? new Date().toISOString();
 // Green when nothing came out UNEXPECTED. A pinned defect failing on purpose is
 // not a broken run, and must not paint the whole report red.
-const allOk = rows.every((r) => r.ok || r.flaky);
+const allOk = rows.every((r) => r.ok || r.flaky || r.skipped);
 // Rendered after the count so the headline never hides either caveat.
 const caveats = [
   pinned ? `${pinned} pinned defect${pinned === 1 ? "" : "s"} failing as designed` : null,
   flaky ? `${flaky} passed only on retry` : null,
+  skipped ? `${skipped} skipped on this platform` : null,
 ].filter(Boolean).join(" · ");
 
 const html = `<!DOCTYPE html>
@@ -118,6 +132,7 @@ const html = `<!DOCTYPE html>
   .badge.fail{background:var(--stop-soft);color:var(--stop)}
   .badge.pinned{background:var(--warn-soft);color:var(--warn)}
   .badge.flaky{background:var(--warn-soft);color:var(--warn)}
+  .badge.skipped{background:var(--line);color:var(--muted)}
   figure{display:inline-block;vertical-align:top;margin:0 12px 8px 0;max-width:340px}
   figure img{max-width:100%;border:1px solid var(--line);border-radius:8px;display:block}
   figcaption{font-size:12px;color:var(--muted);margin-top:5px}
@@ -125,7 +140,7 @@ const html = `<!DOCTYPE html>
 </head>
 <body><div class="wrap">
 <h1>Verify report — real-host E2E</h1>
-<p class="sub">${passed}/${rows.length} journeys passed${caveats ? ` · ${esc(caveats)}` : ""} · a real VS Code host, driven end to end · ${esc(stamp)}</p>
+<p class="sub">${passed}/${judged} journeys passed${caveats ? ` · ${esc(caveats)}` : ""} · a real VS Code host, driven end to end · ${esc(stamp)}</p>
 ${sections}
 </div></body>
 </html>
@@ -134,13 +149,21 @@ ${sections}
 const md = [
   `## Real-host E2E — verify report`,
   ``,
-  `${allOk ? "✅" : "❌"} **${passed}/${rows.length} journeys passed** (${esc(stamp)})`,
+  `${allOk ? "✅" : "❌"} **${passed}/${judged} journeys passed** (${esc(stamp)})`,
   ...(caveats ? [``, `_${caveats}._`] : []),
   ``,
   `| Journey | Verdict | Time | Steps shot |`,
   `|---|---|---|---|`,
   ...rows.map((r) => {
-    const verdict = r.pinned ? "📌 pinned (failing by design)" : r.flaky ? "⚠️ flaky (passed on retry)" : r.ok ? "✅ pass" : `❌ ${r.status}`;
+    const verdict = r.pinned
+      ? "📌 pinned (failing by design)"
+      : r.skipped
+        ? "⏭️ skipped on this platform"
+        : r.flaky
+          ? "⚠️ flaky (passed on retry)"
+          : r.ok
+            ? "✅ pass"
+            : `❌ ${r.status}`;
     return `| ${r.title} | ${verdict} | ${secs(r.ms)} | ${r.shots.length} |`;
   }),
   ``,
@@ -149,4 +172,4 @@ const md = [
 
 fs.writeFileSync(OUT_HTML, html);
 fs.writeFileSync(OUT_MD, md);
-console.log(`verify-report: ${passed}/${rows.length} passed${caveats ? ` (${caveats})` : ""} → ${OUT_HTML} (${(html.length / 1024 / 1024).toFixed(1)}MB), ${OUT_MD}`);
+console.log(`verify-report: ${passed}/${judged} passed${caveats ? ` (${caveats})` : ""} → ${OUT_HTML} (${(html.length / 1024 / 1024).toFixed(1)}MB), ${OUT_MD}`);
