@@ -3,7 +3,7 @@ import Fuse from "fuse.js";
 import { send } from "./vscodeApi";
 import {
   addOnce, deriveStatuses, effectiveFilter, fmtEst, gateCopy, isPrReviewStatus, isTopPriority,
-  keyMatches, matchesStatus, moveKey, railClass, safeHref, ticketKind, visibleFilters,
+  keyMatches, matchesStatus, moveKey, railClass, ticketKind, visibleFilters,
 } from "./helpers";
 import { Filter, FilterVisibility, Task, OutboundMessage, Size, NotepadItemView, NotepadSectionView } from "../types";
 import type { SerializedCaps } from "../tasks/provider";
@@ -823,6 +823,18 @@ function TaskCard(props: {
   const showAddToSprint = caps.sprints && !onRemoveFromSprint && (unassigned || (isMe && !task.inOpenSprint));
   // Offer "Address PR" once the ticket reaches the configured PR-review status.
   const canAddressPr = isPrReviewStatus(task.status, prReviewStatus);
+  // A connector's `url` is third-party text, and index.tsx's capture-phase click
+  // handler only intercepts `https?:` — so `javascript:` is precisely the scheme it
+  // would let navigate the webview, where navigating IS running. Anything else loses
+  // the attribute, leaving an inert key rather than a link to somewhere unexpected.
+  //
+  // Written out here rather than behind a helpers.ts function on purpose: CodeQL
+  // reads a regex test as a barrier only inside the function that performs it, so
+  // routing this through a shared helper leaves js/xss and
+  // js/client-side-unvalidated-url-redirection firing on a line that is already safe.
+  // The Notepad's equivalent guard can stay in a helper because its early `return
+  // null` is a barrier CodeQL does follow.
+  const href = task.url && /^https?:\/\//i.test(task.url) ? task.url : undefined;
   const armed = React.useRef(false); // true only while a drag started from the grip
 
   const take = (e: React.MouseEvent) => {
@@ -893,10 +905,7 @@ function TaskCard(props: {
           <TypeIcon kind={ticketKind(task.type ?? "")} label={task.type || "unknown"} />
           <a
             className="key"
-            // A connector's `url` is third-party text. `safeHref` drops the attribute
-            // for anything that is not http(s), so a `javascript:` ticket URL renders
-            // as an inert key instead of navigating — or running — inside the webview.
-            href={safeHref(task.url)}
+            href={href}
             title={gateCopy(sourceLabel).openIn}
             onClick={(e) => e.stopPropagation() /* don't toggle expand; global handler opens externally */}
           >{task.key}</a>

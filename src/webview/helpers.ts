@@ -275,22 +275,11 @@ export function timeAgo(ms: number | null): string {
 }
 
 // ── URL safety ────────────────────────────────────────────────────────────────
-// Both webviews render URLs they did not author: a task's `url` is whatever the
-// connector put on the ticket, and a notepad thumbnail's src is built from a stored
-// filename. A `javascript:` value in either is a script that runs with the webview's
-// privileges — the sidebar's capture-phase click handler only intercepts `https?:`,
-// so a hostile scheme is precisely the one it lets navigate. Both helpers therefore
-// allowlist rather than strip: an unrecognised scheme loses its link or its tile, and
-// nothing about it is passed through in a half-cleaned form.
-
-const HTTP_URL = /^https?:\/\//i;
-
-/** `url` if it is safe to use as an anchor `href`, otherwise `undefined` — which
- * omits the attribute entirely, so the label renders as plain text rather than as a
- * link that goes somewhere unexpected. */
-export function safeHref(url: string | undefined): string | undefined {
-  return url && HTTP_URL.test(url) ? url : undefined;
-}
+// A notepad thumbnail's src is built from a stored filename, so it is a URL the
+// webview did not author reaching the DOM. The guard allowlists rather than strips:
+// an unrecognised scheme loses its tile, and nothing is passed through half-cleaned.
+// (The sidebar's ticket-URL guard is written out inline in App.tsx instead — see the
+// comment there for why it cannot live here.)
 
 /** Schemes an image `src` may legitimately carry here. `asWebviewUri` returns
  * `vscode-webview:`-family URIs on some hosts and an `https://…vscode-cdn.net` URL on

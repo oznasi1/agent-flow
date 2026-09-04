@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, keyLabel, keyMatches, matchesStatus, normalizeKey, moveKey, railClass, safeHref, safeMediaSrc, ticketKind, visibleFilters } from "../../src/webview/helpers";
+import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, keyLabel, keyMatches, matchesStatus, normalizeKey, moveKey, railClass, safeMediaSrc, ticketKind, visibleFilters } from "../../src/webview/helpers";
 import type { Filter, Run, Task } from "../../src/types";
 import { mkTask } from "../_helpers/factories";
 
@@ -408,29 +408,6 @@ describe("keyMatches", () => {
     // which case there is no number to prefix and only the whole thing matches.
     expect(keyMatches("SPIKE", "spike")).toBe(true);
     expect(keyMatches("SPIKE", "1")).toBe(false);
-  });
-});
-
-describe("safeHref", () => {
-  it("passes an ordinary ticket URL through untouched", () => {
-    expect(safeHref("https://jira.example.com/browse/PROJ-1")).toBe("https://jira.example.com/browse/PROJ-1");
-    expect(safeHref("http://localhost:8080/PROJ-1")).toBe("http://localhost:8080/PROJ-1");
-  });
-
-  it("drops the attribute for a script-bearing scheme", () => {
-    // The sidebar's capture-phase click handler only intercepts `https?:`, so these
-    // are exactly the values it would let navigate the webview iframe.
-    expect(safeHref("javascript:fetch('//evil')")).toBeUndefined();
-    expect(safeHref("JavaScript:alert(1)")).toBeUndefined();
-    expect(safeHref("vbscript:msgbox")).toBeUndefined();
-    expect(safeHref("data:text/html,<script>alert(1)</script>")).toBeUndefined();
-  });
-
-  it("drops a scheme that is merely not a web URL, and an absent one", () => {
-    expect(safeHref("file:///etc/passwd")).toBeUndefined();
-    expect(safeHref("/browse/PROJ-1")).toBeUndefined();
-    expect(safeHref("")).toBeUndefined();
-    expect(safeHref(undefined)).toBeUndefined();
   });
 });
 
