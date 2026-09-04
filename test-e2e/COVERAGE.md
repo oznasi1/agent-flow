@@ -103,7 +103,8 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `deck-open-action-fresh` | GUIDE § The Deck | Open opens the task's window fresh when none is already holding it | todo |
 | `deck-open-action-per-session` | GUIDE § The Deck | On a per-session card Open and Diff act on that session's own directory | todo |
 | `deck-diff-action` | GUIDE § The Deck | Diff shows the working diff | e2e: Diff opens the working diff |
-| `deck-card-overflow-menu` | GUIDE § The Deck | ⋯ offers Open in Jira and Forget; Forget removes the run's record without touching its neighbour | e2e: forget removes a run's record without touching its neighbour |
+| `deck-card-overflow-menu` | GUIDE § The Deck | Forget removes the run's record without touching its neighbour | e2e: forget removes a run's record without touching its neighbour |
+| `deck-card-overflow-rows` | GUIDE § The Deck | The card's overflow offers Open in Jira (the task source's own label) and Forget — today the card-detail drawer's `More` disclosure, not a ⋯ on the card | e2e: the overflow menu offers Open in Jira and Forget |
 | `deck-grouping-lens` | GUIDE § The Deck | The board opens one card per session; switching the header control to Workspaces gives one card per launched task with sessions nested, and the choice sticks across a reopen (`agentFlow.deckGrouping`) | e2e: the Sessions / Workspaces grouping sticks across a reopen |
 | `deck-refresh` | GUIDE § The Deck | The header refresh reports when it last synced (`synced Ns ago`) | todo |
 | `deck-card-facts` | GUIDE § The Deck | Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, the Jira status, and Open / Diff | e2e: the Deck card shows the PR the GitHub forge reports |

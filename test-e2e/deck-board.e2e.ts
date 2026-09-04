@@ -237,7 +237,7 @@ test("Diff opens the working diff", async ({}, testInfo) => {
   await shot(page, testInfo, "9 · the multi-file diff editor for the run");
 });
 
-// Mutation-checked: DeckDetail.tsx "This task" group's `Open in ${sourceLabel}` item dropped
+// Mutation-checked: DeckDetail.tsx's "This task" group gated its `Open in ${sourceLabel}` item on `false` instead of `tracked` — the row vanished and the assertion failed
 test("the overflow menu offers Open in Jira and Forget", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox();
