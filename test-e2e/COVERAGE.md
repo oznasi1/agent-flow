@@ -184,27 +184,31 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `marketplace-scope` | GUIDE § The Marketplace | It reads `~/.claude` — marketplaces, plugins, skills, commands, agents, hooks — plus what you wrote yourself in `~/.claude` or the workspace's `.claude/` | e2e: lists the agents and commands found in |
 | `marketplace-claude-specific` | GUIDE § The Marketplace | The Marketplace is Claude-specific whatever `agentFlow.agentProvider` says | todo |
 | `marketplace-fuzzy-search` | GUIDE § The Marketplace | Search is fuzzy and ranked (`revw` finds `/review`), narrowing the list with the best match selected as you type | e2e: search narrows the list to the matching asset |
-| `marketplace-keyboard-nav` | GUIDE § The Marketplace | From the search box ↑/↓ move the selection and Enter opens its file | todo |
-| `marketplace-type-pills` | GUIDE § The Marketplace | Type pills (All, Skills, Commands, Agents, Hooks, Plugins) carry live counts that follow the query, and filter the list | todo |
-| `marketplace-scope-pills` | GUIDE § The Marketplace | Scope pills narrow to Installed only and Enabled only | todo |
-| `marketplace-plugins-picker` | GUIDE § The Marketplace | The searchable Plugins ▾ picker filters by several plugins at once and clears with one click | todo |
-| `marketplace-marketplace-tags` | GUIDE § The Marketplace | Clicking a marketplace tag filters by marketplace | todo |
-| `marketplace-filter-and` | GUIDE § The Marketplace | Query, type, scope, category, plugins and marketplace all AND together | todo |
-| `marketplace-filter-chips` | GUIDE § The Marketplace | Active selections show as removable chips with Clear; the chip row disappears when nothing is selected | todo |
-| `marketplace-category-grouping` | GUIDE § The Marketplace | Without a query the list groups into category sections from each plugin's manifest, Yours first, then by descending size, Uncategorized last; a header click focuses the category | todo |
-| `marketplace-disabled-rows` | GUIDE § The Marketplace | Disabled plugins' rows are struck through | todo |
-| `marketplace-not-downloaded` | GUIDE § The Marketplace | Plugins a marketplace catalogues but you have not downloaded are listed with their `/plugin install` command | todo |
+| `marketplace-keyboard-nav` | GUIDE § The Marketplace | From the search box ↑/↓ move the selection and Enter opens its file | e2e: arrow keys move the selection and Enter opens the file |
+| `marketplace-type-pills` | GUIDE § The Marketplace | Type pills (All, Skills, Commands, Agents, Hooks, Plugins) carry live counts that follow the query, and filter the list | e2e: type pills carry live counts and filter the list |
+| `marketplace-scope-pills` | GUIDE § The Marketplace | Scope pills narrow to Installed only and Enabled only | e2e: scope pills narrow to installed and enabled |
+| `marketplace-plugins-picker` | GUIDE § The Marketplace | The searchable Plugins ▾ picker filters by several plugins at once and clears with one click | e2e: the Plugins picker filters by several plugins at once |
+| `marketplace-marketplace-tags` | GUIDE § The Marketplace | Clicking a marketplace tag filters by marketplace | e2e: clicking a marketplace tag filters by marketplace |
+| `marketplace-filter-and` | GUIDE § The Marketplace | Query, type, scope, category, plugins and marketplace all AND together | e2e: filters AND together |
+| `marketplace-filter-chips` | GUIDE § The Marketplace | Active selections show as removable chips with Clear; the chip row disappears when nothing is selected | e2e: the chip row disappears when nothing is selected |
+| `marketplace-category-grouping` | GUIDE § The Marketplace | Without a query the list groups into category sections from each plugin's manifest, Yours first, then by descending size, Uncategorized last; a header click focuses the category | e2e: categories group Yours first and Uncategorized last |
+| `marketplace-disabled-rows` | GUIDE § The Marketplace | Disabled plugins' rows are struck through. PINNED DEFECT: only the row's own `disabled` badge is struck through (`.tag.off`), the row itself is not | e2e: disabled assets are struck through |
+| `marketplace-disabled-badge` | GUIDE § The Marketplace | The panel shows which plugins are disabled: the row carries a `disabled` badge, and the badge itself is struck through | e2e: a disabled plugin's row carries a struck-through disabled badge |
+| `marketplace-not-downloaded` | GUIDE § The Marketplace | Plugins a marketplace catalogues but you have not downloaded are listed with their `/plugin install` command | e2e: not-downloaded plugins carry their install command |
 | `marketplace-detail-render` | GUIDE § The Marketplace | Selecting a row renders its file in the detail pane under the metadata | e2e: selecting an asset shows its body |
-| `marketplace-detail-hooks-json` | GUIDE § The Marketplace | A hook renders its `hooks.json` as a fenced JSON block | todo |
+| `marketplace-detail-hooks-json` | GUIDE § The Marketplace | A hook renders its `hooks.json` as a fenced JSON block | e2e: a hook renders its hooks.json as a fenced JSON block |
 | `marketplace-detail-truncation` | GUIDE § The Marketplace | Files over 262,144 characters are truncated, with Open file covering the rest | unit: test/unit/marketplaceView.test.ts |
+| `marketplace-detail-truncation-live` | GUIDE § The Marketplace | In the panel, an oversized file's preview says it was truncated and offers Open file for the rest | e2e: a file over 262,144 characters is truncated |
 | `marketplace-detail-safe-links` | GUIDE § The Marketplace | The renderer builds elements from a parsed tree, never injects HTML; only `http`/`https` links become clickable | unit: test/webview/Markdown.test.tsx |
+| `marketplace-detail-safe-links-live` | GUIDE § The Marketplace | In the panel, a rendered file's `https:` link is an anchor and its `javascript:` link is not | e2e: only http and https links are clickable |
 | `marketplace-detail-actions` | GUIDE § The Marketplace | Copy grabs the command you would type and reports through the webview's own toast; Open file opens it in an editor tab | e2e: copy reports success through the webview's own toast |
-| `marketplace-detail-open-file` | GUIDE § The Marketplace | Open file opens the asset in an editor tab | todo |
+| `marketplace-detail-open-file` | GUIDE § The Marketplace | Open file opens the asset in an editor tab | e2e: Open file opens the asset in an editor tab |
 | `marketplace-reveal-in-finder` | GUIDE § The Marketplace | Reveal in Finder shows the file on disk | untestable: native OS dialog |
 | `marketplace-read-only-offline` | GUIDE § The Marketplace | The panel never writes to `~/.claude`, never runs `/plugin install`, and makes no network calls | unit: test/unit/marketplaceView.test.ts |
-| `marketplace-rescan` | GUIDE § The Marketplace | ⟳ Rescan re-reads the disk, and so does coming back to the panel after a pause | todo |
-| `marketplace-add-marketplace` | GUIDE § The Marketplace | + Add a marketplace copies the `/plugin marketplace add owner/repo` command for you to run in Claude Code | todo |
-| `marketplace-not-set-up` | TELEMETRY § Usage events | Without a `~/.claude/plugins` directory the panel explains Claude Code is not set up | todo |
+| `marketplace-rescan` | GUIDE § The Marketplace | ⟳ Rescan re-reads the disk | e2e: Rescan picks up a file added after the first scan |
+| `marketplace-rescan-refocus` | GUIDE § The Marketplace | Coming back to the panel after a pause re-reads the disk too | unit: test/unit/marketplaceView.test.ts |
+| `marketplace-add-marketplace` | GUIDE § The Marketplace | + Add a marketplace copies the `/plugin marketplace add owner/repo` command for you to run in Claude Code | e2e: Add a marketplace copies the command |
+| `marketplace-not-set-up` | TELEMETRY § Usage events | Without a `~/.claude/plugins` directory the panel explains Claude Code is not set up | e2e: without a plugins directory the panel explains Claude Code is not set up |
 
 ## Doctor & Setup
 

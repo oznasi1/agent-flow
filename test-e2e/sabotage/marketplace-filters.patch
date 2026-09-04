@@ -1,0 +1,13 @@
+diff --git a/src/webview/MarketplaceApp.tsx b/src/webview/MarketplaceApp.tsx
+index 002cec1b..e34a24ab 100644
+--- a/src/webview/MarketplaceApp.tsx
++++ b/src/webview/MarketplaceApp.tsx
+@@ -227,7 +227,7 @@ export function MarketplaceApp(): JSX.Element {
+ 
+   const counts = React.useMemo(() => {
+     const c: Record<AssetType, number> = { skill: 0, command: 0, agent: 0, hook: 0 };
+-    for (const r of assets) if (r.type) c[r.type]++;
++    for (const r of assets) if (r.type && r.type !== "agent") c[r.type]++;
+     return c;
+   }, [assets]);
+ 

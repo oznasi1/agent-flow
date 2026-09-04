@@ -1,0 +1,13 @@
+diff --git a/src/webview/MarketplaceApp.tsx b/src/webview/MarketplaceApp.tsx
+index 002cec1b..32b2dae4 100644
+--- a/src/webview/MarketplaceApp.tsx
++++ b/src/webview/MarketplaceApp.tsx
+@@ -307,7 +307,7 @@ export function MarketplaceApp(): JSX.Element {
+   const onKeyDown = (e: React.KeyboardEvent) => {
+     if (e.key === "ArrowDown") { setSel((s) => Math.min(s + 1, rows.length - 1)); e.preventDefault(); }
+     else if (e.key === "ArrowUp") { setSel((s) => Math.max(s - 1, 0)); e.preventDefault(); }
+-    else if (e.key === "Enter" && active?.file) send({ type: "mkt:open", file: active.file });
++    else if (false && active?.file) send({ type: "mkt:open", file: active.file });
+   };
+ 
+   let lastCat: string | undefined;
