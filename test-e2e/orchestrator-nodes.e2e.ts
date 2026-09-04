@@ -530,3 +530,128 @@ test("disarm in the consent dialog disarms the flow", async ({}, testInfo) => {
   expect(readFlow(sb, "e2e-cmd-disarm").edges[0].firedAt).toBeUndefined();
   await shot(page, testInfo, "2 · disarmed, and nothing ran");
 });
+
+// ── neverAutoRun ──────────────────────────────────────────────────────────────
+
+// Mutation-checked: `runCommand`'s (command.ts) `const blocked = blockedBy(resolved.text,
+// neverAutoRun ?? [])` → `const blocked: string | undefined = undefined`, i.e. the last
+// line before the shell removed while `spendTarget`'s courtesy refusal stayed. `rm -f`
+// then really ran under the stored approval, so the rule latched FIRED rather than
+// errored and the wait for the pattern in `edges[0].error` timed out.
+test("neverAutoRun outranks approval", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot({ "agentFlow.neverAutoRun": ["*rm -f*"] });
+  seedCard(sb, "E2E-NAR");
+  // The flow ALREADY carries the shell approval — this is the "whatever you
+  // approved" half of the claim. Without it the refusal would be indistinguishable
+  // from a flow that was simply never consented to.
+  seedFlow(sb, COMMAND_FLOW(
+    "e2e-never", "E2E Never", "E2E-NAR",
+    `rm -f "$HOME/never.txt"`,
+    { commandConfirmedAt: Date.now() },
+  ));
+  const marker = path.join(sb.home, "never.txt");
+  fs.writeFileSync(marker, "E2E-NEVER-SURVIVED\n");
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-NAR");
+  await armAndGo(deck, block);
+
+  // The rule latches ERRORED, and the message names the PATTERN — the user's next
+  // move is editing one line of settings.json and they have to know which.
+  await expect.poll(() => readFlow(sb, "e2e-never").edges[0].error, { timeout: 90_000 })
+    .toContain('matches the agentFlow.neverAutoRun pattern "*rm -f*"');
+  // No `firedAt`: an errored edge is settled without ever having been a success,
+  // so it needs a Reset rather than reading as already done.
+  expect(readFlow(sb, "e2e-never").edges[0].firedAt).toBeUndefined();
+
+  // THE assertion of record: the file `rm -f` would have deleted is untouched.
+  expect(fs.readFileSync(marker, "utf8")).toBe("E2E-NEVER-SURVIVED\n");
+
+  // And no consent was ever offered for it. `spendTarget` refuses a blocked
+  // command, so the modal is never raised — "asking someone to approve a command
+  // that cannot run either teaches them the approval is theatre or reads as a
+  // promise that saying yes will run it". Safe as a negative: the refusal is
+  // already on disk above, so the pass that would have asked is over.
+  await expect(dialog(page)).toHaveCount(0);
+  expect(journal(sb, "e2e-never").filter((l) => l.kind === "consent-asked")).toHaveLength(0);
+  expect(journal(sb, "e2e-never").filter((l) => l.kind === "errored" && l.edge === "e1")).toHaveLength(1);
+
+  // The failure escalates past the Deck's own toast to a workbench notification —
+  // "failed and stopped" must not die inside an unfocused panel.
+  await expect(notifications(page, /neverAutoRun pattern/)).toBeVisible({ timeout: 30_000 });
+  // …and the card's chip says the workflow is stopped, not advancing.
+  await expect(deck.boardWorkflowChip("E2E-NAR")).toHaveClass(/stopped/, { timeout: 30_000 });
+  await shot(page, testInfo, "1 · refused, named, and the file survived");
+});
+
+// ── chained commands ──────────────────────────────────────────────────────────
+
+/** The feature's own headline example: `place → deploy.sh → smoke.sh`.
+ *  Both commands append to ONE file, so the order they ran in is a fact about
+ *  that file's bytes rather than about two timestamps. The second also records
+ *  its `pwd`, which is the only way to see that it inherited the first one's
+ *  directory — a command node is not a place, so without `chainSourcePlace`'s
+ *  walk back through the chain the second rule has no directory at all. */
+const CHAIN_FLOW = (key: string) => ({
+  id: "e2e-chain", name: "E2E Chain", armed: false, createdAt: Date.now(),
+  nodes: [
+    { id: "n1", x: 0, y: 0, join: "any", kind: "place", runKey: key, repo: "rocket" },
+    { id: "n2", x: 220, y: 0, join: "any", kind: "command", run: `echo one >> "$HOME/chain.txt"` },
+    {
+      id: "n3", x: 440, y: 0, join: "any", kind: "command",
+      run: `pwd > "$HOME/chain2-cwd.txt"; echo two >> "$HOME/chain.txt"`,
+    },
+  ],
+  edges: [
+    { id: "e1", from: "n1", to: "n2", cond: { kind: "tree-clean" } },
+    { id: "e2", from: "n2", to: "n3", cond: { kind: "command-succeeded" } },
+  ],
+});
+
+// Mutation-checked: `chainSourcePlace` (command.ts) `if (node.kind !== "command") return
+// undefined` → `if (true) return undefined`, so the walk back through the chain never
+// went THROUGH a command node to reach a place. The second rule then hit `commandCwd`'s
+// "nothing upstream of n2 is a place" refusal, `chain.txt` stopped at "one" and the
+// `toBe("one\ntwo\n")` poll timed out.
+test("command succeeded chains a second command", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot();
+  seedCard(sb, "E2E-CHN");
+  seedFlow(sb, CHAIN_FLOW("E2E-CHN"));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-CHN");
+  await armAndGo(deck, block);
+
+  const box = dialog(page);
+  await expect(box).toBeVisible({ timeout: 60_000 });
+  await box.getByRole("button", { name: "Run" }).click();
+
+  // Both commands' output, in one file, in the order they ran. `command-succeeded`
+  // reads the receipt the FIRST rule stamped, which cannot exist until the first
+  // command has finished — so this ordering is the condition working, not a race
+  // that happened to resolve this way.
+  await expect.poll(() => fileText(path.join(sb.home, "chain.txt")), { timeout: 120_000 })
+    .toBe("one\ntwo\n");
+
+  // The second command inherited the first one's directory.
+  expect(fs.realpathSync(fileText(path.join(sb.home, "chain2-cwd.txt")).trim()))
+    .toBe(fs.realpathSync(sb.repoPath));
+
+  const flow = readFlow(sb, "e2e-chain");
+  expect(flow.edges[0].performed).toBe(true);
+  expect(flow.edges[1].firedNote).toMatch(/^ran .* in rocket$/);
+  expect(flow.edges[1].error).toBeUndefined();
+  // ONE consent for the whole chain: the gate is per flow, not per command node,
+  // which is exactly why `agentFlow.neverAutoRun` exists as the finer brake.
+  expect(journal(sb, "e2e-chain").filter((l) => l.kind === "consent-asked")).toHaveLength(1);
+  expect(journal(sb, "e2e-chain").filter((l) => l.kind === "fired")).toHaveLength(2);
+  await shot(page, testInfo, "1 · both commands ran, in order, in one checkout");
+});
