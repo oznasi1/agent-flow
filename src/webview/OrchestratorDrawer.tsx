@@ -2,7 +2,7 @@ import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, edgeAction, Flow, FlowEdge, FlowNode, GateNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
 import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
@@ -1465,12 +1465,13 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const clippedRight = flow.nodes.some((n) => posOf(n).x + boxOf(n).w > renderWidth - GRAPH_H_INSET);
 
   /** What a gate node currently is, from the flow alone. `undefined` for every
-   * other kind. The performer is found the same way `gateAnswer` (evaluate.ts)
-   * finds it — by `performed`, never by `firedAt` alone — so the canvas and the
-   * engine can never disagree about which edge posed the question. */
+   * other kind. The performer comes from `gateAskEdge` (model.ts) — the one
+   * definition the engine reads the answer back through, so the canvas and the
+   * engine can never disagree about which edge posed the question. It used to
+   * re-derive that predicate here; the copy is gone. */
   const gateStateOf = (n: FlowNode): { asked: boolean; answer?: "approved" | "rejected"; edgeId?: string } | undefined => {
     if (n.kind !== "gate") return undefined;
-    const performer = flow.edges.find((e) => e.to === n.id && e.performed === true && e.firedAt !== undefined);
+    const performer = gateAskEdge(flow, n.id);
     if (!performer) return { asked: false };
     return { asked: true, answer: performer.gateAnswer, edgeId: performer.id };
   };

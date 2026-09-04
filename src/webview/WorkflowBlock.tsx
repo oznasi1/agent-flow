@@ -23,7 +23,7 @@
 // component sends no host message itself — wiring it into `DeckDetail` (which
 // message each callback posts) is the next task's job, not this one's.
 import * as React from "react";
-import { Flow, FlowEdge, edgeAction } from "../engine/orchestrator/model";
+import { Flow, FlowEdge, edgeAction, gateAskEdge } from "../engine/orchestrator/model";
 import { StepState, WorkflowState, WorkflowStatus } from "../engine/orchestrator/attach";
 import { reasonWhy, ruleOneLine } from "./orchestratorRule";
 
@@ -115,6 +115,16 @@ function WorkflowStep({
   // without changing what the name is.
   const descId = `wf-rule-${step.edgeId}`;
 
+  // The edge to answer, which is NOT this step's own edge. A "you" step carries
+  // the edge pointing AWAY from the gate (`evaluate.ts` posts `awaiting-answer`
+  // against an outgoing edge's `from`), while the answer is stamped on the edge
+  // that ASKED — the only one `flow:answerGate` accepts. Sending `step.edgeId`
+  // made both buttons here a silent no-op: the host refused the write and the
+  // question stayed open, with nothing on screen to say so. `gateAskEdge` is the
+  // engine's own definition of that edge, shared with the Orchestrator drawer,
+  // which is why the drawer's identical buttons always worked.
+  const askEdgeId = step.state === "you" ? gateAskEdge(flow, edge.from)?.id : undefined;
+
   // Whether this rule's TARGET can ever have captured output — only a `run`
   // rule does (a launch, a seed, a notify, or a gate's `ask` have no command
   // to capture), so gating on the target rather than on outcome keeps the
@@ -133,13 +143,13 @@ function WorkflowStep({
         <span id={descId} className="wf-rule">{sentence}</span>
         {text !== undefined && <span className="wf-receipt">{text}</span>}
       </div>
-      {step.state === "you" && (
+      {step.state === "you" && askEdgeId !== undefined && (
         <div className="wf-step-acts">
           <button
             type="button"
             className="dd-pact"
             aria-describedby={descId}
-            onClick={() => onAnswerGate(step.edgeId, "approved")}
+            onClick={() => onAnswerGate(askEdgeId, "approved")}
           >
             Approve
           </button>
@@ -147,7 +157,7 @@ function WorkflowStep({
             type="button"
             className="dd-pact"
             aria-describedby={descId}
-            onClick={() => onAnswerGate(step.edgeId, "rejected")}
+            onClick={() => onAnswerGate(askEdgeId, "rejected")}
           >
             Reject
           </button>

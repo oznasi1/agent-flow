@@ -836,28 +836,22 @@ test("Save to settings writes agentFlow.commands into the real settings.json", a
   await shot(page, testInfo, "2 · saved, in the scope that holds the setting");
 });
 
-// ── a pinned defect ─────────────────────────────────────────────────────────
+// ── the card's own gate buttons ─────────────────────────────────────────────
 // GUIDE § The Deck: "the node shows **Approve** and **Reject**", and the card
 // drawer's Workflow block renders exactly those two buttons for a `you` step.
-// Clicking them does nothing.
 //
-// `WorkflowBlock.tsx` sends `onAnswerGate(step.edgeId, …)`, and a `you` step's
-// `edgeId` is the edge LEAVING the gate — `evaluate.ts` posts `awaiting-answer`
-// against `e.from`, and `DeckApp.tsx`'s `workflowChipTrailer` says so in as many
-// words ("the pending edge here points AWAY from the gate"). But
-// `deckView.ts`'s `flow:answerGate` refuses any edge that is not the performer
-// (`performed !== true || firedAt === undefined`), which an outgoing edge never
-// is. So the write is silently dropped and the question stays unanswered.
+// This test was pinned with `test.fail()` when it was written, because clicking
+// them did nothing: `WorkflowBlock` sent `step.edgeId`, and a `you` step's edge
+// points AWAY from the gate (`evaluate.ts` posts `awaiting-answer` against
+// `e.from`), while `flow:answerGate` accepts only the edge that ASKED — so the
+// write was silently dropped and the question stayed open. The Orchestrator
+// drawer was unaffected, which is why nothing else caught it, and both unit
+// tests missed the seam from opposite sides.
 //
-// The Orchestrator drawer's own gate node is unaffected — it answers the ASK
-// edge (`gateStateOf`), which is why "a gate asks once and Approve fires the
-// downstream rule" above passes. The unit tests miss the seam from both sides:
-// `DeckDetail.test.tsx` asserts the message carries the OUTGOING edge id, and
-// `deckView.test.ts` drives the handler with the ASK edge id.
-//
-// This test asserts ONLY the documented behaviour, so it stays falsifiable: it
-// does not encode today's no-op. Delete `test.fail` when the fix lands.
-test.fail("Approve on the card's own workflow block answers the gate", async ({}, testInfo) => {
+// The fix extracted `gateAskEdge` (model.ts) as the one definition of that edge
+// and pointed all three surfaces at it. The pin is gone; this now proves the
+// card's buttons work.
+test("Approve on the card's own workflow block answers the gate", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = boot();
   seedCard(sb, "E2E-GATE");
@@ -884,10 +878,14 @@ test.fail("Approve on the card's own workflow block answers the gate", async ({}
 
   await approve.click();
 
-  // The documented outcome, and the only thing asserted: the gate is answered.
+  // The answer lands on the ASK edge — edges[0] — which is the edge the drawer
+  // has always written and the only one the engine reads back through.
   await expect.poll(() => readFlow(sb, "e2e-gate").edges[0].gateAnswer, { timeout: 30_000 })
     .toBe("approved");
-  await shot(page, testInfo, "2 · answered");
+  // And the downstream rule fires on it, which is what makes the answer real
+  // rather than merely recorded.
+  await expect(notifications(page, "E2E Gate: E2E-GATE-FIRED")).toBeVisible({ timeout: 60_000 });
+  await shot(page, testInfo, "2 · answered from the card, and the downstream rule fired");
 });
 
 // ── the picker ────────────────────────────────────────────────────────────────
