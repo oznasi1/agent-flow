@@ -210,3 +210,32 @@ describeWithHost(
   },
   (sb) => fs.rmSync(path.join(sb.home, ".claude", "plugins"), { recursive: true, force: true }),
 );
+
+// The Marketplace is the one panel that stays Claude-specific whatever
+// `agentFlow.agentProvider` says, because it browses Claude Code's own plugin
+// ecosystem rather than the configured tool's (GUIDE § The Marketplace). Its own
+// host, because `agentProvider` is read at seed time and the two blocks above
+// deliberately leave it at the shipped default.
+describeWithHost(
+  "marketplace under a non-Claude provider",
+  { "agentFlow.agentProvider": "copilot" },
+  (ctx) => {
+    // Mutation-checked: `marketplaceView.ts`'s scan root changed to a directory
+    // derived from the configured provider (`claudeConfigDir()` → a `copilot`
+    // sibling) — the rows vanish and this test fails. The honest short version of
+    // the same break is `scanClaudeAssets(...)` handed a path that does not exist.
+    test("the Marketplace browses Claude Code's assets under a Copilot provider", async ({}, testInfo) => {
+      await runCommand(ctx.page(), "Open the Marketplace");
+      const mkt = new Marketplace(ctx.page());
+      // The same two seeded assets the shipped-default journey sees: the panel did
+      // not narrow, redirect or empty itself because the configured tool is Copilot.
+      await expect(mkt.result("telemetry-auditor")).toBeVisible({ timeout: 30_000 });
+      await expect(mkt.result("/refit")).toBeVisible();
+      // And it is really the Claude tree being read, not a coincidence of naming:
+      // the detail pane renders the body of the file seeded under `~/.claude`.
+      await mkt.result("telemetry-auditor").click();
+      await expect(mkt.detail()).toContainText("Check the feed endpoint", { timeout: 15_000 });
+      await shot(ctx.page(), testInfo, "1 · Claude's own assets, under a Copilot provider");
+    });
+  },
+);

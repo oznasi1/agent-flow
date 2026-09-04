@@ -9,11 +9,6 @@ setting in the manifest must be named by some row.
 
 Proof grammar: `e2e: <title substring>` · `ct: <path>` · `unit: <path>` · `untestable: <reason>`.
 
-## Backfill in progress
-
-Rows marked `todo` are being written under docs/superpowers/plans/2026-09-03-e2e-doc-coverage.md.
-This heading — and every `todo` — is removed in that plan's last task.
-
 ## Sidebar / Tasks
 
 | id | doc | claim | proof |
@@ -184,7 +179,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 |----|-----|-------|-------|
 | `marketplace-open` | GUIDE § The Marketplace | "Open the Marketplace" (or the puzzle-piece title button) opens a browser of the agents and commands found in `.claude/` | e2e: lists the agents and commands found in .claude/ |
 | `marketplace-scope` | GUIDE § The Marketplace | It reads `~/.claude` — marketplaces, plugins, skills, commands, agents, hooks — plus what you wrote yourself in `~/.claude` or the workspace's `.claude/` | e2e: lists the agents and commands found in |
-| `marketplace-claude-specific` | GUIDE § The Marketplace | The Marketplace is Claude-specific whatever `agentFlow.agentProvider` says | todo |
+| `marketplace-claude-specific` | GUIDE § The Marketplace | The Marketplace is Claude-specific whatever `agentFlow.agentProvider` says | e2e: the Marketplace browses Claude Code's assets under a Copilot provider |
 | `marketplace-fuzzy-search` | GUIDE § The Marketplace | Search is fuzzy and ranked (`revw` finds `/review`), narrowing the list with the best match selected as you type | e2e: search narrows the list to the matching asset |
 | `marketplace-keyboard-nav` | GUIDE § The Marketplace | From the search box ↑/↓ move the selection and Enter opens its file | e2e: arrow keys move the selection and Enter opens the file |
 | `marketplace-type-pills` | GUIDE § The Marketplace | Type pills (All, Skills, Commands, Agents, Hooks, Plugins) carry live counts that follow the query, and filter the list | e2e: type pills carry live counts and filter the list |
@@ -411,9 +406,9 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `provider-x-live-cards` | SETTINGS § table | A Copilot run's card carries no session, because the Deck reads Claude Code's session files and Copilot writes none | e2e: a Copilot run gets the backbone but no session |
 | `provider-x-live-cards-cursor` | SETTINGS § table | The same holds for Cursor | untestable: a Cursor session writes no `~/.claude/sessions` record, so the fixture would be the identical empty-registry setup as the Copilot row above — the harness cannot distinguish "Cursor wrote nothing" from "nothing ran" |
 | `provider-x-remote-control` | SETTINGS § Remote Control | Remote Control needs Claude Code; under Copilot, `on` refuses the launch and `ask` skips the picker | e2e: Copilot with Remote Control on refuses the launch |
-| `provider-x-marketplace` | GUIDE § The Marketplace | The Marketplace browses Claude Code's ecosystem whatever `agentFlow.agentProvider` says | todo |
+| `provider-x-marketplace` | GUIDE § The Marketplace | The Marketplace browses Claude Code's ecosystem whatever `agentFlow.agentProvider` says — the same claim `marketplace-claude-specific` owns, from the providers-and-surfaces side | e2e: the Marketplace browses Claude Code's assets under a Copilot provider |
 | `provider-x-review-button-label` | GUIDE § The Deck | The review button names the configured tool: Review with Claude Code / Cursor / Copilot | e2e: the review button names the configured tool |
-| `provider-x-doctor-rows` | SETTINGS § table | Doctor reports rows for whichever provider is in play, every host tool under `ask` | todo |
+| `provider-x-doctor-rows` | SETTINGS § table | Doctor reports rows for whichever provider is in play, every host tool under `ask` — the same claim `doctor-provider-rows` owns, from the providers-and-surfaces side | e2e: under agentProvider ask Doctor reports every tool |
 | `provider-none-fallback` | README § Quick start | With no coding tool installed the task brief is still written and the prompt lands on the documented clipboard fallback | e2e: lands on the documented clipboard fallback |
 | `provider-seed-agent-off` | SETTINGS § table | `agentFlow.seedAgent: false` opens the workspace and writes the brief and run record but seeds no session and no plan file | unit: test/unit/engine/workspace.test.ts |
 | `provider-seed-time-resolution` | SETTINGS § table | Provider and surface are resolved at seed time in the target window, never from the plan file, so a flipped setting changes plans already on disk | unit: test/unit/engine/workspace.test.ts |
