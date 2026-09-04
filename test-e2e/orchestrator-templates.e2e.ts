@@ -428,17 +428,16 @@ describeWithHost(
 
     // ── the dry run ───────────────────────────────────────────────────────────
 
-    // Pinned: GUIDE.md § The Deck quotes the dry run's own wording — a rule
-    // waiting on a gate "reads \"it is waiting on your answer\" there". The
-    // product says "waiting for your answer" (`reasonWhy`, orchestratorRule.ts:1037
-    // on 2026-09-04) — no "it is", and "for" rather than "on". The panel, the
-    // verdict and the row are all real; only the quoted sentence is not.
+    // GUIDE.md § The Deck quotes the dry run's own wording, so this test holds the
+    // doc to the product rather than the other way round. It used to be pinned:
+    // the doc said a waiting gate "reads \"it is waiting on your answer\" there"
+    // and the product says "waiting for your answer" (`reasonWhy`,
+    // orchestratorRule.ts:1037 on 2026-09-04). The doc was the wrong half and has
+    // been corrected, so the pin is gone and this asserts the real sentence.
     //
-    // Mutation-checked: `reasonWhy`'s `awaiting-answer` arm changed to return the
-    // doc's exact sentence, which is the fix this pin is waiting for — the test
-    // then PASSED, and `test.fail()` reported it as an unexpected pass. So this
-    // pin fails for the documented reason and for no other.
-    test.fail("a dry run reports a waiting gate in words", async ({}, testInfo) => {
+    // Mutation-checked: `reasonWhy`'s `awaiting-answer` arm changed to return
+    // anything else — the assertion below fails.
+    test("a dry run reports a waiting gate in words", async ({}, testInfo) => {
       test.setTimeout(240_000);
       const deck = await Deck.open(ctx.page());
       const orch = await openOnCanvas(deck, GATE_CARD);
@@ -447,10 +446,8 @@ describeWithHost(
       const dry = deck.frame.locator('[data-testid="orch-dryrun"]');
       await expect(dry).toBeVisible({ timeout: 15_000 });
       await shot(ctx.page(), testInfo, "1 · the dry run's verdict on a waiting gate");
-      // The one documented fact, and nothing else: a pinned test asserts the doc's
-      // claim alone, so what the product DOES say is recorded in the comment above
-      // rather than smuggled in here as a second assertion.
-      await expect(dry).toContainText("it is waiting on your answer", { timeout: 15_000 });
+      // The documented sentence, verbatim from GUIDE § The Deck.
+      await expect(dry).toContainText("waiting for your answer", { timeout: 15_000 });
     });
   },
   (sb) => {
