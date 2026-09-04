@@ -319,4 +319,56 @@ export class Deck {
   closedRow(key: string): Locator {
     return this.closedRows().filter({ has: this.frame.locator(".rc-key", { hasText: key }) });
   }
+
+  /** The expanded row's action strip — `.rv-actions` (ReviewStrip.tsx:229 on
+   *  2026-09-04). Inside `{expanded && !selecting && (…)}`, so it exists only on
+   *  an expanded row: waiting for it is how a journey proves the detail block
+   *  rendered at all before asserting that something inside it is ABSENT, which
+   *  a bare `toHaveCount(0)` on a collapsed row would satisfy vacuously. */
+  reviewActions(n: number): Locator {
+    return this.review(n).locator(".rv-actions");
+  }
+
+  /** One of the three write buttons in an expanded row — rendered only while
+   *  `agentFlow.reviewWrites` is on (ReviewStrip.tsx:249-251 on 2026-09-04).
+   *  Addressed by the exact visible label so `Comment` cannot also resolve the
+   *  neighbouring `Request changes`, and so `Approve` cannot resolve the row's
+   *  `▶ Review with …` primary. */
+  reviewSubmit(n: number, verb: "Approve" | "Comment" | "Request changes"): Locator {
+    return this.reviewActions(n).getByRole("button", { name: verb, exact: true });
+  }
+
+  /** The row's review-body textarea. `.rv-box` is the WRAPPER (ReviewStrip.tsx:221
+   *  on 2026-09-04) and is itself gated on `reviewWrites`, so its own
+   *  `toHaveCount(0)` is the honest "there is nowhere to write" assertion; this
+   *  accessor is the field you type into. */
+  reviewBox(n: number): Locator {
+    return this.review(n).locator(".rv-box textarea");
+  }
+
+  /** The row's "Load the session's review" button — rendered only when the host
+   *  found a draft for this PR (`{r.draftPath && (…)}`, ReviewStrip.tsx:239 on
+   *  2026-09-04), which means a review run record whose worktree holds
+   *  `.pick-task/REVIEW-<n>.md`. Absent, not disabled, when there is no draft. */
+  reviewLoadDraft(n: number): Locator {
+    return this.reviewActions(n).getByRole("button", { name: "Load the session's review" });
+  }
+
+  /** The row's post-failure line, `.rv-fail` (ReviewStrip.tsx:261 on 2026-09-04).
+   *  Rendered only after a submit for this row came back failed, and unlike the
+   *  toast it does not time out — so it is the durable DOM record that a
+   *  rejection reached the user. */
+  reviewFail(n: number): Locator {
+    return this.review(n).locator(".rv-fail");
+  }
+
+  /** The Deck's own toast stack — `.toast <level>` with the words in `.toast-msg`
+   *  (DeckApp.tsx:1408-1411 on 2026-09-04). NOT a VS Code notification: the Deck
+   *  posts these into its own webview. They self-dismiss after 2.6s
+   *  (DeckApp.tsx:753), so assert on one immediately after the action that raises
+   *  it and prefer a durable record (a log file, a `calls.jsonl` line) for
+   *  anything the test needs to check later. */
+  toast(level: "success" | "error" | "info" | "warn"): Locator {
+    return this.frame.locator(`.toast.${level} .toast-msg`);
+  }
 }

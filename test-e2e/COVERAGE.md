@@ -160,9 +160,13 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `review-batch-read-only-mode` | GUIDE § The Deck | The batch offers a read-only review that checks nothing out and cannot run tests; it is never one of `agentFlow.reviewRequestModes` unless you add the `read-only` id yourself | unit: test/unit/engine/review/batch.test.ts |
 | `review-batch-layout` | GUIDE § The Deck | Landing in a new window with several PRs asks whether they share one window (a session each) or a window per PR | e2e: a batch review launches one worktree |
 | `review-batch-threshold-and-skips` | GUIDE § The Deck | Batches over `agentFlow.batchLaunchConfirmThreshold` confirm and name the cost in sessions; PRs in a repo you have not checked out are named once and skipped | todo |
-| `review-writes` | GUIDE § The Deck | With `agentFlow.reviewWrites` on (off by default) the expanded row submits Approve, Comment or Request changes, each behind a confirmation naming verb, repo and number, disabled while a submit is in flight; a session-drafted body is marked unless `agentFlow.stampLabelOnWrite` is off | todo |
-| `review-writes-gitlab-request-changes` | SETTINGS § table | On GitLab, Request changes posts a note and withdraws any approval, and the confirmation says so | todo |
-| `review-writes-error-never-body` | FORGES § 4. Conventions | A rejected submit shows the CLI's stderr, never the review body | todo |
+| `review-writes` | GUIDE § The Deck | With `agentFlow.reviewWrites` on (off by default) the expanded row submits Approve, Comment or Request changes, each behind a confirmation naming verb, repo and number (the halves below carry the rest of the sentence) | e2e: Approve confirms with the verb, repo and number before gh pr review runs |
+| `review-writes-cancel` | GUIDE § The Deck | Declining that confirmation sends nothing — the row is released, and no `pr review` reaches the CLI | e2e: cancelling the confirmation sends nothing |
+| `review-writes-in-flight` | GUIDE § The Deck | Each of the three verbs is disabled while a submit for that row is already in flight | unit: test/webview/ReviewStrip.test.tsx |
+| `review-writes-session-draft` | GUIDE § The Deck | A body loaded from the session's draft (`.pick-task/REVIEW-<n>.md`) is marked as session-drafted when it goes out | e2e: a session's draft loads into the review box and is marked session-drafted |
+| `review-writes-unmarked` | GUIDE § The Deck | `agentFlow.stampLabelOnWrite: false` sends that same draft body unmarked | e2e: stampLabelOnWrite off sends the body unmarked |
+| `review-writes-gitlab-request-changes` | SETTINGS § table | On GitLab, Request changes posts a note and withdraws any approval, and the confirmation says so | e2e: Request changes on GitLab warns that approval is withdrawn |
+| `review-writes-error-never-body` | FORGES § 4. Conventions | A rejected submit shows the CLI's stderr, never the review body | e2e: a rejected submit shows the CLI's stderr, never the body |
 | `review-strip-toggle` | GUIDE § The Deck | `agentFlow.reviewRequests: false` hides the strip; it also goes dark whenever `agentFlow.prFacts` is off; `agentFlow.reviewRequestsAlwaysVisible: false` hides it while empty | todo |
 | `review-strip-ttl` | SETTINGS § table | `agentFlow.reviewRequestsTtlSeconds` (default 300, minimum 60) governs how stale the cached queue may be; fetched only while the Deck is open | unit: test/unit/engine/review/store.test.ts |
 
@@ -452,7 +456,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-review-requests` | SETTINGS § table | `agentFlow.reviewRequests` shows the Deck's review-requests strip | todo |
 | `set-review-requests-always-visible` | package.json | `agentFlow.reviewRequestsAlwaysVisible: false` hides the strip while no PR is waiting | todo |
 | `set-review-requests-ttl-seconds` | SETTINGS § table | `agentFlow.reviewRequestsTtlSeconds` (300, minimum 60) is how stale the cached queue may be | unit: test/unit/engine/review/store.test.ts |
-| `set-review-writes` | SETTINGS § table | `agentFlow.reviewWrites` (off) allows approve / comment / request changes from the Deck | todo |
+| `set-review-writes` | SETTINGS § table | `agentFlow.reviewWrites` (off) allows approve / comment / request changes from the Deck | e2e: reviewWrites off shows no submit buttons |
 | `set-merge-writes` | SETTINGS § table | `agentFlow.mergeWrites` (off) shows Merge on a provably ready card | e2e: mergeWrites off shows no Merge button on a ready PR |
 | `set-merge-method` | SETTINGS § table | `agentFlow.mergeMethod`: `squash`, `merge` or `rebase`, named in the dialog every time | e2e: mergeMethod is named in the dialog and passed to gh |
 | `set-review-request-modes` | SETTINGS § table | `agentFlow.reviewRequestModes` layers your review modes over Full review | todo |
@@ -494,12 +498,14 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `priv-your-services-only` | PRIVACY | Nothing about your tickets, code or repos is sent to any service that is not already yours | untestable: negative network claim with no sink in the lane |
 | `priv-no-forge-credentials` | PRIVACY | Agent Flow stores no forge credentials; every forge call inherits `gh`'s own host, SSO and token | unit: test/unit/compat.test.ts |
 | `priv-secretstorage` | PRIVACY | Jira credentials live in VS Code SecretStorage, never in `settings.json` | e2e: signing in round-trips through SecretStorage and signing out re-gates |
-| `priv-read-only-default` | README § Privacy | Jira and the forge are read-only by default; the only writes are ones you trigger — a status change, and with `agentFlow.reviewWrites` or `agentFlow.mergeWrites` on, a review or merge behind a modal | todo |
+| `priv-read-only-default` | README § Privacy | Jira and the forge are read-only by default; the only writes are ones you trigger — with `agentFlow.reviewWrites` off, an expanded review row offers no way to write at all (`set-merge-writes` is the merge half, `priv-read-only-review-modal` the modal) | e2e: reviewWrites off shows no submit buttons |
+| `priv-read-only-review-modal` | README § Privacy | With `agentFlow.reviewWrites` on, a review submit reaches the forge only through a modal confirmation | e2e: Approve confirms with the verb, repo and number before gh pr review runs |
 | `priv-open-agents-reads` | PRIVACY | With `agentFlow.openAgents` on the Deck reads `~/.claude/sessions`, and with `agentFlow.prFacts` also on runs `gh pr list` in a live session's directory even one you never pointed it at | todo |
 | `priv-review-strip-shared-gate` | PRIVACY | `agentFlow.reviewRequests` only produces a forge read while `agentFlow.prFacts` is on | e2e: turning prFacts off drops PR facts and darkens the review strip live |
 | `priv-doctor-probes` | PRIVACY | Doctor makes two authenticated GETs and runs `gh auth status`, and writes nothing except the clipboard when asked to copy | todo |
 | `priv-pick-task-excluded` | PRIVACY | Briefs go in a git-excluded `.pick-task/`, so they are never committed | e2e: the brief directory is git-excluded |
-| `priv-output-channel-log` | PRIVACY | Every review submit and merge attempt, success or failure, is logged to the Agent Flow Deck output channel | todo |
+| `priv-output-channel-log` | PRIVACY | Every review submit that reaches the forge is logged to the Agent Flow Deck output channel (`priv-output-channel-merge` is the merge half, `priv-output-channel-review-failure` the failure half) | e2e: Approve confirms with the verb, repo and number before gh pr review runs |
+| `priv-output-channel-review-failure` | PRIVACY | A review submit the forge rejects is logged too, with the CLI's own wording and none of the review body | e2e: a rejected submit shows the CLI's stderr, never the body |
 | `priv-output-channel-merge` | PRIVACY | A merge that reaches the forge is logged to the Agent Flow Deck output channel with the strategy it used | e2e: Merge confirms with the repo, number and strategy, then runs gh pr merge |
 
 ## Meta
