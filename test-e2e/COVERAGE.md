@@ -75,17 +75,19 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `notepad-add-note` | GUIDE § The Notepad | Add note creates a note from the title and detail fields | e2e: a note added in one view is still there |
 | `notepad-start` | GUIDE § The Notepad | Start launches a session from a note like Explore does, writes a `## Notepad:` brief and lands a plan file; the note stays in the list | e2e: running a note seeds a session and lands a plan file |
 | `notepad-run-badges` | GUIDE § The Notepad | The run lands on the Deck and the note grows a badge: Running while a session is attached, Stale once nothing is, Finished when the Deck records it landed | unit: test/unit/notepad.test.ts |
-| `notepad-rerun-replaces` | GUIDE § The Notepad | Re-running a note replaces that note's previous run record rather than piling up a second | todo |
-| `notepad-images` | GUIDE § The Notepad | An image pasted or dropped onto a note renders a thumbnail; PNG, JPEG, GIF and WebP up to 10 MB each, an oversize one refused | todo |
+| `notepad-rerun-replaces` | GUIDE § The Notepad | Re-running a note replaces that note's previous run record rather than piling up a second | e2e: re-running a note replaces its earlier run record |
+| `notepad-images` | GUIDE § The Notepad | An image pasted or dropped onto a note renders a thumbnail; PNG, JPEG, GIF and WebP up to 10 MB each, an oversize one refused | e2e: a dropped image renders a thumbnail and an oversize one is refused |
 | `notepad-images-attach-picker` | GUIDE § The Notepad | Attach image opens the OS file picker beside Add note and in a note's edit form | untestable: native OS dialog |
 | `notepad-images-copied-to-brief` | GUIDE § The Notepad | Start copies attachments into `.pick-task/images/<run key>/` beside the brief and names them in the brief and the seeded prompt | unit: test/unit/engine/workspace.test.ts |
 | `notepad-drag-order` | GUIDE § The Notepad | Each note has a grip; dragging it puts the list in your order, which persists across reloads and holds under every filter | e2e: a note can be dragged to a new position |
 | `notepad-drag-selectable` | GUIDE § The Notepad | A note body is still text-selectable after its row was dragged | e2e: still selectable after its row was dragged |
-| `notepad-reset-order` | GUIDE § The Notepad | Reset order appears only once you have dragged something, and puts the list back to newest-first | todo |
-| `notepad-filter` | GUIDE § The Notepad | The list opens on Active; All and Done are a click away and filter by the checkbox | todo |
+| `notepad-reset-order` | GUIDE § The Notepad | Reset order appears only once you have dragged something, and puts the list back to newest-first | e2e: Reset order appears only after a drag |
+| `notepad-filter` | GUIDE § The Notepad | The list opens on Active; All and Done are a click away and filter by the checkbox | e2e: the list opens on Active and the filter shows done notes only under Done and All |
 | `notepad-clear-completed` | GUIDE § The Notepad | Clear completed removes every checked note in one action and only appears when there is something to clear | e2e: removes only the done note |
+| `notepad-clear-completed-offer` | GUIDE § The Notepad | Clear completed only appears once a note is checked, and appears even while the Active filter hides it | e2e: Clear completed appears only when a note is done |
 | `notepad-done-checkbox` | GUIDE § The Notepad | The checkbox toggles a note done | e2e: toggling done and clearing completed |
-| `notepad-edit-delete` | GUIDE § The Notepad | The quiet edit and delete icons beneath Start save a new title or remove the note | todo |
+| `notepad-edit-delete` | GUIDE § The Notepad | The quiet edit and delete icons beneath Start save a new title or remove the note | e2e: editing a note saves the new title |
+| `notepad-delete-note` | GUIDE § The Notepad | The delete icon removes that note and only that note | e2e: deleting a note removes it |
 | `notepad-os-dictation` | GUIDE § The Notepad | The fields are ordinary inputs, so the OS's own dictation types into them; there is no microphone button of its own | untestable: OS dictation |
 | `notepad-sections` | GUIDE § The Notepad | Sections can be added and renamed | e2e: sections can be added and renamed |
 | `notepad-retire-in-place` | SETTINGS § table | `agentFlow.retireInPlaceAfterHours` (default 0) removes a finished Explore or Notepad card as soon as its session closes, since it ran in the checkout rather than a worktree | unit: test/unit/engine/retire.test.ts |
