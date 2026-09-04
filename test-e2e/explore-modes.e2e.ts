@@ -41,7 +41,26 @@ async function seededPrompt(ctx: HostCtx, keyPrefix: string): Promise<string> {
   const file = fs.readdirSync(plans).find((f) => f.startsWith(`${keyPrefix}-`))!;
   const plan = JSON.parse(fs.readFileSync(path.join(plans, file), "utf8")) as { matches: { prompt: string }[] };
   expect(plan.matches).toHaveLength(1);
+  // Every Explore launch opens a window, and a window nothing awaited keeps the
+  // Electron app alive: `app.close()` in `describeWithHost`'s `afterAll` then
+  // hangs and Playwright fails the whole FILE with an `"afterAll" hook timeout`,
+  // with every test in it already green. Caught exactly that way in a full-lane
+  // run. `sharedHost.ts` now kills a hung close as a backstop, but a test that
+  // opens a window should still settle it here rather than lean on that.
+  await settleWindows(ctx);
   return plan.matches[0].prompt;
+}
+
+/** Wait for every window the app currently has to reach its workbench. Not a
+ *  count: an Explore into a folder a window already holds is REVEALED rather
+ *  than opened, so the number is not knowable from the gesture. */
+async function settleWindows(ctx: HostCtx): Promise<void> {
+  for (const w of ctx.app().windows()) {
+    await w.locator(".activitybar").waitFor({ timeout: 60_000 }).catch(() => {
+      // A window that never reaches a workbench is not this helper's failure to
+      // report — the assertions above already spoke. Closing is what matters.
+    });
+  }
 }
 
 /** Click Explore and wait for the first native prompt. Which prompt that is
