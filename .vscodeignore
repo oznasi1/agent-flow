@@ -7,6 +7,14 @@ playwright/**
 test-results/**
 playwright-e2e-report/**
 .vscode-test/**
+# The bare names too, not just their contents. A parallel worktree symlinks both
+# of these at the root checkout's copies (a 400MB editor download and
+# node_modules), and `<name>/**` matches what is INSIDE a directory — never a
+# symlink that merely bears the name. Without these two lines `vsce package`
+# from a worktree bundles the symlinks and secretlint dies reading one as a file
+# (`EISDIR`). Same trailing-slash trap `.gitignore` had for `.vscode-test`.
+.vscode-test
+node_modules
 playwright-e2e.config.ts
 playwright-ct.config.ts
 coverage/**
