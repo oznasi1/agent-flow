@@ -209,7 +209,7 @@ test("Open focuses an already-open window instead of duplicating it", async ({},
   await shot(page, testInfo, "8 · still two windows after two Opens");
 });
 
-// Mutation-checked: diffView.ts `openTaskDiff` returns "empty" before `vscode.changes` — no editor opened, only the toast
+// Mutation-checked: diffView.ts `openTaskDiff` iterating `[] as ChangedFile[]` instead of `taskChangedFiles(repo.path)` — it reported "empty", no diff editor opened, and only the toast appeared
 test("Diff opens the working diff", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox();
