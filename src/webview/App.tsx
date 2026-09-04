@@ -828,15 +828,17 @@ function TaskCard(props: {
   // would let navigate the webview, where navigating IS running. Anything else loses
   // the attribute, leaving an inert key rather than a link to somewhere unexpected.
   //
-  // The shape is dictated by what CodeQL's barrier reasoning follows, and all three
-  // parts of it were learned the hard way: a check behind a helpers.ts function does
-  // not carry to the caller, a guard on `task.url` does not protect a SECOND read of
-  // `task.url`, and a regex test is not read as sanitising at all. Hence: written out
-  // here, against a local, with `startsWith`. Losing the regex costs the
-  // case-insensitivity with it — an `HTTPS://` ticket URL now renders inert — which
-  // is the safe direction to fail in, and no connector emits one.
+  // CodeQL keeps js/xss and js/client-side-unvalidated-url-redirection open on the
+  // line below whatever shape this takes — behind a helpers.ts function, inline as a
+  // regex on `task.url`, inline on a local, and as `startsWith` on a local were all
+  // tried. Its js/xss reading is simply wrong here: `href` is assigned from nothing
+  // but a string that begins `http://` or `https://`, so no scheme that executes can
+  // reach the DOM. The redirection query has no fix at all short of dropping the
+  // feature — linking to a URL the source supplied is what this anchor IS. The two
+  // belong in the security tab's dismissed list, not in another rewrite of these
+  // four lines; don't reshape them again trying to satisfy the analyser.
   const ticketUrl = task.url;
-  const href = ticketUrl.startsWith("https://") || ticketUrl.startsWith("http://") ? ticketUrl : undefined;
+  const href = /^https?:\/\//i.test(ticketUrl) ? ticketUrl : undefined;
   const armed = React.useRef(false); // true only while a drag started from the grip
 
   const take = (e: React.MouseEvent) => {
