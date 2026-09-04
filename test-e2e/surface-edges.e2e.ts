@@ -425,12 +425,13 @@ test("a shared-window batch stacks every task in one window", async ({}, testInf
 
   // A session per task, stacked in the one window: two terminals, `Claude · E2E-1`
   // and `Claude · E2E-2`, in the order the tasks were picked. With more than one
-  // terminal the workbench renders the tabs list beside the terminal
-  // (`.terminal-tabs-list`, one `.monaco-list-row` per terminal, its title in text).
-  await shared.waitForTimeout(20_000); // DEBUG
-  fs.writeFileSync("/private/tmp/claude-501/-Users-oznasi-dev-agent-flow/05eac327-a91a-49da-95d9-a98497b6a1bf/scratchpad/shared-dom.html", await shared.locator(".part.panel").evaluate((e) => e.outerHTML)); // DEBUG
-  fs.writeFileSync("/private/tmp/claude-501/-Users-oznasi-dev-agent-flow/05eac327-a91a-49da-95d9-a98497b6a1bf/scratchpad/shared.png", await shared.screenshot()); // DEBUG
-  const tabs = shared.locator(".terminal-tabs-list .monaco-list-row");
+  // terminal the workbench renders a tabs list beside the terminal — read off the
+  // real DOM of this very journey's shared window on 2026-09-03: the terminal
+  // pane body carries `.integrated-terminal`, its `.tabs-list` is a monaco list
+  // with one `.monaco-list-row` per terminal, and each row's
+  // `.terminal-tabs-entry` holds the terminal's name as text. Scoped to
+  // `.integrated-terminal` because `.tabs-list` alone is generic workbench chrome.
+  const tabs = shared.locator(".integrated-terminal .tabs-list .monaco-list-row");
   await expect(tabs).toHaveCount(2, { timeout: 90_000 });
   await expect(tabs.nth(0)).toContainText(`Claude · ${FIXTURE_TASK.key}`);
   await expect(tabs.nth(1)).toContainText(`Claude · ${FIXTURE_TASK_2.key}`);
