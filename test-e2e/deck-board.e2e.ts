@@ -307,7 +307,7 @@ test("header tiles count what the columns hold", async ({}, testInfo) => {
   await shot(page, testInfo, "11 · tiles 1 · 1 · 0 · 0 over the same columns");
 });
 
-// Mutation-checked: DeckApp.tsx `setSyncedAt(Date.now())` on `deck:runs` dropped — the caption stayed "refresh"
+// Mutation-checked: DeckApp.tsx's `deck:runs` handler stripped of `setSyncedAt(Date.now())` — the caption stayed "refresh" and never reported a sync
 test("the refresh control reports when it last synced", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox();

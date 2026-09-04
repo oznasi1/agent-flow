@@ -106,7 +106,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `deck-card-overflow-menu` | GUIDE § The Deck | Forget removes the run's record without touching its neighbour | e2e: forget removes a run's record without touching its neighbour |
 | `deck-card-overflow-rows` | GUIDE § The Deck | The card's overflow offers Open in Jira (the task source's own label) and Forget — today the card-detail drawer's `More` disclosure, not a ⋯ on the card | e2e: the overflow menu offers Open in Jira and Forget |
 | `deck-grouping-lens` | GUIDE § The Deck | The board opens one card per session; switching the header control to Workspaces gives one card per launched task with sessions nested, and the choice sticks across a reopen (`agentFlow.deckGrouping`) | e2e: the Sessions / Workspaces grouping sticks across a reopen |
-| `deck-refresh` | GUIDE § The Deck | The header refresh reports when it last synced (`synced Ns ago`) | todo |
+| `deck-refresh` | GUIDE § The Deck | The header refresh reports when it last synced (`synced Ns ago`) | e2e: the refresh control reports when it last synced |
 | `deck-card-facts` | GUIDE § The Deck | Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, the Jira status, and Open / Diff | e2e: the Deck card shows the PR the GitHub forge reports |
 | `deck-notepad-marker` | GUIDE § The Deck | A note started from the Notepad sits among the tickets marked `notepad` | todo |
 | `deck-run-retirement` | GUIDE § The Deck | Run records retire once a task is provably over; uncommitted or unpushed work always stops retirement, and retirement deletes only the record, never a worktree, branch or commit | e2e: a run past its retire window is swept off the board and out of the store |
