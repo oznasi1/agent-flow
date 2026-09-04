@@ -268,7 +268,7 @@ test("failing required checks pull a working session into fixes needed", async (
 
 // Mutation-checked: prWorkPlan's `elsewhere` (engine/prWork.ts) dropped the
 // briefPath (`seats: [{ matchPath: path }]`) — the seeded prompt rendered the
-// relative `.pick-task/TASK.md` and this test failed on the absolute path.
+// relative `.pick-task/TASK.md` and this test failed on `brief at <abs path>.`.
 test("Fix CI seeds a session pointed at the brief by absolute path", async ({}, testInfo) => {
   test.setTimeout(240_000);
   // `prWorkOpenIn` takes only `ask` or `its-window` (config.ts:448) — there is no
@@ -333,9 +333,9 @@ test("Fix CI seeds a session pointed at the brief by absolute path", async ({}, 
   await shot(page, testInfo, "3 · seeded in this window");
 });
 
-// Mutation-checked: made prWorkClause (prompt.ts:142-145) answer the conflict case
-// with `""` like the review case — the two prompts became byte-identical and this
-// test failed on the conflict sentence.
+// Mutation-checked: made prWorkClause (prompt.ts:142-143) answer the conflict case
+// with `""` like the review case — the two prompts came back byte-identical and this
+// test failed on `expect(conflict).not.toBe(review)`.
 test("Resolve conflict and Address review seed their own prompts", async ({}, testInfo) => {
   test.setTimeout(240_000);
   // One PR that is BOTH conflicting and changes-requested, so `cardActions`
@@ -388,9 +388,9 @@ test("Resolve conflict and Address review seed their own prompts", async ({}, te
   await shot(page, testInfo, "5 · two seeds, two prompts");
 });
 
-// Mutation-checked: made prWorkTarget (deckView.ts:5337) ask regardless of the
-// setting (`if (cfg.prWorkOpenIn !== "ask")` → `if (false)`) — the picker opened,
-// no plan file ever landed, and the poll below failed.
+// Mutation-checked: made prWorkTarget (deckView.ts:5340) ask regardless of the
+// setting (`if (cfg.prWorkOpenIn !== "ask")` → `if (false as boolean)`) — the picker
+// opened, no plan file ever landed, and the poll below failed on 0.
 test("prWorkOpenIn its-window asks nothing", async ({}, testInfo) => {
   test.setTimeout(300_000);
   sb = makeSandbox({
@@ -427,9 +427,9 @@ test("prWorkOpenIn its-window asks nothing", async ({}, testInfo) => {
   await settleWindows(1);
 });
 
-// Mutation-checked: prWorkPlan's `stay` case (engine/prWork.ts) returned
-// `elsewhere(run.repos[0].path + "-wt")` — the plan's matchPath was a path the run
-// does not own and this test failed on the matchPath equality.
+// Mutation-checked: prWorkPlan's `stay` case (engine/prWork.ts) seeded
+// `${r.path}-wt` instead of the repo — the plan's matchPath was a path the run does
+// not own and this test failed on the matchPath equality.
 test("the Deck's Address PR re-seeds the run's workspace in place", async ({}, testInfo) => {
   test.setTimeout(300_000);
   // `agentFlow.worktree: "always"` is the strong fixture here, not "never": the
@@ -478,8 +478,8 @@ test("the Deck's Address PR re-seeds the run's workspace in place", async ({}, t
 // ── When the read fails, and when it is switched off ──────────────────────────
 
 // Mutation-checked: dropped the `error: true` stamp from the failed-fetch entry
-// (deckView.ts:2233) — `unreadRepos` saw nothing wrong, the card lost the warning
-// and the legend lost the count.
+// (deckView.ts:2233) — `unreadRepos` saw nothing wrong and the card's signal line
+// came back as the plain branch backbone with no warning on it.
 test("a failing PR read shows PR unread and counts it in the footer", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox({ "agentFlow.worktree": "always", "agentFlow.prFacts": true });
@@ -516,8 +516,8 @@ test("a failing PR read shows PR unread and counts it in the footer", async ({},
 });
 
 // Mutation-checked: made onConfigChanged ignore the setting (deckView.ts:3952,
-// `if (e.affectsConfiguration("agentFlow.prFacts"))` → `if (false)`) — the card kept
-// #41 and the review strip kept its row, both live in the panel that was never reopened.
+// `if (e.affectsConfiguration("agentFlow.prFacts"))` → `if (false as boolean)`) — the
+// card kept `#41 ✓ ci` in the panel that was never reopened.
 test("turning prFacts off drops PR facts and darkens the review strip live", async ({}, testInfo) => {
   test.setTimeout(300_000);
   // The review TTL at its floor (60s, config.ts:837): with the strip's shared gate
