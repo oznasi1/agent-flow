@@ -95,7 +95,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `deck-header-count-tiles` | GUIDE § The Deck | Four header tiles count what the columns hold | todo |
 | `deck-column-hues` | GUIDE § The Deck | Each column carries its own hue in its dot, header rule and tint; cards are monochrome except in Action required, which carries an orange rail | ct: test-ct/Workflow.hues.spec.tsx |
 | `deck-merge-lanes` | GUIDE § The Deck | Merge is split into `ready to merge` (approved, mergeable, green) and `merged · wrap up` lanes; only a merged PR makes a card say merged | unit: test/unit/engine/bucket.test.ts |
-| `deck-recently-closed` | GUIDE § The Deck | A ticket closed with nothing merged drops into the collapsed Recently closed strip under the board | todo |
+| `deck-recently-closed` | GUIDE § The Deck | A ticket closed with nothing merged drops into the collapsed Recently closed strip under the board | e2e: a closed run collapses into the Recently closed strip |
 | `deck-live-signal` | GUIDE § The Deck | A card reads `working · Ns ago`, `idle`, `ended turn` or `parked` from Claude Code's own transcripts; `parked` only when the transcript cannot be read or does not exist | todo |
 | `deck-action-required-semantics` | GUIDE § The Deck | Action required is session signals only — a session that ended its turn, stalled or exited — so Claude's asking and GitHub's asking stay under separate headers | todo |
 | `deck-fixes-needed-lane` | GUIDE § The Deck | A PR with failing required checks, requested changes or a conflict pulls its card into In review's `fixes needed` lane even while the session is still working | todo |
@@ -421,7 +421,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-retire-abandoned-after-days` | SETTINGS § table | `agentFlow.retireAbandonedAfterDays` (7) retires a ticketless, PR-less, clean run; `0` disables | unit: test/unit/engine/retire.test.ts |
 | `set-retire-closed-after-hours` | SETTINGS § table | `agentFlow.retireClosedAfterHours` (24) keeps a closed run in Recently closed before its record is deleted | e2e: a run past its retire window is swept off the board |
 | `set-retire-in-place-after-hours` | SETTINGS § table | `agentFlow.retireInPlaceAfterHours` (0) is the window for a finished Explore or Notepad card | unit: test/unit/engine/retire.test.ts |
-| `set-inflight-show-all` | SETTINGS § table | `agentFlow.inflightShowAll` renders every run record as a card and retires nothing for being closed | todo |
+| `set-inflight-show-all` | SETTINGS § table | `agentFlow.inflightShowAll` renders every run record as a card and retires nothing for being closed | e2e: inflightShowAll renders every record as a card |
 | `set-notify-on-action-required` | SETTINGS § table | `agentFlow.notifyOnActionRequired` notifies once when a run parks | todo |
 | `set-orchestrator` | SETTINGS § table | `agentFlow.orchestrator` shows the Deck's Orchestrator drawer | e2e: an attached workflow is a real flow in the Workflows drawer, and Detach |
 | `set-never-auto-run` | ORCHESTRATOR_COMMANDS § Never, whatever you approved | `agentFlow.neverAutoRun` patterns outrank every approval | unit: test/unit/engine/orchestrator/neverAutoRun.test.ts |

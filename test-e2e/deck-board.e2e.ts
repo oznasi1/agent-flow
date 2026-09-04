@@ -66,7 +66,7 @@ function secondRepo(sb: Sandbox, name: string): string {
 
 test.afterEach(async () => { await app?.close(); app = undefined; sb?.dispose(); });
 
-// Mutation-checked: DeckApp.tsx `const live = runs.filter((r) => r.shelf !== "closed")` → `runs` (a closed run renders as a card again)
+// Mutation-checked: DeckApp.tsx `const live = runs.filter((r) => r.shelf !== "closed")` → `const live = runs` — the closed run rendered as a card and the count assertion failed
 test("a closed run collapses into the Recently closed strip", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox({ "agentFlow.retireClosedAfterHours": 24 });
@@ -96,7 +96,7 @@ test("a closed run collapses into the Recently closed strip", async ({}, testInf
   await shot(launched.page, testInfo, "2 · expanded strip lists the run");
 });
 
-// Mutation-checked: deckView.ts `shelf: cfg.inflightShowAll ? "board" : s.shelf` → `s.shelf` AND the buildAll shelf override (line ~3660) dropped — the run went back to the strip
+// Mutation-checked: deckView.ts's two shelf overrides neutered — `const shelf = showAll ? "board" : shelfFor(…)` → `false ? …`, and `shelf: cfg.inflightShowAll ? "board" : s.shelf` → `s.shelf`; the run went back to the strip and no card ever appeared
 test("inflightShowAll renders every record as a card", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox({ "agentFlow.retireClosedAfterHours": 24, "agentFlow.inflightShowAll": true });
