@@ -828,18 +828,15 @@ function TaskCard(props: {
   // would let navigate the webview, where navigating IS running. Anything else loses
   // the attribute, leaving an inert key rather than a link to somewhere unexpected.
   //
-  // Written out here rather than behind a helpers.ts function on purpose: CodeQL
-  // reads a regex test as a barrier only inside the function that performs it, so
-  // routing this through a shared helper leaves js/xss and
-  // js/client-side-unvalidated-url-redirection firing on a line that is already safe.
-  // The Notepad's equivalent guard can stay in a helper because its early `return
-  // null` is a barrier CodeQL does follow.
-  // Read once into a local: the guard and the use then share one SSA variable,
-  // which is the shape CodeQL's barrier reasoning actually follows — testing
-  // `task.url` and then passing `task.url` is two separate property reads to it,
-  // and the barrier does not carry across them.
+  // The shape is dictated by what CodeQL's barrier reasoning follows, and all three
+  // parts of it were learned the hard way: a check behind a helpers.ts function does
+  // not carry to the caller, a guard on `task.url` does not protect a SECOND read of
+  // `task.url`, and a regex test is not read as sanitising at all. Hence: written out
+  // here, against a local, with `startsWith`. Losing the regex costs the
+  // case-insensitivity with it — an `HTTPS://` ticket URL now renders inert — which
+  // is the safe direction to fail in, and no connector emits one.
   const ticketUrl = task.url;
-  const href = ticketUrl && /^https?:\/\//i.test(ticketUrl) ? ticketUrl : undefined;
+  const href = ticketUrl.startsWith("https://") || ticketUrl.startsWith("http://") ? ticketUrl : undefined;
   const armed = React.useRef(false); // true only while a drag started from the grip
 
   const take = (e: React.MouseEvent) => {
