@@ -181,7 +181,7 @@ test.afterEach(async () => {
   }
 });
 
-// Mutation-checked: DeckApp.tsx `const merge = local || !mergeWrites ? null : cardMerge(r)` → `local ? null : cardMerge(r)` (button renders with the setting off).
+// Mutation-checked: DeckApp.tsx's `const merge = local || !mergeWrites ? null : cardMerge(r)` → `local ? null : cardMerge(r)`; the button rendered with the setting off and this failed on toHaveCount(0).
 test("mergeWrites off shows no Merge button on a ready PR", async ({}, testInfo) => {
   test.setTimeout(240_000);
   const { page, card } = await boot({}, ghAnswers());
@@ -192,7 +192,7 @@ test("mergeWrites off shows no Merge button on a ready PR", async ({}, testInfo)
   await expect(mergeButton(card)).toHaveCount(0);
 });
 
-// Mutation-checked: deckView.ts mergePr — replaced the `showWarningMessage` await with `const answer = label` (the merge runs with no dialog); this is sabotage/deck-merge.patch.
+// Mutation-checked: mergePr's modal `showWarningMessage` await replaced with `const answer = label`, so the merge runs unconfirmed; the dialog never appeared and this failed. That break is sabotage/deck-merge.patch.
 test("Merge confirms with the repo, number and strategy, then runs gh pr merge", async ({}, testInfo) => {
   test.setTimeout(240_000);
   const { page, card } = await boot({ "agentFlow.mergeWrites": true }, ghAnswers());
@@ -218,7 +218,7 @@ test("Merge confirms with the repo, number and strategy, then runs gh pr merge",
   await shot(page, testInfo, "4 · merged through gh");
 });
 
-// Mutation-checked: deckView.ts mergePr `if (answer !== label)` → `if (false)` (Cancel merges anyway).
+// Mutation-checked: mergePr's `if (answer !== label)` → `if (false)` (deckView.ts:3333 — NOT the identically-worded review-submit guard 175 lines above), so Cancel merged anyway; caught first at the button-release wait below, since an "ok" outcome deliberately leaves the row disabled.
 test("cancelling the merge dialog runs nothing", async ({}, testInfo) => {
   test.setTimeout(240_000);
   const { page, card } = await boot({ "agentFlow.mergeWrites": true }, ghAnswers());
@@ -238,7 +238,7 @@ test("cancelling the merge dialog runs nothing", async ({}, testInfo) => {
   await shot(page, testInfo, "6 · cancelled, nothing ran");
 });
 
-// Mutation-checked: provider.ts MERGE_FLAG `rebase: "--rebase"` → `"--squash"` (dialog says rebase, gh gets squash).
+// Mutation-checked: MERGE_FLAG's `rebase: "--rebase"` → `"--squash"` (engine/pr/provider.ts), so the dialog said rebase and gh got squash; this failed on the argv.
 test("mergeMethod is named in the dialog and passed to gh", async ({}, testInfo) => {
   test.setTimeout(240_000);
   const { page, card } = await boot({ "agentFlow.mergeWrites": true, "agentFlow.mergeMethod": "rebase" }, ghAnswers());
@@ -253,7 +253,13 @@ test("mergeMethod is named in the dialog and passed to gh", async ({}, testInfo)
   await expect.poll(() => mergeCalls(), { timeout: 30_000 }).toEqual([["pr", "merge", "41", "--rebase"]]);
 });
 
-// Mutation-checked: bucket.ts mergeTarget `if (ready.length !== 1) return null` → `=== 0` (picks the first of two).
+// Mutation-checked: BOTH of mergeTarget's plurality refusals dropped — `ready.length !== 1`
+// and the `rest.every(… === "MERGED")` line replaced by `if (ready.length === 0) return null`
+// and picking `ready[0]`. One alone cannot be checked here and that is a fact about the
+// product, not a weakening: a second READY PR is by definition OPEN, so it trips the
+// already-merged rule too, and no two-ready card can isolate the count rule. The
+// sibling-open test below mutates the merged rule on its own.
+// Under the mutation the Merge button appeared and this failed on toHaveCount(0).
 test("two ready PRs across repos show no Merge button", async ({}, testInfo) => {
   test.setTimeout(240_000);
   // The shim keys on argv, and both checkouts ask `gh pr list --head <branch>` —
@@ -270,7 +276,7 @@ test("two ready PRs across repos show no Merge button", async ({}, testInfo) => 
   await expect(mergeButton(card)).toHaveCount(0);
 });
 
-// Mutation-checked: bucket.ts mergeTarget — removed the `rest.every(… state === "MERGED")` refusal (an open sibling no longer blocks).
+// Mutation-checked: mergeTarget's `rest.every((x) => !x.failed && x.facts.state === "MERGED")` → `rest.every(() => true)` (bucket.ts), so rocket#41 became the target with telemetry#52 still open; the button appeared and this failed.
 test("a sibling repo still holding an open PR blocks Merge", async ({}, testInfo) => {
   test.setTimeout(240_000);
   // rocket keeps the ready #41; telemetry's `pr list` answers an open #52 that
@@ -291,7 +297,7 @@ test("a sibling repo still holding an open PR blocks Merge", async ({}, testInfo
   await expect(mergeButton(card)).toHaveCount(0);
 });
 
-// Mutation-checked: glab/provider.ts merge — `if (method === "rebase")` → `if (false)` (falls to "Unknown merge method", which names no setting).
+// Mutation-checked: GlabProvider.merge's `if (method === "rebase")` → `if (false)`, which drops through to the "Unknown merge method: rebase" message — a refusal that names no setting; this failed on the toast.
 test("GitLab refuses a rebase merge naming the setting", async ({}, testInfo) => {
   test.setTimeout(240_000);
   const { page, deck, card } = await boot(
@@ -318,7 +324,7 @@ test("GitLab refuses a rebase merge naming the setting", async ({}, testInfo) =>
   expect(mergeCalls()).toEqual([]);
 });
 
-// Mutation-checked: deckView.ts mergePr — removed `this.log(\`deck: merge failed: …\`)` (the failure never reaches the output channel).
+// Mutation-checked: GhProvider.merge's failure return → a constant `"the merge did not go through"` instead of `err.stderr?.trim() || …`, so gh's own wording reached neither surface; this failed on the toast, and the output-channel line lost it too.
 test("a merge failure reaches the user and the output channel", async ({}, testInfo) => {
   test.setTimeout(240_000);
   const { page, deck, card } = await boot(
