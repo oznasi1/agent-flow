@@ -1,0 +1,13 @@
+diff --git a/src/engine/orchestrator/model.ts b/src/engine/orchestrator/model.ts
+index 8d81759e..72ce8938 100644
+--- a/src/engine/orchestrator/model.ts
++++ b/src/engine/orchestrator/model.ts
+@@ -294,7 +294,7 @@ export function emptyFlow(id: string, name: string, nowMs: number): Flow {
+  * reason it will never fire is that it already errored. That drift was a real
+  * defect — `armability.ts` used to check only `firedAt`. */
+ export function isSettled(e: FlowEdge): boolean {
+-  return e.firedAt !== undefined || e.error !== undefined;
++  return e.error !== undefined;
+ }
+ 
+ /** Every field the HOST stamps onto an edge as it acts, removed — so the edge is

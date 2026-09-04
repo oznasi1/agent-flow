@@ -238,7 +238,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `orch-node-planned-launch` | GUIDE § The Deck | A rule pointed at unstarted work launches that session in a fresh worktree | unit: test/unit/engine/orchestrator/launch.test.ts |
 | `orch-node-place-seed` | GUIDE § The Deck | A rule pointed at a place that already exists seeds a second session there | unit: test/unit/engine/orchestrator/runner.test.ts |
 | `orch-node-command-run` | GUIDE § The Deck | A rule pointed at a command node runs a shell command from `agentFlow.commands` (`id`, `label`, `run`, optional `detail`) or free text; `{note}` is replaced with the rule's note, spliced in unquoted | todo |
-| `orch-node-notify` | GUIDE § The Deck | A notify node pops a VS Code notification in your own window and stamps a receipt — it messages nobody | todo |
+| `orch-node-notify` | GUIDE § The Deck | A notify node pops a VS Code notification in your own window and stamps a receipt — it messages nobody | e2e: a notify rule fires once, pops a VS Code notification |
 | `orch-node-gate` | GUIDE § The Deck | A gate node shows Approve and Reject with an amber dot; it asks once and latches; a later rule fires on you-approved or you-rejected; Reset on the asking rule poses the question again; there is no notification | todo |
 | `orch-rule-note` | GUIDE § The Deck | A launch or seed rule's note is folded into the prompt mode it uses | unit: test/unit/engine/orchestrator/launch.test.ts |
 | `orch-cond-merged-pr` | GUIDE § The Deck | Condition: a merged PR | unit: test/unit/engine/orchestrator/conditions.test.ts |
@@ -256,7 +256,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `orch-arm` | GUIDE § The Deck | Arm a flow and it is checked on every Deck refresh; the card's chip turns live | e2e: arming turns the card's chip live |
 | `orch-arm-unfirable-warning` | TELEMETRY § Usage events | Arming warns about rules that can never fire as configured — Live signal off, PR facts off, or the forge cannot answer | unit: test/unit/engine/orchestrator/armability.test.ts |
 | `orch-fire-once` | GUIDE § The Deck | A rule that is met fires exactly once and tells you, never again on a later pass | unit: test/unit/engine/orchestrator/evaluate.test.ts |
-| `orch-fire-once-e2e` | GUIDE § The Deck | A notify rule fires once in a real host and pops exactly one notification across later passes | todo |
+| `orch-fire-once-e2e` | GUIDE § The Deck | A notify rule fires once in a real host and pops exactly one notification across later passes | e2e: fires once, pops a VS Code notification and stamps a receipt |
 | `orch-poll-interval` | ORCHESTRATOR_COMMANDS § One pass | The Deck polls every 6 seconds (`POLL_MS`) | unit: test/unit/deckView.test.ts |
 | `orch-lock` | ORCHESTRATOR_COMMANDS § One pass | Flows live in `~/.agentflow/flows` behind a lock (TTL 300 s, stale reaped never stolen); a pass that cannot take it does nothing; two windows cannot fire the same rule twice | unit: test/unit/engine/orchestrator/lock.test.ts |
 | `orch-runs-while-hidden` | GUIDE § The Deck | An armed flow keeps advancing while the Deck is hidden; closing the Deck stops it, and closing with something armed says so | todo |
