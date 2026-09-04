@@ -992,6 +992,12 @@ test("Add place is a search-and-tick list too, ticking two places in one write",
   await block.getByRole("button", { name: /open in workflows/i }).click();
   await expect(deck.frame.locator(".orch-hd")).toBeVisible({ timeout: 30_000 });
 
+  // The place picker lives on the LIST view's Add bar only
+  // (OrchestratorDrawer.tsx:2205-2212) — the Canvas's Graph bar carries Tidy,
+  // Notify, Gate, planned work and the command picker, but no place one. The
+  // drawer opens on Canvas, so switch views first. (`+ Add place…` is also
+  // hidden outright while a TEMPLATE is being edited; this is a workflow.)
+  await deck.orchFlowViewTab("List").click();
   await deck.frame.getByRole("button", { name: "Add a place" }).click();
   const pop = deck.frame.locator(".combo-pop");
   await expect(pop).toBeVisible({ timeout: 15_000 });
