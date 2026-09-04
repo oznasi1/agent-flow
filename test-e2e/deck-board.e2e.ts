@@ -495,11 +495,27 @@ test("showTokenTotal adds a Tokens on board total to the header", async ({}, tes
   await shot(launched.page, testInfo, "20 · the Tokens on board tile");
 });
 
-// Mutation-checked: deckView.ts `forgeReady` — `return this.forgeGap === null` → `return true`; every PR read was then attempted and ENOENT'd, the card grew a `⚠ PR unread` row and the legend note changed to the unread wording, failing two of the three assertions
+// Mutation-checked: deckView.ts `forgeReady` — `return this.forgeGap === null` → `return true`; the read was then attempted, ENOENT'd, and the card's signal line grew `⚠ PR unread`. (Checked twice: with the sandbox's remote-less `rocket` the same mutation SURVIVED, because `prEligible` refuses a repo with no resolvable default branch — hence the remote and the off-default branch below.)
 test("without the forge CLI the Deck falls back to the git and task-source backbone", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox({ "agentFlow.prFacts": true });
-  seedRun(sb, baseRun(sb, "E2E-18", { createdAt: Date.now() }));
+  // The repo must be PR-ELIGIBLE, or this test proves nothing: `prEligible`
+  // (engine/git.ts:205-209) refuses a repo whose default branch cannot be
+  // resolved, and the sandbox's `rocket` has no remote at all — so no read
+  // would be attempted whatever `forgeReady` said, and the "no read attempted"
+  // half of the claim would hold vacuously. Confirmed: with the plain fixture
+  // the test survived a `forgeReady() → true` mutation. A remote, an
+  // `origin/HEAD` to derive the default from, and a branch that differs from it
+  // is what makes an attempt possible.
+  execFileSync("git", ["remote", "add", "origin", "https://github.com/oznasi1/rocket.git"], { cwd: sb.repoPath });
+  const sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: sb.repoPath, encoding: "utf8" }).trim();
+  execFileSync("git", ["update-ref", "refs/remotes/origin/main", sha], { cwd: sb.repoPath });
+  execFileSync("git", ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], { cwd: sb.repoPath });
+  execFileSync("git", ["checkout", "-q", "-b", "E2E-18-fix"], { cwd: sb.repoPath });
+  seedRun(sb, baseRun(sb, "E2E-18", {
+    createdAt: Date.now(),
+    repos: [{ name: "rocket", path: sb.repoPath, isGit: true, branch: "E2E-18-fix" }],
+  }));
   // "Not installed" is a `spawn … ENOENT`, and that is precisely how the
   // product defines it: `probeGh` (engine/pr/provider.ts:105-122) reads
   // `code === "ENOENT"` as `missing` and anything else as `signed-out`. The
@@ -522,9 +538,14 @@ test("without the forge CLI the Deck falls back to the git and task-source backb
   // separates "not installed" from "not signed in".
   await expect(deck.frame.locator(".legend .note.warn")).toHaveText("gh CLI not found — PR facts off. Run Doctor", { timeout: 90_000 });
   // And the card is the backbone: its signal line carries the branch git read,
-  // and there are no PR failure rows — `forgeReady` false means no fetch was
-  // ever queued, so nothing is carried forward as unread either.
-  await expect(card.locator(".c-sig")).toContainText("main");
+  // and it does NOT carry `⚠ PR unread` — `forgeReady` false means no fetch was
+  // ever queued, so no repo is carried forward as unreadable. That bit is a
+  // `.c-sig` text bit (webview/deckSignal.ts:66), not a `.c-rows` action row,
+  // and it is the assertion that makes "no read attempted" falsifiable: with
+  // the eligible repo above, a `forgeReady() → true` mutation attempts the read,
+  // it ENOENTs, and this bit appears.
+  await expect(card.locator(".c-sig")).toContainText("E2E-18-fix");
+  await expect(card.locator(".c-sig")).not.toContainText("PR unread");
   await expect(card.locator(".c-rows")).toHaveCount(0);
   await shot(launched.page, testInfo, "21 · no gh: the git + Fixture backbone, and the note that says so");
 });
