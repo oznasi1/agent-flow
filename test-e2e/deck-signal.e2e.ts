@@ -137,37 +137,59 @@ test("a session mid-work reads working on its card and sits in In progress", asy
   await shot(launched.page, testInfo, "1 · working card in In progress");
 });
 
-// Mutation-checked: added `|| i.agentState === "needs-you"` to deriveBucket's needs
-// rung (bucket.ts) — the card moved to Action required and the pin was reported
-// as "expected to fail, but passed".
-// Pinned: GUIDE.md § The Deck says Action required is "a session that ended its
-// turn, stalled, or exited", but deriveBucket (bucket.ts:100-118) admits only
-// `blocked` and `exited` — an ended turn falls through to In progress's `parked`
-// lane, exactly as the docblock there says it should. The product is the
-// deliberate one; the doc sentence is stale. The card's own line still reads
-// `ended turn`.
-test.fail("a session that ended its turn lands the card in Action required", async ({}, testInfo) => {
-  test.setTimeout(240_000);
+/** A tracked run whose one session ended its turn, on the board. Shared by the
+ *  two tests below: one pins the doc's claim about the column, the other holds
+ *  the product to what it actually does. Returns the opened Deck. */
+async function endedTurnBoard(key: string): Promise<{ deck: Deck; page: Page }> {
   sb = makeSandbox();
-  seedRun(sb, baseRun(sb, "E2E-TURN"));
-
+  seedRun(sb, baseRun(sb, key));
   const launched = await launchHost(sb);
   app = launched.app;
-  const session = { pid: pidOf(app), cwd: sb.repoPath, id: "e2e-turn" };
+  const session = { pid: pidOf(app), cwd: sb.repoPath, id: `e2e-${key.toLowerCase()}` };
   seedSession(sb, session);
-  // `end_turn` on the last line is needs-you at ANY age (transcript.ts:135).
+  // `end_turn` on the last line is needs-you at ANY age (transcript.ts:135), so
+  // this needs no heartbeat the way a `working` shape does.
   seedTranscript(sb, { cwd: session.cwd, sessionId: session.id, shape: "ended-turn" });
-
   const deck = await Deck.open(launched.page);
-  await expect(deck.card("E2E-TURN")).toBeVisible({ timeout: 60_000 });
-  await expect(deck.status("E2E-TURN")).toHaveText(/^ended turn · /, { timeout: 30_000 });
-  // Where it actually lands today — asserted first, so the one failing line
-  // below is the doc's claim and nothing else.
-  await expect(deck.cardIn("In progress", "E2E-TURN")).toBeVisible();
-  await expect(deck.laneHeader("In progress", "parked")).toBeVisible();
-  await shot(launched.page, testInfo, "2 · ended turn, parked in In progress");
-  // The documented column. Fails today: see the Pinned note above.
+  await expect(deck.card(key)).toBeVisible({ timeout: 60_000 });
+  return { deck, page: launched.page };
+}
+
+// Mutation-checked: added `|| i.agentState === "needs-you"` to deriveBucket's
+// needs rung (bucket.ts:104) — the card moved to Action required, this test
+// passed, and Playwright reported it as failed ("expected to fail, but passed"),
+// which is what a mutation check on a pinned test looks like.
+// Pinned: GUIDE.md § The Deck says Action required is "a session that ended its
+// turn, stalled, or exited", but deriveBucket (bucket.ts:100-118) admits only
+// `blocked` and `exited`; an ended turn falls through to In progress's `parked`
+// lane. The docblock there argues the product's case at length ("just as often a
+// session that finished cleanly … it was this column's whole volume problem"), so
+// the deliberate behaviour is the code's and the stale sentence is the doc's. The
+// sibling test below holds the product to what it does; this one holds the doc to
+// what it claims, and fails until the sentence is corrected.
+// Deliberately asserts ONE fact and nothing else: a `test.fail` is green whenever
+// ANY line in it fails, so an extra assertion here (that the card is in In
+// progress, say) would make the pin unfalsifiable — the mutation above could
+// never turn it green.
+test.fail("a session that ended its turn lands the card in Action required", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  const { deck, page } = await endedTurnBoard("E2E-TURN");
+  await shot(page, testInfo, "2 · ended turn on the board");
   await expect(deck.cardIn("Action required", "E2E-TURN")).toBeVisible({ timeout: 30_000 });
+});
+
+// Mutation-checked: the same `|| i.agentState === "needs-you"` rung in
+// deriveBucket (bucket.ts:104) — the card left In progress and this test failed
+// on the `parked` lane header.
+test("an ended turn reads ended turn and parks in In progress", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  const { deck, page } = await endedTurnBoard("E2E-PARKED");
+  // `ended turn · Ns ago` — stateView's needs-you branch (DeckApp.tsx:170).
+  await expect(deck.status("E2E-PARKED")).toHaveText(/^ended turn · /, { timeout: 30_000 });
+  await expect(deck.cardIn("In progress", "E2E-PARKED")).toBeVisible();
+  await expect(deck.laneHeader("In progress", "parked")).toBeVisible();
+  await expect(deck.cardIn("Action required", "E2E-PARKED")).toHaveCount(0);
+  await shot(page, testInfo, "3 · ended turn parks in In progress");
 });
 
 // Mutation-checked: made readSessionActivity (transcript.ts) answer `idle` instead
@@ -196,7 +218,7 @@ test("a run with no transcript reads parked", async ({}, testInfo) => {
   await deck.card("E2E-PARK").click();
   await expect(deck.sessions().locator(".ag-row")).toHaveCount(1, { timeout: 15_000 });
   await expect(deck.sessions().locator(".ag-row")).toContainText("rocket");
-  await shot(launched.page, testInfo, "3 · parked with a session and no transcript");
+  await shot(launched.page, testInfo, "4 · parked with a session and no transcript");
 });
 
 // Mutation-checked: made runAttentionPass (attentionJob.ts) return before the toast
@@ -227,7 +249,7 @@ test("notifyOnActionRequired raises one notification per park, coalescing severa
   await expect(waitingToasts(page)).toHaveCount(1, { timeout: 90_000 });
   await expect(waitingToasts(page).first()).toContainText("2 sessions are waiting on you");
   expect(announcedKeys(sb)).toEqual(["E2E-A", "E2E-B"]);
-  await shot(page, testInfo, "4 · one toast for two parked runs");
+  await shot(page, testInfo, "5 · one toast for two parked runs");
 
   // Answer one: a working session is no longer waiting, and the latch prunes it.
   // Re-touched every 5s so the 45s working window cannot lapse under a slow pass.
@@ -241,14 +263,14 @@ test("notifyOnActionRequired raises one notification per park, coalescing severa
   seedTranscript(sb, { cwd: a.cwd, sessionId: a.id, shape: "pending-tool", ageMs: BLOCKED_AGE_MS });
   await expect(page.locator(".notification-list-item", { hasText: "E2E-A is waiting on you" })).toBeVisible({ timeout: 90_000 });
   expect(announcedKeys(sb)).toEqual(["E2E-A", "E2E-B"]);
-  await shot(page, testInfo, "5 · the re-parked run is announced by name");
+  await shot(page, testInfo, "6 · the re-parked run is announced by name");
 
   // Both sit in Action required on the board the toast points at.
   const deck = await Deck.open(page);
   await expect(deck.cardIn("Action required", "E2E-A")).toBeVisible({ timeout: 60_000 });
   await expect(deck.cardIn("Action required", "E2E-B")).toBeVisible({ timeout: 60_000 });
   await expect(deck.status("E2E-A")).toHaveText(/^blocked · waiting on Bash · /);
-  await shot(page, testInfo, "6 · both cards in Action required");
+  await shot(page, testInfo, "7 · both cards in Action required");
 });
 
 // Mutation-checked: runAttentionPass (attentionJob.ts) `deps.setAttention(keys)` →
@@ -278,7 +300,7 @@ test("the activity-bar badge counts waiting runs whether or not notifications ar
     .toHaveText("1", { timeout: 90_000 });
   // Same pass, same keys: had the setting announced anything, it would be here by now.
   await expect(waitingToasts(page)).toHaveCount(0);
-  await shot(page, testInfo, "7 · badge 1, no toast, Deck closed");
+  await shot(page, testInfo, "8 · badge 1, no toast, Deck closed");
 });
 
 // Mutation-checked: stateView's unknown branch (DeckApp.tsx:161) returned
@@ -307,5 +329,5 @@ test("a Copilot run gets the backbone but no session", async ({}, testInfo) => {
   await card.click();
   await expect(deck.sessions().locator(".dd-none")).toHaveText("No session open — git + Fixture only", { timeout: 15_000 });
   await expect(deck.sessions().locator(".ag-row")).toHaveCount(0);
-  await shot(launched.page, testInfo, "8 · Copilot card, backbone only");
+  await shot(launched.page, testInfo, "9 · Copilot card, backbone only");
 });
