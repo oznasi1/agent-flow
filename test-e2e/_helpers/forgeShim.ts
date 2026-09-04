@@ -72,7 +72,8 @@ const SIG_WORDS: Record<ForgeCli, number> = { gh: 2, glab: 2, "atlassian-cli": 3
  *    `bb_api__2_0_…` (one signature per REST path, as `glab api` already has).
  *
  *  Keys are split on whitespace, so write them as the argv reads: `"bb pr list"`,
- *  not `"bb_pr_list"`. A key with MORE words than the rule can see is refused —
+ *  not `"bb_pr_list"`. A trailing ` @<dir>` names a PER-CHECKOUT answer — see
+ *  `splitCwdKey` — and is stripped before this runs. A key with MORE words than the rule can see is refused —
  *  the shim would never match it, and the journey would discover that only as an
  *  unexplained empty answer.
  *
@@ -110,6 +111,26 @@ export function signatureOf(cli: ForgeCli, key: string): string {
  *  the shim itself. All three shims are written even when a CLI has no answers,
  *  so a forge the journey did not configure still lands in unknown.jsonl rather
  *  than reaching a real binary. */
+/** `"pr list @telemetry"` → `{ key: "pr list", cwd: "telemetry" }`; a key with no
+ *  suffix comes back with `cwd: null`.
+ *
+ *  Why the shim needs this at all: the signature is argv-only, and the product
+ *  runs the SAME argv in every checkout of a run — `gh pr list --head <branch> …`
+ *  with only `cwd` differing (`GhProvider.fetch`, `src/engine/pr/provider.ts:126-149`;
+ *  `GlabProvider.api`, `src/engine/pr/glab/provider.ts:128-130`). A two-repo card
+ *  whose repos must disagree (one PR ready, the sibling's still open) cannot be
+ *  built out of argv alone. The `@<dir>` answer is keyed on the basename of the
+ *  directory the CLI was spawned in — the run's `repos[].path`, which is what the
+ *  product passes as `cwd` — and wins over the plain answer for that signature
+ *  whenever it exists; a checkout with no per-dir answer falls through to the
+ *  plain one exactly as before. Basename, not full path: the sandbox root is a
+ *  fresh `mkdtemp` per test, and a journey names its checkouts (`rocket`,
+ *  `telemetry`), so the basename is the stable part. */
+export function splitCwdKey(rawKey: string): { key: string; cwd: string | null } {
+  const m = /^(.*\S)\s+@([A-Za-z0-9_.-]+)$/.exec(rawKey.trim());
+  return m ? { key: m[1], cwd: m[2] } : { key: rawKey, cwd: null };
+}
+
 export function installForgeShims(sb: Pick<Sandbox, "root">, answers: ForgeAnswers): { unknownLog: string } {
   const bin = path.join(sb.root, "bin");
   const answersDir = path.join(sb.root, "forge-answers");
@@ -120,9 +141,10 @@ export function installForgeShims(sb: Pick<Sandbox, "root">, answers: ForgeAnswe
 
   for (const cli of CLIS) {
     const map = answers[cli] ?? {};
-    for (const [key, raw] of Object.entries(map)) {
+    for (const [rawKey, raw] of Object.entries(map)) {
       const answer: ShimAnswer = isShimAnswer(raw) ? raw : { body: raw };
-      const base = path.join(answersDir, `${cli}.${signatureOf(cli, key)}`);
+      const { key, cwd } = splitCwdKey(rawKey);
+      const base = path.join(answersDir, `${cli}.${signatureOf(cli, key)}${cwd ? `@${cwd}` : ""}`);
       fs.writeFileSync(`${base}.json`, stdoutOf(answer.body));
       // Companions are written only when set, and a stale one from an earlier
       // install into the same root is removed, so an answer means exactly what
@@ -158,6 +180,11 @@ export function installForgeShims(sb: Pick<Sandbox, "root">, answers: ForgeAnswe
         `printf '{"cli":"${cli}","hex":"%s","argv":"%s"}\\n' "\${hex% }" "$raw" >> "${callsLog}"`,
         ...sigLine,
         `f="${answersDir}/${cli}.$sig"`,
+        // A per-checkout answer (`splitCwdKey`) wins over the plain one. `pwd`,
+        // not `$PWD`: execFile's `cwd` is what the product varies per repo, and
+        // `pwd` reads it back regardless of how this sh initialises PWD.
+        `d="$(basename "$(pwd)")"`,
+        `[ -f "$f@$d.json" ] && f="$f@$d"`,
         `if [ -f "$f.json" ]; then`,
         `  cat "$f.json"`,
         `  [ -f "$f.stderr" ] && cat "$f.stderr" >&2`,
