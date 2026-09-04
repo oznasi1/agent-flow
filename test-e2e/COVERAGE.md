@@ -191,7 +191,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `marketplace-filter-and` | GUIDE § The Marketplace | Query, type, scope, category, plugins and marketplace all AND together | e2e: filters AND together |
 | `marketplace-filter-chips` | GUIDE § The Marketplace | Active selections show as removable chips with Clear; the chip row disappears when nothing is selected | e2e: the chip row disappears when nothing is selected |
 | `marketplace-category-grouping` | GUIDE § The Marketplace | Without a query the list groups into category sections from each plugin's manifest, Yours first, then by descending size, Uncategorized last; a header click focuses the category | e2e: categories group Yours first and Uncategorized last |
-| `marketplace-disabled-rows` | GUIDE § The Marketplace | Disabled plugins' rows are struck through | e2e: disabled assets are struck through |
+| `marketplace-disabled-rows` | GUIDE § The Marketplace | Disabled plugins' rows are struck through | e2e: disabled assets are struck through (PINNED — only the row's `disabled` badge is struck through, not the row) |
 | `marketplace-disabled-badge` | GUIDE § The Marketplace | The panel shows which plugins are disabled: the row carries a `disabled` badge, and the badge itself is struck through | e2e: a disabled plugin's row carries a struck-through disabled badge |
 | `marketplace-not-downloaded` | GUIDE § The Marketplace | Plugins a marketplace catalogues but you have not downloaded are listed with their `/plugin install` command | e2e: not-downloaded plugins carry their install command |
 | `marketplace-detail-render` | GUIDE § The Marketplace | Selecting a row renders its file in the detail pane under the metadata | e2e: selecting an asset shows its body |

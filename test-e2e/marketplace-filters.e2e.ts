@@ -86,7 +86,7 @@ describeWithHost(
       await shot(ctx.page(), testInfo, "2 · agents only");
     });
 
-    // Mutation-checked: MarketplaceApp.tsx:204 `r.state !== "installed" && r.state !== "user"` → `false` (the Installed-only scope keeps everything) — the launch-pad absence assertion failed.
+    // Mutation-checked, once per half: MarketplaceApp.tsx:204 `r.state !== "installed" && r.state !== "user"` → `false` (Installed only keeps everything) — the launch-pad absence assertion failed; and :205 `r.enabled === false` → `false` (Enabled only keeps everything) — the gantry-check absence assertion failed.
     test("scope pills narrow to installed and enabled", async ({}, testInfo) => {
       const mkt = await openMarketplace(ctx.page());
       // Installed only, proven on the plugin rows: launch-pad is catalogued but
@@ -111,7 +111,7 @@ describeWithHost(
       await shot(ctx.page(), testInfo, "2 · enabled only");
     });
 
-    // Mutation-checked: MarketplaceApp.tsx:207 `!pluginSel.includes(pluginKey(r))` → `false` (the plugin selection stops narrowing) — the telemetry-auditor absence assertion failed.
+    // Mutation-checked, once per half: MarketplaceApp.tsx:207 `!pluginSel.includes(pluginKey(r))` → `false` (the selection stops narrowing) — the telemetry-auditor absence assertion failed; and :368 `onClear={() => { setPluginSel([]); setSel(0); }}` → `onClear={() => { setSel(0); }}` (Clear 2 clears nothing) — the restored-row-count assertion failed.
     test("the Plugins picker filters by several plugins at once and clears with one click", async ({}, testInfo) => {
       const mkt = await openMarketplace(ctx.page());
       await mkt.pickerButton().click();
@@ -198,17 +198,19 @@ describeWithHost(
       await shot(ctx.page(), testInfo, "2 · one category");
     });
 
-    // Mutation-checked: MarketplaceApp.tsx:475 `{r.enabled === false && <span className="tag off">disabled</span>}` → `{false && …}` (no badge at all) — the badge assertion failed; the strike-through half of the row assertion fails against the shipped product either way, which is why this is pinned.
+    // Mutation-checked: marketplaceStyles.ts:50 `.tag.off { text-decoration: line-through; }` → `.row:has(.tag.off) { … }` (the row really is struck through) — the pin then PASSED, which Playwright reports as a failure of a `test.fail`, so this pin is sensitive to the product and not merely to itself. Asserted on the row element, not on its `.nm` child: `text-decoration` is painted over descendants but is not inherited, so a child's computed `textDecorationLine` reads "none" under a row-level rule and could never tell the two designs apart.
     // Pinned: the doc claims the disabled ROW is struck through; the product
     // strikes through only the little "disabled" badge itself
-    // (marketplaceStyles.ts:50 `.tag.off { text-decoration: line-through; }`) —
-    // the row's name and blurb render exactly like an enabled row's.
+    // (marketplaceStyles.ts:50 `.tag.off { text-decoration: line-through; }`),
+    // so the row's own computed text-decoration-line is "none" and its name and
+    // blurb render exactly like an enabled row's. The shipped behaviour is
+    // proven by the companion test below.
     test.fail("disabled assets are struck through", async ({}, testInfo) => {
       const mkt = await openMarketplace(ctx.page());
-      const name = mkt.result("gantry-check").locator(".nm");
-      await expect(name).toBeVisible();
+      const row = mkt.result("gantry-check");
+      await expect(row).toBeVisible();
       await shot(ctx.page(), testInfo, "1 · a disabled row");
-      const decoration = await name.evaluate((el) => getComputedStyle(el).textDecorationLine);
+      const decoration = await row.evaluate((el) => getComputedStyle(el).textDecorationLine);
       expect(decoration).toContain("line-through");
     });
 

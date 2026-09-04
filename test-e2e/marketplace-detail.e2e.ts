@@ -88,7 +88,7 @@ describeWithHost(
   "marketplace detail",
   {},
   (ctx) => {
-    // Mutation-checked: MarketplaceApp.tsx:310 `else if (e.key === "Enter" && active?.file) send({ type: "mkt:open", file: active.file })` → `else if (false)` (Enter does nothing) — the editor-tab assertion failed and the two-row walk still passed, so the walk is proven separately from the open.
+    // Mutation-checked, once per half: MarketplaceApp.tsx:310 `else if (e.key === "Enter" && active?.file)` → `else if (false && active?.file)` (Enter does nothing) — the editor-tab assertion failed; and :308 `Math.min(s + 1, rows.length - 1)` → `Math.min(s, rows.length - 1)` (↓ does not move) — the /refit selection assertion failed.
     test("arrow keys move the selection and Enter opens the file", async ({}, testInfo) => {
       const mkt = await openMarketplace(ctx.page());
       const selected = mkt.frame.locator(".results .row.on");
