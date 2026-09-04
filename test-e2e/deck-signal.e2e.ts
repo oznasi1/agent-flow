@@ -108,7 +108,8 @@ test.afterEach(async () => {
 });
 
 // Mutation-checked: inverted the working window in deriveActivity (transcript.ts,
-// `age <= WORKING_WINDOW_MS` → `age > WORKING_WINDOW_MS`) — the card read `idle`.
+// `age <= WORKING_WINDOW_MS` → `age > WORKING_WINDOW_MS`) — the card read
+// `idle · 10s ago`.
 test("a session mid-work reads working on its card and sits in In progress", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox();
@@ -193,7 +194,7 @@ test("an ended turn reads ended turn and parks in In progress", async ({}, testI
 });
 
 // Mutation-checked: made readSessionActivity (transcript.ts) answer `idle` instead
-// of UNKNOWN_ACTIVITY when the transcript file is missing — the card read `idle`.
+// of UNKNOWN_ACTIVITY for a missing transcript file — the card read `idle · 5s ago`.
 test("a run with no transcript reads parked", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox();
@@ -221,8 +222,10 @@ test("a run with no transcript reads parked", async ({}, testInfo) => {
   await shot(launched.page, testInfo, "4 · parked with a session and no transcript");
 });
 
-// Mutation-checked: made runAttentionPass (attentionJob.ts) return before the toast
-// (`if (toAnnounce.length === 0) return;` → `return;`) — no notification ever came.
+// Mutation-checked: dropped the prune from `nextAnnouncements` (attention.ts —
+// `if (live.has(key)) next[key] = at` → `next[key] = at`), which is the mechanism
+// behind "one per park": the answered run never left the latch, so the poll for
+// `["E2E-B"]` kept seeing both keys and the test failed there.
 test("notifyOnActionRequired raises one notification per park, coalescing several", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox({ "agentFlow.notifyOnActionRequired": true });
