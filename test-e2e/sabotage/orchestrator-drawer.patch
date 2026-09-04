@@ -1,0 +1,13 @@
+diff --git a/src/webview/DeckApp.tsx b/src/webview/DeckApp.tsx
+index 700e72ea..1941adca 100644
+--- a/src/webview/DeckApp.tsx
++++ b/src/webview/DeckApp.tsx
+@@ -1090,7 +1090,7 @@ export function DeckApp(): JSX.Element {
+   // list underneath it renders.
+   const needsYouCount = activeRows.filter((r) => {
+     const s = r.workflow.state.status;
+-    return s === "waiting-on-you" || s === "stopped";
++    return s === "waiting-on-you" || s === "stopped" || true;
+   }).length;
+ 
+   // One card, wherever it lands — a lane renders exactly what an unlaned column
