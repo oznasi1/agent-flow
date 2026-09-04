@@ -184,3 +184,118 @@ describeWithHost(
     });
   },
 );
+
+/** The four Explore kinds whose prompt setting nothing else covers — General is
+ *  proved above and Verify by `a verify session is seeded read-only …`. One
+ *  boot, `exploreMode` unset so the kind picker renders, and one distinctive
+ *  marker per `agentFlow.explorePrompts.*` entry, so a prompt landing under the
+ *  wrong kind is a failure rather than a coincidence. */
+const PROMPT_MARKERS: { label: string; marker: string }[] = [
+  { label: "Open a Jira ticket", marker: "E2E-JIRA-TICKET-MARKER" },
+  { label: "Enhance knowledge / flow", marker: "E2E-KNOWLEDGE-MARKER" },
+  { label: "Debug", marker: "E2E-DEBUG-MARKER" },
+  // Last, and deliberately so: every kind writes the brief to the same
+  // `<repo>/.pick-task/TASK.md`, so only the final launch's brief is still on
+  // disk to check for the Active-tasks block.
+  { label: "Supervise running tasks", marker: "E2E-SUPERVISE-MARKER" },
+];
+
+describeWithHost(
+  "explore modes · per-kind prompts",
+  {
+    "agentFlow.explorePrompts.jiraTicket": "E2E-JIRA-TICKET-MARKER focus={summary}",
+    "agentFlow.explorePrompts.knowledge": "E2E-KNOWLEDGE-MARKER focus={summary}",
+    "agentFlow.explorePrompts.debug": "E2E-DEBUG-MARKER focus={summary}",
+    "agentFlow.explorePrompts.supervise": "E2E-SUPERVISE-MARKER focus={summary}",
+  },
+  (ctx) => {
+    // Mutation-checked: config.ts EXPLORE_ACTION_DEFS — every entry's `settingKey` pointed at "explorePrompts.general"; all four kinds seeded the same (unset, therefore shipped) prompt and no marker appeared.
+    test("each explorePrompts entry is the prompt its own Explore kind seeds", async ({}, testInfo) => {
+      // Four launches, each of which opens a window (`openIn: "new-window"`,
+      // sandbox.ts). One test rather than four so the four kinds share one boot
+      // and one picker walk, which is also what keeps the window count to four.
+      test.setTimeout(600_000);
+
+      for (const { label, marker } of PROMPT_MARKERS) {
+        const topic = `e2e ${marker} ${Date.now()}`;
+        await clickExplore(ctx);
+        const qi = quickInput(ctx.page());
+        await expect(qi.title).toHaveText("Explore — what kind of session?");
+        await qi.rows.filter({ hasText: label }).click();
+
+        // Every one of these four takes a topic box next (only Verify's copy
+        // and Supervise's differ — tasksView.ts:1505-1540) and none asks for an
+        // environment, so the repo picker is the very next step.
+        await expect(qi.widget).toBeVisible({ timeout: 15_000 });
+        await ctx.page().keyboard.type(topic);
+        await ctx.page().keyboard.press("Enter");
+        await pickRocketRepo(ctx);
+
+        const prompt = await seededPrompt(ctx, `explore-${slugify(topic)}`);
+        // The setting's text, with {summary} filled by the typed topic — and NOT
+        // any other kind's marker, which is what makes this per-kind rather than
+        // "some override landed".
+        expect(prompt).toContain(`${marker} focus=${topic}`);
+        for (const other of PROMPT_MARKERS) {
+          if (other.marker !== marker) expect(prompt).not.toContain(other.marker);
+        }
+        await shot(ctx.page(), testInfo, `5 · ${label} seeded ${marker}`);
+      }
+
+      // Supervise ran last, so its brief is the one on disk. Its `planMd`
+      // (tasksView.ts:1573-1578) is the ONLY kind that folds
+      // `describeActiveTasks(readRuns(…))` in — the run record seeded in
+      // `prepare` is the "other active task" it has to list.
+      const brief = fs.readFileSync(path.join(ctx.sb().repoPath, ".pick-task", "TASK.md"), "utf8");
+      expect(brief).toContain("## Active tasks");
+      expect(brief).toContain("**E2E-S1**");
+      expect(brief).toContain("Watch the strut telemetry");
+    });
+  },
+  (sb) => {
+    // One unfinished run, so Supervise's brief has something to list. Written
+    // the way the store does — one file per run under the sandbox HOME
+    // (engine/runs.ts `defaultRunsDir`), which `readRuns` reads directly.
+    const runs = path.join(sb.home, ".agentflow", "runs");
+    fs.mkdirSync(runs, { recursive: true });
+    fs.writeFileSync(
+      path.join(runs, "E2E-S1.json"),
+      JSON.stringify({
+        key: "E2E-S1", summary: "Watch the strut telemetry", url: "https://fixture.invalid/browse/E2E-S1",
+        createdAt: Date.now(), kind: "task", mode: "per-window",
+        repos: [{ name: "rocket", path: sb.repoPath, isGit: true, branch: "main" }],
+        briefPaths: [],
+      }, null, 2) + "\n",
+    );
+  },
+);
+
+// A boot of its own: `agentFlow.exploreSlackDm` is read at explore() time from
+// settings.json, which the sandbox writes once before launch. `general` is
+// pinned so the kind picker is skipped and the toggle under test is the only
+// variable.
+describeWithHost(
+  "explore modes · Slack DM",
+  { "agentFlow.exploreMode": "general", "agentFlow.exploreSlackDm": { general: true } },
+  (ctx) => {
+    // Mutation-checked: config.ts:741 — `slackDm: slackRaw[def.id] === true` → `slackDm: false`; the sentence never reached the template and the seeded prompt did not carry it.
+    test("exploreSlackDm asks the session for a Slack DM when it ends", async ({}, testInfo) => {
+      const topic = `e2e slack dm probe ${Date.now()}`;
+      await clickExplore(ctx);
+      const qi = quickInput(ctx.page());
+      await expect(qi.title).toHaveText("Explore — what do you want to dig into?");
+      await ctx.page().keyboard.type(topic);
+      await ctx.page().keyboard.press("Enter");
+      await pickRocketRepo(ctx);
+
+      const prompt = await seededPrompt(ctx, `explore-${slugify(topic)}`);
+      // `injectSlackDm` (engine/prompt.ts:37) splices SLACK_DM_SENTENCE in just
+      // before the template's `{files}` block, verbatim. Quoted from the
+      // constant, so a reworded sentence fails here rather than drifting.
+      expect(prompt).toContain(
+        "When you're done, send me a direct message on Slack summarizing the session (and link any Jira ticket you opened).",
+      );
+      await shot(ctx.page(), testInfo, "6 · the Slack DM sentence in the seeded prompt");
+    });
+  },
+);

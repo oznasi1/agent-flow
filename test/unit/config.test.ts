@@ -1486,3 +1486,30 @@ describe("getConfig — non-numeric setting values fall back to the documented d
     expect(c.retireInPlaceAfterHours).toBe(0);
   });
 });
+
+/** README § Quick start: "The extension ships no organization-specific
+ * defaults." That is a promise about the SHIPPED MANIFEST, not about
+ * `getConfig()` — nothing in getConfig reads package.json, so its own `|| ""`
+ * fallbacks only ever exercise the vscode mock's unset-key behaviour and would
+ * stay green with `"default": "https://acme.atlassian.net"` sitting in the
+ * manifest. Same reasoning as the reviewWrites / mergeWrites / neverAutoRun
+ * manifest-default tests above, and the same failure mode: an org value baked
+ * into a default reaches every install that never touched the setting. */
+describe("package.json ships no organization-specific defaults", () => {
+  const props = manifestSettings<{ default?: unknown }>(pkg);
+
+  it("declares the two Jira identity settings with an empty default, for the wizard to collect", () => {
+    expect(props["agentFlow.jira.baseUrl"].default).toBe("");
+    expect(props["agentFlow.jira.project"].default).toBe("");
+  });
+
+  it("leaves every other org-shaped setting empty in the manifest too", () => {
+    // The rest of the settings that could name one company: the Salesforce
+    // connector's three, the reserved clone org, and the repo blocklist.
+    expect(props["agentFlow.agileAccelerator.instanceUrl"].default).toBe("");
+    expect(props["agentFlow.agileAccelerator.team"].default).toBe("");
+    expect(props["agentFlow.agileAccelerator.targetOrg"].default).toBe("");
+    expect(props["agentFlow.githubOrg"].default).toBe("");
+    expect(props["agentFlow.repoBlocklist"].default).toEqual([]);
+  });
+});

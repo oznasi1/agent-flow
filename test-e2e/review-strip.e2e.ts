@@ -426,3 +426,37 @@ test("reviewRequests off hides the strip", async ({}, testInfo) => {
   expect(searchQueries()).toHaveLength(1);
   await shot(page, testInfo, "10 · flipped back on, the same panel");
 });
+
+// Mutation-checked: ReviewStrip.tsx:302 — `!p.showWhenEmpty` dropped from the empty-queue `return null`; the strip rendered in the A half and the count assertion failed
+test("reviewRequestsAlwaysVisible false hides the strip while no PR is waiting", async ({}, testInfo) => {
+  test.setTimeout(360_000);
+
+  // A — the setting off, and an EMPTY queue. `ghReviewRequestsAnswer([])` is a
+  // real, successful search that found nothing, which is the state the setting
+  // is about: an outright failure would leave the strip `stale` and it would
+  // render regardless (ReviewStrip.tsx:302).
+  let ctx = await boot(
+    { "agentFlow.reviewRequestsAlwaysVisible": false },
+    ghAnswers([]),
+  );
+  await expect(ctx.deck.frame.locator(".stats")).toBeVisible({ timeout: 60_000 });
+  // The search RAN and came back empty — without this, "no strip" would be
+  // indistinguishable from "the queue has not loaded yet", and the test would
+  // pass against a product with no setting at all.
+  await expect.poll(() => searchQueries().length, { timeout: 90_000 }).toBeGreaterThan(0);
+  await expect(ctx.deck.reviewStrip()).toHaveCount(0);
+  await shot(ctx.page, testInfo, "10 · alwaysVisible off, empty queue: no strip at all");
+
+  await app?.close();
+  app = undefined;
+  sb.dispose();
+
+  // B — the control: the very same empty queue with the setting left at its
+  // shipped default (true, config.ts:836), which keeps the header on screen so
+  // the queue's emptiness is a stated fact rather than a missing element.
+  ctx = await boot({}, ghAnswers([]));
+  await expect(ctx.deck.frame.locator(".stats")).toBeVisible({ timeout: 60_000 });
+  await expect(ctx.deck.reviewStrip()).toHaveCount(1, { timeout: 90_000 });
+  await expect(ctx.deck.reviews()).toHaveCount(0);
+  await shot(ctx.page, testInfo, "11 · default on, same empty queue: the strip stays");
+});
