@@ -95,21 +95,24 @@ This heading — and every `todo` — is removed in that plan's last task.
 | id | doc | claim | proof |
 |----|-----|-------|-------|
 | `deck-open` | GUIDE § The Deck | "Open the Deck (in-flight)" opens the board of everything launched | e2e: swept off the board and out of the store |
-| `deck-four-columns` | GUIDE § The Deck | Four columns — In progress · Action required · In review · Merge — attention rising left to right | todo |
-| `deck-header-count-tiles` | GUIDE § The Deck | Four header tiles count what the columns hold | todo |
+| `deck-four-columns` | GUIDE § The Deck | Four columns — In progress · Action required · In review · Merge — attention rising left to right | e2e: header tiles count what the columns hold |
+| `deck-header-count-tiles` | GUIDE § The Deck | Four header tiles count what the columns hold | e2e: header tiles count what the columns hold |
 | `deck-column-hues` | GUIDE § The Deck | Each column carries its own hue in its dot, header rule and tint; cards are monochrome except in Action required, which carries an orange rail | ct: test-ct/Workflow.hues.spec.tsx |
 | `deck-merge-lanes` | GUIDE § The Deck | Merge is split into `ready to merge` (approved, mergeable, green) and `merged · wrap up` lanes; only a merged PR makes a card say merged | unit: test/unit/engine/bucket.test.ts |
-| `deck-recently-closed` | GUIDE § The Deck | A ticket closed with nothing merged drops into the collapsed Recently closed strip under the board | todo |
+| `deck-recently-closed` | GUIDE § The Deck | A ticket closed with nothing merged drops into the collapsed Recently closed strip under the board | e2e: a closed run collapses into the Recently closed strip |
 | `deck-live-signal` | GUIDE § The Deck | A card reads `working · Ns ago`, `idle`, `ended turn` or `parked` from Claude Code's own transcripts | e2e: a session mid-work reads working |
 | `deck-live-signal-parked` | GUIDE § The Deck | `parked` only when the transcript cannot be read or does not exist — the one route back to the git + Jira backbone; the session itself is still on the card | e2e: a run with no transcript reads parked |
 | `deck-action-required-semantics` | GUIDE § The Deck | Action required is session signals only — a session that ended its turn, stalled or exited — so Claude's asking and GitHub's asking stay under separate headers | e2e: a session that ended its turn lands the card in Action required |
 | `deck-ended-turn-parks` | GUIDE § The Deck | An ended turn reads `ended turn` and parks in In progress's `parked` lane, NOT Action required, which admits only `blocked` and `exited` (`deriveBucket`) — the row above pins the stale doc sentence with `test.fail` | e2e: an ended turn reads ended turn and parks |
 | `deck-fixes-needed-lane` | GUIDE § The Deck | A PR with failing required checks, requested changes or a conflict pulls its card into In review's `fixes needed` lane even while the session is still working | todo |
-| `deck-open-action` | GUIDE § The Deck | Open focuses the window if already open (never a duplicate) and opens it fresh otherwise; on a per-session card it acts on that session's own directory | todo |
-| `deck-diff-action` | GUIDE § The Deck | Diff shows the working diff | todo |
-| `deck-card-overflow-menu` | GUIDE § The Deck | ⋯ offers Open in Jira and Forget; Forget removes the run's record without touching its neighbour | e2e: forget removes a run's record without touching its neighbour |
-| `deck-grouping-lens` | GUIDE § The Deck | The board opens one card per session; switching the header control to Workspaces gives one card per launched task with sessions nested, and the choice sticks across a reopen (`agentFlow.deckGrouping`) | todo |
-| `deck-refresh` | GUIDE § The Deck | The header refresh reports when it last synced (`synced Ns ago`) | todo |
+| `deck-open-action` | GUIDE § The Deck | Open focuses the window already running a task rather than opening a duplicate | e2e: Open focuses an already-open window instead of duplicating it |
+| `deck-open-action-fresh` | GUIDE § The Deck | Open opens the task's window fresh when none is already holding it | todo |
+| `deck-open-action-per-session` | GUIDE § The Deck | On a per-session card Open and Diff act on that session's own directory | todo |
+| `deck-diff-action` | GUIDE § The Deck | Diff shows the working diff | e2e: Diff opens the working diff |
+| `deck-card-overflow-menu` | GUIDE § The Deck | Forget removes the run's record without touching its neighbour | e2e: forget removes a run's record without touching its neighbour |
+| `deck-card-overflow-rows` | GUIDE § The Deck | The card's overflow offers Open in Jira (the task source's own label) and Forget — today the card-detail drawer's `More` disclosure, not a ⋯ on the card | e2e: the overflow menu offers Open in Jira and Forget |
+| `deck-grouping-lens` | GUIDE § The Deck | The board opens one card per session; switching the header control to Workspaces gives one card per launched task with sessions nested, and the choice sticks across a reopen (`agentFlow.deckGrouping`) | e2e: the Sessions / Workspaces grouping sticks across a reopen |
+| `deck-refresh` | GUIDE § The Deck | The header refresh reports when it last synced (`synced Ns ago`) | e2e: the refresh control reports when it last synced |
 | `deck-card-facts` | GUIDE § The Deck | Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, the Jira status, and Open / Diff | e2e: the Deck card shows the PR the GitHub forge reports |
 | `deck-notepad-marker` | GUIDE § The Deck | A note started from the Notepad sits among the tickets marked `notepad` | todo |
 | `deck-run-retirement` | GUIDE § The Deck | Run records retire once a task is provably over; uncommitted or unpushed work always stops retirement, and retirement deletes only the record, never a worktree, branch or commit | e2e: a run past its retire window is swept off the board and out of the store |
@@ -429,12 +432,12 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-environments` | SETTINGS § table | `agentFlow.environments` are offered by Verify on an environment, plus Custom… | e2e: Verify on an environment asks which, from the environments setting plus Custom |
 | `set-deck-show-token-total` | package.json | `agentFlow.deck.showTokenTotal` adds a Tokens on board header total (off by default) | todo |
 | `set-open-agents` | SETTINGS § table | `agentFlow.openAgents` shows every Claude Code session on this machine, on cards and as `local` cards | e2e: openAgents off removes local cards without reopening the panel |
-| `set-deck-grouping` | SETTINGS § table | `agentFlow.deckGrouping`: `agents` (one card per session) or `workspaces`; the board's control writes it | todo |
+| `set-deck-grouping` | SETTINGS § table | `agentFlow.deckGrouping`: `agents` (one card per session) or `workspaces`; the board's control writes it | e2e: the Sessions / Workspaces grouping sticks across a reopen |
 | `set-retire-finished-after-hours` | SETTINGS § table | `agentFlow.retireFinishedAfterHours` (24) keeps landed work on the board after its last session closes | unit: test/unit/engine/retire.test.ts |
 | `set-retire-abandoned-after-days` | SETTINGS § table | `agentFlow.retireAbandonedAfterDays` (7) retires a ticketless, PR-less, clean run; `0` disables | unit: test/unit/engine/retire.test.ts |
 | `set-retire-closed-after-hours` | SETTINGS § table | `agentFlow.retireClosedAfterHours` (24) keeps a closed run in Recently closed before its record is deleted | e2e: a run past its retire window is swept off the board |
 | `set-retire-in-place-after-hours` | SETTINGS § table | `agentFlow.retireInPlaceAfterHours` (0) is the window for a finished Explore or Notepad card | unit: test/unit/engine/retire.test.ts |
-| `set-inflight-show-all` | SETTINGS § table | `agentFlow.inflightShowAll` renders every run record as a card and retires nothing for being closed | todo |
+| `set-inflight-show-all` | SETTINGS § table | `agentFlow.inflightShowAll` renders every run record as a card and retires nothing for being closed | e2e: inflightShowAll renders every record as a card |
 | `set-notify-on-action-required` | SETTINGS § table | `agentFlow.notifyOnActionRequired` notifies once when a run parks | e2e: coalescing several |
 | `set-orchestrator` | SETTINGS § table | `agentFlow.orchestrator` shows the Deck's Orchestrator drawer | e2e: an attached workflow is a real flow in the Workflows drawer, and Detach |
 | `set-never-auto-run` | ORCHESTRATOR_COMMANDS § Never, whatever you approved | `agentFlow.neverAutoRun` patterns outrank every approval | unit: test/unit/engine/orchestrator/neverAutoRun.test.ts |

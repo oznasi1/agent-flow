@@ -19,8 +19,8 @@ import { runCommand } from "../palette";
 export class Deck {
   readonly frame: FrameLocator;
 
-  private constructor(readonly page: Page) {
-    this.frame = page.frameLocator("iframe.webview").last().frameLocator("#active-frame");
+  private constructor(readonly page: Page, frame?: FrameLocator) {
+    this.frame = frame ?? page.frameLocator("iframe.webview").last().frameLocator("#active-frame");
   }
 
   /** Open through the real command palette, not a seam — see `runCommand` for
@@ -32,6 +32,41 @@ export class Deck {
     const deck = new Deck(page);
     await expect(deck.frame.locator("body")).toBeVisible({ timeout: 30_000 });
     return deck;
+  }
+
+  /** Open the Deck in a window whose Tasks sidebar is ALREADY showing — the
+   *  case the class comment above says `.last()` cannot handle. The window then
+   *  holds two of our webviews, and the workbench parks both iframes in an
+   *  overlay container outside the `.part` DOM, so neither structure nor order
+   *  tells them apart; only the Deck renders the `.stats` header (DeckApp.tsx:1120
+   *  on 2026-09-03). Same resolution `deck-github.e2e.ts` does by hand off
+   *  `page.frames()`, expressed here as a FrameLocator so every accessor on the
+   *  class keeps working. Polls because the Deck's inner frame mounts a beat
+   *  after the command is accepted. */
+  static async openBesideSidebar(page: Page): Promise<Deck> {
+    await runCommand(page, "Open the Deck (in-flight)");
+    let found: FrameLocator | undefined;
+    await expect.poll(async () => {
+      const n = await page.locator("iframe.webview").count();
+      for (let i = 0; i < n; i++) {
+        const f = page.frameLocator("iframe.webview").nth(i).frameLocator("#active-frame");
+        if (await f.locator(".stats").count().catch(() => 0)) { found = f; return true; }
+      }
+      return false;
+    }, { timeout: 30_000 }).toBe(true);
+    return new Deck(page, found);
+  }
+
+  /** Close every editor, the Deck panel included, through the real palette —
+   *  `DeckPanel.show` (deckView.ts:574-577) only REVEALS a live panel, so a
+   *  journey that needs a genuine reopen (fresh webview, `deck:ready` again)
+   *  has to dispose it first. Waits for the webview iframes to leave the DOM:
+   *  the tab can be gone a beat before the iframe is, and `open()`'s `.last()`
+   *  would otherwise pick the dying one. Only safe while no sidebar webview is
+   *  open, for the same reason. */
+  static async closeAll(page: Page): Promise<void> {
+    await runCommand(page, "View: Close All Editors");
+    await expect(page.locator("iframe.webview")).toHaveCount(0, { timeout: 15_000 });
   }
 
   /** One card per run (or per session on the Sessions lens). DeckApp.tsx:214. */
@@ -205,5 +240,83 @@ export class Deck {
    *  session's, but the name lives here. Open the drawer (click the card) first. */
   sessions(): Locator {
     return this.detail().locator(".dd-sec", { has: this.frame.locator(".dd-lbl", { hasText: "Sessions" }) });
+  }
+
+  /** One card's Open button — `.c-foot2 .act.primary`, which also carries `live`
+   *  while presence says the run's window is open (DeckApp.tsx:544-550 on
+   *  2026-09-03). Scoped to the card so a board with several cards resolves one. */
+  openButton(key: string): Locator {
+    return this.card(key).locator(".c-foot2 .act.primary");
+  }
+
+  /** One card's Diff button — the `.c-foot2 .act` whose text is exactly "Diff"
+   *  (DeckApp.tsx:551-554 on 2026-09-03). `hasText` rather than `:text-is` so a
+   *  future glyph beside the word does not break the lookup. */
+  diffButton(key: string): Locator {
+    return this.card(key).locator(".c-foot2 .act", { hasText: "Diff" });
+  }
+
+  /** One header count tile's number — `.stats .stat` whose `.l` label is the
+   *  column name; `.n` holds the count (DeckApp.tsx:1120-1124 on 2026-09-03).
+   *  Matched by the label text, not position, so the optional Tokens tile that
+   *  `agentFlow.deck.showTokenTotal` appends cannot shift it. */
+  tile(label: "In progress" | "Action required" | "In review" | "Merge"): Locator {
+    return this.frame.locator(".stats .stat", { has: this.frame.locator(".l", { hasText: label }) }).locator(".n");
+  }
+
+  /** Every column header's name, in board order — `.col-hd .nm`
+   *  (DeckApp.tsx:1334-1336 on 2026-09-03). */
+  columnNames(): Locator {
+    return this.frame.locator(".col .col-hd .nm");
+  }
+
+  /** One column's own count, `.col-hd .ct` (DeckApp.tsx:1338), addressed by
+   *  the header name. */
+  columnCount(label: "In progress" | "Action required" | "In review" | "Merge"): Locator {
+    return this.frame.locator(".col", { has: this.frame.locator(".col-hd .nm", { hasText: label }) }).locator(".col-hd .ct");
+  }
+
+  /** The Sessions / Workspaces lens control — the `.ctls.seg .ctl` whose text is
+   *  the visible label (DeckApp.tsx:1191-1204 on 2026-09-03); the chosen side
+   *  carries the `on` class. */
+  grouping(label: "Sessions" | "Workspaces"): Locator {
+    return this.frame.locator(".ctls.seg .ctl", { hasText: label });
+  }
+
+  /** The header refresh button, resolved by the `.synced` caption it alone
+   *  carries (DeckApp.tsx:1215-1222 on 2026-09-03) — it has no class of its own
+   *  beyond the shared `.ctl`. */
+  refresh(): Locator {
+    return this.frame.locator(".ctl", { has: this.frame.locator(".synced") });
+  }
+
+  /** The refresh button's caption: "refresh" before the first sync, "syncing…"
+   *  in flight, `synced Ns ago` after (DeckApp.tsx:1221 on 2026-09-03). */
+  synced(): Locator {
+    return this.frame.locator(".synced");
+  }
+
+  /** The Recently closed strip, `.rc` (ClosedStrip.tsx:37 on 2026-09-03). Not
+   *  rendered at all — `return null` — while no run is on the closed shelf, so
+   *  its absence is a `toHaveCount(0)`, never a hidden element. */
+  closedStrip(): Locator {
+    return this.frame.locator(".rc");
+  }
+
+  /** The strip's own disclosure button (`.rc-toggle`, ClosedStrip.tsx:39). The
+   *  strip starts collapsed, with only the caret, the name and the count. */
+  closedToggle(): Locator {
+    return this.closedStrip().locator(".rc-toggle");
+  }
+
+  /** Expanded rows, one per closed run (`.rc-row`, ClosedStrip.tsx:57). Zero
+   *  while collapsed — the rows are not in the DOM, not merely hidden. */
+  closedRows(): Locator {
+    return this.closedStrip().locator(".rc-row");
+  }
+
+  /** One closed row, by the key its `.rc-key` chip shows (ClosedStrip.tsx:59). */
+  closedRow(key: string): Locator {
+    return this.closedRows().filter({ has: this.frame.locator(".rc-key", { hasText: key }) });
   }
 }

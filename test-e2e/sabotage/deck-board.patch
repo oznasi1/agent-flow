@@ -1,0 +1,14 @@
+diff --git a/src/deckView.ts b/src/deckView.ts
+index a8b4a7aa..33371490 100644
+--- a/src/deckView.ts
++++ b/src/deckView.ts
+@@ -4058,9 +4058,6 @@ export class DeckPanel {
+         // webview derives both lenses from the run list it already holds, so a
+         // rebuild here would redraw an identical board at the cost of git per
+         // repo and a connector round trip per run.
+-        await vscode.workspace
+-          .getConfiguration("agentFlow")
+-          .update("deckGrouping", m.grouping, vscode.ConfigurationTarget.Global);
+         break;
+       case "deck:inspect":
+         await this.inspect(m.key, m.action, m.repo);
