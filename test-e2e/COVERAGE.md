@@ -102,7 +102,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `deck-open-action` | GUIDE § The Deck | Open focuses the window if already open (never a duplicate) and opens it fresh otherwise; on a per-session card it acts on that session's own directory | todo |
 | `deck-diff-action` | GUIDE § The Deck | Diff shows the working diff | todo |
 | `deck-card-overflow-menu` | GUIDE § The Deck | ⋯ offers Open in Jira and Forget; Forget removes the run's record without touching its neighbour | e2e: forget removes a run's record without touching its neighbour |
-| `deck-grouping-lens` | GUIDE § The Deck | The board opens one card per session; switching the header control to Workspaces gives one card per launched task with sessions nested, and the choice sticks across a reopen (`agentFlow.deckGrouping`) | todo |
+| `deck-grouping-lens` | GUIDE § The Deck | The board opens one card per session; switching the header control to Workspaces gives one card per launched task with sessions nested, and the choice sticks across a reopen (`agentFlow.deckGrouping`) | e2e: the Sessions / Workspaces grouping sticks across a reopen |
 | `deck-refresh` | GUIDE § The Deck | The header refresh reports when it last synced (`synced Ns ago`) | todo |
 | `deck-card-facts` | GUIDE § The Deck | Each card shows its branch and launch time, per-repo diff stats with dirty/ahead markers, the Jira status, and Open / Diff | e2e: the Deck card shows the PR the GitHub forge reports |
 | `deck-notepad-marker` | GUIDE § The Deck | A note started from the Notepad sits among the tickets marked `notepad` | todo |
@@ -416,7 +416,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-environments` | SETTINGS § table | `agentFlow.environments` are offered by Verify on an environment, plus Custom… | e2e: Verify on an environment asks which, from the environments setting plus Custom |
 | `set-deck-show-token-total` | package.json | `agentFlow.deck.showTokenTotal` adds a Tokens on board header total (off by default) | todo |
 | `set-open-agents` | SETTINGS § table | `agentFlow.openAgents` shows every Claude Code session on this machine, on cards and as `local` cards | todo |
-| `set-deck-grouping` | SETTINGS § table | `agentFlow.deckGrouping`: `agents` (one card per session) or `workspaces`; the board's control writes it | todo |
+| `set-deck-grouping` | SETTINGS § table | `agentFlow.deckGrouping`: `agents` (one card per session) or `workspaces`; the board's control writes it | e2e: the Sessions / Workspaces grouping sticks across a reopen |
 | `set-retire-finished-after-hours` | SETTINGS § table | `agentFlow.retireFinishedAfterHours` (24) keeps landed work on the board after its last session closes | unit: test/unit/engine/retire.test.ts |
 | `set-retire-abandoned-after-days` | SETTINGS § table | `agentFlow.retireAbandonedAfterDays` (7) retires a ticketless, PR-less, clean run; `0` disables | unit: test/unit/engine/retire.test.ts |
 | `set-retire-closed-after-hours` | SETTINGS § table | `agentFlow.retireClosedAfterHours` (24) keeps a closed run in Recently closed before its record is deleted | e2e: a run past its retire window is swept off the board |

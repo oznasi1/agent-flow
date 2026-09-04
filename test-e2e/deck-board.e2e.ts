@@ -116,7 +116,7 @@ test("inflightShowAll renders every record as a card", async ({}, testInfo) => {
   await shot(launched.page, testInfo, "3 · showAll: the closed run is a card, no strip");
 });
 
-// Mutation-checked: deckView.ts `deck:setGrouping` no longer calls `.update("deckGrouping", …)` — the reopened board came back on Sessions with two cards
+// Mutation-checked: deckView.ts's `deck:setGrouping` case stripped of its `.update("deckGrouping", …)` — the settings.json poll never saw "workspaces". Same mutation as sabotage/deck-board.patch.
 test("the Sessions / Workspaces grouping sticks across a reopen", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox();
