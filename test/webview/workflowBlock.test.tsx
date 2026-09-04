@@ -31,6 +31,35 @@ const runFlow: Flow = {
   edges: [edge("e1"), edge("e2")],
 };
 
+// A GATE-shaped fixture, and the only honest one for the Approve/Reject rows.
+//
+// The shared `flow` below has no gate in it at all — every node is a place or a
+// notify — so a "you" step against it was never a real waiting gate, and a test
+// built on it could only ever assert that the step's own edge id was forwarded
+// verbatim. That is exactly the defect that shipped: a "you" step carries the
+// edge pointing AWAY from the gate, while the answer must go to the edge that
+// ASKED, so forwarding verbatim made both buttons a silent no-op. These tests
+// asserted the bug, and passed.
+//
+// Shape: place --ask--> gate --answered--> notify. `gAsk` carries `performed`
+// and `firedAt` because that pair is what `gateAskEdge` looks for — the receipt
+// of a question actually posed. `gYou` is the outgoing edge a "you" step names.
+const gate = (id: string, question: string): FlowNode =>
+  ({ id, x: 0, y: 0, join: "any", kind: "gate", question });
+const gAsk: FlowEdge = {
+  id: "g-ask", from: "n1", to: "g1", cond: { kind: "pr-merged" },
+  performed: true, firedAt: 1_000,
+};
+const gYou: FlowEdge = { id: "g-you", from: "g1", to: "n2", cond: { kind: "gate-approved" } };
+const gateFlow: Flow = {
+  id: "f1",
+  name: "Ship it",
+  armed: true,
+  createdAt: 0,
+  nodes: [place("n1", "PROJ-142"), gate("g1", "Deploy to prod?"), notify("n2")],
+  edges: [gAsk, gYou],
+};
+
 // Five edges — enough for every fixture below (`twoDone`, `twoWaiting`, and the
 // single-step gate/fail cases) to name real edges without each test having to
 // mint its own flow. A `state.steps` array that omits some of these edges is
@@ -121,27 +150,48 @@ describe("WorkflowBlock", () => {
     expect(marks).toEqual(["wf-step wf-done", "wf-step wf-done", "wf-step wf-now"]);
   });
 
-  it("offers Approve and Reject on a gate, and answers it", async () => {
+  it("offers Approve and Reject on a gate, and answers the edge that ASKED", async () => {
     const base = makeBase();
-    render(<WorkflowBlock {...base} state={{
+    render(<WorkflowBlock {...base} flow={gateFlow} state={{
       status: "waiting-on-you", done: 1, total: 3,
-      steps: [{ edgeId: "e2", state: "you", receipt: "waiting for your answer" }],
+      steps: [{ edgeId: gYou.id, state: "you", receipt: "waiting for your answer" }],
     }} />);
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
-    expect(base.onAnswerGate).toHaveBeenCalledWith("e2", "approved");
+    // `gAsk`, NOT the step's own `gYou`: `flow:answerGate` accepts only the
+    // performer, so sending the step's edge writes to an edge nothing reads and
+    // the click does nothing at all. Asserted by id, so a regression to
+    // forwarding `step.edgeId` fails here rather than in a real editor.
+    expect(base.onAnswerGate).toHaveBeenCalledWith(gAsk.id, "approved");
+    expect(base.onAnswerGate).not.toHaveBeenCalledWith(gYou.id, "approved");
+  });
+
+  it("offers no gate buttons at all while the question is unasked", async () => {
+    // Nothing to answer yet: no incoming edge carries `performed` + `firedAt`,
+    // so `gateAskEdge` finds no performer. Buttons that rendered here could only
+    // ever produce a refusal, which is the silent no-op this whole seam was.
+    const base = makeBase();
+    render(<WorkflowBlock {...base}
+      flow={{ ...gateFlow, edges: [{ ...gAsk, performed: undefined, firedAt: undefined }, gYou] }}
+      state={{
+        status: "waiting-on-you", done: 0, total: 2,
+        steps: [{ edgeId: gYou.id, state: "you", receipt: "waiting for your answer" }],
+      }} />);
+    await waitFor(() => expect(screen.getByText("waiting for your answer")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Reject" })).toBeNull();
   });
 
   it("offers Reject on a gate, and answers it", async () => {
     const base = makeBase();
-    render(<WorkflowBlock {...base} state={{
+    render(<WorkflowBlock {...base} flow={gateFlow} state={{
       status: "waiting-on-you", done: 1, total: 3,
-      steps: [{ edgeId: "e2", state: "you", reason: "awaiting-answer" }],
+      steps: [{ edgeId: gYou.id, state: "you", reason: "awaiting-answer" }],
     }} />);
     // No receipt on this fixture — `attach.ts` never sets one for `you`, only
     // `reason`. The block must turn that code into the same sentence on its own.
     await waitFor(() => expect(screen.getByText("waiting for your answer")).toBeTruthy());
     await userEvent.click(screen.getByRole("button", { name: "Reject" }));
-    expect(base.onAnswerGate).toHaveBeenCalledWith("e2", "rejected");
+    expect(base.onAnswerGate).toHaveBeenCalledWith(gAsk.id, "rejected");
   });
 
   it("says a step whose source is gone can never be met, not merely waiting", async () => {
@@ -325,15 +375,34 @@ describe("WorkflowBlock", () => {
     // SECOND place node with a different condition so its sentence genuinely
     // differs from e1's — reusing the shared `edge()` helper for both would
     // make them read identically and prove nothing.
+    // TWO real gates, each with its own asked edge — a `you` step only renders
+    // buttons when `gateAskEdge` finds a performer, so a gate-less flow (as this
+    // test used to use) shows none at all.
+    //
+    // The two rules are differentiated by their CONDITION (one fires on your
+    // approval, one on your rejection), not by the gates' questions: `endLabel`
+    // returns the bare word "gate" for every gate node, so two gates asking
+    // different things produce the same sentence. That is a real gap in the
+    // promise this test exists to keep — but naming a gate would change every
+    // rule sentence on four surfaces, so it is reported rather than widened into
+    // this fix. Approve-vs-reject is an ordinary flow shape and differentiates
+    // honestly.
     const twoFlow: Flow = {
       ...flow,
-      nodes: [...flow.nodes, place("n3", "PROJ-9")],
-      edges: [edge("e1"), { id: "e4", from: "n3", to: "n2", cond: { kind: "ci-passed" } }],
+      nodes: [place("n1", "PROJ-142"), gate("g1", "Deploy to prod?"), gate("g2", "Roll back?"),
+        notify("n2"), place("n3", "PROJ-9")],
+      edges: [
+        gAsk,
+        gYou,
+        { id: "g2-ask", from: "n3", to: "g2", cond: { kind: "ci-passed" }, performed: true, firedAt: 2_000 },
+        { id: "g2-you", from: "g2", to: "n2", cond: { kind: "gate-rejected" } },
+      ],
     };
     const base = makeBase();
     render(<WorkflowBlock {...base} flow={twoFlow} state={{
       status: "waiting-on-you", done: 0, total: 2,
-      steps: [{ edgeId: "e1", state: "you", reason: "awaiting-answer" }, { edgeId: "e4", state: "you", reason: "awaiting-answer" }],
+      steps: [{ edgeId: gYou.id, state: "you", reason: "awaiting-answer" },
+        { edgeId: "g2-you", state: "you", reason: "awaiting-answer" }],
     }} />);
     const approves = screen.getAllByRole("button", { name: "Approve" });
     expect(approves).toHaveLength(2);

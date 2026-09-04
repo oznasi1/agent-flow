@@ -391,6 +391,29 @@ export function incomingEdges(flow: Flow, nodeId: string): FlowEdge[] {
   return flow.edges.filter((e) => e.to === nodeId);
 }
 
+/** The edge that ASKED a gate's question, or `undefined` while it is unasked.
+ *
+ * The single definition of "which edge posed this question", and the answer to a
+ * trap that shipped a silent no-op: a gate has edges on both sides, and only the
+ * INCOMING one is the performer. `evaluate.ts` posts `awaiting-answer` against an
+ * outgoing edge's `from`, so a "waiting on you" step carries the edge pointing
+ * AWAY from the gate — while the answer is stamped on, and read back from, the
+ * edge that asked. A surface that answers the edge it was handed writes to an
+ * edge nothing reads, and `flow:answerGate` refuses it (`performed !== true`),
+ * so the click does nothing at all. That is what the Deck card's own Approve did
+ * until this function replaced its third hand-rolled copy of the predicate.
+ *
+ * Found by `performed`, never by `firedAt` alone: an errored sibling has a
+ * `firedAt` and no receipt, and stopping at it would read the answer off an edge
+ * that never asked anything (the same reasoning `gateAnswer` carries below).
+ *
+ * Pure and dependency-free like the rest of this module, so the webview surfaces
+ * can share it with the engine rather than each re-deriving it. */
+export function gateAskEdge(flow: Flow, gateNodeId: string): FlowEdge | undefined {
+  if (findNode(flow, gateNodeId)?.kind !== "gate") return undefined;
+  return incomingEdges(flow, gateNodeId).find((e) => e.performed === true && e.firedAt !== undefined);
+}
+
 /** The action a node kind implies. This is the single source of truth for "what
  * does this rule do", replacing the copy that used to live on the edge — the
  * drawer already refused every pairing except these, which is the tell that the

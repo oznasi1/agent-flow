@@ -1,0 +1,16 @@
+diff --git a/src/tasksView.ts b/src/tasksView.ts
+index a6b17e7c..79722d6c 100644
+--- a/src/tasksView.ts
++++ b/src/tasksView.ts
+@@ -2038,8 +2038,9 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
+     if (resolvedProvider(cfg.agentProvider) === "claude-code" || cfg.remoteControl !== "on" || !cfg.seedAgent) {
+       return false;
+     }
+-    this.toast("error", RC_NEEDS_CLAUDE);
+-    return true;
++    // SABOTAGE: the pre-flight refusal is gone — the launch runs on to the pickers and
++    // the worktree, and only the late backstop in resolveRemoteControl refuses it.
++    return false;
+   }
+ 
+   /** The Remote Control answer for this launch, or null when the launch must not

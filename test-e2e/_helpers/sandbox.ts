@@ -2,6 +2,9 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import type { FixtureConfig } from "../../src/tasks/fixture/connector";
+
+export type { FixtureConfig };
 
 export interface Sandbox {
   root: string;
@@ -53,6 +56,15 @@ export const FIXTURE_CHILD = {
   parent: "E2E-1",
 };
 
+/** Options for `seedClaudeAssets`. */
+export interface SeedAssetsOptions {
+  /** Also write a marketplace catalog under `.claude/plugins/` — see
+   *  `seedRichPlugins`. Opt-in: the four pre-existing `marketplace.e2e.ts`
+   *  tests assert exact row sets and counts against the two-asset base seed,
+   *  and must keep passing unmodified. */
+  rich?: boolean;
+}
+
 /** The Marketplace lists agents and commands out of `.claude/`. The real one is
  *  gitignored, so the sandbox writes its own — two files whose names the
  *  journey asserts on. `dir` is the directory `.claude/` is created under —
@@ -65,7 +77,7 @@ export const FIXTURE_CHILD = {
  *  the webview's `.notSetUp` branch renders an empty-state message INSTEAD of
  *  `.results` — with no `plugins/` dir the seeded agent and command would be
  *  scanned and counted in the filter pills but never rendered as rows. */
-export function seedClaudeAssets(dir: string): void {
+export function seedClaudeAssets(dir: string, opts: SeedAssetsOptions = {}): void {
   const agents = path.join(dir, ".claude", "agents");
   const commands = path.join(dir, ".claude", "commands");
   const plugins = path.join(dir, ".claude", "plugins");
@@ -80,6 +92,139 @@ export function seedClaudeAssets(dir: string): void {
     path.join(commands, "refit.md"),
     "---\ndescription: Refit the landing gear.\n---\n\nRun the refit checklist.\n",
   );
+  if (opts.rich) seedRichPlugins(dir);
+}
+
+/** A marketplace catalog rich enough to drive the Marketplace's filters, read
+ *  off `scanClaudeAssets` (src/engine/claudeAssets.ts:345-420 on 2026-09-04),
+ *  which reads, in order:
+ *
+ *   - `<claudeDir>/plugins` — its mere existence is `notSetUp === false` (:362)
+ *   - `plugins/known_marketplaces.json` (:363) — `{ <key>: { source, installLocation } }`
+ *   - `plugins/installed_plugins.json` (:364) — `{ plugins: { "<plugin>@<mkt>": [{scope,version,installPath}] } }`
+ *   - `<installLocation>/.claude-plugin/marketplace.json` (:373) — the catalog,
+ *     whose `name` (not the known_marketplaces key) is the marketplace's
+ *     displayed name and the `@<mkt>` half of every ref (:374, :381)
+ *   - each catalog entry's `category` (:387, `categoryOf` :329) — LOWER-CASED,
+ *     and absent becomes the explicit `uncategorized` bucket. NOTE: the plan
+ *     said `plugin.json`; the code reads the category off the catalog entry in
+ *     marketplace.json, and there is no per-plugin plugin.json read at all.
+ *   - `<claudeDir>/settings.json`'s `enabledPlugins["<plugin>@<mkt>"]` (:235) —
+ *     `false` is "disabled", and an ABSENT ref stays `null` (unknown), which is
+ *     deliberately not the same thing (no badge either way but the "Enabled
+ *     only" scope drops only an explicit `false`).
+ *
+ *  Content state per plugin comes from `resolveContentDir` (:300): an install
+ *  entry whose `installPath` is a real directory ⇒ `installed`; else the
+ *  catalog `source` path under `installLocation` if that exists ⇒ `clone`; else
+ *  `manifest` — the "not downloaded" row, whose `installCommand` is
+ *  `/plugin install <plugin>@<mkt>` (:409).
+ *
+ *  The shape below is chosen so every filter dimension has a positive AND a
+ *  negative case, and so no two dimensions are carried by the same row:
+ *
+ *  | plugin          | category      | enabled | state         | assets                  |
+ *  |-----------------|---------------|---------|---------------|-------------------------|
+ *  | flight-recorder | monitoring    | true    | installed     | skill flight-log, hook  |
+ *  | hangar-checks   | monitoring    | null    | installed     | command preflight       |
+ *  | cargo-scales    | uncategorized | null    | installed     | skill mass-budget       |
+ *  | gantry-lights   | deployment    | FALSE   | installed     | skill gantry-check      |
+ *  | launch-pad      | monitoring    | null    | not downloaded | —                      |
+ *
+ *  Plus the base seed's own two assets under `yours` (`(user)` / `~/.claude`),
+ *  which makes the pills read Skills 3 · Commands 2 · Agents 1 · Hooks 1. */
+function seedRichPlugins(dir: string): void {
+  const claude = path.join(dir, ".claude");
+  const install = path.join(claude, "plugins", "marketplaces", "rocket-tools");
+  const write = (rel: string, body: string): void => {
+    const abs = path.join(install, rel);
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, body);
+  };
+  const md = (name: string, description: string, body: string): string =>
+    `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`;
+
+  write(
+    ".claude-plugin/marketplace.json",
+    JSON.stringify(
+      {
+        name: "rocket-tools",
+        plugins: [
+          { name: "flight-recorder", description: "Records the flight telemetry stream.", category: "Monitoring", source: "./flight-recorder" },
+          { name: "hangar-checks", description: "Pre-launch checks for the hangar.", category: "Monitoring", source: "./hangar-checks" },
+          { name: "cargo-scales", description: "Weighs the cargo bay.", source: "./cargo-scales" },
+          { name: "gantry-lights", description: "Drives the gantry light rig.", category: "Deployment", source: "./gantry-lights" },
+          { name: "launch-pad", description: "Pad scheduling and holds.", category: "Monitoring", source: "./launch-pad" },
+        ],
+      },
+      null,
+      2,
+    ),
+  );
+
+  write("flight-recorder/skills/flight-log/SKILL.md", md("flight-log", "Reads one flight's log.", "Open the log and summarise the burn."));
+  write(
+    "flight-recorder/hooks/hooks.json",
+    JSON.stringify({ hooks: { PreToolUse: [{ matcher: "Bash", hooks: [{ type: "command", command: "echo flight-recorder" }] }] } }, null, 2),
+  );
+  write("flight-recorder/README.md", "# flight-recorder\n\nRecords the flight telemetry stream.\n");
+  write("hangar-checks/commands/preflight.md", "---\ndescription: Walk the pre-flight list.\n---\n\nCheck the hangar doors.\n");
+  write("cargo-scales/skills/mass-budget/SKILL.md", md("mass-budget", "Balances the mass budget.", "Sum the manifest and compare."));
+  write("gantry-lights/skills/gantry-check/SKILL.md", md("gantry-check", "Checks the gantry lights.", "Sweep every lamp."));
+  // launch-pad: deliberately NO directory, so resolveContentDir lands on
+  // `manifest` and the row renders as "not downloaded" with its install command.
+
+  const plugins = path.join(claude, "plugins");
+  fs.writeFileSync(
+    path.join(plugins, "known_marketplaces.json"),
+    JSON.stringify(
+      { "rocket-tools": { source: { source: "github", repo: "fixture/rocket-tools" }, installLocation: install } },
+      null,
+      2,
+    ),
+  );
+  const entry = (name: string, version: string) => [
+    { scope: "user", version, installPath: path.join(install, name) },
+  ];
+  fs.writeFileSync(
+    path.join(plugins, "installed_plugins.json"),
+    JSON.stringify(
+      {
+        plugins: {
+          "flight-recorder@rocket-tools": entry("flight-recorder", "1.2.0"),
+          "hangar-checks@rocket-tools": entry("hangar-checks", "2.0.0"),
+          "cargo-scales@rocket-tools": entry("cargo-scales", "0.4.1"),
+          "gantry-lights@rocket-tools": entry("gantry-lights", "0.9.0"),
+        },
+      },
+      null,
+      2,
+    ),
+  );
+  fs.writeFileSync(
+    path.join(claude, "settings.json"),
+    JSON.stringify(
+      {
+        enabledPlugins: {
+          "flight-recorder@rocket-tools": true,
+          // The one explicit `false` in the tree — the "disabled" badge and the
+          // row the "Enabled only" scope drops.
+          "gantry-lights@rocket-tools": false,
+        },
+      },
+      null,
+      2,
+    ),
+  );
+}
+
+/** Configure the fixture connector's capabilities and failures by writing
+ *  `<fixtureDir>/config.json`. Call before `launchHost` for knobs the webview
+ *  reads once at init (caps, supportedFilters, sizes); knobs the connector reads
+ *  per call (statusTargets, reject, failDetail, me) may be flipped mid-test.
+ *  Absent file = the shipped connector, so no existing journey needs this. */
+export function writeFixtureConfig(sb: Sandbox, cfg: FixtureConfig): void {
+  fs.writeFileSync(path.join(sb.fixtureDir, "config.json"), JSON.stringify(cfg, null, 2));
 }
 
 export function makeSandbox(settingsOverride: Record<string, unknown> = {}): Sandbox {

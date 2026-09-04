@@ -1,0 +1,13 @@
+diff --git a/src/engine/review/batch.ts b/src/engine/review/batch.ts
+index 5de1dcbb..82aa7a60 100644
+--- a/src/engine/review/batch.ts
++++ b/src/engine/review/batch.ts
+@@ -96,7 +96,7 @@ export function batchReviewModes(modes: PromptMode[], forge: string): PromptMode
+  *  answer, because the worktree is the only thing that actually PREVENTS a checkout
+  *  from landing in the user's own tree. */
+ export function needsWorktrees(mode: PromptMode): boolean {
+-  return mode.id !== READ_ONLY_REVIEW_MODE_ID;
++  return true;
+ }
+ 
+ /** One planned review, one step short of a `BatchTask`. Everything here is decided

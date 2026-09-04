@@ -5,6 +5,16 @@ name: E2E (real host)
 # costs ~1-2 (the VS Code download is cached), cheaper than the fast lane —
 # so it runs everywhere and is a REQUIRED check: no change merges without a
 # real-editor proof. workflow_dispatch remains for ad-hoc runs.
+#
+# The lane is sharded four ways. Every journey boots its own Electron host, so
+# the run's wall-clock grows linearly with the test count — and the coverage
+# matrix (test-e2e/COVERAGE.md) is taking the suite from ~44 journeys to well
+# over 200. Four `shard` jobs run in parallel, each writing a Playwright blob
+# report; the `e2e` job then merges the blobs back into the one json + html
+# report that the verify-feature report and the sticky comment already read.
+# The evidence stays whole, the wall-clock does not move, and `e2e` remains
+# the single required check — branch protection on main pins that name — and
+# it fails whenever any shard did.
 on:
   push:
     branches: [main]
@@ -12,11 +22,16 @@ on:
   pull_request:
 
 jobs:
-  e2e:
+  shard:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
+    strategy:
+      # Every shard reports. One red shard must not cancel the others' evidence —
+      # the merged report is only whole when all four blobs exist.
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -33,8 +48,54 @@ jobs:
           # (COPILOT_CHAT_VERSION); hashing all three re-downloads exactly
           # when any pin moves.
           key: vscode-test-${{ runner.os }}-${{ hashFiles('test-e2e/_helpers/host.ts', 'test-e2e/_helpers/claudeCode.ts', 'test-e2e/_helpers/copilotChat.ts') }}
+      - run: npm run build
       # A real Electron workbench needs a display; xvfb provides one headlessly.
-      - run: xvfb-run -a npm run test:e2e
+      # PW_BLOB switches playwright-e2e.config.ts to the blob reporter, so this
+      # shard's evidence can be merged with the other three below.
+      - run: xvfb-run -a npx playwright test -c playwright-e2e.config.ts --shard=${{ matrix.shard }}/4
+        env:
+          PW_BLOB: "1"
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: blob-${{ matrix.shard }}
+          path: blob-report/
+          retention-days: 1
+      - uses: actions/upload-artifact@v7
+        if: failure()
+        with:
+          name: playwright-e2e-traces-${{ matrix.shard }}
+          path: test-results/
+          retention-days: 7
+
+  # The REQUIRED check keeps its name: branch protection on main requires the
+  # context `e2e`, so this job — not the shards — is the one that must go green.
+  # `if: always()` runs it even when a shard failed, so the report and the sticky
+  # comment are still produced; the last step then carries the shards' verdict.
+  e2e:
+    needs: shard
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: blob-*
+          path: all-blobs
+          merge-multiple: true
+      # One json + html report from all four blobs, at the same paths the
+      # single-job lane wrote them to (test-results/e2e-results.json and
+      # playwright-e2e-report/), so every step below is unchanged.
+      - name: Merge the shards' evidence
+        run: npm run e2e:merge
       # Layer C: the verify-feature report is generated on every run — pass or
       # fail — because it is the evidence, not the gate. The markdown summary
       # lands on the run page; the screenshot-strip HTML rides as an artifact.
@@ -75,11 +136,21 @@ jobs:
           name: verify-report
           path: test-results/verify-report.html
           retention-days: 30
+      # The merged html report, kept when the run was red. `failure()` cannot be
+      # the condition any more: this job's own steps all succeed until the gate
+      # below, so a shard's failure is read from `needs` instead.
       - uses: actions/upload-artifact@v7
-        if: failure()
+        if: always() && needs.shard.result != 'success'
         with:
           name: playwright-e2e-report
           path: |
             playwright-e2e-report/
             test-results/
           retention-days: 7
+      # The shards' verdict becomes this job's — and so the required check's.
+      # Anything but success (failure, cancellation, a skipped matrix) fails it.
+      - name: Gate on the shards
+        if: needs.shard.result != 'success'
+        run: |
+          echo "shard result: ${{ needs.shard.result }}"
+          exit 1

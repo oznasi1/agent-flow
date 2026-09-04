@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
-  emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, incomingEdges,
-  actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId,
+  emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, gateAskEdge,
+  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -288,5 +288,56 @@ describe("id minting", () => {
   it("mints n1 and e1 for an empty flow", () => {
     expect(nextNodeId(flow([], []))).toBe("n1");
     expect(nextEdgeId(flow([], []))).toBe("e1");
+  });
+});
+
+// The one definition of "which edge asked this gate", extracted after a surface
+// that answered the WRONG edge shipped as a silent no-op: the card drawer's
+// Approve sent the edge LEAVING the gate, `flow:answerGate` accepts only the
+// performer, so the write was refused and the question stayed open. Three
+// hand-rolled copies of this predicate existed; these tests guard the survivor.
+describe("gateAskEdge", () => {
+  const gateAt = (edges: FlowEdge[]): Flow => ({
+    id: "f1", name: "Ship it", armed: true, createdAt: 0,
+    nodes: [
+      place("n1"),
+      { id: "g1", kind: "gate", x: 0, y: 0, join: "any", question: "Deploy to prod?" } as GateNode,
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "" } as NotifyNode,
+    ],
+    edges,
+  });
+  const ask = (over: Partial<FlowEdge> = {}): FlowEdge =>
+    ({ id: "e-ask", from: "n1", to: "g1", cond: { kind: "pr-merged" }, performed: true, firedAt: 1, ...over });
+  const outgoing: FlowEdge = { id: "e-you", from: "g1", to: "n2", cond: { kind: "gate-approved" } };
+
+  it("finds the incoming edge that performed the ask", () => {
+    expect(gateAskEdge(gateAt([ask(), outgoing]), "g1")?.id).toBe("e-ask");
+  });
+
+  it("never answers with the edge leaving the gate — the whole point", () => {
+    // The outgoing edge is what a "you" step carries, and answering it is a
+    // silent no-op. Asserted as its own case so a rewrite that "simplified" this
+    // to any adjacent edge fails here.
+    expect(gateAskEdge(gateAt([ask(), outgoing]), "g1")?.id).not.toBe("e-you");
+  });
+
+  it("is undefined while the question is unasked", () => {
+    expect(gateAskEdge(gateAt([ask({ performed: undefined, firedAt: undefined }), outgoing]), "g1")).toBeUndefined();
+  });
+
+  it("ignores an incoming edge that fired without performing", () => {
+    // `performed`, never `firedAt` alone: an errored sibling carries a `firedAt`
+    // and posed nothing, and stopping at it would read the answer off an edge
+    // that never asked.
+    expect(gateAskEdge(gateAt([ask({ performed: undefined }), outgoing]), "g1")).toBeUndefined();
+  });
+
+  it("carries the answer already stamped on the ask edge", () => {
+    expect(gateAskEdge(gateAt([ask({ gateAnswer: "approved" }), outgoing]), "g1")?.gateAnswer).toBe("approved");
+  });
+
+  it("is undefined for a node that is not a gate, and for one that does not exist", () => {
+    expect(gateAskEdge(gateAt([ask(), outgoing]), "n1")).toBeUndefined();
+    expect(gateAskEdge(gateAt([ask(), outgoing]), "nope")).toBeUndefined();
   });
 });

@@ -15,9 +15,16 @@ docs/mockups/
 playwright-report/
 test-results/
 playwright/.cache/
-# E2E host downloads and reports.
-.vscode-test/
+# E2E host downloads and reports. No trailing slash: a parallel worktree
+# symlinks .vscode-test at the root checkout's cache to avoid re-downloading the
+# 400MB host, and `.vscode-test/` matches a directory but never that symlink —
+# which left every worktree permanently dirty and made `npm run sabotage`
+# refuse to run there.
+.vscode-test
 playwright-e2e-report/
+# Sharded E2E (PW_BLOB): per-shard blobs, and the merge input dir CI downloads them into.
+blob-report/
+all-blobs/
 
 # Local scratch output dir suggested by docs/REACH.md for running the reach
 # collector by hand — never meant to be committed to this repo.

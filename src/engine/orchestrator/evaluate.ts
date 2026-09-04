@@ -7,7 +7,8 @@ import { RunStatus } from "../../types";
 import { BranchCiStatus } from "./branchCi";
 import { CondContext, evalCond, placeActivity } from "./conditions";
 import {
-  Condition, Flow, FlowAction, FlowEdge, edgeAction, findNode, incomingEdges, isPlace, isSettled, isSpendAction,
+  Condition, Flow, FlowAction, FlowEdge, edgeAction, findNode, gateAskEdge, incomingEdges, isPlace, isSettled,
+  isSpendAction,
 } from "./model";
 
 /** How many SPENDING edges (`launch`, `seed` or `run` — whatever `isSpendAction`
@@ -109,11 +110,7 @@ function commandSucceeded(flow: Flow, commandNodeId: string): boolean {
  * a hand-written `gateAnswer` sitting on such an edge must not read back as an
  * answer to a question that was never asked. */
 function gateAnswer(flow: Flow, gateNodeId: string): "approved" | "rejected" | undefined {
-  if (findNode(flow, gateNodeId)?.kind !== "gate") return undefined;
-  const performer = incomingEdges(flow, gateNodeId).find(
-    (e) => e.performed === true && e.firedAt !== undefined,
-  );
-  return performer?.gateAnswer;
+  return gateAskEdge(flow, gateNodeId)?.gateAnswer;
 }
 
 export interface EvalInput {
@@ -215,8 +212,7 @@ export function evaluateFlow(i: EvalInput): EvalResult {
       // Only once the question has actually been ASKED. An unasked gate is
       // ordinary not-there-yet — the same silence a planned source gets — and a
       // note for it would tell you to answer a question nobody posed.
-      if (answer === undefined && findNode(i.flow, e.from)?.kind === "gate"
-        && incomingEdges(i.flow, e.from).some((a) => a.performed === true && a.firedAt !== undefined)) {
+      if (answer === undefined && gateAskEdge(i.flow, e.from) !== undefined) {
         note(e.from, "awaiting-answer");
       }
       return answer === (e.cond.kind === "gate-approved" ? "approved" : "rejected");

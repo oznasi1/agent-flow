@@ -1,0 +1,14 @@
+diff --git a/src/tasksView.ts b/src/tasksView.ts
+index a6b17e7c..035a3241 100644
+--- a/src/tasksView.ts
++++ b/src/tasksView.ts
+@@ -414,7 +414,8 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
+   private async stampProvenance(provider: TaskProvider, key: string): Promise<void> {
+     const cfg = getConfig();
+     const labels = provider.caps.labels;
+-    if (!cfg.stampLabelOnWrite || !labels) return;
++    if (!cfg.stampLabelOnWrite) return;
++    if (!labels) throw new Error("sabotage: stampProvenance requires caps.labels");
+     try {
+       await labels.add(key, cfg.provenanceLabel);
+     } catch (e) {

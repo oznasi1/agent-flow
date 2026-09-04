@@ -1,0 +1,13 @@
+diff --git a/src/webview/Notepad.tsx b/src/webview/Notepad.tsx
+index 276f9ab7..f1cc0b68 100644
+--- a/src/webview/Notepad.tsx
++++ b/src/webview/Notepad.tsx
+@@ -110,7 +110,7 @@ export function Notepad({ notes, ordered, sections = [] }: {
+   // that would otherwise still read null.
+   const dragIdRef = React.useRef<string | null>(null);
+ 
+-  const shown = notes.filter((n) => (filter === "all" ? true : filter === "done" ? n.done : !n.done));
++  const shown = notes.filter(() => true);
+   const anyDone = notes.some((n) => n.done);
+   // A pasted screenshot is content in its own right, so it alone can make a note
+   // worth adding — the host's own guard agrees.

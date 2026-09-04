@@ -1,0 +1,13 @@
+diff --git a/src/engine/transcript.ts b/src/engine/transcript.ts
+index 3554db24..c9ffdbd1 100644
+--- a/src/engine/transcript.ts
++++ b/src/engine/transcript.ts
+@@ -144,7 +144,7 @@ export function deriveActivity(lines: TranscriptLine[], mtimeMs: number, nowMs:
+   // Code writes tool results as type "user".
+   const midWork = pendingTool || last.type === "user";
+   const age = nowMs - at;
+-  if (age <= WORKING_WINDOW_MS) return { state: "working", lastActivityMs: at, slug, midWork, pendingTool: toolName, ...model };
++  if (age > WORKING_WINDOW_MS) return { state: "working", lastActivityMs: at, slug, midWork, pendingTool: toolName, ...model };
+   // Stale with a tool still outstanding. The table settles this for the four
+   // gated-and-bounded tools; for everything else, and for a line whose tool name
+   // could not be read, `stalled` stays the honest hedge it always was — the

@@ -1112,10 +1112,17 @@ describe("DeckDetail — Workflow section", () => {
     expect(sent).toHaveBeenCalledWith({ type: "flow:detach", id: "f1" });
   });
 
-  it("Approve sends flow:answerGate for this card's own workflow id", async () => {
+  it("Approve sends flow:answerGate for the edge that ASKED, on this card's own workflow", async () => {
     renderWf(cardWithKey("PROJ-142"), { flows: [withGateOn("PROJ-142")], orchEnabled: true });
     await userEvent.click(screen.getByRole("button", { name: "Approve" }));
-    expect(sent).toHaveBeenCalledWith({ type: "flow:answerGate", id: "f1", edgeId: "e-gate", answer: "approved" });
+    // `e-ask`, not `e-gate`. This assertion used to name `e-gate` — the edge
+    // LEAVING the gate, which is the one a "you" step carries — and that is
+    // precisely the defect it let ship: `flow:answerGate` accepts only the
+    // performer (`performed === true && firedAt !== undefined`), so the host
+    // silently refused every Approve on a card and the question stayed open.
+    // The seam was missed from both sides: this test pinned the wrong id, while
+    // `deckView.test.ts` drove the handler with the right one.
+    expect(sent).toHaveBeenCalledWith({ type: "flow:answerGate", id: "f1", edgeId: "e-ask", answer: "approved" });
   });
 
   it("Reset sends flow:resetEdge for this card's own workflow id", async () => {
