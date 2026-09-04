@@ -18,9 +18,9 @@ This heading — and every `todo` — is removed in that plan's last task.
 
 | id | doc | claim | proof |
 |----|-----|-------|-------|
-| `sidebar-two-tabs` | GUIDE § What it does | The sidebar panel has two tabs, Tasks and Notepad; the project key and your name live in the view title bar | todo |
-| `sidebar-window-gauge` | GUIDE § What it does | The open-window gauge sits at the end of the tab row | todo |
-| `sidebar-explore-button` | GUIDE § What it does | Explore sits at the end of the tab row beside the gauge | todo |
+| `sidebar-two-tabs` | GUIDE § What it does | The sidebar panel has two tabs, Tasks and Notepad; the source's scope (a Jira install's project key) and your name live in the view title bar | e2e: the sidebar panel has two tabs |
+| `sidebar-window-gauge` | GUIDE § What it does | The open-window gauge sits at the end of the tab row | e2e: the open-window gauge sits at the end of the tab row |
+| `sidebar-explore-button` | GUIDE § What it does | Explore sits at the end of the tab row beside the gauge, on both tabs | e2e: Explore sits at the end of the tab row beside the gauge |
 | `task-pool-filter-lenses` | GUIDE § What it does | The pool renders the filter tabs My sprint · Unassigned · Mine · Sprint · Backlog, but only those the connector declares in `caps.supportedFilters` (the fixture connector shows no Unassigned, Sprint or Backlog) | e2e: only the lenses the connector declares render |
 | `task-default-filter` | SETTINGS § table | `agentFlow.defaultFilter` picks the lens the panel opens on (`unassigned`, `mysprint`, `mine`, `sprint`, `backlog`) | e2e: defaultFilter picks the lens the panel opens on |
 | `task-size-lens` | GUIDE § What it does | A size lens (S/M/L by original estimate, an 8-hour workday) renders only when the connector has estimates and `agentFlow.filters.size` is on | e2e: the size lens renders only when the connector has estimates |
@@ -29,7 +29,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `task-title-search` | README § Tasks — the pool | The fuzzy title search narrows the pool (a misspelt title still matches); `agentFlow.filters.search: false` hides the box | e2e: title search narrows the pool fuzzily |
 | `task-card-detail` | README § Tasks — the pool | Clicking a card opens its detail panel with the ticket's description | e2e: the detail panel renders the task's description |
 | `task-detail-fetch-failure` | CONNECTORS § 2. `TaskProvider` | A task whose detail cannot be fetched shows an error toast, not a blank panel, and the card stays in the pool | e2e: a task whose detail cannot be fetched shows a toast, not a blank panel |
-| `task-repo-chips-inference` | README § Tasks — the pool | The repos a ticket touches are pre-selected from its components, labels and text matched against local checkouts | todo |
+| `task-repo-chips-inference` | README § Tasks — the pool | The repos a ticket touches are pre-selected from its components, labels and text matched against local checkouts — one reason each, in that precedence (`confirmedServices` keeps only the component matches where a ticket has any) | e2e: a card's repos arrive selected from the ticket's components, labels and text |
 | `task-component-push` | CONNECTORS § 3. The capability table | A repo chip not on the ticket is dashed with a `↑` that pushes it as a component; the delta the picker produced is what gets written | e2e: records the delta the picker produced |
 | `task-take` | README § Tasks — the pool | Take writes a `.pick-task/TASK.md` brief into each repo, opens a window, and lands the plan handshake | e2e: lands the brief + plan handshake on disk |
 | `task-change-status` | GUIDE § What it does | Changing a card's status records the transition through the connector | e2e: records the transition and the claude-code provenance label |
@@ -38,7 +38,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `task-status-field-retry` | CONNECTORS § 2. `TaskProvider` | A `TaskWriteError` with `retryWith` re-prompts only the field it names, and the second attempt carries the answer | e2e: a rejected write re-prompts only the field it names |
 | `task-provenance-label` | GUIDE § What it does | A status change stamps the provenance label (default `claude-code`) when `agentFlow.stampLabelOnWrite` is on | e2e: changing a card's status records the transition and the claude-code provenance label |
 | `task-provenance-custom-label` | SETTINGS § table | `agentFlow.provenanceLabel` names the label that is stamped (`set-stamp-label-on-write` covers switching the stamp off) | e2e: provenanceLabel names the label that is stamped |
-| `task-assign-to-me` | CONNECTORS § 2. `TaskProvider` | Add to my sprint assigns the task to you first; a connector with no assignment concept accepts the call and does nothing | todo |
+| `task-assign-to-me` | CONNECTORS § 2. `TaskProvider` | Add to my sprint pairs its sprint write with an assignment to you, passing the `me()` id through so the second lookup cannot disagree; a connector with no assignment concept accepts the call and does nothing (that half: `unit: test/unit/tasks/agileAccelerator/provider.test.ts`) | e2e: Add to my sprint pairs the sprint write with an assignment to you |
 | `task-add-to-my-sprint` | CONNECTORS § 3. The capability table | Add to my sprint records `addToSprint` and stamps the provenance label | e2e: records addToSprint and stamps the provenance label |
 | `task-add-to-my-sprint-assigned-elsewhere` | CONNECTORS § 3. The capability table | Add to my sprint is absent on a task assigned to someone else | e2e: Add to my sprint is absent on a task assigned to someone else |
 | `task-add-to-sprint-name-only-identity` | CONNECTORS § 2. `TaskProvider` | A `me()` with `id: ""` refuses the sprint write with "Couldn't resolve your {label} account." and writes nothing | e2e: a name-only identity refuses the sprint write and says so |
