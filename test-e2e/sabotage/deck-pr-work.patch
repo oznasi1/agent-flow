@@ -1,0 +1,13 @@
+diff --git a/src/engine/bucket.ts b/src/engine/bucket.ts
+index fb7ef6dd..04351bb4 100644
+--- a/src/engine/bucket.ts
++++ b/src/engine/bucket.ts
+@@ -109,7 +109,7 @@ export function deriveBucket(i: BucketInput): DeckColumn {
+   // red PR in a run with a live session would otherwise read as In progress, and
+   // an agent cannot know CI failed until something tells it. Drafts do not reach
+   // here any more — see `prSignals`.
+-  if (i.prBlocked) return "review";
++  if (i.prBlocked && i.agentState !== "working") return "review";
+   if (i.prReady) return "merge";
+   if (i.agentState === "working") return "progress";
+   if (i.prOpen || isReviewStatus(i.ticketStatus)) return "review";
