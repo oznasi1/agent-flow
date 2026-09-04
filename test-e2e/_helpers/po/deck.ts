@@ -162,4 +162,48 @@ export class Deck {
   boardWorkflowChip(key: string): Locator {
     return this.card(key).locator(".c-wf");
   }
+
+  /** One board column, addressed by the label its header shows. A column is a
+   *  `<section className="col">` whose `.col-hd .nm` holds `COLUMNS[].label`
+   *  (DeckApp.tsx:93-98 and :1333-1337 on 2026-09-03) — "In progress",
+   *  "Action required", "In review", "Merge". The lane sub-headers (`.lane-hd
+   *  .nm`, lowercase — "working", "parked", …) are siblings of the cards inside
+   *  `.col-body`, not wrappers around them, so a card's LANE cannot be scoped the
+   *  way its column can; `laneHeader` below is the honest half of that. */
+  column(label: "In progress" | "Action required" | "In review" | "Merge"): Locator {
+    return this.frame.locator("section.col", { has: this.frame.locator(".col-hd .nm", { hasText: label }) });
+  }
+
+  /** One card, addressed by ticket key, but only if it sits inside the named
+   *  column — `toHaveCount(0)` on this is "the card is not in that column", and
+   *  `toBeVisible` is "it is". Membership, not just presence of the text
+   *  somewhere on the board. */
+  cardIn(column: "In progress" | "Action required" | "In review" | "Merge", key: string): Locator {
+    return this.column(column).locator(".card", { hasText: key });
+  }
+
+  /** A lane's sub-header inside a column — rendered only while the lane holds at
+   *  least one card (`if (inLane.length === 0) return []`, DeckApp.tsx:1343). */
+  laneHeader(column: "In progress" | "Action required" | "In review" | "Merge", lane: string): Locator {
+    return this.column(column).locator(".lane-hd .nm", { hasText: lane });
+  }
+
+  /** The card's live-signal line — `.c-st .status`, the text `stateView` renders
+   *  (`working · 3s ago`, `ended turn · …`, `parked · git + Fixture only`, …;
+   *  DeckApp.tsx:135-176 and :511-513 on 2026-09-03). The `.sdot` beside it
+   *  carries the tone class; this is the words. */
+  status(key: string): Locator {
+    return this.card(key).locator(".c-st .status");
+  }
+
+  /** The drawer's Sessions section — `<div className="dd-sec">` whose `.dd-lbl`
+   *  reads "Sessions" (DeckDetail.tsx:607-618 on 2026-09-03). Holds an
+   *  `AgentsRow` (`.c-agents`, one `.ag-row` per open session naming it) when the
+   *  card has sessions, else the `.dd-none` line "No session open — git + <source>
+   *  only". Scoped to the drawer because the CARD does not name its sessions at
+   *  all: `Card` in DeckApp.tsx renders no `AgentsRow` — the state line is the
+   *  session's, but the name lives here. Open the drawer (click the card) first. */
+  sessions(): Locator {
+    return this.detail().locator(".dd-sec", { has: this.frame.locator(".dd-lbl", { hasText: "Sessions" }) });
+  }
 }
