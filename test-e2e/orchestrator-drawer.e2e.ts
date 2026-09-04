@@ -197,8 +197,8 @@ describeWithHost(
      *  purpose, which is why it is last. */
     const deck = () => Deck.open(ctx.page());
 
-    // Mutation-checked: DeckApp.tsx's `needsYouCount` filter replaced with
-    // `activeRows.filter(() => true)` — the badge read "2 needs you" from the
+    // Mutation-checked: DeckApp.tsx's `needsYouCount` predicate given `|| true`,
+    // so every row counted as needing you — the badge read "2 needs you" from the
     // start and the plain-count assertion failed.
     test("the Workflows button counts cards and switches to needs-you when one is waiting", async ({}, testInfo) => {
       test.setTimeout(240_000);
@@ -254,8 +254,8 @@ describeWithHost(
 
     // Mutation-checked: DeckApp.tsx's Workflows handler changed to toggle on
     // its own OPEN state rather than its own view (`if (orchOpen) { … }`) — the
-    // click closed the drawer instead of switching, and both the still-open and
-    // Active-selected assertions failed.
+    // second click closed the drawer instead of switching, and the still-open
+    // assertion failed.
     test("clicking Workflows while Templates shows switches to Active", async ({}, testInfo) => {
       test.setTimeout(240_000);
       const d = await deck();
@@ -288,9 +288,11 @@ describeWithHost(
       await expect(d.orch()).toHaveCount(0, { timeout: 30_000 });
     });
 
-    // Mutation-checked: OrchestratorDrawer.tsx's `if (!flow)` branch restored
-    // to its old `return null` — the drawer unmounted on the Canvas click and
-    // every assertion after it failed.
+    // Mutation-checked: OrchestratorDrawer.tsx's `if (!flow)` guard disabled
+    // (`if (!flow && false)`), which is what the old `return null` dead end
+    // amounts to — Canvas with nothing open fell through to code that
+    // dereferences the flow it does not have, the panel rendered nothing at all,
+    // and the Canvas-selected assertion failed.
     test("the Canvas explains itself when nothing is open", async ({}, testInfo) => {
       test.setTimeout(240_000);
       const d = await deck();
@@ -352,8 +354,8 @@ describeWithHost(
     });
 
     // Mutation-checked: flowList.tsx's `NewRuleBar.addRule` returned early
-    // before `onSave(next)` — the rule was never written and the on-disk
-    // edge-count poll stayed at 2.
+    // (`if (next) return;`) just before `onSave(next)` — the rule was never
+    // written and the on-disk edge-count poll stayed at 2.
     test("List view builds and arms a rule without a pointer", async ({}, testInfo) => {
       test.setTimeout(240_000);
       const page = ctx.page();
