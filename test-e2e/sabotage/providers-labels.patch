@@ -1,0 +1,13 @@
+diff --git a/src/webview/ReviewStrip.tsx b/src/webview/ReviewStrip.tsx
+index 977fd16e..0993495c 100644
+--- a/src/webview/ReviewStrip.tsx
++++ b/src/webview/ReviewStrip.tsx
+@@ -233,7 +233,7 @@ function Row({ r, expanded, detail, reviewWrites, body, submitting, submitFailed
+               title={r.localPath ? `Review in a worktree of ${r.repoName}` : notCheckedOut(r.repoName)}
+               onClick={() => onLaunch(r.id)}
+             >
+-              ▶ Review with {agentLabel}
++              ▶ Review with Claude Code
+             </button>
+             {r.draftPath && (
+               <button type="button" className="act" onClick={() => onLoadDraft(r.id)}>Load the session's review</button>
