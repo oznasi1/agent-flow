@@ -257,7 +257,7 @@ test("Approve confirms with the verb, repo and number before gh pr review runs",
   await shot(page, testInfo, "3 · approved through gh");
 });
 
-// Mutation-checked: submitReview's FIRST `if (answer !== label)` (deckView.ts:3158 — the review guard, NOT the identically worded merge guard 175 lines below) → `if (false)`; Cancel submitted anyway and this failed on the empty-argv assertion.
+// Mutation-checked: submitReview's FIRST `if (answer !== label)` (deckView.ts:3158 — the review guard, NOT the identically worded merge guard 175 lines below) → `if (false)`; Cancel approved anyway, and this failed at the button-release wait below rather than at the argv assertion — an approve that lands evicts the row from the queue, so the button it was waiting on stopped existing at all.
 test("cancelling the confirmation sends nothing", async ({}, testInfo) => {
   test.setTimeout(240_000);
   const { page, deck } = await boot({ "agentFlow.reviewWrites": true }, ghAnswers());
@@ -356,7 +356,7 @@ test("Request changes on GitLab warns that approval is withdrawn", async ({}, te
   expect(glabWriteCalls()).toEqual([]);
 });
 
-// Mutation-checked: GhReviewProvider.submit's rejection message (review/provider.ts:129) → `stripCommandLine(...)` dropped in favour of `(e as Error).message`, which embeds the argv and therefore the body; this failed on the toast's exact text.
+// Mutation-checked: GhReviewProvider.submit's `err.stderr?.trim() || … stripCommandLine(e.message)` (review/provider.ts:129) → `e instanceof Error ? e.message : String(e)`; the toast then read `Review submit: Command failed: … --body REVIEW-BODY-E2E-SENTINEL…` — the exact leak FORGES.md § 4 forbids — and this failed on the toast's exact text.
 test("a rejected submit shows the CLI's stderr, never the body", async ({}, testInfo) => {
   test.setTimeout(240_000);
   // A body distinctive enough that its presence anywhere is unmistakable, and
