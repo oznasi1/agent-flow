@@ -835,3 +835,57 @@ test("Save to settings writes agentFlow.commands into the real settings.json", a
   await expect(insp.getByRole("button", { name: "Save to settings" })).toHaveCount(0);
   await shot(page, testInfo, "2 · saved, in the scope that holds the setting");
 });
+
+// ── a pinned defect ─────────────────────────────────────────────────────────
+// GUIDE § The Deck: "the node shows **Approve** and **Reject**", and the card
+// drawer's Workflow block renders exactly those two buttons for a `you` step.
+// Clicking them does nothing.
+//
+// `WorkflowBlock.tsx` sends `onAnswerGate(step.edgeId, …)`, and a `you` step's
+// `edgeId` is the edge LEAVING the gate — `evaluate.ts` posts `awaiting-answer`
+// against `e.from`, and `DeckApp.tsx`'s `workflowChipTrailer` says so in as many
+// words ("the pending edge here points AWAY from the gate"). But
+// `deckView.ts`'s `flow:answerGate` refuses any edge that is not the performer
+// (`performed !== true || firedAt === undefined`), which an outgoing edge never
+// is. So the write is silently dropped and the question stays unanswered.
+//
+// The Orchestrator drawer's own gate node is unaffected — it answers the ASK
+// edge (`gateStateOf`), which is why "a gate asks once and Approve fires the
+// downstream rule" above passes. The unit tests miss the seam from both sides:
+// `DeckDetail.test.tsx` asserts the message carries the OUTGOING edge id, and
+// `deckView.test.ts` drives the handler with the ASK edge id.
+//
+// This test asserts ONLY the documented behaviour, so it stays falsifiable: it
+// does not encode today's no-op. Delete `test.fail` when the fix lands.
+test.fail("Approve on the card's own workflow block answers the gate", async ({}, testInfo) => {
+  test.setTimeout(240_000);
+  sb = boot();
+  seedCard(sb, "E2E-GATE");
+  seedFlow(sb, GATE_FLOW("E2E-GATE"));
+
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+  const deck = await Deck.open(page);
+  const block = await openCard(deck, "E2E-GATE");
+  await armAndGo(deck, block);
+
+  // Wait for the ask on disk, so the buttons below are the real waiting state
+  // rather than a half-rendered pass.
+  await expect.poll(() => readFlow(sb, "e2e-gate").edges[0].firedNote, { timeout: 60_000 })
+    .toBe("asked you: E2E-GATE-Q");
+
+  // Back to the card, where the block's `you` step carries the two buttons.
+  await backToCard(deck, "E2E-GATE");
+  const cardBlock = deck.workflowBlock();
+  const approve = cardBlock.locator(".wf-step.wf-you .dd-pact", { hasText: "Approve" });
+  await expect(approve).toBeVisible({ timeout: 30_000 });
+  await shot(page, testInfo, "1 · the card's own Approve, as the guide describes it");
+
+  await approve.click();
+
+  // The documented outcome, and the only thing asserted: the gate is answered.
+  await expect.poll(() => readFlow(sb, "e2e-gate").edges[0].gateAnswer, { timeout: 30_000 })
+    .toBe("approved");
+  await shot(page, testInfo, "2 · answered");
+});
