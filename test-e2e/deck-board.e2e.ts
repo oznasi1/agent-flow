@@ -407,6 +407,21 @@ test("on a per-session card Open and Diff act on that session's own directory", 
   await expect(card).toBeVisible({ timeout: 60_000 });
   await shot(page, testInfo, "16 · two per-session cards for one two-repo run");
 
+  // Open FIRST, and the order is load-bearing: Diff opens the workbench's
+  // multi-file diff editor in THIS window, which takes the editor area from the
+  // Deck panel — after that the card's own buttons are no longer visible and the
+  // Open click times out (observed live). Open costs the Deck nothing: the window
+  // it mints is a second one.
+  //
+  // The same `repo` rides on the message (DeckApp.tsx:547), so the window lands
+  // on telemetry rather than on the run's first repo.
+  const appeared = app.waitForEvent("window", { timeout: 60_000 });
+  await card.locator(".c-foot2 .act.primary").click();
+  const opened = await appeared;
+  await opened.locator(".activitybar").waitFor({ timeout: 60_000 });
+  await expect.poll(() => opened.title(), { timeout: 30_000 }).toContain("telemetry");
+  await shot(page, testInfo, "17 · Open on the telemetry session's own repo");
+
   // Diff: `diffTitle` names the repos actually being diffed (diffView.ts:56-64),
   // so the tab title is the record of which directory the card acted on.
   await card.locator(".c-foot2 .act", { hasText: "Diff" }).click();
@@ -414,16 +429,7 @@ test("on a per-session card Open and Diff act on that session's own directory", 
   await expect(tab).toBeVisible({ timeout: 30_000 });
   await expect(tab).toContainText("telemetry");
   await expect(tab).not.toContainText("rocket");
-  await shot(page, testInfo, "17 · Diff on the telemetry session's own repo");
-
-  // Open: the same `repo` rides on the message, so the window lands on
-  // telemetry rather than on the run's first repo.
-  const appeared = app.waitForEvent("window", { timeout: 60_000 });
-  await card.locator(".c-foot2 .act.primary").click();
-  const opened = await appeared;
-  await opened.locator(".activitybar").waitFor({ timeout: 60_000 });
-  await expect.poll(() => opened.title(), { timeout: 30_000 }).toContain("telemetry");
-  await shot(page, testInfo, "18 · Open on the telemetry session's own repo");
+  await shot(page, testInfo, "18 · Diff on the telemetry session's own repo");
 });
 
 // Mutation-checked: webview/helpers.ts:262 — `if (runKind(run) === "notepad") return "notepad";` removed; the card's key slot fell through to the raw `notepad-…` key and the assertion failed
@@ -480,10 +486,12 @@ test("showTokenTotal adds a Tokens on board total to the header", async ({}, tes
   await expect(deck.card("E2E-17")).toBeVisible({ timeout: 60_000 });
 
   // A fifth header tile, labelled and effort-weighted (DeckApp.tsx:1125-1136).
-  // 4000×1 + 1000×1.25 + 40000×0.1 + 2000×5 = 19,250 eq → "19.3k" (formatEq).
+  // 4000×1 + 1000×1.25 + 40000×0.1 + 2000×5 = 19,250 eq, which `formatEq`
+  // (engine/usage.ts:99-103) rounds to the nearest thousand: "19k", with the
+  // unit as a nested span so the slot's text reads "19keq".
   const tile = deck.frame.locator(".stats .stat", { has: deck.frame.locator(".l", { hasText: "Tokens on board" }) });
   await expect(tile).toBeVisible({ timeout: 90_000 });
-  await expect(tile.locator(".n")).toHaveText("19.3keq");
+  await expect(tile.locator(".n")).toHaveText("19keq");
   await shot(launched.page, testInfo, "20 · the Tokens on board tile");
 });
 

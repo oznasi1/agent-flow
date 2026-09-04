@@ -240,6 +240,15 @@ describeWithHost(
           if (other.marker !== marker) expect(prompt).not.toContain(other.marker);
         }
         await shot(ctx.page(), testInfo, `5 · ${label} seeded ${marker}`);
+
+        // Let this launch's own new window finish booting before the next one
+        // starts. `describeWithHost`'s `afterAll` closes the Electron app, and
+        // `electronApplication.close()` hangs indefinitely on a window still
+        // mid-activation — the hazard `review-launch.e2e.ts`'s `waitForWindows`
+        // documents at length. That file can await each window because it owns
+        // its own `app`; a shared-host block has no handle on one, so this
+        // settles them by time instead.
+        await ctx.page().waitForTimeout(10_000);
       }
 
       // Supervise ran last, so its brief is the one on disk. Its `planMd`
