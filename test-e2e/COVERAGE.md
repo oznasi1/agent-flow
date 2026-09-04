@@ -99,7 +99,9 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `deck-live-signal` | GUIDE § The Deck | A card reads `working · Ns ago`, `idle`, `ended turn` or `parked` from Claude Code's own transcripts; `parked` only when the transcript cannot be read or does not exist | todo |
 | `deck-action-required-semantics` | GUIDE § The Deck | Action required is session signals only — a session that ended its turn, stalled or exited — so Claude's asking and GitHub's asking stay under separate headers | todo |
 | `deck-fixes-needed-lane` | GUIDE § The Deck | A PR with failing required checks, requested changes or a conflict pulls its card into In review's `fixes needed` lane even while the session is still working | todo |
-| `deck-open-action` | GUIDE § The Deck | Open focuses the window if already open (never a duplicate) and opens it fresh otherwise; on a per-session card it acts on that session's own directory | todo |
+| `deck-open-action` | GUIDE § The Deck | Open focuses the window already running a task rather than opening a duplicate | e2e: Open focuses an already-open window instead of duplicating it |
+| `deck-open-action-fresh` | GUIDE § The Deck | Open opens the task's window fresh when none is already holding it | todo |
+| `deck-open-action-per-session` | GUIDE § The Deck | On a per-session card Open and Diff act on that session's own directory | todo |
 | `deck-diff-action` | GUIDE § The Deck | Diff shows the working diff | todo |
 | `deck-card-overflow-menu` | GUIDE § The Deck | ⋯ offers Open in Jira and Forget; Forget removes the run's record without touching its neighbour | e2e: forget removes a run's record without touching its neighbour |
 | `deck-grouping-lens` | GUIDE § The Deck | The board opens one card per session; switching the header control to Workspaces gives one card per launched task with sessions nested, and the choice sticks across a reopen (`agentFlow.deckGrouping`) | e2e: the Sessions / Workspaces grouping sticks across a reopen |

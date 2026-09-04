@@ -163,7 +163,7 @@ test("the Sessions / Workspaces grouping sticks across a reopen", async ({}, tes
   await shot(page, testInfo, "6 · reopened: still Workspaces, still one card");
 });
 
-// Mutation-checked: workspace.ts `openInEditor` fallback → `workbench.action.newWindow` (every Open minted a window)
+// Mutation-checked: deckView.ts `inspect`'s open branch pointed one directory up (`path.dirname(target)`) so Open resolves a folder no window holds — VS Code minted a third window and the count assertion failed
 test("Open focuses an already-open window instead of duplicating it", async ({}, testInfo) => {
   test.setTimeout(240_000);
   sb = makeSandbox();
