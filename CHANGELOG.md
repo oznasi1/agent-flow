@@ -20,6 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **A Deck card's own Approve and Reject now answer the gate.** Clicking either on a
+  card's Workflow block did nothing at all: a "waiting on you" step carries the edge
+  pointing *away* from the gate, but only the edge that *asked* is accepted, so the
+  answer was silently dropped and the question stayed open. The Orchestrator drawer's
+  identical buttons always worked, which is why nothing caught it. The predicate now
+  has one definition in the engine (`gateAskEdge`) that both surfaces share, and the
+  card renders no gate buttons at all while the question is unasked.
+
 - **Docs that had drifted from the product.** `docs/ORCHESTRATOR_COMMANDS.md` no longer
   claims the command path has never run in a real editor: which shell you get
   (`/bin/sh`), the Save-to-settings write, and the chained `place → command → command`
@@ -31,10 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Found by the coverage work above, each pinned as a failing test so it stays visible:
 
-- **A Deck card's own Approve and Reject do nothing.** The gate's buttons on the card's
-  Workflow block send the edge leaving the gate, but only the edge that asked is
-  accepted, so the answer is silently dropped. The Orchestrator drawer's own gate node
-  is unaffected — use that until this is fixed.
 - **A Copilot batch does seed a chat panel.** `docs/SETTINGS.md` says a batch under
   Copilot's `extension` surface seeds none; that is true only of a shared window. In the
   default separate-windows layout each window seeds its own.
