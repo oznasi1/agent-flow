@@ -1,0 +1,22 @@
+diff --git a/src/engine/doctor.ts b/src/engine/doctor.ts
+index 30c8da53..3587f048 100644
+--- a/src/engine/doctor.ts
++++ b/src/engine/doctor.ts
+@@ -205,7 +205,7 @@ function sourceChecks(i: DoctorInputs): Check[] {
+       ? {
+           group: "source",
+           label: "Credentials valid",
+-          status: "skip",
++          status: "ok",
+           detail: "not probed — no credentials to probe with",
+         }
+       : i.authProbe.ok
+@@ -220,7 +220,7 @@ function sourceChecks(i: DoctorInputs): Check[] {
+       ? {
+           group: "source",
+           label: `${scopeLabel} resolves`,
+-          status: "skip",
++          status: "ok",
+           detail: "not probed — credentials are missing or rejected",
+         }
+       : i.projectProbe.ok

@@ -281,6 +281,66 @@ test("completing the wizard writes the settings and marks setup complete", async
   await shot(page2, testInfo, "2 · no offer on the next launch — setup is marked complete");
 });
 
+// Mutation-checked: `src/setup.ts`'s commit block moved BELOW the `signIn`
+// guard, so nothing is written until the whole wizard succeeds — the four
+// settings are then absent after the decline and this fails.
+test("declining sign-in keeps the settings and warns", async ({}, testInfo) => {
+  test.setTimeout(180_000);
+  const launched = await launchHost(sb);
+  app = launched.app;
+  const page = launched.page;
+
+  await expect(welcome(page)).toBeVisible({ timeout: 60_000 });
+  await welcome(page).locator(".monaco-button", { hasText: "Set up" }).click();
+
+  // Everything up to the credential pair answered — which is PAST the last
+  // cancellable step, so the commit block has already run (setup.ts) — and then
+  // the credential prompt declined.
+  await expect(quickInput(page).locator(".quick-input-title")).toHaveText(step(1));
+  await page.keyboard.type("https://declined.invalid");
+  await page.keyboard.press("Enter");
+  await expect(quickInput(page).locator(".quick-input-title")).toHaveText(step(2));
+  await page.keyboard.type("DECL");
+  await page.keyboard.press("Enter");
+  await expect(quickInput(page).locator(".quick-input-title")).toHaveText(step(REPOS_ROOT_STEP));
+  await replace(page, sb.reposRoot);
+  await page.keyboard.press("Enter");
+  await expect(quickInput(page).locator(".quick-input-title")).toHaveText(step(REPOS_ROOT_STEP + 1));
+  await page.keyboard.press("Escape");
+
+  // The settings the wizard already collected are KEPT — the point of committing
+  // after the last cancellable step rather than at the very end…
+  await expect
+    .poll(() => settingsJson()["agentFlow.jira.baseUrl"], { timeout: 30_000 })
+    .toBe("https://declined.invalid");
+  expect(settingsJson()["agentFlow.jira.project"]).toBe("DECL");
+  expect(settingsJson()["agentFlow.reposRoot"]).toBe(sb.reposRoot);
+  // …and the user is told, by name, which command finishes the job.
+  await expect(page.locator(".notification-list-item", { hasText: "Jira sign-in was cancelled" }))
+    .toBeVisible({ timeout: 30_000 });
+  await shot(page, testInfo, "1 · settings saved, sign-in declined, warned by name");
+
+  // And the next launch does NOT nag, even though `setupComplete` was never
+  // set: `maybeRunSetup`'s second gate is `connector.isConfigured()`, and the
+  // settings kept above make that true, so it marks the flag and stays quiet
+  // (setup.ts) — "skips silently when already configured". The remaining gap is
+  // the credential, which the warning above already named the command for; the
+  // sign-in gate itself is `sign-in.e2e.ts`'s subject.
+  //
+  // Verified as the real behaviour rather than assumed: asserting the offer
+  // RETURNED here failed, because a wizard that got as far as the credential
+  // prompts leaves a configured install behind. Every other test in this file
+  // is the control for this absence — each one sees the offer on a relaunch of
+  // an install whose settings are still empty.
+  await app.close();
+  const relaunched = await launchHost(sb);
+  app = relaunched.app;
+  await expect(relaunched.page.locator('.activitybar [aria-label*="Agent Flow"]').first())
+    .toBeVisible({ timeout: 60_000 });
+  await expect(welcome(relaunched.page)).toHaveCount(0);
+  await shot(relaunched.page, testInfo, "2 · a configured install is never offered the wizard again");
+});
+
 // Mutation-checked: `src/setup.ts`'s `maybeRunSetup` else-branch marking
 // `SETUP_COMPLETE_KEY` true after "Later" — the offer then never returns and the
 // relaunch assertion fails.

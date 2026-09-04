@@ -1,0 +1,13 @@
+diff --git a/src/tasks/jira/connector.ts b/src/tasks/jira/connector.ts
+index ca7bf859..1d295c94 100644
+--- a/src/tasks/jira/connector.ts
++++ b/src/tasks/jira/connector.ts
+@@ -47,7 +47,7 @@ class JiraConnector implements TaskConnector {
+    * a later step leaves an already-configured user's two settings untouched. */
+   async configure(from: number, total: number): Promise<(() => Promise<void>) | null> {
+     const baseUrl = await vscode.window.showInputBox({
+-      title: `Agent Flow Deck Setup (${from}/${total})`,
++      title: `Agent Flow Deck Setup (${from}/${total + 1})`,
+       prompt: "Your Atlassian Jira Cloud site URL",
+       ignoreFocusOut: true,
+       placeHolder: "https://your-org.atlassian.net",

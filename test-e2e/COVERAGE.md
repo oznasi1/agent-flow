@@ -209,21 +209,23 @@ This heading — and every `todo` — is removed in that plan's last task.
 
 | id | doc | claim | proof |
 |----|-----|-------|-------|
-| `setup-first-run-wizard` | README § Quick start | First run collects the connector's settings, the repos directory and a credential in a short wizard | todo |
-| `setup-welcome-offer` | TELEMETRY § Usage events | The first-activation welcome prompt offers Set up and Later; Later (or dismissing) writes nothing and leaves everything unset | todo |
+| `setup-first-run-wizard` | README § Quick start | First run collects the connector's settings, the repos directory and a credential in a short wizard | e2e: the welcome offer leads into a numbered wizard |
+| `setup-welcome-offer` | TELEMETRY § Usage events | The first-activation welcome prompt offers Set up and Later; Later (or dismissing) writes nothing and leaves everything unset | e2e: Later leaves everything unset |
 | `setup-step-numbering` | CONNECTORS § 4. `TaskConnector` | Wizard boxes are titled `Agent Flow Deck Setup (n/total)` where total is `setupSteps + 1 + signInSteps` and the repos-root step comes last | unit: test/unit/setup.test.ts |
 | `setup-commit-thunk` | CONNECTORS § 4. `TaskConnector` | A connector collects without writing; the commit thunk runs after the last cancellable step, so cancelling at any step performs zero setting writes | unit: test/unit/compat.test.ts |
-| `setup-outcomes` | TELEMETRY § Usage events | Escape during a connector step or at the repos-root box writes nothing and leaves `setupComplete` unset so the offer returns next launch; completing writes the settings and marks setup complete; declining sign-in saves settings and warns | todo |
-| `setup-rerun` | README § Quick start | Run Setup… re-runs the wizard on a configured install, and cancelling leaves the configuration untouched | todo |
+| `setup-commit-thunk-e2e` | CONNECTORS § 4. `TaskConnector` | In a real host, both values a connector collected are still absent from `settings.json` after an Escape at the repos-root box that follows them | e2e: Escape at the repos-root step writes nothing |
+| `setup-outcomes` | TELEMETRY § Usage events | Escape during a connector step or at the repos-root box writes nothing and leaves `setupComplete` unset so the offer returns next launch; completing writes the settings and marks setup complete; declining sign-in saves settings and warns | e2e: Escape during a connector step writes nothing |
+| `setup-outcome-signin-skipped` | TELEMETRY § Usage events | Declining the credential prompts keeps the settings the wizard already committed and warns, naming the standalone sign-in command; the install now reads as configured, so the welcome offer never returns | e2e: declining sign-in keeps the settings and warns |
+| `setup-rerun` | README § Quick start | Run Setup… re-runs the wizard on a configured install, and cancelling leaves the configuration untouched | e2e: Run Setup… on a configured install leaves config untouched |
 | `standalone-sign-in` | CONNECTORS § 4. `TaskConnector` | The standalone Sign in command numbers its own boxes (`Jira sign-in (1/2)`) and stores the credential | e2e: signing in round-trips through SecretStorage |
 | `sign-out` | CONNECTORS § 4. `TaskConnector` | Signing out deletes the credential and re-gates the pool | e2e: signing out re-gates the pool |
 | `doctor-command` | README § Feedback | Doctor probes Jira and the forge CLI for real — two authenticated GETs and `gh auth status` — and catches a revoked token instead of reporting a network problem | unit: test/unit/engine/doctor.test.ts |
-| `doctor-rows-from-connector` | CONNECTORS § 4. `TaskConnector` | Doctor's row labels come from the connector's `SourceInfo` (label, scope noun, endpoint) | todo |
-| `doctor-probe-skip` | CONNECTORS § 4. `TaskConnector` | A probe a connector deliberately did not run renders as `skip`, never as a silent pass | todo |
-| `doctor-provider-rows` | SETTINGS § table | Doctor reports rows for whichever tool is in play — every host tool under `agentFlow.agentProvider: ask` | todo |
+| `doctor-rows-from-connector` | CONNECTORS § 4. `TaskConnector` | Doctor's row labels come from the connector's `SourceInfo` (label, scope noun, endpoint) | e2e: Doctor labels rows from the connector's SourceInfo |
+| `doctor-probe-skip` | CONNECTORS § 4. `TaskConnector` | A probe a connector deliberately did not run renders as `skip`, never as a silent pass | e2e: probe rows read skip, never pass |
+| `doctor-provider-rows` | SETTINGS § table | Doctor reports rows for whichever tool is in play — every host tool under `agentFlow.agentProvider: ask` | e2e: under agentProvider ask Doctor reports every tool |
 | `doctor-forge-mode-row` | FORGES § Bitbucket has two modes | Doctor's Bitbucket group has a mode row reading `passthrough (full)` or `projected (limited — upgrade atlassian-cli for full support)` | todo |
-| `doctor-pr-reads-row` | FORGES § 4. Conventions | Doctor's `PR reads` row sits beside a CLI row that is honestly green when the account cannot resolve a repository | todo |
-| `doctor-actions` | TELEMETRY § Usage events | Picking a row runs its action — a command, a setting (opens Settings on that id), an extension or a URL; Copy report fills the clipboard and writes nothing else | todo |
+| `doctor-pr-reads-row` | FORGES § 4. Conventions | Doctor's `PR reads` row sits beside a CLI row that is honestly green when the account cannot resolve a repository | e2e: PR reads is its own row beside the CLI row |
+| `doctor-actions` | TELEMETRY § Usage events | Picking a row runs its action — a command, a setting (opens Settings on that id), an extension or a URL; Copy report fills the clipboard and writes nothing else | e2e: picking a setting row opens Settings on that id |
 | `doctor-gh-where` | ORCHESTRATOR_COMMANDS § Numbers | Doctor says where `gh` was found, the case a bare launchd PATH makes invisible | unit: test/unit/engine/doctor.test.ts |
 | `command-refresh` | TELEMETRY § Usage events | Refresh re-fetches the pool for the current lens | e2e: reordering the pool survives a refresh, and reset |
 | `command-take-task` | TELEMETRY § Usage events | The `agentFlow.takeTask` palette command takes a task without the card | todo |
@@ -517,7 +519,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `priv-read-only-review-modal` | README § Privacy | With `agentFlow.reviewWrites` on, a review submit reaches the forge only through a modal confirmation | e2e: Approve confirms with the verb, repo and number before gh pr review runs |
 | `priv-open-agents-reads` | PRIVACY | With `agentFlow.openAgents` on the Deck reads `~/.claude/sessions`, and with `agentFlow.prFacts` also on runs `gh pr list` in a live session's directory even one you never pointed it at | todo |
 | `priv-review-strip-shared-gate` | PRIVACY | `agentFlow.reviewRequests` only produces a forge read while `agentFlow.prFacts` is on | e2e: turning prFacts off drops PR facts and darkens the review strip live |
-| `priv-doctor-probes` | PRIVACY | Doctor makes two authenticated GETs and runs `gh auth status`, and writes nothing except the clipboard when asked to copy | todo |
+| `priv-doctor-probes` | PRIVACY | Doctor makes two authenticated GETs and runs `gh auth status`, and writes nothing except the clipboard when asked to copy | e2e: Copy report fills the clipboard and writes nothing else |
 | `priv-pick-task-excluded` | PRIVACY | Briefs go in a git-excluded `.pick-task/`, so they are never committed | e2e: the brief directory is git-excluded |
 | `priv-output-channel-log` | PRIVACY | Every review submit that reaches the forge is logged to the Agent Flow Deck output channel (`priv-output-channel-merge` is the merge half, `priv-output-channel-review-failure` the failure half) | e2e: Approve confirms with the verb, repo and number before gh pr review runs |
 | `priv-output-channel-review-failure` | PRIVACY | A review submit the forge rejects is logged too, with the CLI's own wording and none of the review body | e2e: a rejected submit shows the CLI's stderr, never the body |
@@ -529,7 +531,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 |----|-----|-------|-------|
 | `req-editor-version` | README § Requirements | VS Code or Cursor `^1.90.0`; the lane boots the extension on a pinned real host | e2e: a real host boots the extension |
 | `install-paths` | README § Quick start | Install from the Marketplace, Open VSX, `code --install-extension <vsix>`, or Install from VSIX… | untestable: installation runs through the Marketplace or a VSIX outside the harness |
-| `no-org-defaults` | README § Quick start | The extension ships no organization-specific defaults; `agentFlow.jira.baseUrl` and `agentFlow.jira.project` default to `""` and the wizard collects them | todo |
+| `no-org-defaults` | README § Quick start | The extension ships no organization-specific defaults; `agentFlow.jira.baseUrl` and `agentFlow.jira.project` default to `""` and the wizard collects them | e2e: completing the wizard writes the settings and marks setup complete |
 | `status-v1-deferred` | README § Status | Deferred: OAuth web sign-in, cloning not-yet-checked-out repos, multi-project | untestable: documented absence |
 | `feedback-templates` | README § Feedback | The bug-report form asks for a Doctor report; security issues go through a private advisory | untestable: GitHub issue-form templates are repository metadata, not extension behaviour |
 | `reach-dashboard` | REACH § Where the dashboard lives | The reach dashboard is GitHub Pages served from the `reach-data` branch, regenerated on every collection run | untestable: maintainer tooling, not shipped |
