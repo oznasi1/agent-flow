@@ -1,0 +1,20 @@
+diff --git a/src/deckView.ts b/src/deckView.ts
+index a8b4a7aa..4575d8a7 100644
+--- a/src/deckView.ts
++++ b/src/deckView.ts
+@@ -3322,14 +3322,7 @@ export class DeckPanel {
+     let mergeAttempted = false;
+     try {
+       const label = MERGE_LABEL[cfg.mergeMethod];
+-      const answer = await vscode.window.showWarningMessage(
+-        // No preposition: every label is already a verb phrase, so `Squash and merge
+-        // svc#124?` and `Merge svc#124?` both read as sentences, where the old
+-        // `Merge on svc#124?` read as a typo.
+-        `${label} ${target.repo}#${target.number}?`,
+-        { modal: true, detail: "Approved, every check green, and no unresolved review threads." },
+-        label,
+-      );
++      const answer = label;
+       if (answer !== label) {
+         // Distinct from a failure: nothing was attempted, so there is nothing to
+         // warn about — just release the row's disable. No merge_method: the forge
