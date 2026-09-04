@@ -52,9 +52,9 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `task-address-pr-assess-only` | SETTINGS § table | `agentFlow.prReviewAutoFix: false` seeds an assess-only prompt — the shipped assess wording without the implement clause | e2e: prReviewAutoFix off seeds an assess-only prompt |
 | `task-address-pr-custom-prompt` | SETTINGS § table | A custom `agentFlow.prReviewPrompt` is what gets seeded, placeholders substituted, in place of the shipped default | e2e: a custom prReviewPrompt is what gets seeded |
 | `task-launch-in-parallel` | GUIDE § What it does | Ticking several cards and Launch in parallel gives every task its own git worktree and branch, one window per task by default | e2e: opens a window per task, each in its own worktree |
-| `task-launch-in-parallel-shared-window` | GUIDE § What it does | The one-shared-window layout stacks every task's worktree in one window with a session seeded per task, in the order picked | todo |
-| `task-launch-in-parallel-no-repo` | GUIDE § What it does | A task touching none of the filtered repos launches in all of them, so no task launches with no repo | todo |
-| `task-launch-in-parallel-threshold` | GUIDE § What it does | Batches larger than `agentFlow.batchLaunchConfirmThreshold` (default 6) confirm first | todo |
+| `task-launch-in-parallel-shared-window` | GUIDE § What it does | The one-shared-window layout stacks every task's worktree in one window with a session seeded per task, in the order picked | e2e: a shared-window batch stacks every task |
+| `task-launch-in-parallel-no-repo` | GUIDE § What it does | A task touching none of the filtered repos launches in all of them, so no task launches with no repo | e2e: touching none of the filtered repos launches in all of them |
+| `task-launch-in-parallel-threshold` | GUIDE § What it does | Batches larger than `agentFlow.batchLaunchConfirmThreshold` (default 6) confirm first | e2e: a batch larger than the threshold asks first |
 | `task-explore` | GUIDE § What it does | Explore asks where to open and which repos, then launches and lands a plan file | e2e: Explore launches and lands a plan file |
 | `task-explore-actions` | SETTINGS § table | Explore offers six kinds: Open a Jira ticket, Enhance knowledge / flow, Debug, General, Supervise running tasks, Verify on an environment; `agentFlow.exploreMode` pins one and `agentFlow.explorePrompts.*` edits each prompt | e2e: Explore offers the six documented session kinds |
 | `explore-verify-environment` | SETTINGS § table | Verify asks which environment from `agentFlow.environments` plus Custom…, and seeds a read-only prompt that inspects logs, metrics, traces and deployed version there | e2e: a verify session is seeded read-only against the chosen environment |
@@ -359,14 +359,14 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `provider-copilot-vscode-only` | SETTINGS § table | `copilot` works only in VS Code and falls back to Claude Code in Cursor | untestable: real Cursor app automation |
 | `provider-cursor` | SETTINGS § Where the session opens | On a cursor-scheme host, `cursor` really runs `cursor-agent` in the seeded terminal | e2e: really runs cursor-agent in the seeded terminal |
 | `provider-cursor-fallback` | SETTINGS § table | `cursor` degrades to Claude Code on a VS Code host | e2e: degrades to Claude Code on a VS Code host |
-| `provider-ask` | SETTINGS § table | `ask` prompts per launch; a batch asks once and uses the answer for every task; Orchestrator rules and the unattended seed use Claude Code | todo |
+| `provider-ask` | SETTINGS § table | `ask` prompts per launch; a batch asks once and uses the answer for every task; Orchestrator rules and the unattended seed use Claude Code | e2e: asks which tool per launch |
 | `provider-codex` | SETTINGS § table | `codex` runs the Codex CLI in a terminal in any editor and seeds the prompt unsubmitted | e2e: runs the codex CLI and seeds the prompt unsubmitted |
 | `provider-codex-extension` | SETTINGS § table | `codex` under the extension surface still seeds a terminal — there is no panel to pre-fill | e2e: still seeds a terminal — there is no panel to pre-fill |
 | `surface-extension` | SETTINGS § Where the session opens | `agentFlow.agentSurface: extension` (default) pre-fills the tool's chat panel | e2e: the take seeds the real Claude Code panel |
 | `surface-terminal` | SETTINGS § Where the session opens | `terminal` opens an integrated terminal named `Claude · <KEY>` running the CLI with the prompt pre-typed | e2e: into a real integrated terminal |
-| `surface-terminal-no-cli` | SETTINGS § Where the session opens | Without `claude` on PATH the terminal says `command not found` and the prompt is still there to reuse | todo |
+| `surface-terminal-no-cli` | SETTINGS § Where the session opens | Without `claude` on PATH the terminal says `command not found` and the prompt is still there to reuse | e2e: no CLI on PATH says command not found |
 | `surface-press-enter` | SETTINGS § Where the session opens | Either way the prompt is pre-filled, not submitted — you press Enter | e2e: seeds the real Claude Code panel |
-| `surface-copilot-batch` | SETTINGS § Where the session opens | A batch under Copilot's `extension` surface seeds no chat panel (Copilot Chat is single-instance), writes every brief and shows a notification pointing at them | todo |
+| `surface-copilot-batch` | SETTINGS § Where the session opens | A batch under Copilot's `extension` surface seeds no chat panel (Copilot Chat is single-instance), writes every brief and shows a notification pointing at them | e2e: a Copilot extension-surface batch writes every brief |
 | `surface-all-launch-paths` | SETTINGS § Where the session opens | Both surfaces work for every launch path — take, batch, Explore, Notepad, Address PR | e2e: the opened window seeds the agent prompt |
 | `provider-x-live-cards` | SETTINGS § table | Neither Copilot nor Cursor sessions appear as live cards on the Deck, which reads Claude Code's session files | todo |
 | `provider-x-remote-control` | SETTINGS § Remote Control | Remote Control needs Claude Code; under Copilot, `on` refuses the launch and `ask` skips the picker | e2e: Copilot with Remote Control on refuses the launch |
@@ -405,12 +405,12 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `set-filters-repo` | GUIDE § What it does | `agentFlow.filters.repo: false` hides the repo multiselect | e2e: filters.repo false hides the repo lens |
 | `set-filters-search` | package.json | `agentFlow.filters.search: false` hides the fuzzy title search box | e2e: filters.search false hides the search box |
 | `set-seed-agent` | SETTINGS § table | `agentFlow.seedAgent` pre-fills the session's panel or terminal after opening | unit: test/unit/engine/workspace.test.ts |
-| `set-agent-provider` | SETTINGS § table | `agentFlow.agentProvider`: `claude-code`, `copilot`, `cursor`, `codex` or `ask`, each falling back to Claude Code where the editor cannot run it | e2e: a cursor provider setting degrades to Claude Code |
+| `set-agent-provider` | SETTINGS § table | `agentFlow.agentProvider`: `claude-code`, `copilot`, `cursor`, `codex` or `ask`, each falling back to Claude Code where the editor cannot run it | e2e: a batch under "ask" asks once |
 | `set-agent-surface` | SETTINGS § table | `agentFlow.agentSurface`: `extension` for the chat panel, `terminal` for the CLI | e2e: the opened window seeds the agent prompt into a real integrated terminal |
 | `set-task-mode` | SETTINGS § table | `agentFlow.taskMode` pins one prompt mode by `id` so no picker shows | e2e: a custom prompt mode lands its prompt |
 | `set-prompt-modes` | SETTINGS § table | `agentFlow.promptModes` layers over the six built-ins: override by `id`, `hidden: true` drops one, a custom mode's prompt is what the take seeds (the plan handshake's prompt — `.pick-task/TASK.md` itself never carries the mode's prompt, brief.ts) | e2e: a promptModes entry overrides a built-in's label |
 | `set-remote-control` | SETTINGS § Remote Control | `agentFlow.remoteControl`: `off`, `on` or `ask` | e2e: Remote Control pre-fills the slash command |
-| `set-batch-launch-confirm-threshold` | GUIDE § What it does | `agentFlow.batchLaunchConfirmThreshold` (default 6): larger task or review batches confirm first | todo |
+| `set-batch-launch-confirm-threshold` | GUIDE § What it does | `agentFlow.batchLaunchConfirmThreshold` (default 6): larger task or review batches confirm first | e2e: a batch larger than the threshold asks first |
 | `set-explore-prompt` | package.json | `agentFlow.explorePrompt` is the legacy Explore prompt, migrated into the knowledge action when customized | unit: test/unit/config.test.ts |
 | `set-explore-mode` | SETTINGS § table | `agentFlow.exploreMode` pins one Explore action or `ask` shows the picker | e2e: an explorePrompts override lands in the plan |
 | `set-explore-prompts-jira-ticket` | package.json | `agentFlow.explorePrompts.jiraTicket` is the prompt for Open a Jira ticket | todo |
