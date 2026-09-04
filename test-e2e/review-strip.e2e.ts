@@ -132,6 +132,20 @@ async function waitForWindows(windows: Page[], count: number, timeout: number): 
   }
 }
 
+/** Wait until the queue has really landed, then assert its size.
+ *
+ *  `Deck.reviews()` counts `.rv-row`, and the LOADING SKELETON renders exactly
+ *  three of those (ReviewStrip.tsx:274-291) — so a bare `toHaveCount(3)` is
+ *  satisfied by a strip that is still shimmering, and every assertion after it
+ *  then races the search instead of following it. A skeleton row carries no
+ *  `.rv-num`, so waiting on a numbered row first is what tells the two apart.
+ *  Found the hard way: the reviewRequests test read three skeleton rows as the
+ *  queue and went on to assert on a search that had not happened yet. */
+async function expectQueue(deck: Deck, first: number, count: number): Promise<void> {
+  await expect(deck.review(first)).toBeVisible({ timeout: 60_000 });
+  await expect(deck.reviews()).toHaveCount(count);
+}
+
 /** The `q=` argument of the review search's own `gh api graphql` invocation, read
  *  off the shim's argv log. The assertion of record for a SERVER-SIDE filter: the
  *  rows the product never receives cannot prove anything about the query it sent,
@@ -174,7 +188,7 @@ test("sort by oldest puts what you owe longest first", async ({}, testInfo) => {
   test.setTimeout(240_000);
   const { page, deck } = await boot();
 
-  await expect(deck.reviews()).toHaveCount(3, { timeout: 60_000 });
+  await expectQueue(deck, 41, 3);
   // `oldest` is the shipped default (`reviewSort = "oldest"`, deckView.ts:450), so
   // this is the order the strip opens on — no click.
   await expect(deck.reviewSort("oldest")).toHaveClass(/\bon\b/);
@@ -188,7 +202,7 @@ test("sort by smallest puts the quickest review first", async ({}, testInfo) => 
   test.setTimeout(240_000);
   const { page, deck } = await boot();
 
-  await expect(deck.reviews()).toHaveCount(3, { timeout: 60_000 });
+  await expectQueue(deck, 41, 3);
   await expect(deck.reviewNumbers()).toHaveText(["#41", "#44", "#42"]);
 
   await deck.reviewSort("smallest").click();
@@ -206,7 +220,7 @@ test("a row whose repo is not checked out is greyed but live, and says why", asy
   test.setTimeout(240_000);
   const { page, deck } = await boot();
 
-  await expect(deck.reviews()).toHaveCount(3, { timeout: 60_000 });
+  await expectQueue(deck, 41, 3);
 
   // #44 is in `telemetry`, which `makeSandbox` never creates — `decorateReviews`
   // finds no checkout for it, so `localPath` is null.
@@ -238,7 +252,7 @@ test("a row already being reviewed cannot be launched twice", async ({}, testInf
   test.setTimeout(300_000);
   const { page, deck, windows } = await boot();
 
-  await expect(deck.reviews()).toHaveCount(3, { timeout: 60_000 });
+  await expectQueue(deck, 41, 3);
 
   // Launched from the LINE's play glyph, not the expanded row's labelled button:
   // clearing a queue is not supposed to mean opening every row to reach the action.
@@ -284,7 +298,7 @@ test("every row stays visible in a scrollable list", async ({}, testInfo) => {
   }));
   const { page, deck } = await boot({}, ghAnswers(nine));
 
-  await expect(deck.reviews()).toHaveCount(9, { timeout: 60_000 });
+  await expectQueue(deck, 41, 9);
 
   // The row's own fields, read off one row rather than nine: repo, number, title,
   // author, age, the `+a −d` pair, the file count and the S/M/L bucket.
@@ -323,7 +337,7 @@ test("expanding a row fetches failed checks and open threads", async ({}, testIn
     ghAnswers(REQS, { unresolved: 2, prView: ghPrViewAnswer({ number: 41, failing: ["lint"], passing: 1 }) }),
   );
 
-  await expect(deck.reviews()).toHaveCount(3, { timeout: 60_000 });
+  await expectQueue(deck, 41, 3);
   await deck.expandReview(41);
 
   const facts = deck.review(41).locator(".rv-facts");
@@ -350,7 +364,7 @@ test("a custom review mode makes the launch ask which to seed", async ({}, testI
     "agentFlow.reviewRequestMode": "ask",
   });
 
-  await expect(deck.reviews()).toHaveCount(3, { timeout: 60_000 });
+  await expectQueue(deck, 41, 3);
   await deck.reviewGo(41).click();
 
   // The QuickPick is workbench chrome on the top-level page, outside every
@@ -408,7 +422,7 @@ test("reviewRequests off hides the strip", async ({}, testInfo) => {
   settings["agentFlow.reviewRequests"] = true;
   fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
 
-  await expect(deck.reviews()).toHaveCount(3, { timeout: 60_000 });
+  await expectQueue(deck, 41, 3);
   expect(searchQueries()).toHaveLength(1);
   await shot(page, testInfo, "10 · flipped back on, the same panel");
 });

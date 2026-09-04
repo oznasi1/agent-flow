@@ -84,7 +84,14 @@ export class Deck {
    *  collapsed row nor ever carries the row's `#<number>` text. The Skeleton
    *  shown while loading also renders `.rv-row` (ReviewStrip.tsx:274), but it
    *  and the real rows are mutually exclusive (`p.loading` gates one branch,
-   *  `!p.loading` the other), so this never double-counts. */
+   *  `!p.loading` the other), so this never double-counts.
+   *
+   *  It does, however, COLLIDE at three: the skeleton is exactly three rows, so
+   *  `toHaveCount(3)` is satisfied by a strip that is still shimmering and every
+   *  assertion chained after it then races the search rather than following it.
+   *  A skeleton row carries no `.rv-num`, so wait on `review(n)` for a row you
+   *  expect before trusting a count of three (`review-strip.e2e.ts`'s
+   *  `expectQueue` does exactly that, after being caught by it). */
   reviews(): Locator {
     return this.frame.locator(".rv-row");
   }
