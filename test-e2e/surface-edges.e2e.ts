@@ -427,6 +427,9 @@ test("a shared-window batch stacks every task in one window", async ({}, testInf
   // and `Claude · E2E-2`, in the order the tasks were picked. With more than one
   // terminal the workbench renders the tabs list beside the terminal
   // (`.terminal-tabs-list`, one `.monaco-list-row` per terminal, its title in text).
+  await shared.waitForTimeout(20_000); // DEBUG
+  fs.writeFileSync("/private/tmp/claude-501/-Users-oznasi-dev-agent-flow/05eac327-a91a-49da-95d9-a98497b6a1bf/scratchpad/shared-dom.html", await shared.locator(".part.panel").evaluate((e) => e.outerHTML)); // DEBUG
+  fs.writeFileSync("/private/tmp/claude-501/-Users-oznasi-dev-agent-flow/05eac327-a91a-49da-95d9-a98497b6a1bf/scratchpad/shared.png", await shared.screenshot()); // DEBUG
   const tabs = shared.locator(".terminal-tabs-list .monaco-list-row");
   await expect(tabs).toHaveCount(2, { timeout: 90_000 });
   await expect(tabs.nth(0)).toContainText(`Claude · ${FIXTURE_TASK.key}`);
