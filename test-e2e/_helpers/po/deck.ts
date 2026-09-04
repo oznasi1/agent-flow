@@ -459,7 +459,7 @@ export class Deck {
   }
 
   /** One row's line-count pair — `.rv-diff`, holding `.add` (`+{additions}`) and
-   *  `.del` (`−{deletions}`) as separate elements (ReviewStrip.tsx:139-143 on
+   *  `.del` (`−{deletions}`) as separate elements (ReviewStrip.tsx:141-144 on
    *  2026-09-04). Two nodes rather than one string so each is queryable, which is
    *  what lets a forge that can only fill the file count be asserted on. */
   reviewDiff(n: number): Locator {

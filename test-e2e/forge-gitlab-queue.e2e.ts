@@ -141,7 +141,7 @@ test("a GitLab queue row reads 20+ changes as 20 files", async ({}, testInfo) =>
 // ── The queue row's CI chip ──────────────────────────────────────────────────
 
 // Mutation-checked: `ci: "none"` → `ci: "passing"` in `toRequest`
-// (src/engine/review/glab/search.ts:110) — the collapsed chip was already green and
+// (src/engine/review/glab/search.ts:115) — the collapsed chip was already green and
 // the "until expanded" half of this failed.
 test("a GitLab row's CI reads none until expanded", async ({}, testInfo) => {
   test.setTimeout(240_000);

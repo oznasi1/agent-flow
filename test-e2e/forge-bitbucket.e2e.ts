@@ -41,7 +41,7 @@ const PR = 7;
 
 const restBase = `/2.0/repositories/${WS}/${SLUG}/pullrequests`;
 /** The two `?q=` searches passthrough mode issues, in the order `fetchRest` makes
- *  them (src/engine/pr/bb/provider.ts:246-254): the live branch first, then the
+ *  them (src/engine/pr/bb/provider.ts:269-277): the live branch first, then the
  *  ticket key in the title. The interpolated value is url-encoded by the product;
  *  neither of these carries a character that changes under encoding, so the key
  *  reads as the argv does. */
@@ -298,7 +298,7 @@ test("the review strip is hidden on Bitbucket in both modes", async ({}, testInf
 // ── Projected mode's refusals and absences ───────────────────────────────────
 
 // Mutation-checked: BbProvider.merge's `if (method === "rebase" && !passthrough)`
-// (src/engine/pr/bb/provider.ts:337) → `if (false)`, which fell through to `bb pr merge
+// (src/engine/pr/bb/provider.ts:369) → `if (false)`, which fell through to `bb pr merge
 // … --strategy rebase_merge`; the argv assertion below found that call and this failed.
 test("projected mode refuses a rebase merge before any CLI call", async ({}, testInfo) => {
   test.setTimeout(240_000);
@@ -317,7 +317,7 @@ test("projected mode refuses a rebase merge before any CLI call", async ({}, tes
   seedRun(sb);
   // A merge-ready entry, seeded rather than fetched. Projected mode CANNOT
   // produce one — it reports `review: "none"`, `mergeable: "unknown"` and
-  // `unresolved: null` (toProjectedFacts, pr/bb/projected.ts:80-94), none of
+  // `unresolved: null` (toProjectedFacts, pr/bb/projected.ts:81-95), none of
   // which `isMergeReady` accepts (engine/bucket.ts:254-264) — so the only way a
   // real user reaches this refusal is exactly what is staged here: facts written
   // while a passthrough build was installed, still inside their TTL, read back by
@@ -347,7 +347,7 @@ test("projected mode refuses a rebase merge before any CLI call", async ({}, tes
   await dialog.getByRole("button", { name: "Rebase and merge" }).click();
 
   // Refused in words, by the product, naming the setting to change — the Deck's
-  // own error toast (DeckApp.tsx:1408; the message is provider.ts:338-344).
+  // own error toast (DeckApp.tsx:1408; the message is provider.ts:370-376).
   await expect(deck.toast("error")).toContainText("agentFlow.mergeMethod", { timeout: 15_000 });
   await shot(page, testInfo, "6 · refused, naming agentFlow.mergeMethod");
   // BEFORE any CLI call: the shim log holds the two probes and no merge verb.
@@ -356,7 +356,7 @@ test("projected mode refuses a rebase merge before any CLI call", async ({}, tes
 });
 
 // Mutation-checked: `mergeable: "unknown"` → `"clean"` in toProjectedFacts
-// (src/engine/pr/bb/projected.ts:91) — the drawer's merge row then read "clean" and
+// (src/engine/pr/bb/projected.ts:90) — the drawer's merge row then read "clean" and
 // this failed. Re-checked with `isDraft: false` → `true` at :86, which rendered the
 // `.rv`-style `draft` chip and failed the `.pr-draft` assertion, so neither half of
 // this test is a constant.
@@ -370,10 +370,10 @@ test("a projected card shows branch CI and little else", async ({}, testInfo) =>
       // `bb pr list --format json` emits exactly these fields and no others
       // (`BbProjectedPr`, pr/bb/projected.ts:14-21): no url, no draft flag, no
       // conflict state, no per-PR CI. `source` is what the branch selector
-      // matches client-side (provider.ts:220-222).
+      // matches client-side (provider.ts:240-242).
       "bb pr list": [{ id: PR, title: `${KEY} Fix the rocket telemetry panel`, state: "OPEN", author: "octo", source: BRANCH, destination: "main" }],
       // The newest pipeline for that branch — the ONE fact projected mode can
-      // report about CI (`projectedCi`, projected.ts:46-59; `SUCCESSFUL` is the
+      // report about CI (`projectedCi`, projected.ts:47-60; `SUCCESSFUL` is the
       // only string `gradeBbPipeline` reads as passed, pr.ts:89-91).
       "bb pipeline list": [{ build_number: 12, state: "SUCCESSFUL", ref_name: BRANCH }],
     }),
