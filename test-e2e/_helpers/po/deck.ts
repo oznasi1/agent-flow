@@ -428,4 +428,25 @@ export class Deck {
   toast(level: "success" | "error" | "info" | "warn"): Locator {
     return this.frame.locator(`.toast.${level} .toast-msg`);
   }
+
+  /** The strip header's selection-mode toggle — `.rv-select button`, labelled
+   *  `select` (ReviewStrip.tsx:335-337 on 2026-09-04). Rendered only while the strip
+   *  is NOT loading and the host wired `onSelectMode`, so a caller waits on a
+   *  numbered row first. Carries class `on` while selecting. Scoped to `.rv-select`
+   *  rather than matched by name alone: the sort buttons beside it are the same
+   *  shape, and the Marketplace's own controls share the workbench frame. */
+  reviewSelectMode(): Locator {
+    return this.frame.locator(".rv-select button");
+  }
+
+  /** One row's own header button — `.rv-line` (ReviewStrip.tsx:117). One button with
+   *  two jobs: outside selection mode it expands the row (which `expandReview` uses
+   *  it for), and while selecting it TOGGLES the row's pick (ReviewStrip.tsx:114),
+   *  with `aria-pressed` reflecting the picked state (ReviewStrip.tsx:115) and
+   *  `undefined` — so the attribute is absent, not `"false"` — outside the mode.
+   *  `click({ modifiers: ["Shift"] })` on it draws a range from the last row toggled
+   *  (DeckApp.tsx:1274-1291 on 2026-09-04). */
+  reviewLine(n: number): Locator {
+    return this.review(n).locator(".rv-line");
+  }
 }
