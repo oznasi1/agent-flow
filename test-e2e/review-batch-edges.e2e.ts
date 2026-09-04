@@ -363,7 +363,7 @@ test("PRs in a repo you have not checked out are named once and skipped", async 
   // "telemetry, telemetry".
   await expect(deck.toast("success")).toHaveText(
     "Reviewing 1 PR in a worktree each. telemetry isn't checked out — skipped.",
-    { timeout: 240_000 },
+    { timeout: 90_000 },
   );
   await shot(page, testInfo, "9 · the skip, named once");
 
