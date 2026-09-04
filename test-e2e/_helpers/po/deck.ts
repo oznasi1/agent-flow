@@ -371,4 +371,98 @@ export class Deck {
   toast(level: "success" | "error" | "info" | "warn"): Locator {
     return this.frame.locator(`.toast.${level} .toast-msg`);
   }
+
+  /** One of the two Orchestrator header buttons — `.ctl.orch-chip`, rendered
+   *  only while `agentFlow.orchestrator` is on (DeckApp.tsx:1144-1189 on
+   *  2026-09-04). Both carry the same classes and the same icon, so they are
+   *  told apart by the `<span>` naming them, which is the only thing that
+   *  differs. `Workflows` also gains the `armed` class while its badge reads
+   *  "N needs you" — see `orchChipCount`. */
+  orchChip(which: "Workflows" | "Templates"): Locator {
+    return this.frame.locator(".ctl.orch-chip", { has: this.frame.locator("span", { hasText: which }) });
+  }
+
+  /** One header button's badge — `.ct` inside it (DeckApp.tsx:1169-1171 and
+   *  :1186 on 2026-09-04). Absent, not zero, when there is nothing to count:
+   *  Workflows renders no `.ct` with no card carrying a workflow, and Templates
+   *  renders none with no templates at all. So "no badge" is a
+   *  `toHaveCount(0)`, never an empty string. */
+  orchChipCount(which: "Workflows" | "Templates"): Locator {
+    return this.orchChip(which).locator(".ct");
+  }
+
+  /** The Orchestrator drawer itself — `.orch` (`Drawer surface="orch"`,
+   *  Drawer.tsx:35). Its absence is a `toHaveCount(0)`: the drawer unmounts
+   *  rather than hiding. */
+  orch(): Locator {
+    return this.frame.locator(".orch");
+  }
+
+  /** One of the drawer's three top-level views, addressed by the tab that
+   *  reaches it — `role="tab"` inside `role="tablist" aria-label="Orchestrator"`
+   *  (OrchestratorDrawer.tsx:760-769 on 2026-09-04). Scoped to that tablist
+   *  because Canvas ALSO renders a second, nested one (`aria-label="Flow view"`,
+   *  :1785) whose tabs are named `Canvas` and `List` — a frame-wide query for
+   *  the tab named "Canvas" resolves to two elements the moment a flow is open.
+   *  `selected: true` on the role query is how a caller asks which view is
+   *  showing; `aria-selected` is set on all three, never removed. */
+  orchTab(name: "Active" | "Templates" | "Canvas"): Locator {
+    return this.orch()
+      .getByRole("tablist", { name: "Orchestrator" })
+      .getByRole("tab", { name, exact: true });
+  }
+
+  /** All three top-level tabs, in header order — the whole
+   *  `aria-label="Orchestrator"` tablist. `toHaveText([...])` on this is how a
+   *  caller asserts there are exactly three views and what they are named,
+   *  which no per-tab lookup can say. */
+  orchTabs(): Locator {
+    return this.orch().getByRole("tablist", { name: "Orchestrator" }).getByRole("tab");
+  }
+
+  /** The Canvas-only Canvas/List toggle — the nested `aria-label="Flow view"`
+   *  tablist (OrchestratorDrawer.tsx:1785-1802 on 2026-09-04), which exists
+   *  only while `view === "canvas"`. Distinct from `orchTab` above: these two
+   *  pick a PRESENTATION of one flow, not one of the drawer's three screens. */
+  orchFlowViewTab(name: "Canvas" | "List"): Locator {
+    return this.orch()
+      .getByRole("tablist", { name: "Flow view" })
+      .getByRole("tab", { name, exact: true });
+  }
+
+  /** Every row on the Active view — `.wfl-row`, one per card carrying a
+   *  workflow (WorkflowList.tsx:45 on 2026-09-04). Zero rows renders
+   *  `.wfl-empty` instead, so a count of 0 here is the honest "nothing
+   *  attached anywhere". */
+  activeRows(): Locator {
+    return this.orch().locator(".wfl-row");
+  }
+
+  /** One Active row's own button — the whole row is one `<button className=
+   *  "wfl-open">` (WorkflowList.tsx:46), so this is both the row's text and its
+   *  click target. Addressed by the ticket key its `.wfl-ticket` span holds,
+   *  matched with `:text-is` (as `review` does for `.rv-num`) so `E2E-D1`
+   *  cannot also resolve `E2E-D10`'s row. */
+  activeRow(key: string): Locator {
+    return this.orch().locator(`.wfl-row:has(.wfl-ticket:text-is("${key}")) .wfl-open`);
+  }
+
+  /** The drawer's Arm control — `.orch-arm`, the one filled button on the
+   *  surface (OrchestratorDrawer.tsx:2012-2018 on 2026-09-04). Canvas-only, and
+   *  hidden entirely while a TEMPLATE is being edited (a template has no card to
+   *  watch). Its text is the state: "Arm" when disarmed, "Armed · disarm" when
+   *  armed. */
+  orchArm(): Locator {
+    return this.orch().locator(".orch-arm");
+  }
+
+  /** The drawer's resize handle — `.orch-grip`, a `role="separator"` with
+   *  `tabIndex={0}` and `aria-valuenow` carrying the current width
+   *  (OrchestratorDrawer.tsx:783-797 on 2026-09-04). Hidden entirely while
+   *  Expand is on, so its absence is a `toHaveCount(0)`. It is the drawer's
+   *  FIRST focusable element in both renders, which is what makes it the honest
+   *  starting point for walking the drawer's Tab order. */
+  orchGrip(): Locator {
+    return this.orch().locator(".orch-grip");
+  }
 }
