@@ -405,7 +405,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `provider-x-live-cards-cursor` | SETTINGS § table | The same holds for Cursor | untestable: a Cursor session writes no `~/.claude/sessions` record, so the fixture would be the identical empty-registry setup as the Copilot row above — the harness cannot distinguish "Cursor wrote nothing" from "nothing ran" |
 | `provider-x-remote-control` | SETTINGS § Remote Control | Remote Control needs Claude Code; under Copilot, `on` refuses the launch and `ask` skips the picker | e2e: Copilot with Remote Control on refuses the launch |
 | `provider-x-marketplace` | GUIDE § The Marketplace | The Marketplace browses Claude Code's ecosystem whatever `agentFlow.agentProvider` says | todo |
-| `provider-x-review-button-label` | GUIDE § The Deck | The review button names the configured tool: Review with Claude Code / Cursor / Copilot | todo |
+| `provider-x-review-button-label` | GUIDE § The Deck | The review button names the configured tool: Review with Claude Code / Cursor / Copilot | e2e: the review button names the configured tool |
 | `provider-x-doctor-rows` | SETTINGS § table | Doctor reports rows for whichever provider is in play, every host tool under `ask` | todo |
 | `provider-none-fallback` | README § Quick start | With no coding tool installed the task brief is still written and the prompt lands on the documented clipboard fallback | e2e: lands on the documented clipboard fallback |
 | `provider-seed-agent-off` | SETTINGS § table | `agentFlow.seedAgent: false` opens the workspace and writes the brief and run record but seeds no session and no plan file | unit: test/unit/engine/workspace.test.ts |
@@ -561,7 +561,7 @@ This heading — and every `todo` — is removed in that plan's last task.
 | `gap-act-record-not-atomic` | ORCHESTRATOR_COMMANDS § The latch | If the write after a successful command fails, the command ran but nothing was stamped and the next pass runs it again | untestable: documented absence |
 | `gap-windows-shell` | ORCHESTRATOR_COMMANDS § Not yet proven | On Windows the command runs through `cmd.exe` with `windowsHide` | untestable: Windows shell |
 | `gap-note-injection-by-design` | ORCHESTRATOR_COMMANDS § With what text | `{note}` is spliced in unquoted; quoting the template does not close it off | unit: test/unit/engine/orchestrator/command.test.ts |
-| `gap-ask-brief-names-claude` | SETTINGS § table | Under `agentFlow.agentProvider: ask` a single take, an Orchestrator child task and a one-key own-window batch write the brief before the picker, so it names Claude Code whichever tool was picked | todo |
+| `gap-ask-brief-names-claude` | SETTINGS § table | Under `agentFlow.agentProvider: ask` a single take, an Orchestrator child task and a one-key own-window batch write the brief before the picker, so it names Claude Code whichever tool was picked | e2e: names Claude Code in the brief even when Copilot was picked |
 | `gap-gitlab-no-changes-requested` | FORGES § 3. What GitLab and Bitbucket cannot answer | GitLab exposes no changes-requested state; `review` never reads it | untestable: documented absence |
 | `gap-bitbucket-no-review-queue` | FORGES § Bitbucket has two modes | Bitbucket Cloud has no reviewer-side cross-repo query, so no passthrough build fixes the missing strip | untestable: documented absence |
 | `gap-in-open-sprint-overload` | CONNECTORS § 3. The capability table | `Task.inOpenSprint` has no honest no-sprint value; a sprintless source reports `false` | untestable: documented absence |
