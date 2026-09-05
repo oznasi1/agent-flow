@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 import * as vscode from "../../_mocks/vscode";
 import {
   disposeTelemetry, fingerprint, initTelemetry, resetTelemetryForTests, startFlow, track, trackError,
+  writeHeadlessIdentity,
 } from "../../../src/telemetry/telemetry";
 
 function makeContext() {
@@ -232,5 +236,61 @@ describe("fingerprint", () => {
     expect(fingerprint("ABC-1")).toBe("");
     initTelemetry(makeContext(), vi.fn());
     expect(fingerprint("ABC-1")).toMatch(/^[0-9a-f]{16}$/);
+  });
+});
+
+describe("the headless identity handoff", () => {
+  const tmp = () => fs.mkdtempSync(path.join(os.tmpdir(), "af-ident-"));
+  const log = () => undefined;
+
+  it("leaves the distinct id where dist/tick.js looks for it", () => {
+    const dir = tmp();
+    initTelemetry(makeContext(), log, dir);
+    const file = path.join(dir, "telemetry.json");
+    expect(JSON.parse(fs.readFileSync(file, "utf8"))).toEqual({ distinctId: vscode.env.machineId });
+  });
+
+  it("writes NOTHING when the caller does not ask for it", () => {
+    // The default, and deliberately so: this is the only side effect in the
+    // module that touches a path outside the editor's own storage, and a default
+    // that wrote there would do it from every test that ever calls init.
+    const dir = tmp();
+    initTelemetry(makeContext(), log);
+    expect(fs.existsSync(path.join(dir, "telemetry.json"))).toBe(false);
+  });
+
+  it("writes NOTHING while telemetry is off, so an opted-out install never grows the file", () => {
+    // And with the file absent, `sendHeadless` refuses — which is what makes a
+    // cron-scheduled tick silent on a machine that never opted in, whatever its
+    // settings.json says at the moment the tick runs.
+    vscode.setConfig({ "telemetry.enabled": false });
+    const dir = tmp();
+    writeHeadlessIdentity(dir, "machine-1", log);
+    expect(fs.existsSync(path.join(dir, "telemetry.json"))).toBe(false);
+  });
+
+  it("does not rewrite an unchanged file — this runs on every activation", () => {
+    const dir = tmp();
+    writeHeadlessIdentity(dir, "machine-1", log);
+    const file = path.join(dir, "telemetry.json");
+    const first = fs.statSync(file).mtimeMs;
+    fs.writeFileSync(path.join(dir, "marker"), "x"); // ensure time can move on
+    writeHeadlessIdentity(dir, "machine-1", log);
+    expect(fs.statSync(file).mtimeMs).toBe(first);
+  });
+
+  it("replaces the file when the id has actually changed", () => {
+    const dir = tmp();
+    writeHeadlessIdentity(dir, "machine-1", log);
+    writeHeadlessIdentity(dir, "machine-2", log);
+    expect(JSON.parse(fs.readFileSync(path.join(dir, "telemetry.json"), "utf8"))).toEqual({ distinctId: "machine-2" });
+  });
+
+  it("never throws into activate() when the write fails", () => {
+    // A read-only home directory is a working editor, not a broken one: no
+    // failure to write an analytics convenience may take the extension down.
+    const messages: string[] = [];
+    expect(() => writeHeadlessIdentity("/proc/nope/nope", "m", (m) => messages.push(m))).not.toThrow();
+    expect(messages.join(" ")).toContain("headless identity");
   });
 });

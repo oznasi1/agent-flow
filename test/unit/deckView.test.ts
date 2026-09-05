@@ -13311,6 +13311,62 @@ describe("opt-in retry on an armed flow", () => {
     expect(e.retry).toEqual({ max: 2, backoffMs: 30_000 });
     expect(e.retryOk).toBe(true);
   });
+
+  const events = (name: string) => trackSpy.mock.calls.flat().filter((e: any) => e.name === name) as any[];
+
+  it("emits flow_rule_retried for an attempt scheduled, and again for the give-up", async () => {
+    h.launchPlanned.mockResolvedValueOnce({ ok: false, message: "worktree exists" });
+    const { send } = await warmed(retryFlow());
+    trackSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(events("flow_rule_retried")).toEqual([{
+      name: "flow_rule_retried", flow_uid: uidFor("f1"), edge_action: "launch",
+      attempt: 1, max: 2, gave_up: false,
+    }]);
+    // The backoff wait is a number the user typed and is never sent.
+    expect(JSON.stringify(events("flow_rule_retried"))).not.toContain("30000");
+
+    h.launchPlanned.mockResolvedValueOnce({ ok: false, message: "still no worktree" });
+    const spent = await warmed(retryFlow({ error: "worktree exists", attempts: 2, retryAt: Date.now() - 1, performed: true }));
+    trackSpy.mockClear();
+    await spent.send({ type: "deck:refresh" });
+    expect(events("flow_rule_retried")).toEqual([{
+      name: "flow_rule_retried", flow_uid: uidFor("f1"), edge_action: "launch",
+      attempt: 3, max: 2, gave_up: true,
+    }]);
+  });
+
+  it("emits nothing for a plain failure on a rule that never opted into retries", async () => {
+    // Retries are off by default. Reporting every ordinary latched failure as a
+    // give-up would make the feature look adopted everywhere it is not, which is
+    // the whole adoption read — hence the guard on `retryPolicy`, not `e.retry`.
+    h.launchPlanned.mockResolvedValueOnce({ ok: false, message: "worktree exists" });
+    const { send } = await warmed(retryFlow({ retry: undefined }));
+    trackSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(events("flow_rule_retried")).toEqual([]);
+    // The failure itself is still reported, as it always was.
+    expect(events("flow_edge_fired")[0]).toMatchObject({ ok: false, deferred: false });
+  });
+
+  it("emits nothing for a RETRY typed onto a rule that could never take one", async () => {
+    // `retryPolicy` refuses a retry on an action that does not spend. A user who
+    // typed a RETRY into such a rule has configured something inert, and counting
+    // it as uptake would be a lie the engine's own reader does not tell.
+    const inert: Flow = {
+      ...mkFlow("f1", "Ship the migration"),
+      armed: true,
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "landed" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, retry: { max: 2, backoffMs: 30_000 } }],
+    };
+    const { send } = await warmed(inert);
+    trackSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(events("flow_rule_retried")).toEqual([]);
+  });
 });
 
 describe("per-command consent (agentFlow.commandConsent: command)", () => {
@@ -13596,6 +13652,10 @@ describe("a subflow node", () => {
     h.writeFlow.mockClear();
     return opened;
   };
+  /** The analytics events of one name, as "orchestrator telemetry" spells it —
+   * that block's own helper is local to it, and these subflow tests need the same
+   * read beside the fixtures they already have. */
+  const events = (name: string) => trackSpy.mock.calls.flat().filter((e: any) => e.name === name) as any[];
 
   it("starts the template as an ARMED child bound to the source place's card, points the node at it, and journals both sides", async () => {
     const { send } = await warmed([parentFlow()]);
@@ -13664,5 +13724,73 @@ describe("a subflow node", () => {
     await send({ type: "deck:refresh" });
     expect(h.flows.find((f) => f.id === "f1")!.edges[0].error).toMatch(/already started a subflow/);
     expect(h.flows).toHaveLength(1);
+  });
+
+  it("reports a spawn, and the depth the child ran at", async () => {
+    const { send } = await warmed([parentFlow()]);
+    trackSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(events("flow_subflow")).toEqual([
+      // The CHILD's depth — one past a top-level parent's zero — because that is
+      // the number `MAX_SUBFLOW_DEPTH` is measured against.
+      { name: "flow_subflow", flow_uid: uidFor("f1"), event: "spawned", depth: 1 },
+    ]);
+    // The fire itself is still its own event; this one adds the nesting to it.
+    expect(events("flow_edge_fired")[0]).toMatchObject({ edge_action: "spawn", ok: true });
+  });
+
+  it("reports the depth refusal under the parent, and never the template id", async () => {
+    const chain: Flow[] = [
+      { ...mkFlow("g1", "g1"), armed: false },
+      { ...mkFlow("g2", "g2"), armed: false, parentFlow: "g1" },
+      { ...mkFlow("g3", "g3"), armed: false, parentFlow: "g2" },
+    ];
+    const { send } = await warmed([parentFlow({ parentFlow: "g3" }), ...chain]);
+    trackSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(events("flow_subflow")).toEqual([
+      { name: "flow_subflow", flow_uid: uidFor("f1"), event: "refused", depth: 3, refusal: "depth" },
+    ]);
+    // A template id is a user-authored string and never leaves the machine.
+    expect(JSON.stringify(events("flow_subflow"))).not.toContain("k1");
+  });
+
+  it("reports nothing for a refusal the MODEL did not make", async () => {
+    // A template that is gone is a wiring mistake the user sees and fixes in the
+    // drawer, not a fact about how far the feature stretches. Only the two the
+    // model itself refuses — the depth stop and a self-starting template — are
+    // worth an event.
+    const { send } = await warmed([parentFlow({}, { templateId: "nope" })]);
+    trackSpy.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(events("flow_subflow")).toEqual([]);
+  });
+
+  it("reports the child finishing, which is the other half of a spawn", async () => {
+    // The only signal that says a child ran to the end rather than being
+    // abandoned armed on the board. Same setup as the subflow-done firing test
+    // above — a child settled from the first look, so the resume gate holds the
+    // parent's ready rule until Go.
+    const child: Flow = {
+      ...mkFlow("c1", "Ship the migration › Ship it"), armed: true, parentFlow: "f1", parentNode: "s",
+      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "m" }],
+      edges: [{ id: "k1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, firedAt: 5, firedNote: "told you" }],
+    };
+    const parent = parentFlow({ edges: [
+      { id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" }, firedAt: 4, firedNote: "started Ship it", performed: true },
+      { id: "e2", from: "s", to: "n2", cond: { kind: "subflow-done" } },
+    ] }, { childFlowId: "c1" });
+    const { send } = await warmed([parent, child]);
+    // Cleared BEFORE the approval: approving the gate advances the flow itself,
+    // so the rule fires there rather than on the refresh that follows.
+    trackSpy.mockClear();
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await send({ type: "deck:refresh" });
+    expect(events("flow_subflow")).toEqual([
+      // The PARENT's depth: the child that just finished was one deeper, and its
+      // own rules already reported themselves at that depth.
+      { name: "flow_subflow", flow_uid: uidFor("f1"), event: "finished", depth: 0 },
+    ]);
   });
 });

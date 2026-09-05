@@ -1,6 +1,5 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
-import * as os from "os";
 import * as path from "path";
 import { randomUUID } from "crypto";
 import { getConfig } from "../config";
@@ -44,7 +43,14 @@ function settingEnabled(): boolean {
   }
 }
 
-export function initTelemetry(context: vscode.ExtensionContext, log: (m: string) => void): void {
+/** `agentFlowDir` is where the headless identity file is left — `~/.agentflow`
+ * in the product, supplied by `activate()`. OMITTING it writes nothing at all,
+ * and that is the deliberate default: this is the one side effect in this module
+ * that touches a path outside the editor's own storage, and a function that
+ * wrote to the real home directory unless asked not to would do exactly that
+ * from every test that ever calls init. Opt in, explicitly, from the one caller
+ * that means it. */
+export function initTelemetry(context: vscode.ExtensionContext, log: (m: string) => void, agentFlowDir?: string): void {
   if (state) return;
   const identity = createIdentity(context.globalState);
   const commonProperties = {
@@ -93,7 +99,7 @@ export function initTelemetry(context: vscode.ExtensionContext, log: (m: string)
   ];
 
   state = { logger, sender, identity, log, disposables };
-  writeHeadlessIdentity(identity.distinctId, log);
+  if (agentFlowDir !== undefined) writeHeadlessIdentity(agentFlowDir, identity.distinctId, log);
 }
 
 /** Leave `distinct_id` where `dist/tick.js` can find it.
@@ -113,10 +119,9 @@ export function initTelemetry(context: vscode.ExtensionContext, log: (m: string)
  * Best-effort in every failure mode. This runs inside `activate()`, and no
  * failure to write an analytics convenience may take the extension down with it
  * — a read-only home directory is a working editor, not a broken one. */
-function writeHeadlessIdentity(distinctId: string, log: (m: string) => void): void {
+export function writeHeadlessIdentity(dir: string, distinctId: string, log: (m: string) => void): void {
   if (!settingEnabled()) return;
   try {
-    const dir = path.join(os.homedir(), ".agentflow");
     const file = path.join(dir, "telemetry.json");
     // Only the id, and only when it is not already the id on disk: this runs on
     // every activation, and rewriting an unchanged file every window open is
