@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Something that actually runs the tick.** `dist/tick.js` exits 2 when another
+  pass holds the lock and 3 when it cannot start — a well-behaved thing to put on
+  a timer, and nothing put it on one. **Agent Flow: Schedule the Orchestrator
+  Tick…** now does: pick every 2, 5, 15 or 30 minutes, see exactly what will be
+  written and run, and it installs a launchd agent, a systemd user timer, or a
+  Task Scheduler task — finding `node` (or running the editor's own runtime as
+  Node), naming this editor's `settings.json`, and logging to
+  `~/.agentflow/tick.log`. Because the recipe names `tick.js` by its versioned
+  path, every activation checks it and offers to re-point a schedule an update
+  left behind. Run the command again to change the interval or remove it. The
+  docs carry the recipes for anyone who would rather write their own.
+
 ### Changed
 
 - **Per-command consent is the default.** A workflow now asks before each distinct

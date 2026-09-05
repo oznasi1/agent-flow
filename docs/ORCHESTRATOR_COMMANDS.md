@@ -278,6 +278,50 @@ knows behaves the same, because it is the same engine.
 notify`, `would run "…" in <repo>`, what needs an editor or consent — and
 writes nothing, runs nothing, and takes no lock.
 
+### Scheduling the tick
+
+The exit codes were designed for a timer: `2` means another pass held the lock
+and the next slot will do, `3` means the tick could not start (no settings
+file, or `agentFlow.orchestrator` off) and will keep saying so until you fix
+the file. Nothing in the tick sets that timer up, so the extension does:
+
+**Agent Flow: Schedule the Orchestrator Tick…** (Command Palette) asks for an
+interval — every 2, 5, 15 or 30 minutes — shows exactly what it will write and
+run, and then installs it with the platform's own scheduler. It finds a `node`
+on your PATH or in the usual Homebrew places and, failing that, runs the
+editor's own executable as Node (`ELECTRON_RUN_AS_NODE=1`). It passes
+`--settings` naming *this* editor's `settings.json`, so a machine with both
+Code and Cursor schedules the right one. The tick's stdout and stderr go to
+`~/.agentflow/tick.log`, beside the flows and journals it writes. Run the
+command again to change the interval or to **Remove the schedule**.
+
+| Platform | What is written | How it is loaded |
+|----------|-----------------|------------------|
+| macOS    | `~/Library/LaunchAgents/com.agentflow.tick.plist` — `StartInterval`, `RunAtLoad`, a `PATH` wide enough to find `gh`/`glab` | `launchctl bootstrap gui/<uid> <plist>` (after a `bootout` of any earlier copy) |
+| Linux    | `~/.config/systemd/user/agentflow-tick.service` + `.timer` (`XDG_CONFIG_HOME` honoured); the service lists `SuccessExitStatus=2 3` so a skipped pass is not a failed unit | `systemctl --user daemon-reload && systemctl --user enable --now agentflow-tick.timer` |
+| Windows  | `%USERPROFILE%\.agentflow\tick.cmd` | `schtasks /Create /SC MINUTE /MO <n> /TN AgentFlowTick /TR <cmd>` |
+
+**The path moves on every update.** The recipe names `dist/tick.js` by its
+versioned extension directory, and the editor deletes the old directory after an
+update — so a schedule left alone stops running, silently. Every activation
+checks the installed recipe against the current path and, when they differ,
+offers **Update the schedule** once per stale path, keeping the interval you
+chose. Dismiss it and you are not asked again until the next update moves the
+file.
+
+The recipe is data (`src/engine/orchestrator/schedule.ts`), so anyone who
+would rather write their own has the same facts. A cron line for a machine with
+no systemd:
+
+```cron
+*/5 * * * * PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin /usr/local/bin/node ~/.vscode/extensions/oznasi1.agent-flow-<version>/dist/tick.js --settings ~/.config/Code/User/settings.json >> ~/.agentflow/tick.log 2>&1
+```
+
+Whatever drives it, the pass is the same one the Deck runs: it performs
+`notify` rules and already-consented commands, leaves launches, seeds and gates
+for an editor, and takes the same lock — so a Deck left open and a scheduled
+tick never both act on one rule.
+
 ## Consent per command
 
 The session gate is one timestamp per flow, and that is proportionate: a

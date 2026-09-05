@@ -17,6 +17,7 @@ import { settingsSnapshot } from "./telemetry/settingsSnapshot";
 import { maybeShowTelemetryNotice } from "./telemetry/notice";
 import { maybeShowModesNotice } from "./modesNotice";
 import { maybeShowConsentNotice } from "./consentNotice";
+import { defaultScheduleHost, maybeOfferScheduleRefresh, scheduleTickCommand } from "./scheduleTick";
 import { CommandId } from "./telemetry/events";
 
 const INSTALLED_KEY = "agentFlow.telemetry.installReported";
@@ -140,6 +141,8 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
 
     registerTracked("agentFlow.doctor", () => showDoctor(defaultDeps(connector, log))),
+
+    registerTracked("agentFlow.scheduleTick", () => scheduleTickCommand(defaultScheduleHost(context), log)),
   );
 
   // The notepad badge and the attention badge share one timer, deliberately: both
@@ -216,6 +219,9 @@ export function activate(context: vscode.ExtensionContext): void {
     void maybeShowTelemetryNotice(context, { setupRunning: isFirstEver });
     void maybeShowModesNotice(context, { setupRunning: isFirstEver });
     void maybeShowConsentNotice(context, { setupRunning: isFirstEver });
+    // A scheduled tick names this build's `dist/tick.js` by its versioned path;
+    // an update moves it, so the schedule is checked once per activation.
+    void maybeOfferScheduleRefresh(context, defaultScheduleHost(context), log);
   } catch (e) {
     log(`activation: optional step failed (extension still active): ${e instanceof Error ? e.message : String(e)}`);
   }
