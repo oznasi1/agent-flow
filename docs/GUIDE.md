@@ -165,8 +165,8 @@ the setting, and cards fall back to the git + Jira backbone.
 An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you wire the
 sessions already on the board into a *flow*: drag a card in, connect two nodes, and put a
 condition on the connection — a merged PR, failing CI, a session that ended its turn, a
-clean tree, a Jira status, **the command succeeded**, or CI passing on a named branch of a
-named repo. That last one has no picker yet: you get it only by hand-editing the flow file,
+clean tree, a Jira status, **the command succeeded**, **the command printed** a given text, or CI passing on a
+named branch of a named repo. That last one has no picker yet: you get it only by hand-editing the flow file,
 not through the drawer or the list. The drawer resizes by dragging its edge or pressing
 **Expand**, and switching to **List** gives the same flow a keyboard path — build, wire,
 edit and arm it without a pointer.
@@ -195,7 +195,15 @@ all, not a bug waiting on a fix: quoting is the template author's job. A command
 goes on to spawn can outlive the kill. Its captured output is capped at 1 MiB; a chattier
 command is killed the same way and its rule latched as a failure. A failed command (like a
 failed launch or seed) latches and is never retried automatically until you click **Reset** —
-deliberately, so a broken deploy doesn't run again every six seconds. The CI-passing-on-a-branch
+deliberately, so a broken deploy doesn't run again every six seconds. A rule can opt into a
+**RETRY** — a count and a wait — and then a failed launch or seed is tried again that many
+times before it latches; a command's retry counts only once you have also ticked **safe to
+re-run** on that rule, because no default can know which of your commands are harmless twice. Any rule can also carry a
+**deadline** — a number of minutes in its **WITHIN** field — after which, if its condition
+still hasn't arrived, it settles as *expired* rather than waiting forever: not a failure, not
+red, just over. A sibling rule out of the same node on **a deadline here passed** is what then
+acts — "if it hasn't merged in an hour, tell me" is those two rules out of one card. A condition
+that arrives late still fires; the deadline only catches one that never does. The CI-passing-on-a-branch
 condition reads GitHub's aggregate status rollup, which folds skipped and neutral checks
 toward success — so a branch whose required build was merely *skipped* can read as passed
 here. A commit with no checks at all correctly reads as unknown rather than passed, and
@@ -208,7 +216,9 @@ question; the node shows **Approve** and **Reject**; and a later rule fires on
 once and latches, so Reset on the rule that asked is what poses the question
 again. There is no notification: the gate node itself is the signal — it sits in
 the drawer with its question, an amber state dot, and the two buttons, for as
-long as it is unanswered. A **dry run** reports waiting gates in words: a rule
+long as it is unanswered. A **subflow** node starts a saved template as a child
+workflow bound to the same card, armed and named after both; a later rule on **the subflow
+finished** waits for every rule in it to settle. The card keeps showing the parent. A **dry run** reports waiting gates in words: a rule
 waiting on a gate reads "waiting for your answer" there. Nothing outside
 the drawer will tell you a flow is stalled at a gate.
 
@@ -216,7 +226,11 @@ The drawer says what each condition is waiting on right now. **Arm** a flow and 
 on every Deck refresh; a rule that is met fires exactly once and tells you, rather than firing
 again on every later pass. It keeps advancing while the Deck is hidden — an armed flow that
 only ran while you were looking at the board would not be armed — and closing the Deck
-genuinely does stop it, since the panel owns the poll; closing with something armed says so.
+genuinely does stop it, since the panel owns the poll; closing with something armed says so. To keep
+watching with the editor closed, schedule `node dist/tick.js` from the installed extension —
+one pass per run, performing notifications and already-approved commands and leaving anything
+that needs a window or a person pending; see
+[ORCHESTRATOR_COMMANDS.md](ORCHESTRATOR_COMMANDS.md#a-pass-without-the-editor).
 Reopening the Deck, including after a restart, shows you what is already ready and waits for a
 **Go** before acting on it, so an armed flow can never spend anything the moment you come
 back. Before it ever launches or seeds for the first time, a flow asks once — naming the
@@ -224,8 +238,14 @@ ticket, the repos, and the prompt mode it would use — and only then runs unatt
 its first command asks again, separately: approving a flow's launches only approves opening
 sessions, never running a shell command on your machine, so a flow you already
 confirmed for a launch still asks the first time one of its rules would run a command — and
-then, like a launch, runs unattended after that. At most three of these — launches, seeds and
-commands together — happen in a single pass, with the rest picked up on the next one. A
+then, like a launch, runs unattended after that. If that is too coarse — a template attached
+to many cards asks once each and then spends freely — `agentFlow.commandConsent: "command"`
+asks per distinct command text instead, and lets you approve one run, the next five, or
+always. At most three of these — launches, seeds and
+commands together — happen in a single pass, with the rest picked up on the next one. A flow
+can also carry a **spend ceiling** — a lifetime cap on sessions opened plus commands run,
+counted off its journal and shown in its header — and a pass that would cross it performs
+nothing and disarms the flow with a notification saying so. A
 launch, seed or command that fails stamps its rule as errored and stops it there until you
 **Reset** it; a pre-flight read that fails instead — Jira unreachable, say — is retried on the
 next pass rather than latched as a failure. Two VS Code windows with the Deck open cannot fire

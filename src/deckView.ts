@@ -2,25 +2,26 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { exec } from "child_process";
 import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps } from "./engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal } from "./engine/orchestrator/model";
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
-import { appendEvent, truncateOutput, findEdgeOutput, readJournal, JournalEvent, JournalEventInput } from "./engine/orchestrator/journal";
+import { appendEvent, truncateOutput, findEdgeOutput, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
 import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, normalizedTemplateFlow, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
 import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
-import { evaluateFlow } from "./engine/orchestrator/evaluate";
+import { evaluateDeadlines, evaluateFlow } from "./engine/orchestrator/evaluate";
 import { unfirableRules } from "./engine/orchestrator/armability";
-import { ActOutcome, applyFired, notifyLines } from "./engine/orchestrator/runner";
+import { ActOutcome, applyClocks, applyFired, notifyLines } from "./engine/orchestrator/runner";
 import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
-import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "./engine/orchestrator/command";
+import { chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "./engine/orchestrator/command";
+import { shellCommandRunner } from "./engine/orchestrator/shellRunner";
 import { blockedBy } from "./engine/orchestrator/neverAutoRun";
+import { CONSENT_BATCH, consentCovers, consumeConsent, grantConsent } from "./engine/orchestrator/consent";
 import { buildRunStatus } from "./engine/status";
 import { UsageReader } from "./engine/usageFs";
 import type { UsageTotals } from "./engine/usage";
@@ -211,85 +212,9 @@ function nextPlannedNodeId(flow: Flow): string {
   return `n${i}`;
 }
 
-/** How much of a command's captured output `exec` buffers before it kills the child.
- * `exec`'s own default is 1 MiB; stated here rather than left implicit because it is
- * a real limit on what the output channel can show for a chatty deploy, and because
- * exceeding it is one of the non-numeric failures `shellCommandRunner` has to map to
- * an exit code below. */
-const COMMAND_MAX_OUTPUT_BYTES = 1024 * 1024;
-
-
-/** The one place a flow's command actually reaches a shell, and the only place in
- * this feature that holds a process handle.
- *
- * `child_process.exec`, deliberately, not `spawn`: `exec` takes a `timeout` option
- * and Node arms that timer itself, sending `killSignal` to the child when it
- * expires. That is what makes `CommandRunner`'s timeout a real contract instead of
- * a number passed around — `command.ts` awaits this promise unconditionally and adds
- * no `Promise.race` (see its own doc comment on why a caller-side race would trade a
- * hung pass for a silently orphaned process), so a runner that never settled would
- * hold the flows-directory lock for the life of the extension host and stall every
- * other window's Deck refresh. A `spawn` with a hand-rolled timer would have to
- * reimplement exactly this and could get it wrong; `exec` cannot forget.
- *
- * `SIGKILL`, not the default `SIGTERM`: a deploy script that traps or ignores TERM
- * would otherwise keep running past its own deadline while the runner reported it
- * killed.
- *
- * Never rejects. Every failure — a non-zero exit, a timeout kill, a shell that could
- * not even start, more output than `maxBuffer` holds — resolves as a `code`/`stdout`/
- * `stderr` triple, because the caller is a poll loop inside the Deck's refresh and
- * `runCommand`'s "never throws" guarantee is worth more than a distinction between
- * kinds of failure that all end the same way: the rule latches with an error. */
-export const shellCommandRunner: CommandRunner = (command, opts) =>
-  new Promise((resolve) => {
-    exec(
-      command,
-      {
-        cwd: opts.cwd,
-        // The contract. Node kills the child here; nothing else in this feature can.
-        timeout: opts.timeoutMs,
-        killSignal: "SIGKILL",
-        maxBuffer: COMMAND_MAX_OUTPUT_BYTES,
-        // Pins the string-typed `exec` overload as well as the decoding: a Buffer
-        // pair would satisfy `CommandRunner`'s types only after a cast, and the
-        // output is going straight into a log channel and a receipt.
-        encoding: "utf8",
-        windowsHide: true,
-      },
-      (err, stdout, stderr) => {
-        if (!err) return resolve({ code: 0, stdout, stderr });
-        // A number means the command chose it: an ordinary failing exit, and the
-        // most common case by far. Nothing to explain — the code IS the reason.
-        if (typeof err.code === "number") return resolve({ code: err.code, stdout, stderr });
-        // A STRING code is one of Node's own (`ERR_CHILD_PROCESS_STDIO_MAXBUFFER`,
-        // `ENOENT` for a shell that isn't there). The command never got to report
-        // anything, so the message is the only evidence there is.
-        if (typeof err.code === "string") return resolve({ code: 1, stdout, stderr: withReason(stderr, err.message) });
-        // No code at all and a signal: this is the timeout kill above (or a kill
-        // from outside). Reported as `COMMAND_KILLED_EXIT_CODE`, which `command.ts`
-        // owns precisely so it can turn it into a receipt that names the deadline —
-        // the reason line below reaches the output channel, but the edge's `error`
-        // is built from the code.
-        if (err.killed || err.signal) {
-          return resolve({
-            code: COMMAND_KILLED_EXIT_CODE,
-            stdout,
-            stderr: withReason(stderr, `killed by ${err.signal ?? "signal"} — it did not finish within ${opts.timeoutMs} ms.`),
-          });
-        }
-        return resolve({ code: 1, stdout, stderr: withReason(stderr, err.message) });
-      },
-    );
-  });
-
-/** Append the runner's own explanation to whatever the command managed to write,
- * on its own line. Joined rather than concatenated for the same reason
- * `runCommand` joins stdout and stderr: a partial last line with no newline would
- * otherwise run straight into the reason ("Deploying…killed by SIGKILL"). */
-function withReason(stderr: string, reason: string): string {
-  return stderr.length > 0 ? `${stderr}\n${reason}` : reason;
-}
+// `shellCommandRunner` lives in `engine/orchestrator/shellRunner.ts` now, so the
+// headless tick can share it; re-exported here because this is where it was.
+export { shellCommandRunner } from "./engine/orchestrator/shellRunner";
 
 /** What a performing edge (`launch`, `seed` or `run`) is about to spend on, resolved
  * just far enough for the once-per-flow confirmation to name it. A `launch` has a
@@ -342,6 +267,9 @@ interface EdgeDone {
   kind: "done";
   outcome: ActOutcome;
   promote?: { nodeId: string; runKey: string; repo: string };
+  /** A `spawn` started this child flow; `bindSubflow` records it on the node in
+   * the same write as the stamps, the way `promote` rewrites a planned node. */
+  spawn?: { nodeId: string; childFlowId: string; template: string };
   receipt?: { level: "success" | "error"; message: string };
   /** A command's stdout+stderr, for the journal. `ActOutcome` cannot carry it:
    * that type is what `applyFired` stamps onto the edge, and an edge receipt is
@@ -750,10 +678,63 @@ export class DeckPanel {
     // Same reasoning as `promptModes`: configuration the drawer needs to build a
     // node with, which the webview cannot read for itself. Sent whole rather
     // than narrowed — see the `deck:flows` member's own comment in types.ts.
+    // `command-printed` verdicts, per flow, off the same journal read the pass
+    // makes — so the dry run and the card's stepper say what the engine says.
+    // Only flows with such a rule cost a read (see `printedFor`).
+    const printed: Record<string, Record<string, boolean>> = {};
+    if (enabled) {
+      for (const f of flows) {
+        const v = this.printedFor(f);
+        if (v !== undefined) printed[f.id] = v;
+      }
+    }
+    // What each flow has spent, off its journal. Only flows that have journaled
+    // anything get an entry — the drawer reads a missing one as "nothing spent
+    // yet", which is the truth for a flow with no journal. Read here, per post,
+    // rather than cached: the tally must agree with what the pass just wrote,
+    // and `postFlows` runs after it.
+    const spend: Record<string, SpendTally> = {};
+    if (enabled) {
+      for (const f of flows) {
+        const t = this.spendTallyOf(f.id);
+        if (spendTotal(t) > 0) spend[f.id] = t;
+      }
+    }
     this.post({
       type: "deck:flows", flows, enabled, pendingResume, promptModes,
-      commands: cfg.commands, branchCi, templates,
+      commands: cfg.commands, branchCi, templates, printed, spend,
     });
+  }
+
+  /** What a flow has spent over its life, counted off its journal — see
+   * `spendTally`. Never throws: `readJournal` swallows every read failure as
+   * "empty" by contract, and the one thing it does throw on (an id failing
+   * `VALID_FLOW_ID`) cannot come from a flow `readFlows` handed back, since the
+   * store checks the same regex. Zeros for a flow with nothing recorded. */
+  private spendTallyOf(flowId: string): SpendTally {
+    try {
+      return spendTally(readJournal(this.journalIo, this.flowsDir, flowId));
+    } catch {
+      return { sessions: 0, commands: 0 };
+    }
+  }
+
+  /** This flow's `command-printed` verdicts (`printedVerdicts`), or `undefined`
+   * when it has no pending rule of that kind — which is every flow that never
+   * used the condition, and the reason this costs them no journal read. Never
+   * throws: `readJournal` swallows read failures as "empty" by contract, and the
+   * one thing it does throw on (an id failing `VALID_FLOW_ID`) cannot come from
+   * a flow `readFlows` handed back. An unreadable journal therefore reads as
+   * "printed nothing" — waiting, never a match. Defensive about the edge SHAPE
+   * for the reason `branchCiWanted` gives: this can run on a hand-edited flow. */
+  private printedFor(flow: Flow): Record<string, boolean> | undefined {
+    const edges = Array.isArray(flow.edges) ? flow.edges : [];
+    if (!edges.some((e) => e && e.cond?.kind === "command-printed" && !isSettled(e))) return undefined;
+    try {
+      return printedVerdicts(flow, readJournal(this.journalIo, this.flowsDir, flow.id));
+    } catch {
+      return {};
+    }
   }
 
   /** Advance every armed flow against the statuses this pass already built.
@@ -889,7 +870,38 @@ export class DeckPanel {
         continue;
       }
       try {
-        const result = evaluateFlow({ flow, statuses: runs, nowMs, branchCi });
+        // The CLOCKS, before the actions, and outside every gate below: a
+        // deadline starting or running out is bookkeeping about waiting, not a
+        // spend, so neither the resume gate nor a consent ask holds it back. A
+        // flow with no deadlines gets nothing here — `evaluateDeadlines` names
+        // only rules that carry one and `applyClocks` hands back the same object
+        // when there is nothing to stamp — so a pass on such a flow costs exactly
+        // the writes it always did. Read fresh and written at once, under the
+        // lock this pass holds: the same re-read discipline every other write in
+        // this loop follows. The `expired` line is journaled AFTER the write,
+        // for the reason the fired/errored lines below are.
+        // Read once per flow per pass, before either evaluation, so the clocks
+        // and the actions are judged against the same output — see `printedFor`.
+        const printed = this.printedFor(flow);
+        const clocks = evaluateDeadlines({ flow, statuses: runs, nowMs, branchCi, printed, flows });
+        if (clocks.wentLive.length > 0 || clocks.expired.length > 0) {
+          const current = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+          if (current) {
+            const stamped = applyClocks(current, clocks, nowMs);
+            if (stamped !== current) {
+              writeFlow(this.flowIo, this.flowsDir, stamped);
+              for (const e of stamped.edges) {
+                // Only what THIS pass stamped: an edge another window expired a
+                // pass ago carries an older `expiredAt` and its own line already.
+                if (e.expiredAt !== nowMs || !clocks.expired.includes(e.id)) continue;
+                this.journal(flow.id, {
+                  kind: "expired", edge: e.id, from: e.from, to: e.to, since: e.liveSince ?? nowMs,
+                }, nowMs);
+              }
+            }
+          }
+        }
+        const result = evaluateFlow({ flow, statuses: runs, nowMs, branchCi, printed, flows });
         if (result.fired.length === 0) {
           // Nothing ready means nothing to approve: clear the gate so a rule
           // that becomes met later in this session fires without ceremony.
@@ -997,11 +1009,53 @@ export class DeckPanel {
         // target a deferred target can never also have a successful stamp to drop.
         const actedTargets = new Set<string>();
         const firing = unclaimed.map((f) => {
-          if (!f.perform || !isSpendAction(f.action)) return f;
+          // `isPerformedAction`: a `spawn` is deduped per target too — two rules
+          // into one subflow node must start ONE child, not two.
+          if (!f.perform || !isPerformedAction(f.action)) return f;
           if (actedTargets.has(f.edge.to)) return { ...f, perform: false };
           actedTargets.add(f.edge.to);
           return f;
         });
+
+        // The CEILING, before the consent gate: there is no point asking leave to
+        // spend what the flow may not spend. `MAX_LAUNCHES_PER_PASS` bounds one
+        // pass and nothing accumulates across passes — a template instantiated
+        // twenty times is twenty flows each entitled to three spends every six
+        // seconds, forever. `spendCeiling` is the lifetime bound, measured against
+        // the journal's own record of what fired (`spendTally`), so it needs no
+        // counter on the flow and no migration. A pass whose spends would take the
+        // total PAST the ceiling performs NONE of them and disarms the flow,
+        // saying what stopped it; reaching the ceiling exactly is allowed. Whole
+        // pass or nothing, for the reason `overCeiling` gives. The disarm is
+        // written on a fresh read like every other write here, and journaled with
+        // its own `source` so the record says the flow stopped itself.
+        const wanted = firing.filter((f) => f.perform && isSpendAction(f.action)).length;
+        if (wanted > 0 && hasCeiling(fresh)) {
+          const tally = this.spendTallyOf(fresh.id);
+          if (overCeiling(fresh, tally, wanted)) {
+            const atStop = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+            if (atStop) writeFlow(this.flowIo, this.flowsDir, { ...atStop, armed: false });
+            this.pendingResume.delete(flow.id);
+            this.resumeCleared.delete(flow.id);
+            this.journal(flow.id, { kind: "armed", armed: false, source: "ceiling" }, nowMs);
+            trackEvent({
+              name: "flow_armed", armed: false,
+              node_count: fresh.nodes.length, edge_count: fresh.edges.length,
+              unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+              source: "ceiling",
+            });
+            this.log(`deck: flow ${flow.id} disarmed — ${spendTotal(tally)} spent against a ceiling of ${fresh.spendCeiling}, and this pass wanted ${wanted} more`);
+            // A warning, not an error: nothing failed. But it is the one message a
+            // user who set a ceiling is waiting for, so it persists in the bell
+            // rather than as a webview toast nobody sees with the Deck closed.
+            void vscode.window.showWarningMessage(
+              `${fresh.name} was disarmed at its ceiling: ${spendTotal(tally)} of ${fresh.spendCeiling} spent ` +
+                `(${tally.sessions} ${tally.sessions === 1 ? "session" : "sessions"}, ${tally.commands} ${tally.commands === 1 ? "command" : "commands"}), ` +
+                `and this pass would have added ${wanted}. Raise the ceiling or re-arm to continue.`,
+            );
+            continue;
+          }
+        }
 
         // A flow asks ONCE before it ever spends anything, then runs unattended: a
         // mis-wired flow should cost one prompt, not a string of paid sessions. A
@@ -1059,7 +1113,11 @@ export class DeckPanel {
         // sentence. The output is for the journal alone.
         const outputs = new Map<string, string>();
         const promotions: { nodeId: string; runKey: string; repo: string }[] = [];
+        const spawns: { nodeId: string; childFlowId: string; template: string }[] = [];
         const receipts: { level: "success" | "error"; message: string }[] = [];
+        // Resolved texts of the `run` rules this pass performed under per-command
+        // consent, each to be counted against its bounded approval at write time.
+        const consumed: string[] = [];
         // The junction targets of rules that could not even be DECIDED this pass.
         const deferredTargets = new Set<string>();
         // A mid-pass disarm is ONE thing that happened to this flow, not one per
@@ -1084,7 +1142,10 @@ export class DeckPanel {
           }
           // A stamped-only sibling performs nothing, and a notify's whole action is
           // the toast `notifyLines` produces below.
-          if (!f.perform || !isSpendAction(f.action)) continue;
+          // `isPerformedAction`, not `isSpendAction`: a `spawn` spends nothing (no
+          // cap, no consent gate above) but the host performs it — it writes the
+          // child flow — so it is dispatched here and owes `applyFired` an outcome.
+          if (!f.perform || !isPerformedAction(f.action)) continue;
           // Re-read and check `armed` immediately before THIS edge, not once for the
           // whole flow: a launch or seed is its own `await`, and up to three of them
           // can run in one pass (the per-pass cap), each one long enough for
@@ -1119,6 +1180,15 @@ export class DeckPanel {
             continue;
           }
           const done = await this.performEdge(fresh, f.edge, runs, f.action);
+          // A bounded per-command approval is spent by the RUN, whatever its exit:
+          // a command that ran and failed still ran. Recorded here, where the act's
+          // own result says it was a `done` rather than a pre-flight `defer` that
+          // ran nothing, and applied to `next` below in the same write as the
+          // stamps. The text comes from the same resolution the gate approved.
+          if (f.action === "run" && done.kind === "done" && getConfig().commandConsent === "command") {
+            const spent = this.spendTarget(fresh, f.edge, f.action);
+            if (spent?.action === "run") consumed.push(spent.text);
+          }
           // One per edge this pass actually PERFORMED — never per evaluation, and
           // never for a rule merely stamped as a sibling, which is what keeps this
           // to at most MAX_LAUNCHES_PER_PASS events per six seconds. Emitted here,
@@ -1186,6 +1256,7 @@ export class DeckPanel {
             outputs.set(f.edge.id, truncateOutput(done.output));
           }
           if (done.promote) promotions.push(done.promote);
+          if (done.spawn) spawns.push(done.spawn);
           if (done.receipt) receipts.push(done.receipt);
         }
         // A deferred rule is left exactly as it was, so the next pass retries it —
@@ -1245,6 +1316,13 @@ export class DeckPanel {
         // line above: a promotion settles the rules that pointed at the node as
         // planned work, and those stamps belong to this pass, not to a later read.
         for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo, nowMs);
+        // The child exists on disk already (written in `performSpawn`); this is
+        // the parent's pointer to it, in the same write as the rule's stamp so a
+        // crash between the two cannot leave a started child nobody can find.
+        for (const sp of spawns) next = bindSubflow(next, sp.nodeId, sp.childFlowId);
+        // Count each run against its bounded per-command approval — on `atWrite`'s
+        // copy of the record, like everything else this write carries.
+        for (const text of consumed) next = consumeConsent(next, text);
         writeFlow(this.flowIo, this.flowsDir, next);
         // AFTER the write, never before. A crash in between loses a line rather
         // than inventing an event the flow file has no stamp for — the same
@@ -1265,6 +1343,15 @@ export class DeckPanel {
               kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error,
               ...(output === undefined ? {} : { output }),
             }, nowMs);
+            // The failure was scheduled to try again rather than latched
+            // (`failedStamp`, runner.ts). Its own line, after the error's: the
+            // "why did nothing fire?" query must not mistake a retry for a stop,
+            // and the record must say the retry was the RULE's choice.
+            if (e.retryAt !== undefined) {
+              this.journal(flow.id, {
+                kind: "retrying", edge: e.id, attempt: e.attempts ?? 1, max: e.retry?.max ?? 0, retryAt: e.retryAt,
+              }, nowMs);
+            }
           } else if (e.firedAt !== undefined) {
             this.journal(flow.id, {
               kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "",
@@ -1274,6 +1361,9 @@ export class DeckPanel {
         }
         for (const p of promotions) {
           this.journal(flow.id, { kind: "promoted", node: p.nodeId, runKey: p.runKey, repo: p.repo }, nowMs);
+        }
+        for (const sp of spawns) {
+          this.journal(flow.id, { kind: "spawned", node: sp.nodeId, template: sp.template, child: sp.childFlowId }, nowMs);
         }
         // After the write, and computed from `next` AFTER the promotions: a
         // promotion settles the rules that pointed at the node as planned work,
@@ -1430,7 +1520,14 @@ export class DeckPanel {
    * through it, so a fourth action cannot be added as "already confirmed" by
    * whichever of the three someone forgot. */
   private confirmedAt(flow: Flow, target: SpendTarget): number | undefined {
-    return target.action === "run" ? flow.commandConfirmedAt : flow.launchConfirmedAt;
+    if (target.action !== "run") return flow.launchConfirmedAt;
+    // Under `agentFlow.commandConsent: "command"` the flow-level stamp is not
+    // consulted at all: consent is per resolved text (consent.ts), so a flow
+    // approved once for `deploy.sh staging` still asks before `deploy.sh prod`,
+    // and asks again once a bounded approval is spent. The default `"flow"` mode
+    // is the released behaviour, byte for byte.
+    if (getConfig().commandConsent === "command") return consentCovers(flow, target.text)?.at;
+    return flow.commandConfirmedAt;
   }
 
   /** The first spend in this pass that the user has not yet approved FOR ITS OWN
@@ -1463,6 +1560,15 @@ export class DeckPanel {
    * never consent to run `deploy.sh`. */
   private async askFirstSpend(flow: Flow, target: SpendTarget): Promise<void> {
     const cfg = getConfig();
+    // The per-command ask is its own modal, not a variant of the per-flow one: it
+    // says what the approval covers (this text, not the flow), and it offers a
+    // SIZE for the approval. The answer lands in `commandConsents` (consent.ts),
+    // never in `commandConfirmedAt`, so flipping the setting back later does not
+    // find a flow-wide approval nobody gave.
+    if (target.action === "run" && cfg.commandConsent === "command") {
+      await this.askCommandConsent(flow, target);
+      return;
+    }
     const ACT = target.action === "launch" ? "Launch" : target.action === "run" ? "Run" : "Seed";
     const DISARM = "Disarm";
     // What the agent will actually be told is material to this consent, so a note
@@ -1535,6 +1641,38 @@ export class DeckPanel {
     );
   }
 
+  /** The per-command ask — `agentFlow.commandConsent: "command"`. Names the
+   * resolved text (the thing being approved) and offers the approval's size: one
+   * run, the next `CONSENT_BATCH`, or every run of exactly this text. Approving
+   * one text says nothing about another: a different command, or the same one
+   * with a different note spliced in, asks again. Same re-read discipline and the
+   * same journal line as the per-flow ask, with the answer's size in `answer`. */
+  private async askCommandConsent(flow: Flow, target: SpendTarget & { action: "run" }): Promise<void> {
+    const ONCE = "Run once";
+    const BATCH = `Run the next ${CONSENT_BATCH}`;
+    const ALWAYS = "Always for this command";
+    const DISARM = "Disarm";
+    const message =
+      `${flow.name} is ready to run "${commandPreview(target.text)}" on this machine, unattended. ` +
+      `Approving covers exactly this command; a different one will ask again.`;
+    const answer = await vscode.window.showWarningMessage(message, { modal: true }, ONCE, BATCH, ALWAYS, DISARM);
+    const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+    if (!latest) return;
+    const now = Date.now();
+    if (answer === ONCE) writeFlow(this.flowIo, this.flowsDir, grantConsent(latest, target.text, now, 1));
+    else if (answer === BATCH) writeFlow(this.flowIo, this.flowsDir, grantConsent(latest, target.text, now, CONSENT_BATCH));
+    else if (answer === ALWAYS) writeFlow(this.flowIo, this.flowsDir, grantConsent(latest, target.text, now));
+    else if (answer === DISARM) writeFlow(this.flowIo, this.flowsDir, { ...latest, armed: false });
+    this.journal(
+      latest.id,
+      {
+        kind: "consented",
+        answer: answer === ONCE ? "act-once" : answer === BATCH ? "act-batch" : answer === ALWAYS ? "act" : answer === DISARM ? "disarm" : "dismissed",
+      },
+      now,
+    );
+  }
+
   /** The configured PromptMode for an id, or a `done` refusal naming what will not
    * happen because of it. Shared by both acting verbs, which resolve the id from
    * different places — a launch from its planned node, a seed from the edge — but must
@@ -1598,6 +1736,7 @@ export class DeckPanel {
   ): Promise<EdgeResult> {
     if (action === "seed") return this.performSeed(flow, edge, statuses);
     if (action === "run") return this.performRun(flow, edge, statuses);
+    if (action === "spawn") return this.performSpawn(flow, edge);
     const node = this.plannedTarget(flow, edge);
     if (!node) {
       return {
@@ -1795,6 +1934,71 @@ export class DeckPanel {
    * command-node version of "one bad rule becomes twenty windows", except each
    * retry is a real side effect on real infrastructure. `runCommand` never throws
    * by contract, so the only way out of here is a decided one. */
+  /** Start a child flow from the template a `subflow` node names, bound to the
+   * card the rule's SOURCE PLACE is on — the same `instantiate` the card's own
+   * Attach uses, with the same repos and modes, so a subflow is exactly "this
+   * template, attached to this card, armed", plus a pointer back to its parent.
+   *
+   * Every refusal here is deterministic and latches: a source that is not a
+   * place (there is no card to bind), a template that is gone, a template with
+   * nothing to bind, a chain already `MAX_SUBFLOW_DEPTH` deep, or a node that
+   * already started a child (Reset on the rule does not clear `childFlowId` —
+   * see `SubflowNode` — because the child is a real flow with its own history).
+   *
+   * The child is written ARMED, because a subflow nobody arms does nothing, and
+   * it inherits NO consent: its first spend asks, exactly as an attached
+   * template's would. Journalled on the child as `armed` with `source: "spawn"`
+   * — not a toggle, not a banner. */
+  private async performSpawn(flow: Flow, edge: FlowEdge): Promise<EdgeResult> {
+    const node = findNode(flow, edge.to);
+    if (!node || node.kind !== "subflow") {
+      return { kind: "done", outcome: { ok: false, error: `a subflow rule must point at a subflow node, and ${edge.to} is not.` } };
+    }
+    const sub: SubflowNode = node;
+    if (sub.childFlowId !== undefined) {
+      return { kind: "done", outcome: { ok: false, error: `${sub.id} already started a subflow (${sub.childFlowId}); delete or reset that flow to start it again.` } };
+    }
+    const source = findNode(flow, edge.from);
+    if (!source || !isPlace(source)) {
+      return { kind: "done", outcome: { ok: false, error: `a subflow starts from a place — ${edge.from} is not one, so there is no card to bind it to.` } };
+    }
+    const t = this.allTemplates().find((x) => x.id === sub.templateId);
+    if (!t) {
+      return { kind: "done", outcome: { ok: false, error: `the template this subflow starts (${sub.templateId}) is no longer on disk.` } };
+    }
+    const flows = readFlows(this.flowIo, this.flowsDir);
+    if (subflowDepth(flow, flows) >= MAX_SUBFLOW_DEPTH) {
+      return { kind: "done", outcome: { ok: false, error: `this workflow is already ${MAX_SUBFLOW_DEPTH} subflows deep — not nesting another.` } };
+    }
+    const cfg = getConfig();
+    const run = this.run(source.runKey);
+    const ticketKey = run ? ticketKeyFor(run, this.connector) : source.runKey;
+    const taken = new Set(flows.map((f) => f.id));
+    const now = Date.now();
+    let id = newFlowId(now);
+    for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+    if (taken.has(id)) return { kind: "defer", reason: "could not mint a flow id for the subflow" };
+    let child: Flow;
+    try {
+      const onDisk = new Set(discoverRepos(cfg.reposRoot, cfg.repoBlocklist).map((r) => r.name));
+      child = instantiate(t, ticketKey, id, now, {
+        repos: run ? run.repos.map((r) => r.name).filter((n) => onDisk.has(n)) : [source.repo],
+        modes: cfg.promptModes.map((m) => m.id),
+      });
+    } catch (e) {
+      return { kind: "done", outcome: { ok: false, error: (e as Error).message } };
+    }
+    child = { ...child, name: `${flow.name} › ${t.name}`, armed: true, parentFlow: flow.id, parentNode: sub.id };
+    writeFlow(this.flowIo, this.flowsDir, child);
+    this.journal(child.id, { kind: "armed", armed: true, source: "spawn" }, now);
+    return {
+      kind: "done",
+      outcome: { ok: true, note: `started ${t.name}` },
+      spawn: { nodeId: sub.id, childFlowId: child.id, template: t.id },
+      receipt: { level: "success", message: `${flow.name}: started the "${t.name}" subflow.` },
+    };
+  }
+
   private async performRun(flow: Flow, edge: FlowEdge, statuses: RunStatus[]): Promise<EdgeResult> {
     const node = this.commandTarget(flow, edge);
     if (!node) {
@@ -4225,7 +4429,21 @@ export class DeckPanel {
         if (!getConfig().orchestrator) return;
         const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
         if (!flow) return;
-        writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed });
+        // Arming restarts every pending rule's deadline clock. A disarmed flow
+        // is paused — `evaluateDeadlines` never ticks it — and a clock that kept
+        // its old `liveSince` across the pause would expire the instant the flow
+        // woke, for time nobody was waiting. Settled rules keep theirs: an
+        // expiry that already happened is history, and Reset is what clears it.
+        // Deleted rather than set `undefined`, so the stored record does not
+        // gain a key that reads as "present but blank".
+        const edges = m.armed
+          ? flow.edges.map((e) => {
+              if (isSettled(e) || e.liveSince === undefined) return e;
+              const { liveSince: _restart, ...rest } = e;
+              return rest;
+            })
+          : flow.edges;
+        writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed, edges });
         // `source: "toggle"` matches the `flow_armed` telemetry this handler
         // already emits below, so the two records of one gesture agree. The
         // pass's own auto-skip records its disarm as its own `skipped` events

@@ -68,7 +68,24 @@ export type CommandNode = NodeBase & {
  * the world, decides. */
 export type GateNode = NodeBase & { kind: "gate"; question: string };
 
-export type FlowNode = PlaceNode | PlannedNode | NotifyNode | CommandNode | GateNode;
+/** A workflow inside a workflow: a node that, when a rule reaches it, STARTS a
+ * saved template as a child flow bound to the same card, and that a LATER rule
+ * can wait on with `subflow-done`. It is what lets a starter compose into a
+ * bigger shape instead of being copied into it.
+ *
+ * `templateId` is the user's configuration. `childFlowId` is a host stamp: set
+ * once the child exists (`bindSubflow`), never carried into a template
+ * (`normalizedTemplateFlow` strips it), and — deliberately — NOT cleared by Reset
+ * on the rule that started it: the child is a real flow on disk with its own
+ * history, and a second start would leave two. Reset the child's own rules, or
+ * delete it, to run it again.
+ *
+ * The child carries `parentFlow`/`parentNode` (see `Flow`) and is excluded from
+ * card attachment (`attachedWorkflows`), which is what keeps "one workflow per
+ * card" a question about the parent alone. */
+export type SubflowNode = NodeBase & { kind: "subflow"; templateId: string; childFlowId?: string };
+
+export type FlowNode = PlaceNode | PlannedNode | NotifyNode | CommandNode | GateNode | SubflowNode;
 
 /** Every condition kind that needs no parameter. */
 export type CondKind =
@@ -105,7 +122,22 @@ export type CondKind =
    * disk either way. Reading only half of it would leave a rejected gate
    * indistinguishable from an unanswered one to every downstream rule. */
   | "gate-approved"
-  | "gate-rejected";
+  | "gate-rejected"
+  /** Did ANOTHER rule out of this same source run out of time? Bare, and answered
+   * in the same unusual place as the three above — `evaluate.ts`'s `isMet`
+   * intercepts it before `conditions.ts` — because the fact lives on a SIBLING
+   * edge's `expiredAt`, not on any `RunStatus`. It is what lets a deadline act:
+   * the rule carrying `timeoutMinutes` only settles as expired, and a sibling with
+   * this condition is what then notifies, re-seeds, or launches the fallback.
+   * "If it hasn't merged in an hour, tell me" is two rules out of one place. */
+  | "deadline-passed"
+  /** Has the child workflow a `subflow` node started FINISHED — every rule in it
+   * settled? Bare, and answered in the same unusual place as the four above:
+   * `evaluate.ts`'s `isMet` reads the child off `EvalInput.flows`, because the
+   * fact lives in another flow's file, not on any `RunStatus`. A child that
+   * stopped on a failure is not done — it is stopped — and this stays unmet; a
+   * deadline on the rule is how a parent bounds that wait. */
+  | "subflow-done";
 
 /** The `kind` strings below are serialized into flow files under
  * ~/.agentflow/flows and shared across windows, so they keep their released
@@ -134,14 +166,43 @@ export type Condition =
    * Verdicts arrive on `CondContext.branchCi`, keyed `repo#branch`, and only an
    * explicit `"passed"` satisfies it: this condition is built to gate a deploy,
    * so an unreadable branch reads as not met (see `conditions.ts`'s arm). */
-  | { kind: "branch-ci-passed"; repo: string; branch: string };
+  | { kind: "branch-ci-passed"; repo: string; branch: string }
+  /** Did the command this rule points past PRINT `text` — anywhere in its
+   * captured stdout+stderr, case-insensitively (`outputContains`)? The second
+   * command-shaped condition beside `command-succeeded`, and the first that
+   * reads more than one bit off a command: "deploy printed ROLLBACK, so page me"
+   * and "the smoke test printed 0 failures, so promote" are both this.
+   *
+   * The output itself never crosses into the engine. It lives in the flow's
+   * journal (`fired`/`errored` lines carry `output`), which is host-side: the
+   * host reads it once per pass, answers this rule (`printedVerdicts`,
+   * journal.ts), and hands the verdict in on `EvalInput.printed` keyed by THIS
+   * rule's edge id — the same route `branch-ci-passed` takes for its `gh` call,
+   * and for the same reason: `conditions.ts` and `evaluate.ts` are bundled into
+   * the webview and can reach neither a forge nor a file. Answered only once the
+   * command's own rule has performed (see `evaluate.ts`'s `commandPrinted`) —
+   * ran and succeeded OR ran and failed, since a failure's output is often
+   * exactly the text worth acting on. */
+  | { kind: "command-printed"; text: string };
+
+/** Does a command's captured output carry `text`? Case-insensitive substring —
+ * not a regex, not a glob. A deploy script's "DEPLOYED" and a human's "deployed"
+ * are the same fact, and a `*` in a rule that means "literal asterisk" is a trap
+ * `agentFlow.neverAutoRun`'s globbing already sets once in this codebase. Blank
+ * text matches nothing: a rule with no text is incomplete (`condIncomplete`),
+ * never one that fires on any output at all. The ONE place the match is
+ * defined, so the host's verdict and any future reader agree. */
+export function outputContains(output: string, text: string): boolean {
+  const needle = text.trim().toLowerCase();
+  return needle !== "" && output.toLowerCase().includes(needle);
+}
 
 /** What a rule does when its condition is met, derived from the node it points
  * at — see `actionFor`. `run` executes a command node's command.
  *
  * Nothing here instructs a RUNNING agent; that remains impossible (see the
  * spec's out-of-scope note on `tell`). */
-export type FlowAction = "launch" | "seed" | "notify" | "run" | "ask";
+export type FlowAction = "launch" | "seed" | "notify" | "run" | "ask" | "spawn";
 
 export interface FlowEdge {
   id: string;
@@ -236,6 +297,59 @@ export interface FlowEdge {
   /** The action threw. Never retried until Reset — retrying a launch that failed
    * every poll is how you end up with twenty windows. */
   error?: string;
+  /** How long this rule may WAIT once its clock is running before it settles as
+   * expired — the user's own configuration, kept by Reset and by `toTemplate`
+   * exactly like `note`. Absent (or anything but a positive finite number — a
+   * flow file is hand-editable, see `hasDeadline`) means the rule waits forever,
+   * which is what every rule did before this field existed and what keeps an old
+   * file reading unchanged.
+   *
+   * A deadline does not make the rule fire. It settles it with `expiredAt`, and
+   * a SIBLING out of the same source with the `deadline-passed` condition is what
+   * acts on that — see `CondKind`. */
+  timeoutMinutes?: number;
+  /** When this rule's clock started: the first pass that found it live — its
+   * source a place on the board, a command that has performed, or a gate that
+   * has been asked (see `evaluateDeadlines` in evaluate.ts) — while it carried a
+   * deadline. Stamped only for a rule WITH `timeoutMinutes`, so a flow that never
+   * opted in is never written for this. Host-owned: cleared by Reset
+   * (`stripHostStamps`), and cleared on every pending rule when the flow is
+   * re-armed, so a paused flow's clocks start over rather than expiring the
+   * instant it wakes. */
+  liveSince?: number;
+  /** The THIRD terminal stamp, beside `firedAt` and `error`: the deadline passed
+   * and the condition had not arrived. Distinct from both on purpose — an expired
+   * rule ran nothing (so it is not a `firedAt`, and `commandSucceeded` must never
+   * read it as a performer) and nothing broke (so it is not an `error`, and the
+   * drawer must not show it in red). `isSettled` counts it, so it is never
+   * evaluated again until Reset. */
+  expiredAt?: number;
+  /** OPT-IN retry for a rule that spends. Absent — the default, and every flow on
+   * disk — means what it always meant: a failure is a full stop until Reset.
+   * With it, a failed `launch`, `seed` or `run` is tried again up to `max` more
+   * times, each after `backoffMs`, and only THEN latched. The user's own
+   * configuration, kept by Reset and `toTemplate` like `note`.
+   *
+   * Split by whether the action is safe to repeat, which is the whole care this
+   * feature needs: a launch that failed because a worktree could not be created
+   * is safe to retry; a deploy that half-ran is not. So a `run` rule's retry is
+   * honoured only alongside `retryOk` — the same posture the consent gates take
+   * toward shell. See `retryPolicy`, the one reader. */
+  retry?: { max: number; backoffMs: number };
+  /** The explicit tick that this `run` rule's command is safe to execute twice.
+   * Only ever `true`, only read for `run`, and required for `retry` to mean
+   * anything on one — a retry policy on a command without it is inert. */
+  retryOk?: true;
+  /** Host stamp: how many times this rule's action has FAILED so far. Kept when
+   * it finally succeeds (the receipt says "after 2 retries") and when it gives
+   * up. Cleared by Reset. */
+  attempts?: number;
+  /** Host stamp: the earliest moment the next attempt may run. Its PRESENCE is
+   * what makes an errored rule "pending retry" rather than settled — see
+   * `isSettled` and `retryPending` — and `evaluate.ts` reads it as "not yet"
+   * until the clock passes it. Absent on a terminal failure. Cleared by Reset,
+   * and by the attempt that succeeds. */
+  retryAt?: number;
 }
 
 export interface Flow {
@@ -278,6 +392,80 @@ export interface Flow {
    * reads the same as "not from a template", the honest answer for a
    * hand-drawn one. */
   fromTemplate?: string;
+  /** Per-command approvals, keyed by the RESOLVED command text — the same string
+   * `spendTarget` shows in the modal and `neverAutoRun` matches against — read
+   * only under `agentFlow.commandConsent: "command"` (see consent.ts). Each
+   * record says when the text was approved and, when the approval was for a
+   * number of runs, how many are left; absent `remaining` means "always for this
+   * command". `commandConfirmedAt` beside it is untouched and still governs the
+   * default `"flow"` mode, so flipping the setting back restores exactly the
+   * behaviour every existing workflow has. Never carried into a template
+   * (`normalizedTemplateFlow` builds from scratch). */
+  /** How much this flow may spend over its whole life — sessions opened plus
+   * commands run — before it disarms itself. The count it is measured against is
+   * DERIVED from the flow's journal (`spendTally`, journal.ts), never stored here:
+   * every fired spend is already a journal line, so a stored counter would be a
+   * second copy of a fact that could drift from the first, and would need a
+   * migration for every flow already on disk. The journal is lifetime — Reset
+   * clears a rule's receipt but not its line — which is exactly what makes this
+   * a ceiling rather than a per-cycle budget.
+   *
+   * A pass whose spends would take the total PAST the ceiling performs none of
+   * them and disarms the flow, saying so (`advanceUnderLock`, deckView.ts). The
+   * per-pass cap (`MAX_LAUNCHES_PER_PASS`) bounds one pass; this bounds all of
+   * them, which matters most for a template instantiated many times over.
+   *
+   * Optional, and absent on every flow written before this field existed, which
+   * reads as "no ceiling" — what every flow had. Anything but a positive finite
+   * number reads the same way (`hasCeiling`). */
+  spendCeiling?: number;
+
+  commandConsents?: Record<string, CommandConsent>;
+  /** Set on a flow a `subflow` node started: the flow and node it was started
+   * from. Absent on every hand-drawn or attached flow. What it changes: the
+   * child is never offered as a card's workflow (`attachedWorkflows`), so the
+   * card keeps showing the parent; the child is still a real flow in the
+   * Workflows list, armable, resettable and deletable on its own. */
+  parentFlow?: string;
+  parentNode?: string;
+}
+
+/** One per-command approval — see `Flow.commandConsents`. */
+export interface CommandConsent {
+  at: number;
+  /** Runs still covered. Absent: every run of this text, from now on. `0` reads
+   * as spent, and the next such command asks again. */
+  remaining?: number;
+}
+
+/** What a flow has spent so far, counted off its journal's `fired` lines: a
+ * `launch` or a `seed` opened a session, a `run` executed a command. Defined here
+ * rather than in journal.ts because the webview shows it (`deck:flows` carries
+ * one per flow) and journal.ts imports `path`, which no browser bundle can take. */
+export interface SpendTally {
+  sessions: number;
+  commands: number;
+}
+
+export function spendTotal(t: SpendTally): number {
+  return t.sessions + t.commands;
+}
+
+/** Does this flow have a ceiling it can hit? A positive finite number and nothing
+ * else — same tolerance `hasDeadline`-style readers extend to a hand-edited file:
+ * `"spendCeiling": "10"` or `0` reaches here, and neither is a ceiling. */
+export function hasCeiling(f: Flow): boolean {
+  return typeof f.spendCeiling === "number" && Number.isFinite(f.spendCeiling) && f.spendCeiling > 0;
+}
+
+/** Would performing `wanted` more spends take this flow past its ceiling?
+ * Reaching the ceiling exactly is allowed — a ceiling of 10 means ten — and a flow
+ * with no ceiling is never over it. Asked of the WHOLE pass's spends rather than
+ * one at a time, so a pass either performs everything it decided or nothing: a
+ * half-performed pass would leave a junction's siblings stamped around a
+ * performer that never ran. */
+export function overCeiling(f: Flow, tally: SpendTally, wanted: number): boolean {
+  return hasCeiling(f) && spendTotal(tally) + wanted > f.spendCeiling!;
 }
 
 export function emptyFlow(id: string, name: string, nowMs: number): Flow {
@@ -294,7 +482,53 @@ export function emptyFlow(id: string, name: string, nowMs: number): Flow {
  * reason it will never fire is that it already errored. That drift was a real
  * defect — `armability.ts` used to check only `firedAt`. */
 export function isSettled(e: FlowEdge): boolean {
-  return e.firedAt !== undefined || e.error !== undefined;
+  // An error with a `retryAt` is a failure that will be tried again — still in
+  // play, not terminal. Every reader of "settled" (the evaluator's skip, the
+  // junction's arithmetic, armability, the stepper's done count) gets that
+  // answer from here alone.
+  return e.firedAt !== undefined || e.expiredAt !== undefined || (e.error !== undefined && e.retryAt === undefined);
+}
+
+/** Has this rule failed and is it waiting to try again? The one shape that is
+ * errored yet not settled. */
+export function retryPending(e: FlowEdge): boolean {
+  return e.error !== undefined && e.retryAt !== undefined;
+}
+
+/** The retry this rule may take for `action`, or `undefined` when it must not.
+ * Three refusals, all deliberate: no policy or a malformed one (a flow file is
+ * hand-editable — `max` must be a positive integer and `backoffMs` a non-negative
+ * finite number); an action that does not spend (a notify or an ask cannot fail
+ * in a way a retry would help, and `applyFired` never asks); and a `run` without
+ * the explicit `retryOk` tick — re-executing shell that half-ran is the failure
+ * mode this whole feature is careful about, so it takes a second, separate yes. */
+export function retryPolicy(e: FlowEdge, action: FlowAction | undefined): { max: number; backoffMs: number } | undefined {
+  const r = e.retry;
+  if (!r || typeof r !== "object") return undefined;
+  if (!Number.isInteger(r.max) || r.max <= 0) return undefined;
+  if (typeof r.backoffMs !== "number" || !Number.isFinite(r.backoffMs) || r.backoffMs < 0) return undefined;
+  if (!isSpendAction(action)) return undefined;
+  if (action === "run" && e.retryOk !== true) return undefined;
+  return { max: r.max, backoffMs: r.backoffMs };
+}
+
+/** Does this rule carry a deadline it can run out of? A positive, finite minute
+ * count and nothing else: a flow file is JSON somebody can hand-edit, and
+ * `store.ts`'s `validEdge` admits an edge on the strength of its `cond` alone, so
+ * `"timeoutMinutes": "10"` or `0` can reach every reader. Zero and below read as
+ * "no deadline" rather than "expires at once" — a rule that expires the instant
+ * it goes live is not something anyone means by a deadline. */
+export function hasDeadline(e: FlowEdge): boolean {
+  return typeof e.timeoutMinutes === "number" && Number.isFinite(e.timeoutMinutes) && e.timeoutMinutes > 0;
+}
+
+/** The moment this rule's clock runs out, or `undefined` while it has no deadline
+ * or the clock has not started. One arithmetic, shared by the engine's expiry
+ * check, the dry run's "expires in…" and the card's stepper, so no two of them
+ * can disagree about when. */
+export function deadlineAt(e: FlowEdge): number | undefined {
+  if (!hasDeadline(e) || typeof e.liveSince !== "number") return undefined;
+  return e.liveSince + e.timeoutMinutes! * 60_000;
 }
 
 /** Every field the HOST stamps onto an edge as it acts, removed — so the edge is
@@ -308,8 +542,9 @@ export function isSettled(e: FlowEdge): boolean {
  * on `FlowEdge` is therefore forgotten in exactly one place, here, rather than in
  * whichever of two call sites nobody remembered.
  *
- * `mode` and `note` survive on purpose: they are the user's configuration, not a
- * mirror of anything the host decided, and a seed's mode has nowhere else to live. */
+ * `mode`, `note` and `timeoutMinutes` survive on purpose: they are the user's
+ * configuration, not a mirror of anything the host decided, and a seed's mode has
+ * nowhere else to live. */
 export function stripHostStamps(e: FlowEdge): FlowEdge {
   const kept: FlowEdge = { ...e };
   delete kept.firedAt;
@@ -318,6 +553,10 @@ export function stripHostStamps(e: FlowEdge): FlowEdge {
   delete kept.error;
   delete kept.action;
   delete kept.gateAnswer;
+  delete kept.liveSince;
+  delete kept.expiredAt;
+  delete kept.attempts;
+  delete kept.retryAt;
   return kept;
 }
 
@@ -356,9 +595,66 @@ export function stripHostStamps(e: FlowEdge): FlowEdge {
  * "notify">` would let the type system believe an edge past this guard could
  * still be `ask`, which is exactly the false belief `deckView.ts`'s dispatch
  * would otherwise be handed. */
-export function isSpendAction(action: FlowAction | undefined): action is Exclude<FlowAction, "notify" | "ask"> {
+export function isSpendAction(action: FlowAction | undefined): action is Exclude<FlowAction, "notify" | "ask" | "spawn"> {
   return action === "launch" || action === "seed" || action === "run";
 }
+
+/** Does the HOST have to do something for this verb — as opposed to a verb whose
+ * whole action is the stamp (`notify` is a toast off the receipt, `ask` is the
+ * question the stamp poses)? Every spending verb, plus `spawn`: starting a child
+ * flow writes a file but spends nothing itself — the child spends under its own
+ * consent — so it must be dispatched and must report an outcome (`applyFired`
+ * demands one) without being capped or consent-gated as a spend. The one place
+ * this second allowlist lives, for the reason `isSpendAction` gives about its. */
+export function isPerformedAction(action: FlowAction | undefined): action is Exclude<FlowAction, "notify" | "ask"> {
+  return isSpendAction(action) || action === "spawn";
+}
+
+export function isSubflow(n: FlowNode): n is SubflowNode {
+  return n.kind === "subflow";
+}
+
+/** Has the child a `subflow` node started finished? Every rule settled, and at
+ * least one rule — an empty child has nothing to finish. `flows` is every flow
+ * the caller has (the child is another file); a missing child, or a node that
+ * has not started one yet, is simply not done. */
+export function subflowDone(flow: Flow, nodeId: string, flows: readonly Flow[]): boolean {
+  const node = findNode(flow, nodeId);
+  if (!node || node.kind !== "subflow" || node.childFlowId === undefined) return false;
+  const child = flows.find((f) => f.id === node.childFlowId);
+  return child !== undefined && child.edges.length > 0 && child.edges.every(isSettled);
+}
+
+/** Record which child a `subflow` node started. A node rewrite, like
+ * `promoteToPlace`: the fact is about the node, and a later rule reads it there. */
+export function bindSubflow(flow: Flow, nodeId: string, childFlowId: string): Flow {
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) => (n.id === nodeId && n.kind === "subflow" ? { ...n, childFlowId } : n)),
+  };
+}
+
+/** How many ancestors a flow has — 0 for a top-level flow. Bounded by
+ * `MAX_SUBFLOW_DEPTH` at spawn time: a template that starts a template that
+ * starts a template is a fork bomb six seconds at a time, and the guard has to
+ * live where the chain grows. Stops at a cycle or a missing parent rather than
+ * looping. */
+export function subflowDepth(flow: Flow, flows: readonly Flow[]): number {
+  const seen = new Set<string>([flow.id]);
+  let depth = 0;
+  let cur: Flow | undefined = flow;
+  while (cur?.parentFlow !== undefined) {
+    const parent = flows.find((f) => f.id === cur!.parentFlow);
+    if (!parent || seen.has(parent.id)) break;
+    seen.add(parent.id);
+    depth++;
+    cur = parent;
+  }
+  return depth;
+}
+
+/** Nesting a subflow inside a subflow inside a subflow is as deep as this goes. */
+export const MAX_SUBFLOW_DEPTH = 3;
 
 export function isPlace(n: FlowNode): n is PlaceNode {
   return n.kind === "place";
@@ -429,6 +725,7 @@ export function actionFor(kind: string): FlowAction | undefined {
     case "notify": return "notify";
     case "command": return "run";
     case "gate": return "ask";
+    case "subflow": return "spawn";
     default: return undefined;
   }
 }
@@ -473,6 +770,11 @@ export function condIncomplete(cond: Condition): string | undefined {
     case "branch-ci-passed":
       if (blank(cond.repo)) return "no repo set";
       return blank(cond.branch) ? "no branch set" : undefined;
+    case "command-printed":
+      // `outputContains` matches nothing for blank text, so this is a rule the
+      // engine would evaluate forever and never satisfy — the same shape as a
+      // blank status, and reported the same way.
+      return blank(cond.text) ? "no text set" : undefined;
     default:
       return undefined;
   }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyFired, notifyLines } from "../../../../src/engine/orchestrator/runner";
+import { applyClocks, applyFired, notifyLines } from "../../../../src/engine/orchestrator/runner";
 import { Flow, FlowEdge, FlowNode, JoinMode, NotifyNode, PlaceNode, emptyFlow } from "../../../../src/engine/orchestrator/model";
 import { FiredEdge } from "../../../../src/engine/orchestrator/evaluate";
 
@@ -387,5 +387,146 @@ describe("applyFired — an ask edge", () => {
     // action guard that prevents non-notify actions from producing toast lines.
     const flow = gateFlow();
     expect(notifyLines(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }])).toEqual([]);
+  });
+});
+
+describe("applyClocks", () => {
+  const twoRules = () => flowWith(
+    [place("a", "PROJ-1"), notify("y", "one"), notify("z", "two")],
+    [edge("e1", "a", "y", { timeoutMinutes: 10 }), edge("e2", "a", "z", { timeoutMinutes: 10 })],
+  );
+
+  it("stamps liveSince on the edges that went live, and nothing else", () => {
+    const out = applyClocks(twoRules(), { wentLive: ["e1"], expired: [] }, NOW);
+    expect(out.edges[0].liveSince).toBe(NOW);
+    expect(out.edges[1].liveSince).toBeUndefined();
+    expect(out.edges[0].expiredAt).toBeUndefined();
+  });
+
+  it("stamps expiredAt on the edges that ran out", () => {
+    const flow = twoRules();
+    flow.edges[1].liveSince = NOW - 60 * 60_000;
+    const out = applyClocks(flow, { wentLive: [], expired: ["e2"] }, NOW);
+    expect(out.edges[1].expiredAt).toBe(NOW);
+    expect(out.edges[1].liveSince).toBe(NOW - 60 * 60_000);
+    expect(out.edges[0]).toEqual(flow.edges[0]);
+  });
+
+  it("returns the very same flow when there is nothing to stamp, so the caller can skip the write", () => {
+    const flow = twoRules();
+    expect(applyClocks(flow, { wentLive: [], expired: [] }, NOW)).toBe(flow);
+  });
+
+  it("does not restart a clock the store already holds — the evaluation was a store-read ago", () => {
+    const flow = twoRules();
+    flow.edges[0].liveSince = NOW - 5;
+    const out = applyClocks(flow, { wentLive: ["e1"], expired: [] }, NOW);
+    expect(out).toBe(flow);
+  });
+
+  it("leaves an edge that settled between the evaluation and this write alone", () => {
+    // Another window fired it in the gap. A settled edge must not gain an
+    // expiry stamp on top of its receipt, nor a clock it no longer needs.
+    const flow = twoRules();
+    flow.edges[0].firedAt = NOW - 1;
+    flow.edges[1].error = "boom";
+    expect(applyClocks(flow, { wentLive: ["e1"], expired: ["e2"] }, NOW)).toBe(flow);
+  });
+
+  it("ignores an edge id that is not in the flow", () => {
+    const flow = twoRules();
+    expect(applyClocks(flow, { wentLive: ["nope"], expired: ["nope"] }, NOW)).toBe(flow);
+  });
+
+  it("does not mutate the flow it is given", () => {
+    const flow = twoRules();
+    const before = JSON.stringify(flow);
+    applyClocks(flow, { wentLive: ["e1"], expired: ["e2"] }, NOW);
+    expect(JSON.stringify(flow)).toBe(before);
+  });
+});
+
+describe("applyFired — opt-in retry", () => {
+  const launchFlow = (edgeOver: Partial<FlowEdge> = {}) => {
+    const planned = { id: "p", kind: "planned" as const, x: 0, y: 0, join: "any" as const, ticketKey: "PROJ-9", repos: ["r"], mode: "tdd", dest: "worktree" as const };
+    return flowWith([place("a", "PROJ-1"), planned], [edge("e1", "a", "p", { retry: { max: 2, backoffMs: 30_000 }, ...edgeOver })]);
+  };
+  const fail = (flow: Flow) => new Map([["e1", { ok: false, error: "no worktree" } as const]]);
+  const hit = (flow: Flow, action: "launch" | "run" = "launch"): FiredEdge => ({ edge: flow.edges[0], perform: true, action });
+
+  it("schedules a retry on the first failure of a rule that opted in: error kept, attempts 1, retryAt = now + backoff, not settled", () => {
+    const flow = launchFlow();
+    const out = applyFired(flow, [hit(flow)], NOW, fail(flow)).edges[0];
+    expect(out).toMatchObject({ error: "no worktree", attempts: 1, retryAt: NOW + 30_000, performed: true });
+    expect(out.firedAt).toBeUndefined();
+  });
+
+  it("latches after the last allowed retry fails, keeping the count", () => {
+    const flow = launchFlow({ attempts: 2, retryAt: NOW - 1, error: "earlier" });
+    const out = applyFired(flow, [hit(flow)], NOW, fail(flow)).edges[0];
+    expect(out).toMatchObject({ error: "no worktree", attempts: 3, performed: true });
+    expect(out.retryAt).toBeUndefined();
+  });
+
+  it("does not retry a rule that never opted in — a failure is the full stop it always was", () => {
+    const flow = launchFlow({ retry: undefined });
+    const out = applyFired(flow, [hit(flow)], NOW, fail(flow)).edges[0];
+    expect(out).toMatchObject({ error: "no worktree", attempts: 1, performed: true });
+    expect(out.retryAt).toBeUndefined();
+  });
+
+  it("does not retry a run without the safe-to-re-run tick, and does with it", () => {
+    const flow = launchFlow();
+    expect(applyFired(flow, [hit(flow, "run")], NOW, fail(flow)).edges[0].retryAt).toBeUndefined();
+    const ticked = launchFlow({ retryOk: true });
+    expect(applyFired(ticked, [hit(ticked, "run")], NOW, fail(ticked)).edges[0].retryAt).toBe(NOW + 30_000);
+  });
+
+  it("a success after retries clears the error and the schedule, keeps the count, and says so in the receipt", () => {
+    const flow = launchFlow({ attempts: 2, retryAt: NOW - 1, error: "earlier" });
+    const out = applyFired(flow, [hit(flow)], NOW, new Map([["e1", { ok: true, note: "opened r-3a" } as const]])).edges[0];
+    expect(out.firedAt).toBe(NOW);
+    expect(out.firedNote).toBe("opened r-3a · after 2 retries");
+    expect(out.error).toBeUndefined();
+    expect(out.retryAt).toBeUndefined();
+    expect(out.attempts).toBe(2);
+  });
+
+  it("a first-time success reads exactly as it always did", () => {
+    const flow = launchFlow();
+    const out = applyFired(flow, [hit(flow)], NOW, new Map([["e1", { ok: true, note: "opened r-3a" } as const]])).edges[0];
+    expect(out.firedNote).toBe("opened r-3a");
+    expect(out.attempts).toBeUndefined();
+  });
+
+  it("a fail-closed edge (no outcome reported) is terminal even with a policy — nothing ran to retry", () => {
+    const flow = launchFlow({ attempts: 1, retryAt: NOW - 1, error: "earlier" });
+    const out = applyFired(flow, [hit(flow)], NOW, new Map()).edges[0];
+    expect(out.error).toMatch(/was not performed/);
+    expect(out.retryAt).toBeUndefined();
+  });
+});
+
+describe("applyFired — a spawn edge", () => {
+  const subFlow = () => {
+    const sub = { id: "s", kind: "subflow" as const, x: 0, y: 0, join: "any" as const, templateId: "t" };
+    return flowWith([place("a", "PROJ-1"), sub], [edge("e1", "a", "s")]);
+  };
+
+  it("is performed by the host and so owes an outcome: a success stamps the receipt, no outcome fails closed", () => {
+    const flow = subFlow();
+    const ok = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "spawn" }], NOW,
+      new Map([["e1", { ok: true, note: "started Ship it" } as const]])).edges[0];
+    expect(ok).toMatchObject({ firedAt: NOW, firedNote: "started Ship it", performed: true });
+    const none = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "spawn" }], NOW).edges[0];
+    expect(none.error).toBe("spawn was not performed");
+    expect(none.firedAt).toBeUndefined();
+  });
+
+  it("a refusal latches the rule with the host's error", () => {
+    const flow = subFlow();
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "spawn" }], NOW,
+      new Map([["e1", { ok: false, error: "the template is gone" } as const]])).edges[0];
+    expect(out).toMatchObject({ error: "the template is gone", performed: true });
   });
 });

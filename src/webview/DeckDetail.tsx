@@ -49,6 +49,9 @@ export interface DeckDetailProps {
    * the Orchestrator drawer read, so this drawer's workflow state cannot disagree
    * with theirs about what a `branch-ci-passed` rule is waiting on. */
   branchCi: Record<string, BranchCiStatus>;
+  /** `command-printed` verdicts, flow id → rule edge id — threaded beside
+   * `branchCi` for the same reason it is. Optional: absent reads as waiting. */
+  printed?: Record<string, Record<string, boolean>>;
   /** `agentFlow.orchestrator`. The Workflow section — chip, block, picker,
    * everything — renders nothing at all while this is false: the setting
    * defaults off, and new surface must ship inert. */
@@ -226,7 +229,7 @@ function copy(text: string): void {
 }
 
 export function DeckDetail({
-  card, sourceLabel, usage, closing = false, flows, templates, runs, branchCi, orchEnabled,
+  card, sourceLabel, usage, closing = false, flows, templates, runs, branchCi, printed, orchEnabled,
   onClose, onForget, onOpenWorkflow, onOpenTemplates,
 }: DeckDetailProps): JSX.Element {
   const r = card.status;
@@ -264,7 +267,7 @@ export function DeckDetail({
   // fix, and it stays cheap because `DeckApp.tsx`'s own 1s `forceTick` already
   // re-renders this drawer regularly regardless of what this file does.
   const now = Date.now();
-  const workflow = orchEnabled ? cardWorkflow(flows, r, runs, now, branchCi) : undefined;
+  const workflow = orchEnabled ? cardWorkflow(flows, r, runs, now, branchCi, printed) : undefined;
   const wf = workflow?.flow;
   const wfState = workflow?.state;
   const [pickerOpen, setPickerOpen] = React.useState(false);

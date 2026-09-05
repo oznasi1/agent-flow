@@ -948,7 +948,7 @@ describe("a parameterised condition", () => {
     expect(values).not.toContain("command-succeeded");
   });
 
-  it("offers only the command condition on a row out of a command node", () => {
+  it("offers only the command-shaped conditions on a row out of a command node", () => {
     const fromCommand = flow({
       nodes: [
         { id: "n1", kind: "command", x: 0, y: 0, join: "any", commandId: "deploy" },
@@ -961,7 +961,8 @@ describe("a parameterised condition", () => {
     const values = Array.from(
       screen.getByLabelText("Condition").querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    expect(values).toEqual(["command-succeeded"]);
+    // Both command-shaped kinds, and nothing place- or gate-shaped.
+    expect(values).toEqual(["command-succeeded", "command-printed"]);
   });
 });
 
@@ -1013,7 +1014,7 @@ describe("adding a rule from the keyboard", () => {
     expect(cond.value).toBe("pr-merged");
     fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n2" } });
     expect(Array.from(cond.querySelectorAll("option")).map((o) => (o as HTMLOptionElement).value))
-      .toEqual(["command-succeeded"]);
+      .toEqual(["command-succeeded", "command-printed"]);
     // Asserted on the rule the bar actually BUILDS, not on the select's rendered
     // value: jsdom resolves a value matching no option to the FIRST option, so a
     // draft still holding `pr-merged` would read as "command-succeeded" here
@@ -1469,5 +1470,55 @@ describe("the new-rule bar and a parameterised condition", () => {
     const bar = screen.getByTestId("flowlist-newrule");
     fireEvent.change(within(bar).getByLabelText("New rule condition"), { target: { value: "pr-merged" } });
     expect(within(bar).queryByLabelText("Branch")).toBeNull();
+  });
+});
+
+describe("a rule's deadline in the list", () => {
+  it("offers a deadline field on an open row for every verb, and writes it on blur", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: placeAndNotify(), onSave })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const box = screen.getByLabelText("Deadline minutes") as HTMLInputElement;
+    fireEvent.change(box, { target: { value: "45" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].timeoutMinutes).toBe(45);
+  });
+
+  it("clears the deadline when the field is emptied, and keeps the old value on junk", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: placeAndPlanned({ timeoutMinutes: 45 }), onSave })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const box = screen.getByLabelText("Deadline minutes") as HTMLInputElement;
+    expect(box.value).toBe("45");
+    fireEvent.change(box, { target: { value: "-2" } });
+    fireEvent.blur(box);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(box.value).toBe("45");
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    expect("timeoutMinutes" in (onSave.mock.calls.at(-1)![0] as Flow).edges[0]).toBe(false);
+  });
+
+  it("a closed row says how long the rule may wait, and says nothing without a deadline", () => {
+    const r1 = render(<FlowList {...props({ flow: placeAndPlanned({ timeoutMinutes: 45 }) })} />);
+    expect(screen.getByTestId("flowlist-row-e1").textContent).toContain("within 45m");
+    r1.unmount();
+    render(<FlowList {...props({ flow: placeAndPlanned() })} />);
+    expect(screen.getByTestId("flowlist-row-e1").textContent).not.toContain("within");
+    expect(screen.queryByLabelText("Deadline minutes")).toBeNull();
+  });
+
+  it("shows an expired rule's receipt in the dim voice, not red, and offers Reset", () => {
+    const onResetEdge = vi.fn();
+    render(<FlowList {...props({
+      flow: placeAndPlanned({ timeoutMinutes: 45, liveSince: 1_000, expiredAt: 1_000 + 45 * 60_000 }),
+      onResetEdge,
+    })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    expect(row.textContent).toContain("expired — waited 45m");
+    expect(row.querySelector(".fl-receipt .err")).toBeNull();
+    expect(row.querySelector(".fl-receipt .fired")).toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: "Reset" }));
+    expect(onResetEdge).toHaveBeenCalled();
   });
 });

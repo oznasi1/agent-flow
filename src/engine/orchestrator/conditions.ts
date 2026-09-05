@@ -188,6 +188,32 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
         `evalCond cannot answer ${cond.kind}: a gate's verdict is decided in ` +
           "evaluate.ts's gateAnswer from the whole Flow, never from one place's CondContext.",
       );
+    case "deadline-passed":
+      // The fourth kind answered from the whole `Flow` rather than from a place:
+      // the fact is a SIBLING edge's `expiredAt`, which no `CondContext` carries.
+      // `evaluate.ts`'s `isMet` intercepts it before this switch, exactly as it
+      // does the three above, and `observationOf` refuses it before
+      // `describeCond`. Throwing keeps it that way.
+      throw new Error(
+        "evalCond cannot answer deadline-passed: it is decided in evaluate.ts from a " +
+          "sibling edge's expiredAt, never from one place's CondContext.",
+      );
+    case "command-printed":
+      // Answered from the journal, host-side, and handed to `evaluate.ts` on
+      // `EvalInput.printed` (see `commandPrinted` there). No `CondContext`
+      // carries a command's output, so — as for the four kinds above — this arm
+      // exists only to keep the switch total, and throws to stay unreachable.
+      throw new Error(
+        "evalCond cannot answer command-printed: it is decided in evaluate.ts from a " +
+          "host-supplied verdict, never from one place's CondContext.",
+      );
+    case "subflow-done":
+      // Answered from another FLOW's file (`subflowDone`, model.ts), handed to
+      // `evaluate.ts` on `EvalInput.flows`. Same reasoning as the arms above.
+      throw new Error(
+        "evalCond cannot answer subflow-done: it is decided in evaluate.ts from the child " +
+          "flow, never from one place's CondContext.",
+      );
     default:
       // A kind this build does not know — a flow file written by a NEWER build.
       // `store.ts`'s `validEdge` deliberately KEEPS such an edge so the rule
@@ -356,6 +382,25 @@ export function describeCond(cond: Condition, c: CondContext): string {
         "describeCond cannot describe gate-approved/gate-rejected: there is no " +
           "CondContext-shaped observation for a gate. observationOf (orchestratorRule.ts) " +
           "must refuse this kind the same way it refuses command-succeeded.",
+      );
+    case "deadline-passed":
+      // Unreachable for the same reason as the two arms above: the observation
+      // is a sibling edge's stamp, not anything a place's `RunStatus` holds.
+      throw new Error(
+        "describeCond cannot describe deadline-passed: there is no place-shaped " +
+          "observation for it. observationOf (orchestratorRule.ts) must refuse this kind.",
+      );
+    case "command-printed":
+      // Unreachable for the same reason: the observation is a command's journaled
+      // output, not anything a place's `RunStatus` holds.
+      throw new Error(
+        "describeCond cannot describe command-printed: there is no place-shaped " +
+          "observation for it. observationOf (orchestratorRule.ts) must refuse this kind.",
+      );
+    case "subflow-done":
+      throw new Error(
+        "describeCond cannot describe subflow-done: there is no place-shaped " +
+          "observation for it. observationOf (orchestratorRule.ts) must refuse this kind.",
       );
   }
 }

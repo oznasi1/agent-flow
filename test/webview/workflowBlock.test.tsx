@@ -472,3 +472,81 @@ describe("WorkflowBlock — state to appearance", () => {
     expect(rules.length).toBeGreaterThan(6);
   });
 });
+
+describe("WorkflowBlock — a step with a deadline", () => {
+  it("marks an expired step .wf-expired, words it as expired, and offers Reset but never Output", async () => {
+    const base = makeBase();
+    const expiredFlow: Flow = {
+      ...runFlow,
+      edges: [{ ...edge("e1"), timeoutMinutes: 30, liveSince: 1_000, expiredAt: 1_000 + 30 * 60_000 }],
+    };
+    render(<WorkflowBlock {...base} flow={expiredFlow} state={{
+      status: "advancing", done: 1, total: 1,
+      steps: [{ edgeId: "e1", state: "expired" }],
+    }} />);
+    const li = document.querySelector("li.wf-step")!;
+    expect(li.className).toBe("wf-step wf-expired");
+    expect(screen.getByText("expired — waited 30m")).toBeTruthy();
+    // A `run` rule's target — and still no Output: an expiry ran nothing.
+    expect(screen.queryByRole("button", { name: "Output" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(base.onResetEdge).toHaveBeenCalledWith("e1");
+  });
+
+  it("counts down on the current step while its clock is running", () => {
+    render(<WorkflowBlock {...makeBase()} state={{
+      status: "advancing", done: 0, total: 1,
+      steps: [{ edgeId: "e1", state: "now", deadlineAt: Date.now() + 12 * 60_000 + 5_000 }],
+    }} />);
+    expect(screen.getByText("expires in 12m")).toBeTruthy();
+  });
+
+  it("lets a recorded receipt win over the countdown — the engine's words come first", () => {
+    render(<WorkflowBlock {...makeBase()} state={{
+      status: "advancing", done: 0, total: 1,
+      steps: [{ edgeId: "e1", state: "now", receipt: "no branch set", deadlineAt: Date.now() + 12 * 60_000 }],
+    }} />);
+    expect(screen.getByText("no branch set")).toBeTruthy();
+    expect(screen.queryByText(/expires in/)).toBeNull();
+  });
+
+  it("spends neither attention colour on an expired step", () => {
+    // The hue rule again, for the new state: an expiry is not a failure and does
+    // not want a human, so it gets the dim default and nothing more.
+    const rules = [...DECK_CSS.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(\.wf-step\.wf-expired[^{]*)\{([^}]*)\}/g)];
+    for (const [, , body] of rules) {
+      expect(body).not.toContain("--c-danger");
+      expect(body).not.toContain("--c-attn");
+    }
+  });
+});
+
+describe("WorkflowBlock — a failure pending retry", () => {
+  it("reads as the current step with the error and the schedule, and offers Reset and Output", async () => {
+    const base = makeBase();
+    const retryingFlow: Flow = {
+      ...runFlow,
+      edges: [{ ...edge("e1"), retry: { max: 3, backoffMs: 60_000 }, retryOk: true, error: "exit 1", attempts: 1, retryAt: Date.now() + 30_000, performed: true }],
+    };
+    render(<WorkflowBlock {...base} flow={retryingFlow} state={{
+      status: "advancing", done: 0, total: 1,
+      steps: [{ edgeId: "e1", state: "now", receipt: "exit 1", retryAt: Date.now() + 30_000 }],
+    }} />);
+    expect(document.querySelector("li.wf-step")!.className).toBe("wf-step wf-now");
+    expect(screen.getByText(/exit 1 · retry 1 of 3 in (29|30)s/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Output" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(base.onResetEdge).toHaveBeenCalledWith("e1");
+  });
+
+  it("a terminal failure after retries says what it cost", () => {
+    const failedFlow: Flow = {
+      ...runFlow,
+      edges: [{ ...edge("e1"), retry: { max: 2, backoffMs: 1 }, retryOk: true, error: "exit 1", attempts: 3, performed: true }],
+    };
+    render(<WorkflowBlock {...makeBase()} flow={failedFlow} state={{
+      status: "stopped", done: 1, total: 1, steps: [{ edgeId: "e1", state: "fail", receipt: "exit 1" }],
+    }} />);
+    expect(screen.getByText("exit 1 · gave up after 2 retries")).toBeTruthy();
+  });
+});

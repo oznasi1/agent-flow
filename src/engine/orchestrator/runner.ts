@@ -1,8 +1,40 @@
 // What an armed flow's fired edges MEAN: the latches to stamp, and the sentences
 // to show. Pure and total, so both decisions are testable from fixtures without a
 // panel, a filesystem or a clock — the panel does the I/O.
-import { FiredEdge } from "./evaluate";
-import { Flow, findNode, isSpendAction } from "./model";
+import { ClockResult, FiredEdge } from "./evaluate";
+import { Flow, FlowAction, FlowEdge, findNode, isPerformedAction, isSettled, isSpendAction, retryPolicy } from "./model";
+
+/** Stamp the clocks a pass decided about: `liveSince` on every rule that went
+ * live, `expiredAt` on every rule that ran out. Returns the SAME flow object when
+ * nothing changed, so the caller can skip the write — a pass on a flow with no
+ * deadlines must cost no write at all, which is what keeps this feature inert
+ * for every flow that never opted in.
+ *
+ * Reads the edge as the store holds it NOW, not as evaluation saw it a store-read
+ * ago, and that is why two of the ids can be ignored: a rule another window has
+ * since settled must not gain an expiry on top of its receipt, and a clock the
+ * store already holds is not restarted (evaluation named it live because ITS copy
+ * had no `liveSince`; the store's copy may, if a parallel pass got there first).
+ * Both are the same discipline `advanceUnderLock`'s `unclaimed` filter applies to
+ * fired edges. */
+export function applyClocks(flow: Flow, clocks: ClockResult, nowMs: number): Flow {
+  const live = new Set(clocks.wentLive);
+  const out = new Set(clocks.expired);
+  let changed = false;
+  const edges = flow.edges.map((e) => {
+    if (isSettled(e)) return e;
+    if (out.has(e.id)) {
+      changed = true;
+      return { ...e, expiredAt: nowMs };
+    }
+    if (live.has(e.id) && e.liveSince === undefined) {
+      changed = true;
+      return { ...e, liveSince: nowMs };
+    }
+    return e;
+  });
+  return changed ? { ...flow, edges } : flow;
+}
 
 /** What actually happened when the caller performed one acting edge. Only the
  * caller can know — a `launch` either opened a window or explained why it did not —
@@ -107,11 +139,26 @@ export function applyFired(
       // outcome" IS that allowlist, by construction. A fifth, non-spending verb is
       // never dispatched, so demanding an outcome from it would latch a rule
       // nothing was ever asked to perform.
-      if (hit.perform && isSpendAction(hit.action)) {
+      // `isPerformedAction`, not `isSpendAction`: `spawn` spends nothing and is
+      // neither capped nor consent-gated, but the host DOES perform it (it writes
+      // the child flow) and so owes an outcome exactly like a launch does.
+      if (hit.perform && isPerformedAction(hit.action)) {
         const outcome = outcomes?.get(e.id);
-        if (!outcome) return { ...e, error: `${hit.action} was not performed`, performed: true };
-        if (!outcome.ok) return { ...e, error: outcome.error, performed: true };
-        return { ...e, firedAt: nowMs, firedNote: outcome.note, performed: true };
+        // Terminal, and never retried: nothing ran, so there is no failure a
+        // second attempt could be a second attempt AT. `retryAt` is dropped in
+        // case this is the fail-closed end of a retry that never reached the act.
+        if (!outcome) return { ...withoutRetryStamps(e), error: `${hit.action} was not performed`, performed: true };
+        if (!outcome.ok) return failedStamp(e, hit.action, outcome.error, nowMs);
+        // A success clears the failure it may be recovering from: `error` and
+        // `retryAt` go, `attempts` stays so the receipt can say what it took.
+        const { error: _cleared, ...recovered } = withoutRetryStamps(e);
+        const retries = typeof e.attempts === "number" && e.attempts > 0 ? e.attempts : 0;
+        return {
+          ...recovered,
+          firedAt: nowMs,
+          firedNote: retries > 0 ? `${outcome.note} · after ${retries} ${retries === 1 ? "retry" : "retries"}` : outcome.note,
+          performed: true,
+        };
       }
       return {
         ...e,
@@ -125,6 +172,30 @@ export function applyFired(
       };
     }),
   };
+}
+
+/** `e` with the pending-retry stamp removed. `attempts` is deliberately kept: it
+ * is the count, and the count outlives the schedule. */
+function withoutRetryStamps(e: FlowEdge): FlowEdge {
+  const { retryAt: _drop, ...rest } = e;
+  return rest;
+}
+
+/** What a FAILED performing edge is stamped with. Counts the failure, then asks
+ * `retryPolicy` whether — for this action, with this rule's opt-in — another
+ * attempt is allowed. If so the edge keeps its `error` (the drawer shows what
+ * went wrong) and gains `retryAt`, which is what keeps it out of `isSettled` and
+ * tells `evaluate.ts` when it may be tried again. Otherwise it is the terminal
+ * failure it always was, with `attempts` saying how many tries that took.
+ *
+ * `attempts` counts failures, so after the first failure it is 1 and a policy of
+ * `max: 3` schedules retries after failures 1, 2 and 3 — three retries, four
+ * attempts in all — and latches on the fourth failure. */
+function failedStamp(e: FlowEdge, action: FlowAction | undefined, error: string, nowMs: number): FlowEdge {
+  const attempts = (typeof e.attempts === "number" && e.attempts >= 0 ? e.attempts : 0) + 1;
+  const policy = retryPolicy(e, action);
+  const base = { ...withoutRetryStamps(e), error, performed: true as const, attempts };
+  return policy !== undefined && attempts <= policy.max ? { ...base, retryAt: nowMs + policy.backoffMs } : base;
 }
 
 /** The receipt for a performed edge the caller reported no outcome for — which,
