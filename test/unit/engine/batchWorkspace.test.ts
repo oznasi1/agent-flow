@@ -13,7 +13,7 @@ const writeFileSync = vi.mocked(fs.writeFileSync);
 const realpathSync = vi.mocked(fs.realpathSync);
 const execSync = vi.mocked(childProcess.execSync);
 const execFileSync = vi.mocked(childProcess.execFileSync);
-const exec = vi.mocked(childProcess.exec);
+const execFile = vi.mocked(childProcess.execFile);
 
 beforeEach(() => {
   vi.mocked(fs).mkdirSync.mockReset();
@@ -24,7 +24,7 @@ beforeEach(() => {
   realpathSync.mockReset().mockImplementation((p) => String(p));
   execSync.mockReset().mockReturnValue(""); // git ls-files → no files
   execFileSync.mockReset().mockReturnValue(""); // gitState's git calls → no state
-  exec.mockReset().mockImplementation(((_c: string, cb: (e: unknown) => void) => cb(null)) as never);
+  execFile.mockReset().mockImplementation(((_f: string, _a: string[], cb: (e: unknown) => void) => cb(null)) as never);
 });
 
 /** Two tasks, each with one worktree in `api`. */
@@ -245,13 +245,14 @@ describe("openSharedWorkspace", () => {
     expect(order.slice(first, last + 1)).toEqual(["plan", "plan"]);
     // …and the durable writes still all precede the open.
     expect(order.indexOf("run")).toBeGreaterThan(last);
-    expect(exec).toHaveBeenCalledTimes(1);
+    expect(execFile).toHaveBeenCalledTimes(1);
   });
 
   it("opens the destination exactly once", async () => {
     await openSharedWorkspace(baseReq());
-    expect(exec).toHaveBeenCalledTimes(1);
-    expect(String(exec.mock.calls[0][0])).toContain("/ws/PROJ-1+1.code-workspace");
+    expect(execFile).toHaveBeenCalledTimes(1);
+    // The path is its own argv slot, never spliced into a command string.
+    expect((execFile.mock.calls[0] as unknown as [string, string[]])[1]).toContain("/ws/PROJ-1+1.code-workspace");
   });
 
   // "This window" is the one destination that changes nothing about the window it
@@ -263,7 +264,7 @@ describe("openSharedWorkspace", () => {
       const result = await openSharedWorkspace(
         baseReq({ target: { kind: "current" }, currentWindow: here }),
       );
-      expect(exec).not.toHaveBeenCalled();
+      expect(execFile).not.toHaveBeenCalled();
       expect(commands.executeCommand).not.toHaveBeenCalledWith("vscode.openFolder", expect.anything(), expect.anything());
       expect(result.seededInPlace).toBe(true);
       expect(result.opened).toBe(true);

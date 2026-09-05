@@ -614,6 +614,28 @@ describe("Notepad — images", () => {
     expect(screen.queryAllByRole("img")).toHaveLength(0);
   });
 
+  it("renders nothing for a thumbnail whose URI carries an unusable scheme", () => {
+    // Same treatment as a URI that never arrived: dropped, not drawn half-formed.
+    // `asWebviewUri` never produces this, but the src is built from a stored
+    // filename, so the scheme is checked at the point it reaches the DOM.
+    render(<Notepad ordered={false} notes={[note({ images: [image()], imageUris: ["javascript:alert(1)"] })]} />);
+    expect(screen.queryAllByRole("img")).toHaveLength(0);
+  });
+
+  it("keeps every URI shape asWebviewUri really returns", () => {
+    // Which one arrives depends on the host, so a scheme check that rejected any of
+    // them would blank the strip on that editor rather than on a hostile input.
+    render(<Notepad ordered={false} notes={[note({
+      images: [image(), image({ id: "i2", name: "b.png" }), image({ id: "i3", name: "c.png" })],
+      imageUris: [
+        "https://file+.vscode-resource.vscode-cdn.net/a.png",
+        "vscode-webview-resource://abc/b.png",
+        "data:image/png;base64,iVBORw0KGgo=",
+      ],
+    })]} />);
+    expect(screen.getAllByRole("img")).toHaveLength(3);
+  });
+
   it("renders no image strip for a note without images", () => {
     render(<Notepad notes={[note()]} ordered={false} />);
     expect(screen.queryAllByRole("img")).toHaveLength(0);

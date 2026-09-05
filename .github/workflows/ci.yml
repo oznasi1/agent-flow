@@ -5,6 +5,12 @@ on:
     branches: [main]
   pull_request:
 
+# The gate only ever reads the tree. Without this the job would inherit the
+# repository default for GITHUB_TOKEN, which on a write-default repo hands every
+# `npm ci` postinstall script a token that can push to main.
+permissions:
+  contents: read
+
 jobs:
   build-and-test:
     runs-on: ubuntu-latest

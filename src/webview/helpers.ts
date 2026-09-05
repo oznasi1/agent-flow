@@ -273,3 +273,34 @@ export function timeAgo(ms: number | null): string {
   if (s < 86400) return `${Math.round(s / 3600)}h ago`;
   return `${Math.round(s / 86400)}d ago`;
 }
+
+// ── URL safety ────────────────────────────────────────────────────────────────
+// A notepad thumbnail's src is built from a stored filename, so it is a URL the
+// webview did not author reaching the DOM. The guard allowlists rather than strips:
+// an unrecognised scheme loses its tile, and nothing is passed through half-cleaned.
+// (The sidebar's ticket-URL guard is written out inline in App.tsx instead — see the
+// comment there for why it cannot live here.)
+
+/** Schemes an image `src` may legitimately carry here. `asWebviewUri` returns
+ * `vscode-webview:`-family URIs on some hosts and an `https://…vscode-cdn.net` URL on
+ * others, and the same code renders data and blob URLs for an image held in memory. */
+const MEDIA_SCHEMES = [
+  "https://", "http://", "blob:", "data:image/",
+  "vscode-webview://", "vscode-webview-resource://", "vscode-resource:", "vscode-file://",
+] as const;
+
+/** `uri` if it is safe to use as an image `src`, otherwise `undefined`.
+ *
+ *  The return is REBUILT from the matched scheme literal rather than being the input
+ *  handed back, and that is the substance of the guard, not a formality: the part of
+ *  a URL that decides whether it executes is its prefix, and after this the prefix is
+ *  one of the literals above by construction — no arrangement of the input can put
+ *  anything else there. Returning `uri` itself leaves a value whose scheme merely
+ *  *was checked*, which is a weaker claim and one CodeQL's js/xss correctly declines
+ *  to accept (a `WriteUrlSink` is only a sink while the attacker holds the prefix). */
+export function safeMediaSrc(uri: string | undefined): string | undefined {
+  if (!uri) return undefined;
+  const lower = uri.toLowerCase();
+  const scheme = MEDIA_SCHEMES.find((s) => lower.startsWith(s));
+  return scheme ? `${scheme}${uri.slice(scheme.length)}` : undefined;
+}

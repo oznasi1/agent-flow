@@ -18,8 +18,9 @@ import { setConfig } from "../../_mocks/vscode";
 
 vi.mock("child_process", () => ({
   // `open -a` succeeds by invoking its callback with no error; execSync backs
-  // `git ls-files` (no files) and the git-exclude write.
-  exec: vi.fn((_cmd: string, cb: (e: unknown) => void) => cb(null)),
+  // `git ls-files` (no files) and the git-exclude write. It is `execFile`, not
+  // `exec`: openInEditor spawns `open` with an argv array and no shell.
+  execFile: vi.fn((_f: string, _a: string[], cb: (e: unknown) => void) => cb(null)),
   execSync: vi.fn(() => ""),
   execFileSync: vi.fn(() => ""),
 }));

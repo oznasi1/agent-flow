@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, keyLabel, keyMatches, matchesStatus, normalizeKey, moveKey, railClass, ticketKind, visibleFilters } from "../../src/webview/helpers";
+import { addOnce, deriveStatuses, effectiveFilter, fmtEst, isPrReviewStatus, isTopPriority, keyLabel, keyMatches, matchesStatus, normalizeKey, moveKey, railClass, safeMediaSrc, ticketKind, visibleFilters } from "../../src/webview/helpers";
 import type { Filter, Run, Task } from "../../src/types";
 import { mkTask } from "../_helpers/factories";
 
@@ -408,5 +408,44 @@ describe("keyMatches", () => {
     // which case there is no number to prefix and only the whole thing matches.
     expect(keyMatches("SPIKE", "spike")).toBe(true);
     expect(keyMatches("SPIKE", "1")).toBe(false);
+  });
+});
+
+describe("safeMediaSrc", () => {
+  it("accepts every URI shape asWebviewUri actually produces", () => {
+    // Which one arrives depends on the host, so rejecting any of them would blank
+    // the notepad's thumbnails on that editor rather than on a malicious input.
+    for (const uri of [
+      "vscode-webview://abc/notepad-images/i1.png",
+      "vscode-webview-resource://abc/i1.png",
+      "vscode-resource:/i1.png",
+      "vscode-file://vscode-app/i1.png",
+      "https://file+.vscode-resource.vscode-cdn.net/i1.png",
+      "blob:vscode-webview://abc/uuid",
+      "data:image/png;base64,iVBORw0KGgo=",
+    ]) {
+      expect(safeMediaSrc(uri)).toBe(uri);
+    }
+  });
+
+  it("normalises the scheme's case, because the prefix it returns is the literal", () => {
+    // The return is rebuilt from the matched literal rather than being the input
+    // handed back, so an oddly-cased scheme comes out canonical. That is the point:
+    // after this the prefix is one of the allowed literals by construction.
+    expect(safeMediaSrc("HTTPS://host/a.png")).toBe("https://host/a.png");
+    expect(safeMediaSrc("VSCode-Webview://abc/a.png")).toBe("vscode-webview://abc/a.png");
+  });
+
+  it("keeps everything after the scheme byte for byte", () => {
+    // Only the prefix is replaced; the rest must survive untouched, including the
+    // case and any characters a filename brought with it.
+    expect(safeMediaSrc("https://Host/Path%20With+Odd~Chars.PNG")).toBe("https://Host/Path%20With+Odd~Chars.PNG");
+  });
+
+  it("rejects a script-bearing or HTML data src", () => {
+    expect(safeMediaSrc("javascript:alert(1)")).toBeUndefined();
+    expect(safeMediaSrc("data:text/html,<script>alert(1)</script>")).toBeUndefined();
+    expect(safeMediaSrc("")).toBeUndefined();
+    expect(safeMediaSrc(undefined)).toBeUndefined();
   });
 });

@@ -65,7 +65,18 @@ function collect(suite, file, acc) {
 }
 const rows = (data.suites ?? []).flatMap((s) => collect(s, s.file, []));
 
-const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+// Quotes matter as much as angle brackets here: `esc` is used inside attribute values
+// (`alt="…"`) as well as in text, and a test title or attachment name carrying a double
+// quote would otherwise close the attribute and let the rest of it become markup. The
+// values are author-controlled today, but this report is generated from whatever a spec
+// file names, so it escapes on the way out rather than trusting that.
+const esc = (s) =>
+  String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
 const secs = (ms) => `${(ms / 1000).toFixed(1)}s`;
 
 const sections = rows

@@ -58,7 +58,16 @@ Merge finished children into \`${orchestration.parentBranch}\`; never into main.
 }
 
 /** A summary safe to drop in a markdown table cell: an unescaped pipe would end the
- *  cell early and shift every column after it. */
+ *  cell early and shift every column after it, and a newline would end the whole row.
+ *
+ *  Backslashes go first, and that ordering is the whole point. Escaping only the pipe
+ *  turns a summary that already contains a backslash-pipe pair into `a\\|b`, which a
+ *  renderer reads as one literal backslash followed by a LIVE pipe — the escape the
+ *  replace just added has been consumed by the backslash in front of it. Doubling
+ *  backslashes first means every `\\` in the output is one this function put there. */
 function cell(text: string): string {
-  return text.replace(/\|/g, "\\|");
+  return text
+    .replace(/\\/g, "\\\\")
+    .replace(/\|/g, "\\|")
+    .replace(/[\r\n]+/g, " ");
 }
