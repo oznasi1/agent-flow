@@ -51,13 +51,29 @@ const marketplaceConfig = {
   outfile: "dist/marketplace.js",
 };
 
+// The headless tick: `node dist/tick.js` runs one orchestrator pass with no editor.
+// A Node bundle like the extension host's, but with NOTHING external — there is no
+// `vscode` where it runs, so a module in its import graph that reaches for one
+// fails this build rather than crashing a cron job at 3am.
+const tickConfig = {
+  ...shared,
+  entryPoints: ["src/headless/main.ts"],
+  outfile: "dist/tick.js",
+  platform: "node",
+  format: "cjs",
+  target: "node18",
+  mainFields: ["module", "main"],
+};
+
+const ALL = [extensionConfig, webviewConfig, deckConfig, marketplaceConfig, tickConfig];
+
 async function main() {
   if (watch) {
-    const ctxs = await Promise.all([extensionConfig, webviewConfig, deckConfig, marketplaceConfig].map((c) => esbuild.context(c)));
+    const ctxs = await Promise.all(ALL.map((c) => esbuild.context(c)));
     await Promise.all(ctxs.map((c) => c.watch()));
     console.log("[esbuild] watching…");
   } else {
-    await Promise.all([extensionConfig, webviewConfig, deckConfig, marketplaceConfig].map((c) => esbuild.build(c)));
+    await Promise.all(ALL.map((c) => esbuild.build(c)));
     console.log("[esbuild] build complete");
   }
 }

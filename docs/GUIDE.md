@@ -224,7 +224,11 @@ The drawer says what each condition is waiting on right now. **Arm** a flow and 
 on every Deck refresh; a rule that is met fires exactly once and tells you, rather than firing
 again on every later pass. It keeps advancing while the Deck is hidden — an armed flow that
 only ran while you were looking at the board would not be armed — and closing the Deck
-genuinely does stop it, since the panel owns the poll; closing with something armed says so.
+genuinely does stop it, since the panel owns the poll; closing with something armed says so. To keep
+watching with the editor closed, schedule `node dist/tick.js` from the installed extension —
+one pass per run, performing notifications and already-approved commands and leaving anything
+that needs a window or a person pending; see
+[ORCHESTRATOR_COMMANDS.md](ORCHESTRATOR_COMMANDS.md#a-pass-without-the-editor).
 Reopening the Deck, including after a restart, shows you what is already ready and waits for a
 **Go** before acting on it, so an armed flow can never spend anything the moment you come
 back. Before it ever launches or seeds for the first time, a flow asks once — naming the
@@ -236,7 +240,10 @@ then, like a launch, runs unattended after that. If that is too coarse — a tem
 to many cards asks once each and then spends freely — `agentFlow.commandConsent: "command"`
 asks per distinct command text instead, and lets you approve one run, the next five, or
 always. At most three of these — launches, seeds and
-commands together — happen in a single pass, with the rest picked up on the next one. A
+commands together — happen in a single pass, with the rest picked up on the next one. A flow
+can also carry a **spend ceiling** — a lifetime cap on sessions opened plus commands run,
+counted off its journal and shown in its header — and a pass that would cross it performs
+nothing and disarms the flow with a notification saying so. A
 launch, seed or command that fails stamps its rule as errored and stops it there until you
 **Reset** it; a pre-flight read that fails instead — Jira unreachable, say — is retried on the
 next pass rather than latched as a failure. Two VS Code windows with the Deck open cannot fire

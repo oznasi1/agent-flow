@@ -54,23 +54,29 @@ first four steps can end the pass without a command ever running.
    or after a restart — that finds rules *already* met does not act. It
    reports them and waits for **Go**. A flow armed last week must not spend
    anything the moment you reopen the Deck.
-4. **Ask for consent, once per kind of spend.** Two separate gates: one
+4. **Stop at the ceiling, if you set one.** A flow's optional **spend
+   ceiling** bounds what it may spend over its whole life — sessions opened
+   plus commands run — counted off its own journal. A pass whose spends would
+   take that total past the ceiling performs none of them, disarms the flow,
+   and says so in a notification. See [The ceiling](#the-ceiling).
+5. **Ask for consent, once per kind of spend.** Two separate gates: one
    covers launching and seeding sessions, the other covers running
    shell. Consent to open a session is **not** consent to execute a command,
    so a flow you approved before commands existed is asked again. The modal
    names the actual command text. The pass that asks performs nothing —
    approval only lets the *next* pass act.
-5. **Run it.** Resolve the command (a named entry from settings, or the free
+6. **Run it.** Resolve the command (a named entry from settings, or the free
    text on the node), substitute `{note}`, decide the working directory, then
    hand it to the shell with a hard 120-second deadline.
-6. **Stamp the outcome — once, for the whole pass.** Success or failure, the
+7. **Stamp the outcome — once, for the whole pass.** Success or failure, the
    rule is marked and will not be evaluated again until you Reset it. Every
    outcome from the pass is written in a single write, so a crash between two
    rules cannot leave one of them looking like it never ran.
 
 Four branches leave a pass without running anything: **busy** (lock not
-taken → skip pass), **not met** (condition unmet → wait), **unapproved**
-(consent pending → ask, act next pass). The other two outcomes — exit 0, or
+taken → skip pass), **not met** (condition unmet → wait), **at the ceiling**
+(the flow disarms itself), **unapproved** (consent pending → ask, act next
+pass). The other two outcomes — exit 0, or
 non-zero/killed — both land in the same latch, which is terminal until
 Reset.
 
@@ -161,6 +167,70 @@ after the output channel itself has scrolled past it or the window has
 closed. The rule's own receipt carries the exit code and a sentence, not the
 output.
 
+## A pass without the editor
+
+The flows worth arming are the ones that watch overnight, and until now the
+pass was a timer on the Deck panel: close the window and nothing moved. The
+extension ships a second Node bundle for exactly that gap:
+
+```bash
+node ~/.vscode/extensions/oznasi1.agent-flow-<version>/dist/tick.js [--settings <path>] [--dry-run] [--no-fetch]
+```
+
+One invocation is one pass — the same pass the Deck runs, over the same
+`~/.agentflow/flows`, behind the same lock, writing the same stamps and the same
+[journal](FLOW_JOURNAL.md) lines — so a cron or launchd entry every few minutes
+is the whole scheduler, and the Deck picks up whatever the tick did the next time
+it opens. Exit `0` after a pass, `2` when a Deck or another tick held the lock,
+`3` when it could not start.
+
+**Where its settings come from.** There is no editor to ask, so it reads the
+same `settings.json` the editor would — Code, Code Insiders or Cursor, found by
+platform, or the file `--settings` names (`AGENT_FLOW_SETTINGS` works too).
+`agentFlow.orchestrator` must be on in that file; `agentFlow.commands`,
+`agentFlow.neverAutoRun`, `agentFlow.commandConsent`, `agentFlow.forge`,
+`agentFlow.prFacts` and `agentFlow.reposRoot` are read exactly as the editor
+reads them. Workspace-level settings are not: a tick has no workspace.
+
+**What it performs, and what it refuses.**
+
+- **`notify`** fires: the rule is stamped with its receipt and the line the Deck
+  would have toasted is printed instead. Nobody is notified beyond your log —
+  a cron job's stdout is the notification.
+- **`run`** fires **only when the flow already consented** — `commandConfirmedAt`
+  under the default consent mode, a covering per-command record under
+  `agentFlow.commandConsent: command` (a bounded approval is counted down). The
+  tick never asks and never invents an approval; an unconsented command is left
+  pending and named in the report. `agentFlow.neverAutoRun` is honoured before
+  consent is even consulted, and the command runs through the same runner, with
+  the same 120 s deadline, as it would in the Deck.
+- **`launch`, `seed` and `ask` are refused**, not degraded. They need an editor
+  and a person. Their met rules are left exactly as met as they were — not
+  stamped, not errored — and named as `needs an editor, left pending`, so the next
+  Deck pass finds them. A target whose performer is held has its siblings held
+  too, so an `"all"` junction is never half-stamped.
+
+Deadlines tick, the spend ceiling disarms, retries are scheduled and honoured,
+and `the command printed…` is answered from the journal — every rule the engine
+knows behaves the same, because it is the same engine.
+
+**What is different, and stated.**
+
+- **No resume gate.** The Deck holds first-look fires until you press Go, because
+  reopening a window must not spend. A scheduled tick is you asking for
+  unattended passes; it spends only what the flow already consented to.
+- **No ticket.** The connector's credentials live in the editor's secret store,
+  so a headless status carries no ticket: `ticket reached done` and `ticket
+  status is…` never fire from a tick.
+- **PR facts are refreshed** — but only for repos an armed flow's place watches,
+  and only past the Deck's own TTL, through the forge CLI the settings name.
+  `--no-fetch` reads the cache as the last Deck pass left it.
+- **No windows.** A card's "window open" reads false; nothing here opens one.
+
+`--dry-run` evaluates every armed flow, prints what a pass would do — `would
+notify`, `would run "…" in <repo>`, what needs an editor or consent — and
+writes nothing, runs nothing, and takes no lock.
+
 ## Consent per command
 
 The two consent gates are still two timestamps per flow, and that is
@@ -203,6 +273,36 @@ Every armed flow also keeps an append-only record of what it did — see
 > the write after a successful command fails, the command really ran but
 > nothing was stamped — and the next pass will run it again. This is the
 > same gap the launch path has.
+
+## The ceiling
+
+`MAX_LAUNCHES_PER_PASS` is 3, and it bounds one pass of one flow. Nothing
+accumulates across passes, and evaluation runs once per flow — so a poll
+across *N* armed flows can spend 3*N*, every six seconds, for as long as the
+conditions keep holding. Templates make *N* large cheaply: one shape attached
+to twenty cards is twenty flows, each entitled to that.
+
+A flow's **spend ceiling** is the lifetime bound. Set it in the flow header,
+beside the line that says what the flow has spent so far. It counts
+**sessions opened plus commands run**, and it counts them off the flow's own
+[journal](FLOW_JOURNAL.md): every spend is already a `fired` line there, so
+nothing is stored on the flow but the ceiling itself, and no existing flow
+needed migrating. Because the journal is lifetime, so is the count — **Reset**
+puts a rule back in play but un-spends nothing, and an `errored` launch that
+opened no window counts for nothing.
+
+When a pass finds that the spends it is about to perform would take the total
+**past** the ceiling, it performs **none** of them, writes the flow disarmed,
+and raises a notification naming the flow, the count against the ceiling, and
+how many this pass wanted. Reaching the ceiling exactly is allowed. The whole
+pass stops rather than the last edge over the line, so an `"all"` junction is
+never left with its siblings stamped around a performer that did not run. The
+journal records the stop as an `armed` event with `source: "ceiling"`. Raise
+the ceiling, or re-arm, to continue.
+
+One honest caveat: the journal is capped at 1 MB and trims its oldest lines.
+A flow chatty enough to be trimmed has lost its oldest spends, so on such a
+flow the count is a floor, not an exact total.
 
 ## Retry, if you ask for it
 
@@ -563,9 +663,11 @@ there, which closes the picker and opens the drawer's Templates view instead.
 - **Control the environment.** No env-var editing, no shell choice, no
   argument array — one string, your default shell, the extension host's
   environment.
-- **Run with the Deck closed.** The pass is a timer on the Deck panel. An
-  armed flow keeps polling in a background tab, but closing the tab or the
-  window stops everything. Nothing runs on a schedule outside the editor.
+- **Launch, seed or ask with the Deck closed.** The Deck's pass is a timer on
+  the panel; closing the window stops it. A scheduled `node dist/tick.js`
+  (see [A pass without the editor](#a-pass-without-the-editor)) performs
+  `notify` and already-consented `run` rules, and leaves the three verbs that
+  need an editor and a person pending, saying so.
 - **Have two windows share the work.** One window holds the lock and acts;
   the others skip that pass entirely.
 
@@ -579,6 +681,7 @@ there, which closes the picker and opens the drawer's Templates view instead.
 | Max output                     | 1 MiB          | Beyond it the process is torn down and the rule latches errored.            |
 | Kill signal                    | SIGKILL        | A script that traps TERM would otherwise run past its own deadline.        |
 | Consent prompts                | 2 per flow     | One for sessions, one for shell — asked once each, then remembered. With `agentFlow.commandConsent: command`, shell asks once per distinct command text instead, sized once / next 5 / always. |
+| Spend ceiling                  | none by default | Optional lifetime bound per flow on sessions + commands, counted off the journal; the pass that would cross it disarms the flow instead. |
 | Telemetry about commands       | count only     | Never an id, a label, or the command text: a `run` string carries hostnames and sometimes tokens. |
 
 ## Proven in a real editor

@@ -910,6 +910,7 @@
   },
   "scripts": {
     "build": "node esbuild.js",
+    "tick": "node dist/tick.js",
     "watch": "node esbuild.js --watch",
     "preview": "node scripts/build-preview.js",
     "test": "vitest run",

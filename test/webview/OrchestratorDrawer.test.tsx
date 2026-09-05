@@ -5180,3 +5180,45 @@ describe("opt-in retry in the inspector", () => {
     expect(screen.getByTestId("orch-inspector").querySelector(".orch-obs .err")!.textContent).toBe("no worktree · gave up after 2 retries");
   });
 });
+
+describe("a flow's spend ceiling in the header", () => {
+  it("says what the flow has spent, from the host's tally, and offers a ceiling field that writes on blur", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()], spend: { f1: { sessions: 3, commands: 1 } } })} />);
+    expect(screen.getByTestId("orch-spend").textContent).toContain("3 sessions · 1 command spent");
+    const box = screen.getByLabelText("Spend ceiling") as HTMLInputElement;
+    expect(box.placeholder).toBe("none");
+    fireEvent.change(box, { target: { value: "10" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).spendCeiling).toBe(10);
+  });
+
+  it("reads a flow with no tally yet as having spent nothing, and shows the ceiling it is under", () => {
+    const f = wired();
+    f.spendCeiling = 10;
+    render(<OrchestratorDrawer {...props({ flows: [f] })} />);
+    expect(screen.getByTestId("orch-spend").textContent).toContain("nothing spent yet · 0 of 10");
+    expect((screen.getByLabelText("Spend ceiling") as HTMLInputElement).value).toBe("10");
+  });
+
+  it("clears the ceiling when emptied and reverts junk without saving", () => {
+    const f = wired();
+    f.spendCeiling = 10;
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [f] })} />);
+    const box = screen.getByLabelText("Spend ceiling") as HTMLInputElement;
+    fireEvent.change(box, { target: { value: "-4" } });
+    fireEvent.blur(box);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(box.value).toBe("10");
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    expect("spendCeiling" in (onSave.mock.calls.at(-1)![0] as Flow)).toBe(false);
+  });
+
+  it("offers no ceiling while editing a template — a template spends nothing", () => {
+    render(<OrchestratorDrawer {...props({ flows: [], templates: [template()], openId: { kind: "template", id: "t1" } as OrchTarget })} />);
+    expect(screen.queryByLabelText("Spend ceiling")).toBeNull();
+    expect(screen.queryByTestId("orch-spend")).toBeNull();
+  });
+});

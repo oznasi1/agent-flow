@@ -39,6 +39,9 @@ import {
   retryText,
   retryLabel,
   failureText,
+  withCeiling,
+  parseCeilingInput,
+  spendSummary,
   withNodeCwdRepo,
   withNodeJoin,
 } from "../../src/webview/orchestratorRule";
@@ -488,5 +491,30 @@ describe("opt-in retry in the rule module", () => {
     expect(failureText({ ...wired().edges[0], error: "gave up", attempts: 4 })).toBe("gave up · gave up after 3 retries");
     expect(failureText({ ...wired().edges[0], error: "boom" })).toBe("boom");
     expect(failureText({ ...wired().edges[0], error: "boom", attempts: 1 })).toBe("boom");
+  });
+});
+
+describe("a flow's spend ceiling in the rule module", () => {
+  it("withCeiling writes a positive count on the flow and DELETES the field for none", () => {
+    const set = withCeiling(wired(), 10);
+    expect(set.spendCeiling).toBe(10);
+    const cleared = withCeiling(set, undefined);
+    expect("spendCeiling" in cleared).toBe(false);
+  });
+
+  it("parseCeilingInput accepts blank as none and a positive whole number, and refuses the rest", () => {
+    expect(parseCeilingInput("")).toEqual({ ok: true, ceiling: undefined });
+    expect(parseCeilingInput("10")).toEqual({ ok: true, ceiling: 10 });
+    expect(parseCeilingInput("0")).toEqual({ ok: false });
+    expect(parseCeilingInput("2.5")).toEqual({ ok: false });
+    expect(parseCeilingInput("lots")).toEqual({ ok: false });
+  });
+
+  it("sums up what a flow has spent, in the vocabulary — sessions, not the other word", () => {
+    expect(spendSummary({ sessions: 0, commands: 0 }, undefined)).toBe("nothing spent yet");
+    expect(spendSummary({ sessions: 1, commands: 0 }, undefined)).toBe("1 session spent");
+    expect(spendSummary({ sessions: 3, commands: 2 }, undefined)).toBe("3 sessions · 2 commands spent");
+    expect(spendSummary({ sessions: 3, commands: 2 }, 10)).toBe("3 sessions · 2 commands spent · 5 of 10");
+    expect(spendSummary({ sessions: 0, commands: 0 }, 10)).toBe("nothing spent yet · 0 of 10");
   });
 });

@@ -2,7 +2,7 @@
 // Type-only: src/tasks/provider.ts imports Filter/Task/Size from here, so a
 // value import would be a runtime cycle. `import type` is erased at build time.
 import type { SerializedCaps, TaskConnector } from "./tasks/provider";
-import type { Flow } from "./engine/orchestrator/model";
+import type { Flow, SpendTally } from "./engine/orchestrator/model";
 import type { UsageTotals } from "./engine/usage";
 // A verdict enum, not a value module — `deck:flows` carries a map of these so the
 // drawer can say what a branch-CI rule is waiting on. Re-exported because the
@@ -986,6 +986,7 @@ export type OutboundMessage =
       promptModes: FlowPromptMode[]; commands: FlowCommand[];
       branchCi: Record<string, BranchCiStatus>; templates: FlowTemplate[];
       printed?: Record<string, Record<string, boolean>>;
+      spend?: Record<string, SpendTally>;
     }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }

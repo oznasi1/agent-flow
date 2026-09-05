@@ -31,6 +31,8 @@ import {
   nextEdgeId,
   nextNodeId,
   PlannedNode,
+  SpendTally,
+  spendTotal,
 } from "../engine/orchestrator/model";
 import { hasNote } from "../engine/prompt";
 import { BranchCiStatus, FlowCommand, FlowPromptMode, RunStatus } from "../types";
@@ -902,6 +904,49 @@ export function withDest(flow: Flow, edge: FlowEdge, dest: LaunchDest): Flow {
     ...flow,
     nodes: flow.nodes.map((n) => (n.id === edge.to && n.kind === "planned" ? { ...n, dest } : n)),
   };
+}
+
+/** The aria-label of the flow header's ceiling `<input>` — see `withCeiling`. */
+export const CEILING_ARIA_LABEL = "Spend ceiling";
+
+/** What the ceiling field shows when the flow has none: "none", not a number,
+ * for the same reason `DEADLINE`-style fields say so — a number here would read
+ * as a configured value, and "no ceiling" is a real choice. */
+export const CEILING_PLACEHOLDER = "none";
+
+/** Write a flow's lifetime spend ceiling, or DELETE it for `undefined` — never
+ * store a blank. On the FLOW, not a rule: the ceiling is about everything the
+ * flow spends, and the tally it is measured against is per flow (`spendTally`). */
+export function withCeiling(flow: Flow, ceiling: number | undefined): Flow {
+  if (ceiling === undefined) {
+    const { spendCeiling: _drop, ...rest } = flow;
+    return rest;
+  }
+  return { ...flow, spendCeiling: ceiling };
+}
+
+/** What the ceiling field's text means, on blur. Blank removes the ceiling; a
+ * positive WHOLE number is one — a ceiling counts sessions and commands, and
+ * two and a half of either is not a thing; anything else is refused so the
+ * control puts the old value back rather than storing what `hasCeiling` would
+ * then ignore. */
+export function parseCeilingInput(raw: string): { ok: true; ceiling: number | undefined } | { ok: false } {
+  if (raw.trim() === "") return { ok: true, ceiling: undefined };
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? { ok: true, ceiling: n } : { ok: false };
+}
+
+/** The header's one line about money: what this flow has opened and run over
+ * its life, and — when a ceiling is set — where that stands against it. Reads
+ * "session", the vocabulary's word for one run of a coding tool (a Deck card),
+ * never the other word. "nothing spent yet" rather than "0 sessions · 0
+ * commands": a flow that has never acted should read as quiet, not as a tally. */
+export function spendSummary(t: SpendTally, ceiling: number | undefined): string {
+  const parts: string[] = [];
+  if (t.sessions > 0) parts.push(`${t.sessions} ${t.sessions === 1 ? "session" : "sessions"}`);
+  if (t.commands > 0) parts.push(`${t.commands} ${t.commands === 1 ? "command" : "commands"}`);
+  const spent = parts.length === 0 ? "nothing spent yet" : `${parts.join(" · ")} spent`;
+  return ceiling === undefined ? spent : `${spent} · ${spendTotal(t)} of ${ceiling}`;
 }
 
 /** Write a rule's once-off note. Unlike `withMode`, there is exactly ONE home
