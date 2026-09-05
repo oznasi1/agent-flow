@@ -17,6 +17,8 @@ import { defaultRunsDir, readRuns } from "../engine/runs";
 import { defaultSessionsDir, readOpenSessionsProbe } from "../engine/sessions";
 import { claudeProjectsRoot } from "../engine/paths";
 import { readSessionActivity } from "../engine/transcript";
+import { UsageReader } from "../engine/usageFs";
+import { weightedEq } from "../engine/usage";
 import { defaultPrFactsDir, readPrEntries, writePrEntry } from "../engine/pr/store";
 import { prEligible } from "../engine/git";
 import { discoverRepos } from "../engine/repos";
@@ -77,6 +79,24 @@ export function reportLines(r: PassReport, dryRun: boolean): string[] {
     out.push(head, ...lines.map((l) => `  ${l}`));
   }
   return out;
+}
+
+/** The token tally for a flow's runs, off the same transcripts the Deck's card
+ * reads. A fresh `UsageReader` per tick — there is no next sweep to cache for —
+ * and `undefined` when a read throws, which the pass reads as "not measured". */
+export function tokenSpendReader(runs: { key: string; repos: { path: string }[] }[], projectsRoot: string, reader = new UsageReader()) {
+  return (runKeys: string[]): number | undefined => {
+    try {
+      let eq = 0;
+      for (const key of runKeys) {
+        const run = runs.find((r) => r.key === key);
+        if (run) eq += weightedEq(reader.readRun(projectsRoot, (run.repos ?? []).map((r) => r.path)));
+      }
+      return eq;
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 export async function main(argv: string[], print: (l: string) => void = console.log): Promise<number> {
@@ -142,6 +162,7 @@ export async function main(argv: string[], print: (l: string) => void = console.
     nowMs, now: () => Date.now(), log,
     dryRun: args.dryRun,
     token: `tick-${process.pid}-${newFlowId(nowMs)}`,
+    tokenSpend: tokenSpendReader(runs, projectsRoot),
   });
   for (const l of reportLines(report, args.dryRun)) print(l);
   return report.lock === "busy" ? 2 : 0;

@@ -18,7 +18,7 @@
 //
 // Pure over injected IO, like every engine module, so the whole pass is testable
 // from fixtures; `main.ts` wires the real filesystem, shell and forge.
-import { CommandNode, Flow, FlowAction, FlowEdge, findNode, hasCeiling, isPlace, isSettled, isSpendAction, overCeiling, spendTotal } from "../engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, atTokenCeiling, findNode, flowRunKeys, hasCeiling, hasTokenCeiling, isPlace, isSettled, isSpendAction, overCeiling, spendTotal } from "../engine/orchestrator/model";
 import { FlowIo, readFlows, writeFlow } from "../engine/orchestrator/store";
 import { evaluateDeadlines, evaluateFlow } from "../engine/orchestrator/evaluate";
 import { ActOutcome, applyClocks, applyFired, notifyLines } from "../engine/orchestrator/runner";
@@ -53,6 +53,12 @@ export interface PassDeps {
   /** Evaluate and report, write nothing, run nothing. */
   dryRun: boolean;
   token: string;
+  /** Effort-weighted token equivalents spent across these runs, for a flow with
+   * a `tokenCeiling` — `undefined` when nothing could be read, which the pass
+   * treats as "not measured" rather than as zero (see `atTokenCeiling`).
+   * Optional: a caller with no reader (every existing test) has no token
+   * ceilings to enforce. */
+  tokenSpend?: (runKeys: string[]) => number | undefined;
 }
 
 export interface FlowReport {
@@ -71,7 +77,8 @@ export interface FlowReport {
   /** Met `run` rules this pass could not perform because the flow has not
    * consented to them. */
   needsConsent: string[];
-  /** Set when the pass disarmed the flow at its spend ceiling. */
+  /** Set when the pass disarmed the flow at its spend ceiling — the count, or
+   * the token figure, whichever it hit. */
   disarmedAtCeiling?: string;
 }
 
@@ -155,6 +162,20 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
               const atStop = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
               if (atStop) writeFlow(d.flowIo, d.flowsDir, { ...atStop, armed: false });
               journal(flow.id, { kind: "armed", armed: false, source: "ceiling" }, d.nowMs);
+            }
+            continue;
+          }
+        }
+        // The token ceiling, read off the transcripts the Deck's card reads —
+        // same rule as the Deck: at or past it, a pass that wants to spend stops.
+        if (wanted > 0 && hasTokenCeiling(fresh) && d.tokenSpend) {
+          const eq = d.tokenSpend(flowRunKeys(fresh));
+          if (atTokenCeiling(fresh, { sessions: 0, commands: 0, eq })) {
+            report.disarmedAtCeiling = `${eq} eq of ${fresh.tokenCeiling} eq spent, and this pass wanted ${wanted}`;
+            if (!d.dryRun) {
+              const atStop = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
+              if (atStop) writeFlow(d.flowIo, d.flowsDir, { ...atStop, armed: false });
+              journal(flow.id, { kind: "armed", armed: false, source: "token-ceiling" }, d.nowMs);
             }
             continue;
           }

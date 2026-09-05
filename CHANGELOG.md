@@ -20,6 +20,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   path, every activation checks it and offers to re-point a schedule an update
   left behind. Run the command again to change the interval or remove it. The
   docs carry the recipes for anyone who would rather write their own.
+- **A ceiling denominated in spend, not in events.** The spend ceiling counts
+  sessions opened and commands run — the units you worry about at 2am, and a poor
+  proxy for cost: a six-hour session and a one-minute one both count as one. A
+  flow's header now has a second field, **token ceiling**, in the effort-weighted
+  `eq` a Deck card already prints (`800k`, `1.5M`), read off the same transcripts
+  and summed over the runs the flow's places belong to. A pass that wants to spend
+  while the figure is at or past it performs nothing and disarms the flow,
+  journaled as `armed` with `source: "token-ceiling"`; the headless tick enforces
+  it too. A transcript that cannot be read is "not measured", never zero. Both
+  ceilings coexist: they answer different questions.
 
 ### Changed
 

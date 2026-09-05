@@ -2,7 +2,7 @@ import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, isSpendAction, JoinMode, LaunchDest, PlaceNode, PlannedNode, retryPending, hasCeiling, SpendTally } from "../engine/orchestrator/model";
+import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, isSpendAction, JoinMode, LaunchDest, PlaceNode, PlannedNode, retryPending, hasCeiling, hasTokenCeiling, SpendTally } from "../engine/orchestrator/model";
 import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
@@ -37,8 +37,11 @@ import {
   CEILING_ARIA_LABEL,
   CEILING_PLACEHOLDER,
   parseCeilingInput,
+  parseEqInput,
   spendSummary,
+  TOKEN_CEILING_ARIA_LABEL,
   withCeiling,
+  withTokenCeiling,
   modeValueOf,
   nextEdgeId,
   nextNodeId,
@@ -1996,7 +1999,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   data-testid="orch-spend"
                   style={{ gap: 6, marginLeft: 10, fontSize: "var(--t-micro)", color: "var(--dim)" }}
                 >
-                  <span>· {spendSummary(p.spend?.[flow.id] ?? { sessions: 0, commands: 0 }, hasCeiling(flow) ? flow.spendCeiling : undefined)}</span>
+                  <span>· {spendSummary(p.spend?.[flow.id] ?? { sessions: 0, commands: 0 }, hasCeiling(flow) ? flow.spendCeiling : undefined, hasTokenCeiling(flow) ? flow.tokenCeiling : undefined)}</span>
                   <span>· ceiling</span>
                   <input
                     className="orch-num"
@@ -2011,6 +2014,23 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                       const parsed = parseCeilingInput(ev.currentTarget.value);
                       if (parsed.ok) p.onSave(withCeiling(flow, parsed.ceiling));
                       else ev.currentTarget.value = hasCeiling(flow) ? String(flow.spendCeiling) : "";
+                    }}
+                  />
+                  {/* The second ceiling, in the card's `eq` unit — see
+                      `Flow.tokenCeiling`. Free text rather than a number input so
+                      it takes the suffixes the card prints (`800k`, `1.5M`). */}
+                  <span>· token ceiling</span>
+                  <input
+                    className="orch-num"
+                    type="text"
+                    aria-label={TOKEN_CEILING_ARIA_LABEL}
+                    key={`${openKey}-eq`}
+                    defaultValue={hasTokenCeiling(flow) ? String(flow.tokenCeiling) : ""}
+                    placeholder={CEILING_PLACEHOLDER}
+                    onBlur={(ev) => {
+                      const parsed = parseEqInput(ev.currentTarget.value);
+                      if (parsed.ok) p.onSave(withTokenCeiling(flow, parsed.ceiling));
+                      else ev.currentTarget.value = hasTokenCeiling(flow) ? String(flow.tokenCeiling) : "";
                     }}
                   />
                 </span>

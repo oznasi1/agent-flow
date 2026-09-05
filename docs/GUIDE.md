@@ -245,8 +245,9 @@ the flow holds unattended, which is what every release before 0.69 did. At most 
 these — launches, seeds and
 commands together — happen in a single pass, with the rest picked up on the next one. A flow
 can also carry a **spend ceiling** — a lifetime cap on sessions opened plus commands run,
-counted off its journal and shown in its header — and a pass that would cross it performs
-nothing and disarms the flow with a notification saying so. A
+counted off its journal and shown in its header — and a **token ceiling** in the `eq` unit a
+card prints, read off its runs' transcripts; a pass that would cross the first, or wants to
+spend at or past the second, performs nothing and disarms the flow with a notification saying so. A
 launch, seed or command that fails stamps its rule as errored and stops it there until you
 **Reset** it; a pre-flight read that fails instead — Jira unreachable, say — is retried on the
 next pass rather than latched as a failure. Two VS Code windows with the Deck open cannot fire

@@ -5,7 +5,7 @@ import * as path from "path";
 import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal } from "./engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal, atTokenCeiling, flowRunKeys, hasTokenCeiling } from "./engine/orchestrator/model";
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, findEdgeOutput, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
@@ -24,7 +24,7 @@ import { blockedBy } from "./engine/orchestrator/neverAutoRun";
 import { CONSENT_BATCH, consentCovers, consumeConsent, grantConsent } from "./engine/orchestrator/consent";
 import { buildRunStatus } from "./engine/status";
 import { UsageReader } from "./engine/usageFs";
-import type { UsageTotals } from "./engine/usage";
+import { formatEq, weightedEq, type UsageTotals } from "./engine/usage";
 import { readLiveWindows, defaultWindowsDir, currentWindow } from "./engine/presence";
 // The destination question, shared with Take in the sidebar so **Review with agent**
 // asks it in the same words with the same pickers.
@@ -693,11 +693,18 @@ export class DeckPanel {
     // yet", which is the truth for a flow with no journal. Read here, per post,
     // rather than cached: the tally must agree with what the pass just wrote,
     // and `postFlows` runs after it.
+    // A flow with a TOKEN ceiling also gets its `eq` figure, read off the same
+    // transcripts the card reads — only such flows, because a read costs a
+    // stat per transcript and this runs on every post. `runs` is read once, and
+    // only when some flow needs it.
     const spend: Record<string, SpendTally> = {};
     if (enabled) {
+      const tokenRuns = flows.some(hasTokenCeiling) ? readRuns(defaultRunsDir()) : undefined;
       for (const f of flows) {
         const t = this.spendTallyOf(f.id);
-        if (spendTotal(t) > 0) spend[f.id] = t;
+        const eq = tokenRuns ? this.tokenSpendOf(f, tokenRuns) : undefined;
+        if (eq !== undefined) t.eq = eq;
+        if (spendTotal(t) > 0 || eq !== undefined) spend[f.id] = t;
       }
     }
     this.post({
@@ -716,6 +723,33 @@ export class DeckPanel {
       return spendTally(readJournal(this.journalIo, this.flowsDir, flowId));
     } catch {
       return { sessions: 0, commands: 0 };
+    }
+  }
+
+  /** What this flow's runs have spent in effort-weighted token equivalents — the
+   * `eq` the card prints — summed over `flowRunKeys`, off the same `UsageReader`
+   * the board sweep uses (so a transcript already parsed costs a `stat`). Only
+   * asked for a flow carrying a token ceiling. `undefined` when nothing could be
+   * read or the flow has no places: "not measured", which `atTokenCeiling` never
+   * treats as reached — an unreadable transcript is not evidence of spend. */
+  private tokenSpendOf(flow: Flow, runs: Run[]): number | undefined {
+    if (!hasTokenCeiling(flow)) return undefined;
+    const keys = flowRunKeys(flow);
+    if (keys.length === 0) return undefined;
+    try {
+      const root = claudeProjectsRoot();
+      let eq = 0;
+      let read = false;
+      for (const key of keys) {
+        const run = runs.find((r) => r.key === key);
+        if (!run) continue;
+        eq += weightedEq(this.usage.readRun(root, (run.repos ?? []).map((r) => r.path)));
+        read = true;
+      }
+      return read ? eq : undefined;
+    } catch (e) {
+      this.log(`deck: flow ${flow.id} token spend unreadable — ${e instanceof Error ? e.message : String(e)}`);
+      return undefined;
     }
   }
 
@@ -1052,6 +1086,32 @@ export class DeckPanel {
               `${fresh.name} was disarmed at its ceiling: ${spendTotal(tally)} of ${fresh.spendCeiling} spent ` +
                 `(${tally.sessions} ${tally.sessions === 1 ? "session" : "sessions"}, ${tally.commands} ${tally.commands === 1 ? "command" : "commands"}), ` +
                 `and this pass would have added ${wanted}. Raise the ceiling or re-arm to continue.`,
+            );
+            continue;
+          }
+        }
+        // The TOKEN ceiling, beside the count: the same stop, measured in what the
+        // work cost rather than in how many times it started. Read off the card's
+        // transcripts (`tokenSpendOf`) only for a flow that set one, and only when
+        // this pass wants to spend. AT the ceiling stops — see `atTokenCeiling`.
+        if (wanted > 0 && hasTokenCeiling(fresh)) {
+          const eq = this.tokenSpendOf(fresh, runs.map((s) => s.run));
+          if (atTokenCeiling(fresh, { sessions: 0, commands: 0, eq })) {
+            const atStop = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+            if (atStop) writeFlow(this.flowIo, this.flowsDir, { ...atStop, armed: false });
+            this.pendingResume.delete(flow.id);
+            this.resumeCleared.delete(flow.id);
+            this.journal(flow.id, { kind: "armed", armed: false, source: "token-ceiling" }, nowMs);
+            trackEvent({
+              name: "flow_armed", armed: false,
+              node_count: fresh.nodes.length, edge_count: fresh.edges.length,
+              unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+              source: "token-ceiling",
+            });
+            this.log(`deck: flow ${flow.id} disarmed — ${eq} eq spent against a token ceiling of ${fresh.tokenCeiling}, and this pass wanted ${wanted} more`);
+            void vscode.window.showWarningMessage(
+              `${fresh.name} was disarmed at its token ceiling: ${formatEq(eq ?? 0)} eq of ${formatEq(fresh.tokenCeiling!)} eq spent across its runs, ` +
+                `and this pass would have started ${wanted} more. Raise the ceiling or re-arm to continue.`,
             );
             continue;
           }
