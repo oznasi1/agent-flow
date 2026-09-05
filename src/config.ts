@@ -2,6 +2,7 @@ import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";
 import { AgentProvider, FilterVisibility, FlowCommand, MergeMethod, PromptMode } from "./types";
+import { readCommandConsent, readCommands, readNeverAutoRun } from "./configReaders";
 // The destination vocabulary, defined beside the picker that reads it so the setting and
 // the code that acts on it cannot drift apart.
 import type { OpenInSetting } from "./engine/openTarget";
@@ -120,20 +121,7 @@ export const DEFAULT_EXPLORE_VERIFY_PROMPT =
  * explore prompt its own setting. */
 export const DEFAULT_ENVIRONMENTS = ["dev", "staging", "production"];
 
-/** Exactly one built-in ships for `agentFlow.commands`, and it is inert by
- * construction: `echo` cannot fail or mutate anything, so a user who never
- * configured this setting still gets a real row in the picker — one that
- * demonstrates `{note}` substitution — instead of a picker that looks empty
- * and gives no sign named commands are even a thing. See `readCommands`'
- * doc comment for the rule this single entry has to satisfy. */
-export const DEFAULT_COMMANDS: FlowCommand[] = [
-  {
-    id: "verify-on-dev",
-    label: "Verify on dev",
-    detail: "Example — replace the command with your own check",
-    run: "echo verify the feature on {note}",
-  },
-];
+export { DEFAULT_COMMANDS } from "./configReaders";
 
 /** Where Agent Flow Deck starts a session. */
 export type AgentSurface = "extension" | "terminal";
@@ -664,62 +652,6 @@ function readEnvironments(c: vscode.WorkspaceConfiguration): string[] {
   return seen.size ? [...seen] : [...DEFAULT_ENVIRONMENTS];
 }
 
-/** Unlike `promptModes`, the built-in here isn't a menu of real options to
- * layer a customization over — it's a single example, `DEFAULT_COMMANDS`,
- * shown so a user who never configured this setting can see that named
- * commands are a thing and how `{note}` reaches one. That is only safe
- * because the rule survives from this comment's earlier shape: a command
- * list is something the user opts into running, so no default entry may
- * have real effects — inventing (or shipping) anything that could act would
- * put a runnable command into a picker nobody configured. The one example
- * is `echo`, which cannot fail or mutate anything; the next built-in added
- * here has to clear the same bar, not just be plausible-looking.
- *
- * An entry with no usable `id` or no `run` is dropped: the id is how a node
- * refers to it, and a command with nothing to execute is a picker row that
- * fails at the moment it is trusted. A missing `label` falls back to the id
- * rather than rendering a blank row. */
-function readCommands(c: vscode.WorkspaceConfiguration): FlowCommand[] {
-  const raw = c.get<unknown[]>("commands");
-  // Spread from DEFAULT_COMMANDS, not a bare `[]` literal — same wiring
-  // readEnvironments gives DEFAULT_ENVIRONMENTS, so the exported constant is
-  // what a missing setting actually resolves to, not a decorative export a
-  // mutation to could change with nothing here noticing.
-  if (!Array.isArray(raw)) return [...DEFAULT_COMMANDS];
-  const out: FlowCommand[] = [];
-  const seen = new Set<string>();
-  for (const v of raw) {
-    if (!v || typeof v !== "object") continue;
-    const e = v as Partial<FlowCommand>;
-    const id = typeof e.id === "string" ? e.id.trim() : "";
-    const run = typeof e.run === "string" ? e.run.trim() : "";
-    if (!id || !run || seen.has(id)) continue;
-    seen.add(id);
-    const label = typeof e.label === "string" && e.label.trim() ? e.label.trim() : id;
-    out.push({ id, label, run, ...(typeof e.detail === "string" && e.detail.trim() ? { detail: e.detail.trim() } : {}) });
-  }
-  return out;
-}
-
-/** Read `agentFlow.neverAutoRun`. Trims each entry and drops anything blank or
- * non-string, the same treatment `readCommands` gives a command's `run` — a
- * `settings.json` is a text file people edit by hand, and a stray `""` must not
- * become a rule.
- *
- * Deliberately does NOT fall back to a default list the way `readEnvironments`
- * does. There is no default: an unusable setting reads as an empty list, because
- * the alternative is this module refusing commands that nobody configured it to
- * refuse. The setting is a brake the user installs, never one shipped pre-applied.
- * That is also what makes it safe to ship to an existing install — see
- * `test/unit/compat.test.ts` on new behavior arriving inert. */
-function readNeverAutoRun(c: vscode.WorkspaceConfiguration): string[] {
-  const raw = c.get<unknown[]>("neverAutoRun");
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((v): v is string => typeof v === "string")
-    .map((v) => v.trim())
-    .filter((v) => v !== "");
-}
 
 /** The three merge strategies, as a value so both `getConfig()`'s fallback and the
  * telemetry snapshot's allowlist derive from one list. Here rather than beside
@@ -800,7 +732,7 @@ export function getConfig(): AgentFlowConfig {
     // Anything but the exact opt-in string is the released behaviour — a
     // hand-typed `"per-command"` must not silently become the new mode, and
     // must not break the old one either.
-    commandConsent: c.get<string>("commandConsent") === "command" ? "command" : "flow",
+    commandConsent: readCommandConsent(c),
     // `?? false` rather than `|| false`: an explicit `false` and an unset value
     // must both read false, and neither may be silently coerced by a truthiness
     // check the way the string settings above are.
