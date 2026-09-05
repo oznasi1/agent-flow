@@ -465,13 +465,18 @@ export type UsageEvent =
   //
   // A pass-level summary rather than per-rule events on purpose: the headless
   // path is a short-lived process that must flush and exit, and one event per
-  // tick keeps that bounded whatever the flow count. `refused_pending` is the
-  // count of rules the tick left alone because it cannot perform them at all
-  // (launch, seed and ask), which is the number that says whether a user's
-  // headless setup is doing what they hoped.
+  // tick keeps that bounded whatever the flow count. Every count is a sum over
+  // the pass's own `FlowReport`s (headless/pass.ts), so this event says exactly
+  // what the tick printed to the cron log and nothing more.
+  //
+  // `needs_editor` is the number that says whether a headless setup is doing
+  // what its owner hoped: those are met rules the tick refuses outright (launch,
+  // seed and ask), and a user whose every tick reports nothing but those has
+  // scheduled a job that can never do anything.
   | {
       name: "headless_tick"; dry_run: boolean; flow_count: number; armed_count: number;
-      fired: number; errored: number; deferred: number; refused_pending: number; duration_ms: number;
+      fired: number; notified: number; errored: number; expired: number;
+      needs_editor: number; needs_consent: number; disarmed_at_ceiling: number; duration_ms: number;
     }
   // Fires on every open of the Marketplace panel. `revealed: true` is an
   // already-open panel refocused — its counts are the last scan's, kept on the

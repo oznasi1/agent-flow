@@ -33,6 +33,11 @@ export function candidateSettingsPaths(platform: NodeJS.Platform, home: string, 
 export interface LoadedSettings {
   path: string;
   reader: SettingsReader;
+  /** The whole parsed file, for the handful of settings that are NOT ours.
+   * `reader` deliberately answers only `agentFlow.*` keys, and telemetry consent
+   * is two settings, one of them the editor's own `telemetry.telemetryLevel` —
+   * which has no `agentFlow.` prefix and so cannot come through the reader. */
+  raw: Record<string, unknown>;
 }
 
 export interface SettingsIo {
@@ -83,5 +88,5 @@ export function loadSettings(
     return { error: `could not read ${found}: ${(e as Error).message}` };
   }
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { error: `${found} is not a settings object` };
-  return { path: found, reader: readerFor(raw as Record<string, unknown>) };
+  return { path: found, reader: readerFor(raw as Record<string, unknown>), raw: raw as Record<string, unknown> };
 }

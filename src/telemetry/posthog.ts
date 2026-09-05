@@ -1,4 +1,11 @@
-import * as vscode from "vscode";
+// `import type`, not a value import, and load-bearing: this module is the ONE
+// piece of the telemetry stack `dist/tick.js` reuses, and the headless bundle has
+// no `vscode` to resolve. `vscode` appears here only in type position
+// (`extends vscode.TelemetrySender`), so erasing it at compile time costs
+// nothing and is what keeps the sender usable from a bare node process.
+// test/unit/headless/noVscode.test.ts is the near gate; `npm run build` is the
+// real one.
+import type * as vscode from "vscode";
 
 /** EU cloud — the project's region, and keys are region-scoped.
  *

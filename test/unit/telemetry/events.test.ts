@@ -66,7 +66,7 @@ const SAMPLES = [
   { name: "flow_rule_retried", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", edge_action: "launch", attempt: 2, max: 3, gave_up: false },
   { name: "flow_consent_answered", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", mode: "command", action: "run", answer: "batch" },
   { name: "flow_subflow", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", event: "refused", depth: 3, refusal: "depth" },
-  { name: "headless_tick", dry_run: false, flow_count: 5, armed_count: 2, fired: 3, errored: 0, deferred: 1, refused_pending: 2, duration_ms: 812 },
+  { name: "headless_tick", dry_run: false, flow_count: 5, armed_count: 2, fired: 3, notified: 1, errored: 0, expired: 1, needs_editor: 2, needs_consent: 0, disarmed_at_ceiling: 0, duration_ms: 812 },
   { name: "marketplace_opened", revealed: false, asset_count: 7, plugin_count: 2, marketplace_count: 1, skills: 3, commands: 2, agents: 1, hooks: 1, not_set_up: false },
   { name: "marketplace_action", action: "read", truncated: true },
   { name: "tasks_fetched", filter: "sprint", lens: "mysprint", size: "any", task_count: 12, repo_count: 3, live_window_count: 2, authed: true },

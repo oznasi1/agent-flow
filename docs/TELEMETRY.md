@@ -142,7 +142,7 @@ Suppressed entirely when `telemetry.telemetryLevel` is `"error"` (or lower).
 | `flow_rule_retried` | `flow_uid`; `edge_action`; `attempt`, `max: number`; `gave_up: boolean` | One per retry decision on a rule that carries a **RETRY**: `gave_up: false` is another attempt scheduled, `gave_up: true` is the last failure with no attempts left. Only rules whose retry could actually be taken are reported, so a RETRY typed onto a rule that can never use one (a notify, or a command without its explicit *safe to re-run* tick) emits nothing. The backoff wait is not sent. |
 | `flow_consent_answered` | `flow_uid`; `mode`: `"flow"` \| `"command"`; `action`: `"launch"` \| `"seed"` \| `"run"`; `answer`: `"once"` \| `"batch"` \| `"always"` \| `"disarm"` \| `"dismissed"` | Every answer to a spend gate, under both consent modes (`agentFlow.commandConsent`). Emitted on all outcomes including Escape (`"dismissed"`), because a dismissed question writes nothing and would otherwise be indistinguishable from a window closed before the modal was read. In the default `flow` mode the single approving button reports as `"always"` — it approves every command that workflow will ever have. Never carries the command text, the workflow name, or the note. |
 | `flow_subflow` | `flow_uid` (the **parent's**); `event`: `"spawned"` \| `"finished"` \| `"refused"`; `depth: number`; `refusal?`: `"self"` \| `"depth"` | A subflow node's outcome: a child started, a child's rules all settled (the parent's *the subflow finished* condition being met), or a start the model refused — `"self"` for a template that starts itself, `"depth"` for the three-deep stop. Never carries the template id or either flow's name. |
-| `headless_tick` | `dry_run: boolean`; `flow_count`, `armed_count`, `fired`, `errored`, `deferred`, `refused_pending`, `duration_ms: number` | One per orchestrator pass performed outside the editor by `dist/tick.js` (cron, launchd). A pass-level summary rather than per-rule events, because the headless path is a short-lived process that must flush and exit. `refused_pending` counts rules the tick left alone because it cannot perform them at all (launch, seed and ask). See [Headless passes](#headless-passes) below for how consent and identity work there. |
+| `headless_tick` | `dry_run: boolean`; `flow_count`, `armed_count`, `fired`, `notified`, `errored`, `expired`, `needs_editor`, `needs_consent`, `disarmed_at_ceiling`, `duration_ms: number` | One per orchestrator pass performed outside the editor by `dist/tick.js` (cron, launchd). A pass-level summary rather than per-rule events, because the headless path is a short-lived process that must flush and exit. `needs_editor` counts rules the tick left alone because it cannot perform them at all (launch, seed and ask) — a tick reporting nothing else is a job that can never do anything. Every count is a sum over the same per-flow report the tick prints to your cron log. See [Headless passes](#headless-passes) below for how consent and identity work there. |
 | `marketplace_opened` | `revealed: boolean`; `asset_count`, `plugin_count`, `marketplace_count: number`; `skills`, `commands`, `agents`, `hooks: number` (`view.assets` grouped by `AssetType`); `not_set_up: boolean` | Every open of the Marketplace panel. `revealed: true` is an already-open panel refocused, reporting the last scan's counts kept on the panel instance; `revealed: false` fires once, at the first `render()` this panel instance completes — never on a later re-render (a stale re-focus, `mkt:refresh`). |
 | `marketplace_action` | `action`: one of `"open"`, `"reveal"`, `"read"`, `"copy"`, `"open_external"`; `allowed?: boolean` (present for `"open"`/`"reveal"` — whether the file was on the last scan's allow-list, emitted whether or not the case goes on to act); `truncated?: boolean` (present for `"read"` only, once the file was actually read — a refused read emits nothing) | Every `onMessage` click-shaped gesture on the Marketplace panel. No file path, asset name, or URL is ever a property. |
 | `tasks_fetched` | `filter` (requested, same vocabulary as `default_filter`'s non-sentinel values): `"unassigned"` \| `"mine"` \| `"mysprint"` \| `"sprint"` \| `"backlog"` \| `"all"`; `lens` (same vocabulary — what `effectiveFilter` actually clamped `filter` to); `size`: `"any"` \| `"s"` \| `"m"` \| `"l"`; `task_count`, `repo_count: number`; `live_window_count?: number` (present only when `agentFlow.trackOpenWindows` is on); `authed: boolean` | Every `fetch` — this **is** the lens-usage signal, since a lens/tab change re-fetches. `filter` and `lens` differ exactly when a webview left open across a `taskSource` change asks for a lens the new source cannot serve. The unauthenticated early return (no provider to clamp against) reports `lens` equal to the requested `filter`, zero counts, and `authed: false`. |
@@ -231,6 +231,37 @@ directly, so a per-task failure is still visible without waiting for
 `batch_completed`'s aggregate `failed` count — the same "both fire" doubling
 the Take funnel accepts above, not a second classification of a different
 failure.
+
+### Headless passes
+
+`dist/tick.js` runs an orchestrator pass from cron or launchd, with no editor
+around it. It reports one `headless_tick` per pass, and nothing else — no
+per-rule events, because the tick is a short-lived process that must flush and
+exit, and one event per tick keeps that bounded whatever the flow count.
+
+Two things work differently out there, and both are deliberately stricter than
+the editor:
+
+- **Consent is read twice, from your `settings.json`.** In a window,
+  `TelemetryLogger` enforces your global `telemetry.telemetryLevel` before Agent
+  Flow Deck's own `agentFlow.telemetry.enabled` is ever consulted. Nothing does
+  that in a bare node process, so the tick reads **both** from the same settings
+  file it already loaded, and both must say yes: anything but
+  `telemetry.telemetryLevel: "all"` sends nothing.
+- **The tick mints no identifier.** It cannot read `vscode.env.machineId`, and it
+  will not invent an id — a tick that did would look like a brand-new user on
+  every cron run. It reads `distinct_id` from `~/.agentflow/telemetry.json`,
+  which the extension writes **only while telemetry is enabled**. No file, no
+  events. An install that has never run the extension with telemetry on is an
+  install the tick stays silent about, whatever its settings say.
+
+That file holds one value, `distinctId`, which is the same anonymous VS Code
+machine id every ordinary event already carries. The fingerprint salt is
+deliberately *not* stored there: a headless pass sends no fingerprinted value, so
+it has no business holding the salt that would let it.
+
+A pass that found the flows lock held by another Deck or tick reports nothing at
+all — no pass ran, so there is nothing to report.
 
 ### Settings snapshot
 

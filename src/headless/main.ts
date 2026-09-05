@@ -24,6 +24,7 @@ import { resolveForge } from "../engine/forge/registry";
 import { loadSettings } from "./settings";
 import { headlessStatuses, refreshWatchedPrs } from "./statuses";
 import { PassReport, runHeadlessPass } from "./pass";
+import { sendHeadless } from "./telemetry";
 
 export interface Args {
   settings?: string;
@@ -102,6 +103,9 @@ export async function main(argv: string[], print: (l: string) => void = console.
   }
   const log = (m: string) => print(`  ${m}`);
   const nowMs = Date.now();
+  // The whole pass, forge fetch included, because that is what a cron schedule
+  // actually costs the machine — not just the part that touched flows.
+  const startedAt = Date.now();
   const flowsDir = defaultFlowsDir();
   const runs = readRuns(defaultRunsDir());
   const flows = readFlows(nodeFlowIo(), flowsDir);
@@ -144,6 +148,32 @@ export async function main(argv: string[], print: (l: string) => void = console.
     token: `tick-${process.pid}-${newFlowId(nowMs)}`,
   });
   for (const l of reportLines(report, args.dryRun)) print(l);
+  // Nothing at all when another process held the lock: no pass ran, so there is
+  // no pass to report, and a tick that fired every minute against a busy lock
+  // would otherwise report far more often than it ever did any work.
+  //
+  // Awaited before the exit code is returned — the process is about to end, and
+  // an unflushed event is a lost one. `sendHeadless` never throws and never
+  // sends without both consent gates and the extension's own identity file, so
+  // a machine that has not opted in does no work here beyond one absent-file
+  // read.
+  if (report.lock === "held") {
+    const sum = (pick: (f: PassReport["flows"][number]) => number) => report.flows.reduce((n, f) => n + pick(f), 0);
+    await sendHeadless({
+      name: "headless_tick", dry_run: args.dryRun,
+      // Every flow on disk against the ones this pass judged: the gap is how
+      // many workflows a user keeps around but leaves disarmed.
+      flow_count: flows.length, armed_count: report.flows.length,
+      fired: sum((f) => f.fired.length),
+      notified: sum((f) => f.notified.length),
+      errored: sum((f) => f.errored.length),
+      expired: sum((f) => f.expired.length),
+      needs_editor: sum((f) => f.needsEditor.length),
+      needs_consent: sum((f) => f.needsConsent.length),
+      disarmed_at_ceiling: sum((f) => (f.disarmedAtCeiling === undefined ? 0 : 1)),
+      duration_ms: Date.now() - startedAt,
+    }, { raw: loaded.raw, log });
+  }
   return report.lock === "busy" ? 2 : 0;
 }
 
