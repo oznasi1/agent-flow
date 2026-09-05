@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.68.1] — 2026-09-06
+
 ### Security
 
 - **A workspace path can no longer run a shell command when a task is taken.**
