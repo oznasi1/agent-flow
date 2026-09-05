@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   JournalIo, journalPath, createIdMinter, appendEvent, readJournal, findEdgeOutput,
-  truncateOutput, JOURNAL_CAP_BYTES, JOURNAL_TRIM_TO_BYTES, OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES,
+  truncateOutput, printedVerdicts, JOURNAL_CAP_BYTES, JOURNAL_TRIM_TO_BYTES, OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES,
 } from "../../../../src/engine/orchestrator/journal";
 
 /** An in-memory JournalIo. `files` is the whole store. */
@@ -361,5 +361,64 @@ describe("the expired event", () => {
     appendEvent(io, DIR, "f1", { kind: "reset", edge: "e1" }, 1_001);
     appendEvent(io, DIR, "f1", { kind: "expired", edge: "e1", from: "n1", to: "n2", since: 1_001 }, 1_002);
     expect(findEdgeOutput(readJournal(io, DIR, "f1"), "e1")).toMatchObject({ ok: true, output: "hello" });
+  });
+});
+
+describe("printedVerdicts", () => {
+  const flow = (over: { performer?: Partial<import("../../../../src/engine/orchestrator/model").FlowEdge>; text?: string } = {}) => ({
+    id: "f1", name: "f", armed: true, createdAt: 0,
+    nodes: [
+      { id: "a", kind: "place" as const, x: 0, y: 0, join: "any" as const, runKey: "PROJ-1", repo: "r" },
+      { id: "c", kind: "command" as const, x: 0, y: 0, join: "any" as const, run: "deploy.sh" },
+      { id: "z", kind: "notify" as const, x: 0, y: 0, join: "any" as const, message: "m" },
+    ],
+    edges: [
+      { id: "e1", from: "a", to: "c", cond: { kind: "pr-merged" as const }, firedAt: 1_000, performed: true as const, ...over.performer },
+      { id: "e2", from: "c", to: "z", cond: { kind: "command-printed" as const, text: over.text ?? "DEPLOYED" } },
+    ],
+  });
+  const withOutput = (output: string, kind: "fired" | "errored" = "fired") => {
+    const { io } = fakeIo();
+    if (kind === "fired") appendEvent(io, DIR, "f1", { kind, edge: "e1", from: "a", to: "c", action: "run", note: "ran", output }, 1_000);
+    else appendEvent(io, DIR, "f1", { kind, edge: "e1", from: "a", to: "c", action: "run", error: "exit 1", output }, 1_000);
+    return readJournal(io, DIR, "f1");
+  };
+
+  it("answers true when the performer's latest output carries the text, case-insensitively", () => {
+    expect(printedVerdicts(flow(), withOutput("…\nDeployed to prod\n"))).toEqual({ e2: true });
+  });
+
+  it("answers false when the output lacks the text, when the text is blank, and when nothing was captured", () => {
+    expect(printedVerdicts(flow(), withOutput("rolled back"))).toEqual({ e2: false });
+    expect(printedVerdicts(flow({ text: "" }), withOutput("DEPLOYED"))).toEqual({ e2: false });
+    expect(printedVerdicts(flow(), [])).toEqual({ e2: false });
+  });
+
+  it("reads an errored performer's output too", () => {
+    expect(printedVerdicts(flow({ performer: { firedAt: undefined, error: "exit 1", performed: true } }), withOutput("ROLLBACK", "errored")))
+      .toEqual({ e2: false });
+    expect(printedVerdicts(flow({ performer: { firedAt: undefined, error: "exit 1", performed: true }, text: "rollback" }), withOutput("ROLLBACK", "errored")))
+      .toEqual({ e2: true });
+  });
+
+  it("answers false while the command has not performed, even with an older line on record", () => {
+    // After a Reset the performer is pending and the journal still holds last
+    // cycle's output — which must not answer for a run that has not happened.
+    expect(printedVerdicts(flow({ performer: { firedAt: undefined, performed: undefined } }), withOutput("DEPLOYED"))).toEqual({ e2: false });
+  });
+
+  it("reads the LATEST line for the performer, never an older run's", () => {
+    const { io } = fakeIo();
+    appendEvent(io, DIR, "f1", { kind: "fired", edge: "e1", from: "a", to: "c", action: "run", note: "ran", output: "DEPLOYED" }, 1_000);
+    appendEvent(io, DIR, "f1", { kind: "reset", edge: "e1" }, 1_001);
+    appendEvent(io, DIR, "f1", { kind: "errored", edge: "e1", from: "a", to: "c", action: "run", error: "exit 1", output: "ROLLBACK" }, 1_002);
+    expect(printedVerdicts(flow({ performer: { firedAt: undefined, error: "exit 1", performed: true } }), readJournal(io, DIR, "f1"))).toEqual({ e2: false });
+  });
+
+  it("says nothing about settled rules or rules that do not leave a command node", () => {
+    const f = flow();
+    f.edges.push({ id: "e3", from: "a", to: "z", cond: { kind: "command-printed", text: "x" } } as never);
+    (f.edges[1] as { firedAt?: number }).firedAt = 5;
+    expect(printedVerdicts(f, withOutput("DEPLOYED"))).toEqual({});
   });
 });

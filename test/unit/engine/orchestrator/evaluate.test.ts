@@ -811,3 +811,47 @@ describe("evaluateFlow — deadline-passed", () => {
     expect(r.blocked).toEqual([]);
   });
 });
+
+describe("evaluateFlow — command-printed", () => {
+  const printedRule = (id: string, from: string, to: string, over: Partial<FlowEdge> = {}) =>
+    edge(id, from, to, { cond: { kind: "command-printed", text: "DEPLOYED" }, ...over });
+  /** place → command (performed, succeeded) → notify, the rule under test on the last hop. */
+  const ran = (performerOver: Partial<FlowEdge> = { firedAt: NOW - 1, performed: true }) =>
+    flowWith([place("a", "PROJ-1"), command("c"), notify("z")],
+      [edge("e1", "a", "c", { action: "run", ...performerOver }), printedRule("e2", "c", "z")]);
+
+  it("fires when the host says the command printed the text and the command has performed", () => {
+    const r = evaluateFlow({ flow: ran(), statuses: [status("PROJ-1")], nowMs: NOW, printed: { e2: true } });
+    expect(r.fired.map((f) => f.edge.id)).toEqual(["e2"]);
+  });
+
+  it("fires on a command that ran and FAILED too — a failure's output is often the text worth acting on", () => {
+    const r = evaluateFlow({ flow: ran({ error: "exit 1", performed: true }), statuses: [status("PROJ-1")], nowMs: NOW, printed: { e2: true } });
+    expect(r.fired.map((f) => f.edge.id)).toEqual(["e2"]);
+  });
+
+  it("does not fire without a verdict, or with a false one — an absent map is waiting, never a match", () => {
+    expect(evaluateFlow({ flow: ran(), statuses: [status("PROJ-1")], nowMs: NOW }).fired).toEqual([]);
+    expect(evaluateFlow({ flow: ran(), statuses: [status("PROJ-1")], nowMs: NOW, printed: { e2: false } }).fired).toEqual([]);
+    expect(evaluateFlow({ flow: ran(), statuses: [status("PROJ-1")], nowMs: NOW, printed: {} }).fired).toEqual([]);
+  });
+
+  it("does not fire before the command has performed, whatever the host's verdict says", () => {
+    // A stale `true` — computed off last cycle's journal line, before a Reset cleared
+    // the performer — must not fire this cycle's rule.
+    const r = evaluateFlow({ flow: ran({}), statuses: [status("PROJ-1")], nowMs: NOW, printed: { e2: true } });
+    expect(r.fired).toEqual([]);
+  });
+
+  it("refuses a rule of this kind wired off a place, with no blocked note", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [printedRule("e1", "a", "z", { firedAt: undefined })]);
+    const r = evaluateFlow({ flow, statuses: [status("PROJ-1")], nowMs: NOW, printed: { e1: true } });
+    expect(r.fired).toEqual([]);
+    expect(r.blocked).toEqual([]);
+  });
+
+  it("reads the verdict keyed by the RULE's edge, not the command's", () => {
+    const r = evaluateFlow({ flow: ran(), statuses: [status("PROJ-1")], nowMs: NOW, printed: { e1: true } });
+    expect(r.fired).toEqual([]);
+  });
+});

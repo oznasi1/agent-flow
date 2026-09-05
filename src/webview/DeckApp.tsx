@@ -642,6 +642,10 @@ export function DeckApp(): JSX.Element {
    * drawer needs them to say what a `branch-ci-passed` rule is waiting on;
    * nothing else on the board reads a branch. */
   const [branchCi, setBranchCi] = React.useState<Record<string, BranchCiStatus>>({});
+  /** `command-printed` verdicts, flow id → rule edge id, from the host's journal
+   * read — threaded wherever `branchCi` is, for the same reason: every reader of
+   * a workflow's state must answer that rule the way the engine does. */
+  const [printed, setPrinted] = React.useState<Record<string, Record<string, boolean>>>({});
   /** Reusable workflow shapes, for the card drawer's attach picker. Rides
    * `deck:flows` alongside `flows` itself — see that message's own comment in
    * types.ts for why: with the orchestrator off there is nothing to attach,
@@ -890,6 +894,7 @@ export function DeckApp(): JSX.Element {
         // of a defended set undefended is how the next reader learns the wrong
         // rule from the surrounding code.
         setBranchCi(m.branchCi ?? {});
+        setPrinted(m.printed ?? {});
       }
     };
     window.addEventListener("message", handler);
@@ -1048,11 +1053,11 @@ export function DeckApp(): JSX.Element {
     const m = new Map<string, CardWorkflow>();
     if (!orchEnabled) return m;
     for (const c of cards) {
-      const w = cardWorkflow(flows, c.status, runs, now, branchCi);
+      const w = cardWorkflow(flows, c.status, runs, now, branchCi, printed);
       if (w) m.set(c.id, w);
     }
     return m;
-  }, [orchEnabled, cards, flows, runs, now, branchCi]);
+  }, [orchEnabled, cards, flows, runs, now, branchCi, printed]);
 
   // The Active screen's rows — one per card carrying a workflow, read from the
   // exact same map the board's own chip reads below, so the two can never name
@@ -1068,7 +1073,7 @@ export function DeckApp(): JSX.Element {
       const w = workflowByCard.get(c.id);
       if (w) entries.push({ card: c, w });
     }
-    const order = rankByState(entries.map((e) => e.w.flow), runs, now, branchCi);
+    const order = rankByState(entries.map((e) => e.w.flow), runs, now, branchCi, printed);
     const rank = new Map(order.map((f, i) => [f, i]));
     return entries
       .slice()
@@ -1079,7 +1084,7 @@ export function DeckApp(): JSX.Element {
         title: e.card.status.run.summary,
         workflow: e.w,
       }));
-  }, [cards, workflowByCard, runs, now, branchCi]);
+  }, [cards, workflowByCard, runs, now, branchCi, printed]);
 
   // How many rows on the Active list are genuinely waiting on the reader —
   // `waiting-on-you` (a gate asking a question) or `stopped` (a rule that
@@ -1442,6 +1447,7 @@ export function DeckApp(): JSX.Element {
           promptModes={promptModes}
           commands={commands}
           branchCi={branchCi}
+          printed={printed}
           templates={templates}
           draftTemplate={draftTemplate}
           view={orchView}
@@ -1575,6 +1581,7 @@ export function DeckApp(): JSX.Element {
           // shelving as closed must not make its own node unresolvable.
           runs={runs}
           branchCi={branchCi}
+          printed={printed}
           orchEnabled={orchEnabled}
           onClose={() => setSelId(null)}
           onForget={forget}

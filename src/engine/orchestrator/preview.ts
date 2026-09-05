@@ -83,8 +83,11 @@ export function previewFlow(
   statuses: RunStatus[],
   nowMs: number,
   branchCi?: Record<string, BranchCiStatus>,
+  /** `command-printed` verdicts for THIS flow, keyed by rule edge id — see
+   * `EvalInput.printed`. The webview receives them per flow on `deck:flows`. */
+  printed?: Record<string, boolean>,
 ): RulePreview[] {
-  const i = { flow: { ...flow, armed: true }, statuses, nowMs, branchCi };
+  const i = { flow: { ...flow, armed: true }, statuses, nowMs, branchCi, printed };
   const capped = evaluateFlow(i);
   const uncapped = evaluateFlow({ ...i, maxLaunches: Number.POSITIVE_INFINITY });
 

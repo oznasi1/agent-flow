@@ -441,6 +441,12 @@ export interface OrchestratorDrawerProps {
    * built-ins ship — and the free-text option below is what keeps the command
    * node reachable for a user who has configured none. */
   commands: FlowCommand[];
+  /** `command-printed` verdicts, keyed flow id → rule edge id — the host's own
+   * read of each flow's journal, and the same map the pass handed
+   * `evaluateFlow`. Without it the dry run would read every such rule as
+   * waiting while the engine fires it. Optional: a caller with no such rule
+   * (and every existing test) passes nothing, which reads as "did not print". */
+  printed?: Record<string, Record<string, boolean>>;
   /** Branch-CI verdicts the host has fetched, keyed `repo#branch` — the same map
    * `evaluateFlow` is handed. Without it a `branch-ci-passed` rule's own
    * observation line reads "not checked yet" forever, even while the host knows
@@ -568,7 +574,9 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // it when the target switches FROM an armed flow with the panel open TO a
   // template. A dry run is a verdict about being armed, and a template cannot
   // be armed, so it has nothing to verdict either way.
-  const dry = dryRun && flow && !editingTemplate ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : [];
+  const dry = dryRun && flow && !editingTemplate
+    ? previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id])
+    : [];
   const firing = dry.filter((v) => v.verdict === "fire").length;
   /** The Save-as-template dialog's own state: whether it is open, the name
    * typed so far, and one {mode, dest} choice per place node being demoted.
@@ -2006,7 +2014,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                       // held by the cap, unobservable or blank alike — which is why it and
                       // `fired` need not add up to `edges`: a settled rule is in neither.
                       if (!dryRun) {
-                        const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi);
+                        const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id]);
                         send({
                           type: "flow:dryRun",
                           edges: flow.edges.length,

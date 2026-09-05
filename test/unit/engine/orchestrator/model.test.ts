@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, gateAskEdge,
-  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt,
+  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -372,5 +372,24 @@ describe("a deadline on an edge", () => {
     // No clock yet, or no deadline — no moment.
     expect(deadlineAt(edge("e1", "a", "z", { timeoutMinutes: 10 }))).toBeUndefined();
     expect(deadlineAt(edge("e1", "a", "z", { liveSince: 1_000 }))).toBeUndefined();
+  });
+});
+
+describe("command-printed", () => {
+  it("outputContains is a case-insensitive substring match, and blank text matches nothing", () => {
+    expect(outputContains("Deploy finished: DEPLOYED to prod\n", "deployed")).toBe(true);
+    expect(outputContains("rollback initiated", "ROLLBACK")).toBe(true);
+    expect(outputContains("all green", "red")).toBe(false);
+    expect(outputContains("anything at all", "")).toBe(false);
+    expect(outputContains("anything at all", "   ")).toBe(false);
+    // A literal asterisk, not a glob.
+    expect(outputContains("3 * 4", "*")).toBe(true);
+    expect(outputContains("34", "*")).toBe(false);
+  });
+
+  it("condIncomplete reports blank text, in the same voice as a blank status", () => {
+    expect(condIncomplete({ kind: "command-printed", text: "" })).toBe("no text set");
+    expect(condIncomplete({ kind: "command-printed", text: "ok" })).toBeUndefined();
+    expect(condIncomplete({ kind: "command-printed" } as unknown as Condition)).toBe("no text set");
   });
 });

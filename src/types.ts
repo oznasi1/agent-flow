@@ -975,10 +975,17 @@ export type OutboundMessage =
   // `templates` rides the same emptied-with-`flows` rule as `pendingResume` and
   // for the same reason: with the setting off there is nothing to attach, and
   // silence must not read as "not loaded yet".
+  // `printed` is every `command-printed` rule's verdict, keyed flow id → rule edge
+  // id, read by the host off each flow's journal (`printedVerdicts`) — the SAME
+  // map the pass handed `evaluateFlow`, for the reason `branchCi` is: the drawer's
+  // dry run and the card's stepper must agree with the engine about a rule the
+  // webview cannot answer for itself (the output is in a file). Optional on the
+  // wire; a missing map reads as "did not print", i.e. waiting.
   | {
       type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[];
       promptModes: FlowPromptMode[]; commands: FlowCommand[];
       branchCi: Record<string, BranchCiStatus>; templates: FlowTemplate[];
+      printed?: Record<string, Record<string, boolean>>;
     }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }

@@ -11,6 +11,7 @@ import type { RunStatus } from "../../src/types";
 import {
   COND_LABEL,
   condOffered,
+  condOptionLabel,
   CWD_REPO_DEFAULT,
   deadlineLabel,
   deadlineNote,
@@ -306,11 +307,15 @@ describe("gate nodes in the pickers", () => {
     expect(off).toContain("pr-merged");
     expect(off).toContain("ci-passed");
     expect(off).not.toContain("command-succeeded");
-    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 3);
+    // Minus the two gate kinds and the two command-shaped kinds.
+    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 4);
   });
 
-  it("still offers command-succeeded off a command, and no gate condition", () => {
-    expect(offeredConds(gateFlow(), "c")).toEqual(["command-succeeded"]);
+  it("still offers the command-shaped conditions off a command, and no gate condition", () => {
+    // Two now, not one: `command-printed` joined `command-succeeded` as the second
+    // kind answered off a command node. The pin is still that no gate (or
+    // place-shaped) kind leaks in here.
+    expect(offeredConds(gateFlow(), "c")).toEqual(["command-succeeded", "command-printed"]);
   });
 
   it("seeds a new wire out of a gate with gate-approved", () => {
@@ -410,5 +415,37 @@ describe("deadlines in the rule module", () => {
     } as unknown as RunStatus;
     expect(observationOf(f, f.edges[0], [status])).toBeNull();
     expect(observationFallback(f, f.edges[0])).toMatch(/another rule/);
+  });
+});
+
+describe("command-printed in the rule module", () => {
+  const commandFlow = (): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "c", kind: "command", x: 200, y: 0, join: "any", run: "deploy.sh" },
+      { id: "n2", kind: "notify", x: 400, y: 0, join: "any", message: "done" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "c", cond: { kind: "pr-merged" } },
+      { id: "e2", from: "c", to: "n2", cond: { kind: "command-printed", text: "DEPLOYED" } },
+    ],
+  });
+
+  it("is offered off a command node and nowhere else, labelled with the parameter ellipsis", () => {
+    expect(COND_LABEL["command-printed"].endsWith("…")).toBe(true);
+    expect(offeredConds(commandFlow(), "c")).toContain("command-printed");
+    expect(offeredConds(commandFlow(), "n1")).not.toContain("command-printed");
+  });
+
+  it("seeds with blank text, names the text in a rule's option label, and marks the blank", () => {
+    expect(seedCond("command-printed")).toEqual({ kind: "command-printed", text: "" });
+    expect(condOptionLabel({ kind: "command-printed", text: "DEPLOYED" })).toBe("the command printed “DEPLOYED”");
+    expect(withCond(commandFlow(), "e2", "command-succeeded").edges[1].cond).toEqual({ kind: "command-succeeded" });
+  });
+
+  it("has no place-shaped observation, and its fallback names the command and the text", () => {
+    const f = commandFlow();
+    expect(observationOf(f, f.edges[1], [])).toBeNull();
+    expect(observationFallback(f, f.edges[1])).toBe("waiting for deploy.sh to print “DEPLOYED”");
   });
 });

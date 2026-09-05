@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A rule can read what a command printed.** A new condition off a command node, **the
+  command printed…**, is met when the command's captured output contains a text — a plain
+  case-insensitive substring — so "deploy printed `ROLLBACK`, page me" is one rule. The host
+  answers it off the flow's journal once per pass and hands the verdict to the engine and
+  the drawer alike, so the dry run agrees with what fires. A command that ran and failed
+  counts too; a rule waits until the command has run, and again after a Reset.
+
 - **Deadlines on rules.** Every rule in a workflow has a **WITHIN** field — minutes, or blank
   for "forever". A rule whose condition has not arrived by then settles as *expired*: a third
   terminal state beside fired and errored, shown in the drawer's ordinary voice rather than in

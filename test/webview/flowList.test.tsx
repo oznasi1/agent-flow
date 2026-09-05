@@ -948,7 +948,7 @@ describe("a parameterised condition", () => {
     expect(values).not.toContain("command-succeeded");
   });
 
-  it("offers only the command condition on a row out of a command node", () => {
+  it("offers only the command-shaped conditions on a row out of a command node", () => {
     const fromCommand = flow({
       nodes: [
         { id: "n1", kind: "command", x: 0, y: 0, join: "any", commandId: "deploy" },
@@ -961,7 +961,8 @@ describe("a parameterised condition", () => {
     const values = Array.from(
       screen.getByLabelText("Condition").querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    expect(values).toEqual(["command-succeeded"]);
+    // Both command-shaped kinds, and nothing place- or gate-shaped.
+    expect(values).toEqual(["command-succeeded", "command-printed"]);
   });
 });
 
@@ -1013,7 +1014,7 @@ describe("adding a rule from the keyboard", () => {
     expect(cond.value).toBe("pr-merged");
     fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n2" } });
     expect(Array.from(cond.querySelectorAll("option")).map((o) => (o as HTMLOptionElement).value))
-      .toEqual(["command-succeeded"]);
+      .toEqual(["command-succeeded", "command-printed"]);
     // Asserted on the rule the bar actually BUILDS, not on the select's rendered
     // value: jsdom resolves a value matching no option to the FIRST option, so a
     // draft still holding `pr-merged` would read as "command-succeeded" here

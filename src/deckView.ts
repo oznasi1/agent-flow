@@ -9,7 +9,7 @@ import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
 import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps } from "./engine/orchestrator/model";
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
-import { appendEvent, truncateOutput, findEdgeOutput, readJournal, JournalEvent, JournalEventInput } from "./engine/orchestrator/journal";
+import { appendEvent, truncateOutput, findEdgeOutput, printedVerdicts, readJournal, JournalEvent, JournalEventInput } from "./engine/orchestrator/journal";
 import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, normalizedTemplateFlow, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
 import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
@@ -750,10 +750,38 @@ export class DeckPanel {
     // Same reasoning as `promptModes`: configuration the drawer needs to build a
     // node with, which the webview cannot read for itself. Sent whole rather
     // than narrowed — see the `deck:flows` member's own comment in types.ts.
+    // `command-printed` verdicts, per flow, off the same journal read the pass
+    // makes — so the dry run and the card's stepper say what the engine says.
+    // Only flows with such a rule cost a read (see `printedFor`).
+    const printed: Record<string, Record<string, boolean>> = {};
+    if (enabled) {
+      for (const f of flows) {
+        const v = this.printedFor(f);
+        if (v !== undefined) printed[f.id] = v;
+      }
+    }
     this.post({
       type: "deck:flows", flows, enabled, pendingResume, promptModes,
-      commands: cfg.commands, branchCi, templates,
+      commands: cfg.commands, branchCi, templates, printed,
     });
+  }
+
+  /** This flow's `command-printed` verdicts (`printedVerdicts`), or `undefined`
+   * when it has no pending rule of that kind — which is every flow that never
+   * used the condition, and the reason this costs them no journal read. Never
+   * throws: `readJournal` swallows read failures as "empty" by contract, and the
+   * one thing it does throw on (an id failing `VALID_FLOW_ID`) cannot come from
+   * a flow `readFlows` handed back. An unreadable journal therefore reads as
+   * "printed nothing" — waiting, never a match. Defensive about the edge SHAPE
+   * for the reason `branchCiWanted` gives: this can run on a hand-edited flow. */
+  private printedFor(flow: Flow): Record<string, boolean> | undefined {
+    const edges = Array.isArray(flow.edges) ? flow.edges : [];
+    if (!edges.some((e) => e && e.cond?.kind === "command-printed" && !isSettled(e))) return undefined;
+    try {
+      return printedVerdicts(flow, readJournal(this.journalIo, this.flowsDir, flow.id));
+    } catch {
+      return {};
+    }
   }
 
   /** Advance every armed flow against the statuses this pass already built.
@@ -899,7 +927,10 @@ export class DeckPanel {
         // lock this pass holds: the same re-read discipline every other write in
         // this loop follows. The `expired` line is journaled AFTER the write,
         // for the reason the fired/errored lines below are.
-        const clocks = evaluateDeadlines({ flow, statuses: runs, nowMs, branchCi });
+        // Read once per flow per pass, before either evaluation, so the clocks
+        // and the actions are judged against the same output — see `printedFor`.
+        const printed = this.printedFor(flow);
+        const clocks = evaluateDeadlines({ flow, statuses: runs, nowMs, branchCi, printed });
         if (clocks.wentLive.length > 0 || clocks.expired.length > 0) {
           const current = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
           if (current) {
@@ -917,7 +948,7 @@ export class DeckPanel {
             }
           }
         }
-        const result = evaluateFlow({ flow, statuses: runs, nowMs, branchCi });
+        const result = evaluateFlow({ flow, statuses: runs, nowMs, branchCi, printed });
         if (result.fired.length === 0) {
           // Nothing ready means nothing to approve: clear the gate so a rule
           // that becomes met later in this session fires without ceremony.

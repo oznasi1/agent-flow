@@ -12973,3 +12973,72 @@ describe("deadlines on an armed flow", () => {
     expect(e.timeoutMinutes).toBe(10);
   });
 });
+
+describe("a command-printed rule", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** place → command (already performed) → notify on "the command printed…". */
+  const printedFlow = (text = "DEPLOYED"): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "c", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "it printed the word" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "c", cond: { kind: "pr-merged" }, firedAt: 5, firedNote: "ran", performed: true },
+      { id: "e2", from: "c", to: "n2", cond: { kind: "command-printed", text } },
+    ],
+  });
+  const ranWith = (output: string) =>
+    seedJournal("f1", { kind: "fired", edge: "e1", from: "n1", to: "c", action: "run", note: "ran", output }, 1_000);
+
+  it("fires when the journal shows the command printed the text", async () => {
+    ranWith("building…\nDEPLOYED to prod\n");
+    setConfig({ orchestrator: true });
+    h.flows = [printedFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    // The first pass holds a ready rule at the resume gate; Go is the next pass.
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[1].firedAt).toBeTypeOf("number");
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/printed the word/));
+  });
+
+  it("waits when the output lacks the text, and when nothing was journaled", async () => {
+    ranWith("rolled back\n");
+    setConfig({ orchestrator: true });
+    h.flows = [printedFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[1].firedAt).toBeUndefined();
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("posts the verdict per flow on deck:flows so the drawer agrees with the engine", async () => {
+    ranWith("DEPLOYED");
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...printedFlow(), armed: false }];
+    const { p } = await openPanel();
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { printed?: Record<string, Record<string, boolean>> };
+    expect(msg.printed).toEqual({ f1: { e2: true } });
+  });
+
+  it("posts nothing for a flow without such a rule — and reads no journal for it", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f2", "plain"), armed: false }];
+    const { p } = await openPanel();
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { printed?: Record<string, unknown> };
+    expect(msg.printed).toEqual({});
+  });
+});
