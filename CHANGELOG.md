@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A pass without the editor.** The extension now ships `dist/tick.js`: one orchestrator
+  pass from a shell, over the same flows, lock and journal the Deck uses, reading the
+  editor's own `settings.json`. It performs notify rules and already-consented run rules,
+  honours deadlines, the ceiling, retries and `neverAutoRun`, refreshes PR facts for the repos
+  armed flows watch, and refuses launch, seed and ask — leaving them pending and saying so.
+  `--dry-run` reports without touching anything. Schedule it with cron or launchd to keep a
+  flow watching overnight.
+
 - **Consent per command, behind a setting.** `agentFlow.commandConsent: "command"` keys a
   workflow's shell approval to the resolved command text instead of the workflow: each new
   text asks, and the ask offers **Run once**, **Run the next 5**, **Always for this command**,

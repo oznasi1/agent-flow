@@ -224,7 +224,11 @@ The drawer says what each condition is waiting on right now. **Arm** a flow and 
 on every Deck refresh; a rule that is met fires exactly once and tells you, rather than firing
 again on every later pass. It keeps advancing while the Deck is hidden — an armed flow that
 only ran while you were looking at the board would not be armed — and closing the Deck
-genuinely does stop it, since the panel owns the poll; closing with something armed says so.
+genuinely does stop it, since the panel owns the poll; closing with something armed says so. To keep
+watching with the editor closed, schedule `node dist/tick.js` from the installed extension —
+one pass per run, performing notifications and already-approved commands and leaving anything
+that needs a window or a person pending; see
+[ORCHESTRATOR_COMMANDS.md](ORCHESTRATOR_COMMANDS.md#a-pass-without-the-editor).
 Reopening the Deck, including after a restart, shows you what is already ready and waits for a
 **Go** before acting on it, so an armed flow can never spend anything the moment you come
 back. Before it ever launches or seeds for the first time, a flow asks once — naming the

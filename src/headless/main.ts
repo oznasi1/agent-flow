@@ -48,7 +48,7 @@ export function parseArgs(argv: string[]): Args | { error: string } {
   return out;
 }
 
-export const USAGE = `agent-flow tick — one orchestrator pass, no editor needed
+export const USAGE = `Agent Flow Deck tick — one orchestrator pass, no editor needed
 
   node dist/tick.js [--settings <path>] [--dry-run] [--no-fetch]
 

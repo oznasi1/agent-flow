@@ -168,7 +168,16 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
         // performer is the strand the Deck's `deferredTargets` exists to prevent.
         const heldTargets = new Set<string>();
         for (const f of firing) {
-          if (!f.perform || !isSpendAction(f.action)) continue;
+          if (!f.perform) continue;
+          // A gate's `ask` spends nothing, so `isSpendAction` would let it through
+          // to be stamped as posed — but a question posed with nobody there to
+          // answer it is the degradation the backlog forbids. Held, like a launch.
+          if (f.action === "ask") {
+            heldTargets.add(f.edge.to);
+            report.needsEditor.push(ruleName(fresh, f.edge, f.action));
+            continue;
+          }
+          if (!isSpendAction(f.action)) continue;
           if (f.action !== "run") {
             heldTargets.add(f.edge.to);
             report.needsEditor.push(ruleName(fresh, f.edge, f.action));

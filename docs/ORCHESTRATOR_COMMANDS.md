@@ -167,6 +167,70 @@ after the output channel itself has scrolled past it or the window has
 closed. The rule's own receipt carries the exit code and a sentence, not the
 output.
 
+## A pass without the editor
+
+The flows worth arming are the ones that watch overnight, and until now the
+pass was a timer on the Deck panel: close the window and nothing moved. The
+extension ships a second Node bundle for exactly that gap:
+
+```bash
+node ~/.vscode/extensions/oznasi1.agent-flow-<version>/dist/tick.js [--settings <path>] [--dry-run] [--no-fetch]
+```
+
+One invocation is one pass — the same pass the Deck runs, over the same
+`~/.agentflow/flows`, behind the same lock, writing the same stamps and the same
+[journal](FLOW_JOURNAL.md) lines — so a cron or launchd entry every few minutes
+is the whole scheduler, and the Deck picks up whatever the tick did the next time
+it opens. Exit `0` after a pass, `2` when a Deck or another tick held the lock,
+`3` when it could not start.
+
+**Where its settings come from.** There is no editor to ask, so it reads the
+same `settings.json` the editor would — Code, Code Insiders or Cursor, found by
+platform, or the file `--settings` names (`AGENT_FLOW_SETTINGS` works too).
+`agentFlow.orchestrator` must be on in that file; `agentFlow.commands`,
+`agentFlow.neverAutoRun`, `agentFlow.commandConsent`, `agentFlow.forge`,
+`agentFlow.prFacts` and `agentFlow.reposRoot` are read exactly as the editor
+reads them. Workspace-level settings are not: a tick has no workspace.
+
+**What it performs, and what it refuses.**
+
+- **`notify`** fires: the rule is stamped with its receipt and the line the Deck
+  would have toasted is printed instead. Nobody is notified beyond your log —
+  a cron job's stdout is the notification.
+- **`run`** fires **only when the flow already consented** — `commandConfirmedAt`
+  under the default consent mode, a covering per-command record under
+  `agentFlow.commandConsent: command` (a bounded approval is counted down). The
+  tick never asks and never invents an approval; an unconsented command is left
+  pending and named in the report. `agentFlow.neverAutoRun` is honoured before
+  consent is even consulted, and the command runs through the same runner, with
+  the same 120 s deadline, as it would in the Deck.
+- **`launch`, `seed` and `ask` are refused**, not degraded. They need an editor
+  and a person. Their met rules are left exactly as met as they were — not
+  stamped, not errored — and named as `needs an editor, left pending`, so the next
+  Deck pass finds them. A target whose performer is held has its siblings held
+  too, so an `"all"` junction is never half-stamped.
+
+Deadlines tick, the spend ceiling disarms, retries are scheduled and honoured,
+and `the command printed…` is answered from the journal — every rule the engine
+knows behaves the same, because it is the same engine.
+
+**What is different, and stated.**
+
+- **No resume gate.** The Deck holds first-look fires until you press Go, because
+  reopening a window must not spend. A scheduled tick is you asking for
+  unattended passes; it spends only what the flow already consented to.
+- **No ticket.** The connector's credentials live in the editor's secret store,
+  so a headless status carries no ticket: `ticket reached done` and `ticket
+  status is…` never fire from a tick.
+- **PR facts are refreshed** — but only for repos an armed flow's place watches,
+  and only past the Deck's own TTL, through the forge CLI the settings name.
+  `--no-fetch` reads the cache as the last Deck pass left it.
+- **No windows.** A card's "window open" reads false; nothing here opens one.
+
+`--dry-run` evaluates every armed flow, prints what a pass would do — `would
+notify`, `would run "…" in <repo>`, what needs an editor or consent — and
+writes nothing, runs nothing, and takes no lock.
+
 ## Consent per command
 
 The two consent gates are still two timestamps per flow, and that is
@@ -599,9 +663,11 @@ there, which closes the picker and opens the drawer's Templates view instead.
 - **Control the environment.** No env-var editing, no shell choice, no
   argument array — one string, your default shell, the extension host's
   environment.
-- **Run with the Deck closed.** The pass is a timer on the Deck panel. An
-  armed flow keeps polling in a background tab, but closing the tab or the
-  window stops everything. Nothing runs on a schedule outside the editor.
+- **Launch, seed or ask with the Deck closed.** The Deck's pass is a timer on
+  the panel; closing the window stops it. A scheduled `node dist/tick.js`
+  (see [A pass without the editor](#a-pass-without-the-editor)) performs
+  `notify` and already-consented `run` rules, and leaves the three verbs that
+  need an editor and a person pending, saying so.
 - **Have two windows share the work.** One window holds the lock and acts;
   the others skip that pass entirely.
 
