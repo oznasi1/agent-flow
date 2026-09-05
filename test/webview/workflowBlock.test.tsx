@@ -472,3 +472,51 @@ describe("WorkflowBlock — state to appearance", () => {
     expect(rules.length).toBeGreaterThan(6);
   });
 });
+
+describe("WorkflowBlock — a step with a deadline", () => {
+  it("marks an expired step .wf-expired, words it as expired, and offers Reset but never Output", async () => {
+    const base = makeBase();
+    const expiredFlow: Flow = {
+      ...runFlow,
+      edges: [{ ...edge("e1"), timeoutMinutes: 30, liveSince: 1_000, expiredAt: 1_000 + 30 * 60_000 }],
+    };
+    render(<WorkflowBlock {...base} flow={expiredFlow} state={{
+      status: "advancing", done: 1, total: 1,
+      steps: [{ edgeId: "e1", state: "expired" }],
+    }} />);
+    const li = document.querySelector("li.wf-step")!;
+    expect(li.className).toBe("wf-step wf-expired");
+    expect(screen.getByText("expired — waited 30m")).toBeTruthy();
+    // A `run` rule's target — and still no Output: an expiry ran nothing.
+    expect(screen.queryByRole("button", { name: "Output" })).toBeNull();
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(base.onResetEdge).toHaveBeenCalledWith("e1");
+  });
+
+  it("counts down on the current step while its clock is running", () => {
+    render(<WorkflowBlock {...makeBase()} state={{
+      status: "advancing", done: 0, total: 1,
+      steps: [{ edgeId: "e1", state: "now", deadlineAt: Date.now() + 12 * 60_000 + 5_000 }],
+    }} />);
+    expect(screen.getByText("expires in 12m")).toBeTruthy();
+  });
+
+  it("lets a recorded receipt win over the countdown — the engine's words come first", () => {
+    render(<WorkflowBlock {...makeBase()} state={{
+      status: "advancing", done: 0, total: 1,
+      steps: [{ edgeId: "e1", state: "now", receipt: "no branch set", deadlineAt: Date.now() + 12 * 60_000 }],
+    }} />);
+    expect(screen.getByText("no branch set")).toBeTruthy();
+    expect(screen.queryByText(/expires in/)).toBeNull();
+  });
+
+  it("spends neither attention colour on an expired step", () => {
+    // The hue rule again, for the new state: an expiry is not a failure and does
+    // not want a human, so it gets the dim default and nothing more.
+    const rules = [...DECK_CSS.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/(\.wf-step\.wf-expired[^{]*)\{([^}]*)\}/g)];
+    for (const [, , body] of rules) {
+      expect(body).not.toContain("--c-danger");
+      expect(body).not.toContain("--c-attn");
+    }
+  });
+});

@@ -136,7 +136,11 @@ test("a terminal surface with no CLI on PATH says command not found and keeps th
   // after the boot pause regardless of what the CLI did, so the task prompt lands
   // on the shell line under the error.
   await expect.poll(() => terminalText(opened), { timeout: 30_000 }).toContain(`Jira ${FIXTURE_TASK.key}`);
-  const screen = await terminalText(opened);
+  // Whitespace-normalised: xterm wraps the pasted prompt at the runner's column
+  // width, and on one CI VM the break fell between "rocket" and "telemetry" —
+  // the same prompt, split across two rows. What the journey proves is that the
+  // words landed, not where the terminal chose to wrap them.
+  const screen = (await terminalText(opened)).replace(/\s+/g, " ");
   expect(screen).toContain("rocket telemetry");
   // And it really was no CLI at all — not the shim, and not a developer's real one.
   expect(screen).not.toContain("CLAUDE-SHIM-READY");

@@ -328,3 +328,32 @@ describe("cardWorkflow", () => {
     expect(found?.extraCount).toBe(1);
   });
 });
+
+describe("workflowState — an expired rule", () => {
+  it("reports an expired edge as expired, with no receipt of its own", () => {
+    const s = workflowState(withEdges([edge({ id: "e1", timeoutMinutes: 10, liveSince: 1, expiredAt: 700 })]), [], 1000);
+    expect(s.steps[0]).toMatchObject({ state: "expired" });
+    expect(s.steps[0].receipt).toBeUndefined();
+    expect(s.done).toBe(1);
+  });
+
+  it("does not stop the workflow — a sibling may be the one that acts on the deadline", () => {
+    const s = workflowState(withEdges([
+      edge({ id: "e1", expiredAt: 700 }),
+      edge({ id: "e2", cond: { kind: "deadline-passed" } }),
+    ]), [], 1000);
+    expect(s.status).toBe("advancing");
+    expect(s.steps[1].state).toBe("now");
+  });
+
+  it("is done when every rule has fired or expired", () => {
+    const s = workflowState(withEdges([edge({ id: "e1", firedAt: 5 }), edge({ id: "e2", expiredAt: 6 })]), [], 1000);
+    expect(s.status).toBe("done");
+  });
+
+  it("names the moment a current step's clock runs out", () => {
+    const s = workflowState(withEdges([edge({ id: "e1", timeoutMinutes: 10, liveSince: 1_000 })]),
+      [wire(mkRun({ key: "PROJ-142" }))], 61_000);
+    expect(s.steps[0]).toMatchObject({ state: "now", deadlineAt: 1_000 + 10 * 60_000 });
+  });
+});

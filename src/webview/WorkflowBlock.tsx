@@ -25,7 +25,7 @@
 import * as React from "react";
 import { Flow, FlowEdge, edgeAction, gateAskEdge } from "../engine/orchestrator/model";
 import { StepState, WorkflowState, WorkflowStatus } from "../engine/orchestrator/attach";
-import { reasonWhy, ruleOneLine } from "./orchestratorRule";
+import { deadlineNote, expiredText, reasonWhy, ruleOneLine } from "./orchestratorRule";
 
 export interface WorkflowBlockProps {
   /** `undefined` — nothing binds this card — is a state in its own right, not an
@@ -74,15 +74,26 @@ const MARK: Record<StepState["state"], string> = {
   waiting: "·",
   you: "!",
   fail: "✕",
+  // Settled without arriving. Not `✕`: nothing failed, and the failure glyph
+  // beside a rule that merely ran out of time would send a reader looking for an
+  // error that isn't there.
+  expired: "⊘",
 };
 
 /** The receipt line under a step's rule sentence: the engine's own recorded
  * words if it has any, else `reasonWhy`'s sentence for why it is stuck, else
- * nothing — a `waiting` step with neither is simply next in line, and says so
- * by staying quiet rather than manufacturing a reason it doesn't have. */
-function stepText(step: StepState): string | undefined {
+ * the countdown on a running clock, else nothing — a `waiting` step with none of
+ * these is simply next in line, and says so by staying quiet rather than
+ * manufacturing a reason it doesn't have.
+ *
+ * An expired step is worded from the EDGE (`expiredText`): `attach.ts` records
+ * no receipt for it on purpose — an expiry has no engine words, only a moment —
+ * and the sentence belongs here with the other three presentations' copy. */
+function stepText(step: StepState, edge: FlowEdge, nowMs: number): string | undefined {
+  if (step.state === "expired") return expiredText(edge);
   if (step.receipt !== undefined) return step.receipt;
   if (step.reason !== undefined) return reasonWhy(step.reason);
+  if (step.deadlineAt !== undefined) return deadlineNote(step.deadlineAt, nowMs);
   return undefined;
 }
 
@@ -102,7 +113,9 @@ function WorkflowStep({
   onOutput: (edgeId: string) => void;
 }): JSX.Element {
   const sentence = ruleOneLine(flow, edge);
-  const text = stepText(step);
+  // `Date.now()` at render, the same clock the dry-run panel reads for its own
+  // countdown; the block re-renders on every `deck:runs`, i.e. every poll.
+  const text = stepText(step, edge, Date.now());
   // Referenced by this step's own buttons via `aria-describedby` below, NOT
   // folded into their accessible name. Several gates or failures can be on
   // screen at once, and a screen reader reading "Approve" four times with
@@ -187,6 +200,20 @@ function WorkflowStep({
               Output
             </button>
           )}
+          <button
+            type="button"
+            className="dd-pact"
+            aria-describedby={descId}
+            onClick={() => onResetEdge(step.edgeId)}
+          >
+            Reset
+          </button>
+        </div>
+      )}
+      {/* Settled, so Reset is the one way back into play — and NO Output, even
+          on a `run` rule: an expiry ran nothing, so there is no line to open. */}
+      {step.state === "expired" && (
+        <div className="wf-step-acts">
           <button
             type="button"
             className="dd-pact"

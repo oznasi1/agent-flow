@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { applyFired, notifyLines } from "../../../../src/engine/orchestrator/runner";
+import { applyClocks, applyFired, notifyLines } from "../../../../src/engine/orchestrator/runner";
 import { Flow, FlowEdge, FlowNode, JoinMode, NotifyNode, PlaceNode, emptyFlow } from "../../../../src/engine/orchestrator/model";
 import { FiredEdge } from "../../../../src/engine/orchestrator/evaluate";
 
@@ -387,5 +387,61 @@ describe("applyFired — an ask edge", () => {
     // action guard that prevents non-notify actions from producing toast lines.
     const flow = gateFlow();
     expect(notifyLines(flow, [{ edge: flow.edges[0], perform: true, action: "ask" }])).toEqual([]);
+  });
+});
+
+describe("applyClocks", () => {
+  const twoRules = () => flowWith(
+    [place("a", "PROJ-1"), notify("y", "one"), notify("z", "two")],
+    [edge("e1", "a", "y", { timeoutMinutes: 10 }), edge("e2", "a", "z", { timeoutMinutes: 10 })],
+  );
+
+  it("stamps liveSince on the edges that went live, and nothing else", () => {
+    const out = applyClocks(twoRules(), { wentLive: ["e1"], expired: [] }, NOW);
+    expect(out.edges[0].liveSince).toBe(NOW);
+    expect(out.edges[1].liveSince).toBeUndefined();
+    expect(out.edges[0].expiredAt).toBeUndefined();
+  });
+
+  it("stamps expiredAt on the edges that ran out", () => {
+    const flow = twoRules();
+    flow.edges[1].liveSince = NOW - 60 * 60_000;
+    const out = applyClocks(flow, { wentLive: [], expired: ["e2"] }, NOW);
+    expect(out.edges[1].expiredAt).toBe(NOW);
+    expect(out.edges[1].liveSince).toBe(NOW - 60 * 60_000);
+    expect(out.edges[0]).toEqual(flow.edges[0]);
+  });
+
+  it("returns the very same flow when there is nothing to stamp, so the caller can skip the write", () => {
+    const flow = twoRules();
+    expect(applyClocks(flow, { wentLive: [], expired: [] }, NOW)).toBe(flow);
+  });
+
+  it("does not restart a clock the store already holds — the evaluation was a store-read ago", () => {
+    const flow = twoRules();
+    flow.edges[0].liveSince = NOW - 5;
+    const out = applyClocks(flow, { wentLive: ["e1"], expired: [] }, NOW);
+    expect(out).toBe(flow);
+  });
+
+  it("leaves an edge that settled between the evaluation and this write alone", () => {
+    // Another window fired it in the gap. A settled edge must not gain an
+    // expiry stamp on top of its receipt, nor a clock it no longer needs.
+    const flow = twoRules();
+    flow.edges[0].firedAt = NOW - 1;
+    flow.edges[1].error = "boom";
+    expect(applyClocks(flow, { wentLive: ["e1"], expired: ["e2"] }, NOW)).toBe(flow);
+  });
+
+  it("ignores an edge id that is not in the flow", () => {
+    const flow = twoRules();
+    expect(applyClocks(flow, { wentLive: ["nope"], expired: ["nope"] }, NOW)).toBe(flow);
+  });
+
+  it("does not mutate the flow it is given", () => {
+    const flow = twoRules();
+    const before = JSON.stringify(flow);
+    applyClocks(flow, { wentLive: ["e1"], expired: ["e2"] }, NOW);
+    expect(JSON.stringify(flow)).toBe(before);
   });
 });

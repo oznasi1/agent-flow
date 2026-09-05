@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Deadlines on rules.** Every rule in a workflow has a **WITHIN** field — minutes, or blank
+  for "forever". A rule whose condition has not arrived by then settles as *expired*: a third
+  terminal state beside fired and errored, shown in the drawer's ordinary voice rather than in
+  red, marked `⊘` on the card's stepper, and cleared by Reset like the other two. A new
+  condition, **a deadline here passed**, lets a sibling rule out of the same node act on it —
+  "if it hasn't merged in an hour, tell me" is two rules out of one card. A late condition
+  still fires; the clock starts only once the rule is genuinely waiting (its card on the board,
+  its command run, its gate asked), pauses while the flow is disarmed, and restarts on re-arm.
+  The dry run counts down (`expires in 12m`) and the journal records each expiry as its own
+  `expired` event. Flows that set no deadline are written exactly as before.
+
 ## [0.67.1] — 2026-09-04
 
 ### Changed

@@ -87,6 +87,9 @@ const LABEL: Record<Condition["kind"], string> = {
   // edge (`gateAnswer`), not from any toggleable signal.
   "gate-approved": "you approved",
   "gate-rejected": "you rejected",
+  // Same reason and same absence from NEEDS_LIVE/NEEDS_PR as the three above:
+  // answered off a sibling edge's `expiredAt`, never off a toggleable signal.
+  "deadline-passed": "a deadline here passed",
 };
 
 export function unfirableRules(flow: Flow, sources: SourceState): UnfirableRule[] {

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, gateAskEdge,
-  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId,
+  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -339,5 +339,38 @@ describe("gateAskEdge", () => {
   it("is undefined for a node that is not a gate, and for one that does not exist", () => {
     expect(gateAskEdge(gateAt([ask(), outgoing]), "n1")).toBeUndefined();
     expect(gateAskEdge(gateAt([ask(), outgoing]), "nope")).toBeUndefined();
+  });
+});
+
+describe("a deadline on an edge", () => {
+  it("isSettled is true for an edge that expired — the third terminal stamp", () => {
+    // Neither `firedAt` nor `error`: an expired rule ran nothing and failed at
+    // nothing, and it must still never be evaluated again until Reset.
+    expect(isSettled(edge("e1", "a", "z", { expiredAt: 1 }))).toBe(true);
+  });
+
+  it("stripHostStamps drops the clock and the expiry, and keeps the deadline itself", () => {
+    const out = stripHostStamps(edge("e1", "a", "z", { timeoutMinutes: 45, liveSince: 5, expiredAt: 9 }));
+    expect(out.liveSince).toBeUndefined();
+    expect(out.expiredAt).toBeUndefined();
+    // The deadline is the user's configuration — what the rule IS — like `note`.
+    expect(out.timeoutMinutes).toBe(45);
+  });
+
+  it("hasDeadline is true only for a positive finite minute count", () => {
+    expect(hasDeadline(edge("e1", "a", "z"))).toBe(false);
+    expect(hasDeadline(edge("e1", "a", "z", { timeoutMinutes: 0 }))).toBe(false);
+    expect(hasDeadline(edge("e1", "a", "z", { timeoutMinutes: -3 }))).toBe(false);
+    expect(hasDeadline(edge("e1", "a", "z", { timeoutMinutes: Number.NaN }))).toBe(false);
+    // A hand-edited file can carry anything.
+    expect(hasDeadline(edge("e1", "a", "z", { timeoutMinutes: "10" as unknown as number }))).toBe(false);
+    expect(hasDeadline(edge("e1", "a", "z", { timeoutMinutes: 10 }))).toBe(true);
+  });
+
+  it("deadlineAt is the moment the clock runs out, once it is running", () => {
+    expect(deadlineAt(edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: 1_000 }))).toBe(1_000 + 10 * 60_000);
+    // No clock yet, or no deadline — no moment.
+    expect(deadlineAt(edge("e1", "a", "z", { timeoutMinutes: 10 }))).toBeUndefined();
+    expect(deadlineAt(edge("e1", "a", "z", { liveSince: 1_000 }))).toBeUndefined();
   });
 });

@@ -343,3 +343,23 @@ describe("findEdgeOutput", () => {
     expect(findEdgeOutput(events, "e1")).toEqual({ ok: true, output: "mine", kind: "fired", action: "run", at: 1 });
   });
 });
+
+describe("the expired event", () => {
+  it("round-trips an expiry with the edge, its ends and when its clock started", () => {
+    const { io } = fakeIo();
+    appendEvent(io, DIR, "f1", { kind: "expired", edge: "e1", from: "n1", to: "n2", since: 500 }, 1_000);
+    expect(readJournal(io, DIR, "f1")[0]).toMatchObject({
+      kind: "expired", edge: "e1", from: "n1", to: "n2", since: 500, at: 1_000,
+    });
+  });
+
+  it("is not an output-bearing event, so findEdgeOutput does not read it as one", () => {
+    // An expiry ran nothing. If it counted as this edge's latest run, a Reset
+    // then expire would hide the output of the command that DID run before it.
+    const { io } = fakeIo();
+    appendEvent(io, DIR, "f1", { kind: "fired", edge: "e1", from: "n1", to: "n2", action: "run", note: "ok", output: "hello" }, 1_000);
+    appendEvent(io, DIR, "f1", { kind: "reset", edge: "e1" }, 1_001);
+    appendEvent(io, DIR, "f1", { kind: "expired", edge: "e1", from: "n1", to: "n2", since: 1_001 }, 1_002);
+    expect(findEdgeOutput(readJournal(io, DIR, "f1"), "e1")).toMatchObject({ ok: true, output: "hello" });
+  });
+});

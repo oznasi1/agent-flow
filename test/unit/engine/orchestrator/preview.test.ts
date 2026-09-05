@@ -203,3 +203,40 @@ describe("previewFlow — a rule whose own condition is blank", () => {
       .toMatchObject({ verdict: "unset", blank: "no status set" });
   });
 });
+
+describe("previewFlow — deadlines", () => {
+  it("reads a rule whose deadline has run out unmet as expiring", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: NOW - 10 * 60_000 })]);
+    expect(previewFlow(flow, [status("PROJ-1")], NOW)).toEqual([
+      { edgeId: "e1", verdict: "expire", perform: false },
+    ]);
+  });
+
+  it("reads it as firing, not expiring, when the condition arrived in time — the engine's decision wins", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: NOW - 60 * 60_000 })]);
+    expect(verdictOf(previewFlow(flow, [status("PROJ-1", { merged: true })], NOW), "e1")).toBe("fire");
+  });
+
+  it("expiring outranks blocked — a deadline that ran out while the card was gone still ran out", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: NOW - 60 * 60_000 })]);
+    expect(verdictOf(previewFlow(flow, [], NOW), "e1")).toBe("expire");
+  });
+
+  it("names the moment a waiting rule's clock runs out, and only when it is running", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z"), notify("y")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: NOW - 60_000 }),
+       edge("e2", "a", "y", { timeoutMinutes: 10 })]);
+    expect(previewFlow(flow, [status("PROJ-1")], NOW)).toEqual([
+      { edgeId: "e1", verdict: "waiting", perform: false, deadlineAt: NOW + 9 * 60_000 },
+      { edgeId: "e2", verdict: "waiting", perform: false },
+    ]);
+  });
+
+  it("leaves an expired rule out entirely, like every other settled rule", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z", { expiredAt: NOW - 1 })]);
+    expect(previewFlow(flow, [status("PROJ-1", { merged: true })], NOW)).toEqual([]);
+  });
+});

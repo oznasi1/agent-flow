@@ -12,18 +12,25 @@ import {
   COND_LABEL,
   condOffered,
   CWD_REPO_DEFAULT,
+  deadlineLabel,
+  deadlineNote,
   defaultCondFor,
   DEFAULT_IDLE_MINUTES,
   endLabel,
+  expiredText,
+  observationFallback,
   observationOf,
   offeredConds,
   OFFERED_CONDS,
+  parseDeadlineInput,
   repoOptions,
   seedCond,
   sourceRepoOfNode,
+  verdictLabel,
   verdictWhy,
   withCond,
   withCondParams,
+  withDeadline,
   withNodeCwdRepo,
   withNodeJoin,
 } from "../../src/webview/orchestratorRule";
@@ -331,5 +338,77 @@ describe("gate nodes in the pickers", () => {
       .toBe("its card isn't on the board — this can never be met while that stays true");
     expect(verdictWhy({ verdict: "blocked", reason: "agent-state-unknown" } as RulePreview))
       .toBe("can't tell what the session is doing right now");
+  });
+});
+
+describe("deadlines in the rule module", () => {
+  const withDeadlineEdge = (timeoutMinutes?: number): Flow => {
+    const f = wired();
+    if (timeoutMinutes !== undefined) f.edges[0].timeoutMinutes = timeoutMinutes;
+    return f;
+  };
+
+  it("labels deadline-passed as a bare kind and offers it off a place, never off a gate or a command", () => {
+    expect(COND_LABEL["deadline-passed"]).toBe("a deadline here passed");
+    expect(COND_LABEL["deadline-passed"].endsWith("…")).toBe(false);
+    expect(offeredConds(wired(), "n1")).toContain("deadline-passed");
+  });
+
+  it("withDeadline writes a positive minute count on the edge, and DELETES the field for none", () => {
+    const f = withDeadlineEdge();
+    const set = withDeadline(f, f.edges[0], 45);
+    expect(set.edges[0].timeoutMinutes).toBe(45);
+    const cleared = withDeadline(set, set.edges[0], undefined);
+    expect("timeoutMinutes" in cleared.edges[0]).toBe(false);
+  });
+
+  it("parseDeadlineInput accepts blank as none and a positive number as minutes, and refuses the rest", () => {
+    expect(parseDeadlineInput("")).toEqual({ ok: true, minutes: undefined });
+    expect(parseDeadlineInput("   ")).toEqual({ ok: true, minutes: undefined });
+    expect(parseDeadlineInput("45")).toEqual({ ok: true, minutes: 45 });
+    expect(parseDeadlineInput("0")).toEqual({ ok: false });
+    expect(parseDeadlineInput("-3")).toEqual({ ok: false });
+    expect(parseDeadlineInput("soon")).toEqual({ ok: false });
+  });
+
+  it("says how long a rule may wait on a closed row, and nothing when it has no deadline", () => {
+    expect(deadlineLabel(withDeadlineEdge(90).edges[0])).toBe("within 90m");
+    expect(deadlineLabel(withDeadlineEdge().edges[0])).toBeNull();
+  });
+
+  it("counts down to the moment a running clock expires, in whole minutes, never negative", () => {
+    const at = 1_000_000;
+    expect(deadlineNote(at, at - 9 * 60_000 - 30_000)).toBe("expires in 9m");
+    expect(deadlineNote(at, at - 30_000)).toBe("expires on the next pass");
+    expect(deadlineNote(at, at + 60_000)).toBe("expires on the next pass");
+  });
+
+  it("words an expired rule by how long it waited, and plainly when the clock was never recorded", () => {
+    const f = withDeadlineEdge(60);
+    f.edges[0].liveSince = 1_000;
+    f.edges[0].expiredAt = 1_000 + 61 * 60_000;
+    expect(expiredText(f.edges[0])).toBe("expired — waited 61m");
+    const bare = withDeadlineEdge(60);
+    bare.edges[0].expiredAt = 5;
+    expect(expiredText(bare.edges[0])).toBe("expired");
+  });
+
+  it("reads an expire verdict in words, with a reason that names the fallback", () => {
+    const v: RulePreview = { edgeId: "e1", verdict: "expire", perform: false };
+    expect(verdictLabel(v)).toBe("would expire");
+    expect(verdictWhy(v)).toMatch(/deadline/);
+    expect(verdictWhy(v)).toMatch(/a deadline here passed/);
+  });
+
+  it("observationOf refuses deadline-passed like the other flow-answered kinds, and the fallback says what it waits on", () => {
+    const f = wired();
+    f.edges[0].cond = { kind: "deadline-passed" };
+    const status = {
+      run: { key: "PROJ-1", summary: "s", url: "", createdAt: 1, mode: "multiroot", repos: [], briefPaths: [] },
+      column: "progress", ticketStatus: null, ticketCategory: null, repos: [],
+      agent: { state: "working", lastActivityMs: 1, slug: null }, windowOpen: false, prs: {}, agents: [], shelf: "board",
+    } as unknown as RunStatus;
+    expect(observationOf(f, f.edges[0], [status])).toBeNull();
+    expect(observationFallback(f, f.edges[0])).toMatch(/another rule/);
   });
 });

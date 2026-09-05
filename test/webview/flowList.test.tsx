@@ -1471,3 +1471,53 @@ describe("the new-rule bar and a parameterised condition", () => {
     expect(within(bar).queryByLabelText("Branch")).toBeNull();
   });
 });
+
+describe("a rule's deadline in the list", () => {
+  it("offers a deadline field on an open row for every verb, and writes it on blur", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: placeAndNotify(), onSave })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const box = screen.getByLabelText("Deadline minutes") as HTMLInputElement;
+    fireEvent.change(box, { target: { value: "45" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].timeoutMinutes).toBe(45);
+  });
+
+  it("clears the deadline when the field is emptied, and keeps the old value on junk", () => {
+    const onSave = vi.fn();
+    render(<FlowList {...props({ flow: placeAndPlanned({ timeoutMinutes: 45 }), onSave })} />);
+    fireEvent.click(screen.getByTestId("flowlist-row-e1"));
+    const box = screen.getByLabelText("Deadline minutes") as HTMLInputElement;
+    expect(box.value).toBe("45");
+    fireEvent.change(box, { target: { value: "-2" } });
+    fireEvent.blur(box);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(box.value).toBe("45");
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    expect("timeoutMinutes" in (onSave.mock.calls.at(-1)![0] as Flow).edges[0]).toBe(false);
+  });
+
+  it("a closed row says how long the rule may wait, and says nothing without a deadline", () => {
+    const r1 = render(<FlowList {...props({ flow: placeAndPlanned({ timeoutMinutes: 45 }) })} />);
+    expect(screen.getByTestId("flowlist-row-e1").textContent).toContain("within 45m");
+    r1.unmount();
+    render(<FlowList {...props({ flow: placeAndPlanned() })} />);
+    expect(screen.getByTestId("flowlist-row-e1").textContent).not.toContain("within");
+    expect(screen.queryByLabelText("Deadline minutes")).toBeNull();
+  });
+
+  it("shows an expired rule's receipt in the dim voice, not red, and offers Reset", () => {
+    const onResetEdge = vi.fn();
+    render(<FlowList {...props({
+      flow: placeAndPlanned({ timeoutMinutes: 45, liveSince: 1_000, expiredAt: 1_000 + 45 * 60_000 }),
+      onResetEdge,
+    })} />);
+    const row = screen.getByTestId("flowlist-row-e1");
+    expect(row.textContent).toContain("expired — waited 45m");
+    expect(row.querySelector(".fl-receipt .err")).toBeNull();
+    expect(row.querySelector(".fl-receipt .fired")).toBeNull();
+    fireEvent.click(within(row).getByRole("button", { name: "Reset" }));
+    expect(onResetEdge).toHaveBeenCalled();
+  });
+});

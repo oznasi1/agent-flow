@@ -25,6 +25,7 @@ import {
   Flow,
   FlowAction,
   FlowEdge,
+  hasDeadline,
   JoinMode,
   LaunchDest,
   nextEdgeId,
@@ -65,7 +66,84 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   // condition about something YOU did rather than something the world did.
   "gate-approved": "you approved",
   "gate-rejected": "you rejected",
+  // Bare, like the three above it. "here" is load-bearing: the condition reads
+  // a SIBLING rule out of the same source, and a label without it would read as
+  // if this rule had a deadline of its own.
+  "deadline-passed": "a deadline here passed",
 };
+
+/** The aria-label both presentations' deadline `<input>` shares — see
+ * `withDeadline` for what the field means. Centralised for the same reason
+ * `NOTE_ARIA_LABEL` is. */
+export const DEADLINE_ARIA_LABEL = "Deadline minutes";
+
+/** What the deadline field shows when the rule has none. "none" and not a
+ * number: a number here would read as a configured value, and the rule waits
+ * forever, which is a real and ordinary choice, not a blank. */
+export const DEADLINE_PLACEHOLDER = "none";
+
+/** The one sentence beside the deadline field. A deadline does NOT make the rule
+ * fire — it settles it as expired — and "then expires" is the half of that a
+ * user would otherwise guess wrong. */
+export const DEADLINE_HINT = "min, then it expires";
+
+/** Write a rule's deadline, or DELETE it for `undefined` — never store a blank.
+ * One home, on the edge, for every verb: a deadline is about waiting, and every
+ * rule waits the same way regardless of what it then does. The engine reads it
+ * through `hasDeadline` (model.ts), which refuses anything but a positive finite
+ * number, so this writer only ever stores what `parseDeadlineInput` admitted. */
+export function withDeadline(flow: Flow, edge: FlowEdge, minutes: number | undefined): Flow {
+  return {
+    ...flow,
+    edges: flow.edges.map((x) => {
+      if (x.id !== edge.id) return x;
+      if (minutes === undefined) {
+        const { timeoutMinutes: _drop, ...rest } = x;
+        return rest;
+      }
+      return { ...x, timeoutMinutes: minutes };
+    }),
+  };
+}
+
+/** What the deadline field's text means, on blur. Blank is "no deadline" —
+ * emptying the field is how you remove one — and only a positive finite number
+ * is a deadline; anything else (`0`, a negative, letters) is refused so the
+ * control puts the old value back rather than silently storing something the
+ * engine would ignore. `0` is refused rather than read as "expires at once":
+ * see `hasDeadline`. */
+export function parseDeadlineInput(raw: string): { ok: true; minutes: number | undefined } | { ok: false } {
+  if (raw.trim() === "") return { ok: true, minutes: undefined };
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? { ok: true, minutes: n } : { ok: false };
+}
+
+/** A closed row's word for a rule's deadline, or `null` without one. Short on
+ * purpose — a closed row is a sentence to scan (see `truncatedNote`). */
+export function deadlineLabel(e: FlowEdge): string | null {
+  return hasDeadline(e) ? `within ${e.timeoutMinutes}m` : null;
+}
+
+/** The countdown beside a rule whose clock is running: whole minutes left, and
+ * "on the next pass" once under a minute — the engine only looks every six
+ * seconds, so a live count of seconds would promise a precision it hasn't got.
+ * Never negative: a clock past its moment that has not yet been stamped is one
+ * pass from expiring, which is the same sentence. */
+export function deadlineNote(deadlineAtMs: number, nowMs: number): string {
+  const left = Math.floor((deadlineAtMs - nowMs) / 60_000);
+  return left >= 1 ? `expires in ${left}m` : "expires on the next pass";
+}
+
+/** How an expired rule reads where a fired one shows its receipt. Says how long
+ * it actually waited when the clock was recorded (`liveSince`), because that is
+ * the one fact a reader wants next — "expired after 61m" tells you the deadline
+ * was 60 and CI was still running — and just "expired" for a hand-edited file
+ * that carries the stamp without the clock. Shared by the inspector, the list
+ * and the card's stepper so the three cannot word one fact three ways. */
+export function expiredText(e: FlowEdge): string {
+  if (e.expiredAt === undefined || typeof e.liveSince !== "number") return "expired";
+  return `expired — waited ${Math.max(0, Math.round((e.expiredAt - e.liveSince) / 60_000))}m`;
+}
 
 /** Every condition kind that carries a parameter, and so needs a seed value the
  * moment a picker names it. One list, in one place, because `withCond` and
@@ -509,7 +587,13 @@ export function observationOf(
   // in a place-shaped `CondContext`, so `describeCond`'s matching arms throw too
   // — this guard is what keeps them unreachable, same as it always has for
   // `command-succeeded`.
-  if (e.cond.kind === "command-succeeded" || e.cond.kind === "gate-approved" || e.cond.kind === "gate-rejected") {
+  //
+  // `deadline-passed` is the fourth: its fact is a sibling rule's `expiredAt`,
+  // read by `evaluate.ts` alone, and `describeCond`'s arm for it throws.
+  if (
+    e.cond.kind === "command-succeeded" || e.cond.kind === "gate-approved" || e.cond.kind === "gate-rejected" ||
+    e.cond.kind === "deadline-passed"
+  ) {
     return null;
   }
   const from = flow.nodes.find((n) => n.id === e.from);
@@ -540,6 +624,9 @@ export function observationOf(
  * forever otherwise), and only a hand-edited file or another build can produce
  * one — so it gets its own sentence rather than a wait that will never end. */
 export function observationFallback(flow: Flow, e: FlowEdge): string {
+  // Nothing is missing here either: the rule is waiting on a sibling's clock,
+  // which is not on any board to observe.
+  if (e.cond.kind === "deadline-passed") return "waiting for another rule from here to run out of time";
   if (e.cond.kind !== "command-succeeded") return "this card is not on the board right now";
   const from = flow.nodes.find((n) => n.id === e.from);
   return from && from.kind === "command"
@@ -1009,6 +1096,9 @@ export function verdictLabel(v: RulePreview): string {
   switch (v.verdict) {
     case "fire": return v.perform ? "would fire" : "would close the join";
     case "defer": return "deferred";
+    // Not "would fire": nothing this rule points at happens. It settles, and a
+    // sibling `deadline-passed` rule is what acts — see `verdictWhy`.
+    case "expire": return "would expire";
     case "blocked": return "blocked";
     // Not "blocked": that says something outside the rule is in the way and will
     // pass. This one is a property of the rule itself and outlasts any board.
@@ -1051,6 +1141,11 @@ export function reasonWhy(reason: NonNullable<RulePreview["reason"]>): string {
 export function verdictWhy(v: RulePreview): string | null {
   if (v.verdict === "defer") {
     return `met, but ${MAX_LAUNCHES_PER_PASS} is this pass's cap — fires on a later pass`;
+  }
+  // Names the fallback in the picker's own words, so a reader knows which
+  // condition to reach for on the rule that should act on this.
+  if (v.verdict === "expire") {
+    return `its deadline ran out with the condition unmet — a rule here on “${COND_LABEL["deadline-passed"]}” fires next`;
   }
   // `condIncomplete`'s own words, unchanged — the inspector marks the field with
   // this exact string and the arm warning counts the rules it applies to, so a
