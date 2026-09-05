@@ -180,6 +180,55 @@ Every armed flow also keeps an append-only record of what it did — see
 > nothing was stamped — and the next pass will run it again. This is the
 > same gap the launch path has.
 
+## Deadlines
+
+An armed flow waiting on something that will never come looks exactly like one
+that is working. A **deadline** is how a rule says how long it is willing to
+wait. Every rule has a **WITHIN** field in the inspector and in the list — a
+number of minutes, or blank for "forever", which is what every rule did before
+the field existed.
+
+Two stamps carry it, both host-owned and both cleared by **Reset**:
+
+- **The clock starts** (`liveSince`) on the first pass that finds the rule
+  *live* — its source is a place whose card is on the board, a command node
+  whose own rule has already run (and succeeded or failed), or a gate whose
+  question has been asked. A rule out of planned work has nothing to wait on
+  yet; its clock starts when the launch promotes that node into a place. Only a
+  rule **with** a deadline is ever stamped, so a flow that never sets one is
+  never written for this.
+- **It expires** (`expiredAt`) on the first pass past the deadline whose
+  condition is still unmet. That is the third terminal stamp, beside fired and
+  errored, and it is neither: nothing ran, and nothing broke. The drawer says
+  `expired — waited 61m` in its ordinary voice, not in red, and the card's
+  stepper marks the step `⊘`. An expired rule does not stop the workflow.
+
+A deadline never makes the rule itself fire. What acts on it is a **sibling** —
+another rule out of the same source — whose condition is **a deadline here
+passed**. "If it hasn't merged in an hour, tell me" is two rules out of one
+place: `PR is merged → notify` with a 60-minute deadline, and `a deadline here
+passed → notify`. "Wait ten minutes, then re-seed" is the same shape pointed at
+the place itself. The sibling fires on the pass after the expiry.
+
+Three edges of the rule, stated rather than left to be discovered:
+
+- **Met wins.** A condition that arrives late still fires the rule; the deadline
+  catches a condition that never arrives, it does not refuse one that does. The
+  dry run reads such a rule as *would fire*, never *would expire*.
+- **A gone card does not stop the clock.** The clock started while the card
+  was observable; that it has since left the board did not make the condition
+  arrive. The rule expires on schedule.
+- **An "all" junction dies on an expiry** exactly as it does on an error. A
+  settled rule normally counts as an arrival at the junction; an expired one is
+  precisely a rule that did not arrive, and "both PRs merged" is not met by one
+  of them running out of time.
+
+Disarming pauses every clock and **re-arming restarts** the pending ones, so a
+flow paused for a day does not expire the moment it wakes. The dry run shows
+`expires in 12m` beside a waiting rule whose clock is running, and *would
+expire* on the pass that would settle it; the journal records the expiry as its
+own event (see [the flow journal](FLOW_JOURNAL.md)).
+
 ## Saving a command
 
 Type a command on a node, name it, and press **Save to settings**. The host

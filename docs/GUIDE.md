@@ -195,7 +195,12 @@ all, not a bug waiting on a fix: quoting is the template author's job. A command
 goes on to spawn can outlive the kill. Its captured output is capped at 1 MiB; a chattier
 command is killed the same way and its rule latched as a failure. A failed command (like a
 failed launch or seed) latches and is never retried automatically until you click **Reset** —
-deliberately, so a broken deploy doesn't run again every six seconds. The CI-passing-on-a-branch
+deliberately, so a broken deploy doesn't run again every six seconds. Any rule can also carry a
+**deadline** — a number of minutes in its **WITHIN** field — after which, if its condition
+still hasn't arrived, it settles as *expired* rather than waiting forever: not a failure, not
+red, just over. A sibling rule out of the same node on **a deadline here passed** is what then
+acts — "if it hasn't merged in an hour, tell me" is those two rules out of one card. A condition
+that arrives late still fires; the deadline only catches one that never does. The CI-passing-on-a-branch
 condition reads GitHub's aggregate status rollup, which folds skipped and neutral checks
 toward success — so a branch whose required build was merely *skipped* can read as passed
 here. A commit with no checks at all correctly reads as unknown rather than passed, and
