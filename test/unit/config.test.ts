@@ -1513,3 +1513,21 @@ describe("package.json ships no organization-specific defaults", () => {
     expect(props["agentFlow.repoBlocklist"].default).toEqual([]);
   });
 });
+
+describe("getConfig — commandConsent", () => {
+  // Ships inert: an install that has never heard of the setting keeps the
+  // once-per-flow ask every existing workflow was armed under.
+  it("defaults to flow", () => {
+    expect(getConfig().commandConsent).toBe("flow");
+    expect(manifestSettings<{ default?: unknown }>(pkg)["agentFlow.commandConsent"].default).toBe("flow");
+  });
+
+  it("reads the exact opt-in and nothing else", () => {
+    setConfig({ commandConsent: "command" });
+    expect(getConfig().commandConsent).toBe("command");
+    setConfig({ commandConsent: "per-command" });
+    expect(getConfig().commandConsent).toBe("flow");
+    setConfig({ commandConsent: 1 });
+    expect(getConfig().commandConsent).toBe("flow");
+  });
+});

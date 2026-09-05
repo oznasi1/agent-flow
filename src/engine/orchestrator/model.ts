@@ -368,6 +368,24 @@ export interface Flow {
    * reads the same as "not from a template", the honest answer for a
    * hand-drawn one. */
   fromTemplate?: string;
+  /** Per-command approvals, keyed by the RESOLVED command text — the same string
+   * `spendTarget` shows in the modal and `neverAutoRun` matches against — read
+   * only under `agentFlow.commandConsent: "command"` (see consent.ts). Each
+   * record says when the text was approved and, when the approval was for a
+   * number of runs, how many are left; absent `remaining` means "always for this
+   * command". `commandConfirmedAt` beside it is untouched and still governs the
+   * default `"flow"` mode, so flipping the setting back restores exactly the
+   * behaviour every existing workflow has. Never carried into a template
+   * (`normalizedTemplateFlow` builds from scratch). */
+  commandConsents?: Record<string, CommandConsent>;
+}
+
+/** One per-command approval — see `Flow.commandConsents`. */
+export interface CommandConsent {
+  at: number;
+  /** Runs still covered. Absent: every run of this text, from now on. `0` reads
+   * as spent, and the next such command asks again. */
+  remaining?: number;
 }
 
 export function emptyFlow(id: string, name: string, nowMs: number): Flow {

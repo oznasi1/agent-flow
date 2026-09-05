@@ -566,6 +566,10 @@ vi.mock("../../src/config", async (importActual) => {
       // test that never sets it gets the shipped default — an empty list, which
       // blocks nothing.
       neverAutoRun: real.neverAutoRun,
+      // Sourced from the real getConfig() for the same reason: a test steers the
+      // consent mode with setConfig({ commandConsent }), and every test that never
+      // sets it gets the shipped default — once per flow.
+      commandConsent: real.commandConsent,
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
@@ -13134,5 +13138,143 @@ describe("opt-in retry on an armed flow", () => {
     expect(e.retryAt).toBeUndefined();
     expect(e.retry).toEqual({ max: 2, backoffMs: 30_000 });
     expect(e.retryOk).toBe(true);
+  });
+});
+
+describe("per-command consent (agentFlow.commandConsent: command)", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** A place watching aws-ops wired to a free-text command. `launchConfirmedAt` set
+   * so nothing here is about sessions; `commandConfirmedAt` set too — under
+   * per-command consent it must be IGNORED, which several cases below prove. */
+  const cmdFlow = (run = "deploy.sh staging", over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    commandConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "command", x: 0, y: 0, join: "any", run },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run" }],
+    ...over,
+  });
+
+  const warmed = async (flow: Flow) => {
+    setConfig({ orchestrator: true, commandConsent: "command" });
+    h.flows = [flow];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    h.exec.mockClear();
+    return opened;
+  };
+  const modal = () => (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+  const answer = (label: string) => (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(label);
+  /** Reset the rule so the same command is ready to run again on the next pass. */
+  const rearm = (f: Flow): Flow => ({ ...f, edges: f.edges.map((e) => ({ ...e, firedAt: undefined, firedNote: undefined, performed: undefined, error: undefined })) });
+
+  it("asks per command text — ignoring the flow-level stamp — with the four sizes of approval, and runs nothing that pass", async () => {
+    const { send } = await warmed(cmdFlow());
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    const call = modal();
+    expect(call[0]).toContain('"deploy.sh staging"');
+    expect(call[0]).toContain("exactly this command");
+    expect(call[1]).toMatchObject({ modal: true });
+    expect(call.slice(2)).toEqual(["Run once", "Run the next 5", "Always for this command", "Disarm"]);
+    expect(journal().filter((j) => j.kind === "consent-asked")).toHaveLength(1);
+  });
+
+  it("Run once covers exactly one run: the next pass runs, the pass after that asks again", async () => {
+    answer("Run once");
+    const { send } = await warmed(cmdFlow());
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConsents).toEqual({ "deploy.sh staging": { at: expect.any(Number), remaining: 1 } });
+    expect(journal().filter((j) => j.kind === "consented").at(-1)).toMatchObject({ answer: "act-once" });
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(h.flows[0].commandConsents!["deploy.sh staging"].remaining).toBe(0);
+    // Same command, ready again: it asks again.
+    h.flows = [rearm(h.flows[0])];
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(modal().slice(2)).toEqual(["Run once", "Run the next 5", "Always for this command", "Disarm"]);
+  });
+
+  it("Run the next 5 counts down one per run, failures included", async () => {
+    answer("Run the next 5");
+    const { send } = await warmed(cmdFlow());
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConsents!["deploy.sh staging"].remaining).toBe(5);
+    expect(journal().filter((j) => j.kind === "consented").at(-1)).toMatchObject({ answer: "act-batch" });
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConsents!["deploy.sh staging"].remaining).toBe(4);
+  });
+
+  it("Always for this command never asks again for that text, but a different text asks", async () => {
+    answer("Always for this command");
+    const { send } = await warmed(cmdFlow());
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConsents).toEqual({ "deploy.sh staging": { at: expect.any(Number) } });
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    h.flows = [rearm(h.flows[0])];
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(2);
+    // A second command node with different text, in the same flow, asks.
+    h.flows = [{
+      ...h.flows[0],
+      nodes: [...h.flows[0].nodes, { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh prod" }],
+      edges: [...h.flows[0].edges, { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "run" }],
+    }];
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(2);
+    expect(modal()[0]).toContain('"deploy.sh prod"');
+  });
+
+  it("Disarm disarms and writes no approval; dismissing writes nothing and journals the dismissal", async () => {
+    answer("Disarm");
+    const { send } = await warmed(cmdFlow());
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].armed).toBe(false);
+    expect(h.flows[0].commandConsents).toBeUndefined();
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
+    const again = await warmed(cmdFlow());
+    await again.send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConsents).toBeUndefined();
+    expect(h.flows[0].armed).toBe(true);
+    expect(journal().filter((j) => j.kind === "consented").at(-1)).toMatchObject({ answer: "dismissed" });
+  });
+
+  it("the flow-level stamp is never written by a per-command answer, so flipping the setting back finds no approval nobody gave", async () => {
+    answer("Always for this command");
+    const { send } = await warmed(cmdFlow("deploy.sh staging", { commandConfirmedAt: undefined }));
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConfirmedAt).toBeUndefined();
+    expect(h.flows[0].commandConsents!["deploy.sh staging"]).toBeTruthy();
+  });
+
+  it("under the default mode nothing changes: the flow-level stamp still covers every command", async () => {
+    setConfig({ orchestrator: true, commandConsent: "flow" });
+    h.flows = [cmdFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.exec.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.flows[0].commandConsents).toBeUndefined();
   });
 });
