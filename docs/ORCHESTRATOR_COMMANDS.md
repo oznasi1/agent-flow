@@ -54,23 +54,29 @@ first four steps can end the pass without a command ever running.
    or after a restart — that finds rules *already* met does not act. It
    reports them and waits for **Go**. A flow armed last week must not spend
    anything the moment you reopen the Deck.
-4. **Ask for consent, once per kind of spend.** Two separate gates: one
+4. **Stop at the ceiling, if you set one.** A flow's optional **spend
+   ceiling** bounds what it may spend over its whole life — sessions opened
+   plus commands run — counted off its own journal. A pass whose spends would
+   take that total past the ceiling performs none of them, disarms the flow,
+   and says so in a notification. See [The ceiling](#the-ceiling).
+5. **Ask for consent, once per kind of spend.** Two separate gates: one
    covers launching and seeding sessions, the other covers running
    shell. Consent to open a session is **not** consent to execute a command,
    so a flow you approved before commands existed is asked again. The modal
    names the actual command text. The pass that asks performs nothing —
    approval only lets the *next* pass act.
-5. **Run it.** Resolve the command (a named entry from settings, or the free
+6. **Run it.** Resolve the command (a named entry from settings, or the free
    text on the node), substitute `{note}`, decide the working directory, then
    hand it to the shell with a hard 120-second deadline.
-6. **Stamp the outcome — once, for the whole pass.** Success or failure, the
+7. **Stamp the outcome — once, for the whole pass.** Success or failure, the
    rule is marked and will not be evaluated again until you Reset it. Every
    outcome from the pass is written in a single write, so a crash between two
    rules cannot leave one of them looking like it never ran.
 
 Four branches leave a pass without running anything: **busy** (lock not
-taken → skip pass), **not met** (condition unmet → wait), **unapproved**
-(consent pending → ask, act next pass). The other two outcomes — exit 0, or
+taken → skip pass), **not met** (condition unmet → wait), **at the ceiling**
+(the flow disarms itself), **unapproved** (consent pending → ask, act next
+pass). The other two outcomes — exit 0, or
 non-zero/killed — both land in the same latch, which is terminal until
 Reset.
 
@@ -203,6 +209,36 @@ Every armed flow also keeps an append-only record of what it did — see
 > the write after a successful command fails, the command really ran but
 > nothing was stamped — and the next pass will run it again. This is the
 > same gap the launch path has.
+
+## The ceiling
+
+`MAX_LAUNCHES_PER_PASS` is 3, and it bounds one pass of one flow. Nothing
+accumulates across passes, and evaluation runs once per flow — so a poll
+across *N* armed flows can spend 3*N*, every six seconds, for as long as the
+conditions keep holding. Templates make *N* large cheaply: one shape attached
+to twenty cards is twenty flows, each entitled to that.
+
+A flow's **spend ceiling** is the lifetime bound. Set it in the flow header,
+beside the line that says what the flow has spent so far. It counts
+**sessions opened plus commands run**, and it counts them off the flow's own
+[journal](FLOW_JOURNAL.md): every spend is already a `fired` line there, so
+nothing is stored on the flow but the ceiling itself, and no existing flow
+needed migrating. Because the journal is lifetime, so is the count — **Reset**
+puts a rule back in play but un-spends nothing, and an `errored` launch that
+opened no window counts for nothing.
+
+When a pass finds that the spends it is about to perform would take the total
+**past** the ceiling, it performs **none** of them, writes the flow disarmed,
+and raises a notification naming the flow, the count against the ceiling, and
+how many this pass wanted. Reaching the ceiling exactly is allowed. The whole
+pass stops rather than the last edge over the line, so an `"all"` junction is
+never left with its siblings stamped around a performer that did not run. The
+journal records the stop as an `armed` event with `source: "ceiling"`. Raise
+the ceiling, or re-arm, to continue.
+
+One honest caveat: the journal is capped at 1 MB and trims its oldest lines.
+A flow chatty enough to be trimmed has lost its oldest spends, so on such a
+flow the count is a floor, not an exact total.
 
 ## Retry, if you ask for it
 
@@ -579,6 +615,7 @@ there, which closes the picker and opens the drawer's Templates view instead.
 | Max output                     | 1 MiB          | Beyond it the process is torn down and the rule latches errored.            |
 | Kill signal                    | SIGKILL        | A script that traps TERM would otherwise run past its own deadline.        |
 | Consent prompts                | 2 per flow     | One for sessions, one for shell — asked once each, then remembered. With `agentFlow.commandConsent: command`, shell asks once per distinct command text instead, sized once / next 5 / always. |
+| Spend ceiling                  | none by default | Optional lifetime bound per flow on sessions + commands, counted off the journal; the pass that would cross it disarms the flow instead. |
 | Telemetry about commands       | count only     | Never an id, a label, or the command text: a `run` string carries hostnames and sometimes tokens. |
 
 ## Proven in a real editor

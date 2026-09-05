@@ -3,7 +3,7 @@ import { send } from "./vscodeApi";
 import { BranchCiStatus, CardAgent, DeckColumn, DeckLane, FlowCommand, FlowPromptMode, FlowTemplate, OutboundMessage, PendingResume, ReviewDetail, ReviewRequest, ReviewSort, RunStatus, isTicketRun, runKind } from "../types";
 import type { AccountSlot } from "../types";
 import { ClosedRow, ClosedStrip } from "./ClosedStrip";
-import type { Flow } from "../engine/orchestrator/model";
+import type { Flow, SpendTally } from "../engine/orchestrator/model";
 import { bindsRun, boundTicketKeyOf, cardWorkflow, rankByState, type CardWorkflow, type WorkflowState, type WorkflowStatus } from "../engine/orchestrator/attach";
 import { TEMPLATE_SCHEMA } from "../engine/orchestrator/templates";
 import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
@@ -642,6 +642,9 @@ export function DeckApp(): JSX.Element {
    * drawer needs them to say what a `branch-ci-passed` rule is waiting on;
    * nothing else on the board reads a branch. */
   const [branchCi, setBranchCi] = React.useState<Record<string, BranchCiStatus>>({});
+  /** What each flow has spent over its life, from the host's journal read — the
+   * Orchestrator drawer's header shows it beside the ceiling. See `deck:flows`. */
+  const [spend, setSpend] = React.useState<Record<string, SpendTally>>({});
   /** `command-printed` verdicts, flow id → rule edge id, from the host's journal
    * read — threaded wherever `branchCi` is, for the same reason: every reader of
    * a workflow's state must answer that rule the way the engine does. */
@@ -894,6 +897,7 @@ export function DeckApp(): JSX.Element {
         // of a defended set undefended is how the next reader learns the wrong
         // rule from the surrounding code.
         setBranchCi(m.branchCi ?? {});
+        setSpend(m.spend ?? {});
         setPrinted(m.printed ?? {});
       }
     };
@@ -1448,6 +1452,7 @@ export function DeckApp(): JSX.Element {
           commands={commands}
           branchCi={branchCi}
           printed={printed}
+          spend={spend}
           templates={templates}
           draftTemplate={draftTemplate}
           view={orchView}

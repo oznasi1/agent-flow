@@ -6,10 +6,10 @@ import { exec } from "child_process";
 import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps } from "./engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, SpendTally, hasCeiling, overCeiling, spendTotal } from "./engine/orchestrator/model";
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
-import { appendEvent, truncateOutput, findEdgeOutput, printedVerdicts, readJournal, JournalEvent, JournalEventInput } from "./engine/orchestrator/journal";
+import { appendEvent, truncateOutput, findEdgeOutput, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
 import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, normalizedTemplateFlow, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
 import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
@@ -761,10 +761,35 @@ export class DeckPanel {
         if (v !== undefined) printed[f.id] = v;
       }
     }
+    // What each flow has spent, off its journal. Only flows that have journaled
+    // anything get an entry — the drawer reads a missing one as "nothing spent
+    // yet", which is the truth for a flow with no journal. Read here, per post,
+    // rather than cached: the tally must agree with what the pass just wrote,
+    // and `postFlows` runs after it.
+    const spend: Record<string, SpendTally> = {};
+    if (enabled) {
+      for (const f of flows) {
+        const t = this.spendTallyOf(f.id);
+        if (spendTotal(t) > 0) spend[f.id] = t;
+      }
+    }
     this.post({
       type: "deck:flows", flows, enabled, pendingResume, promptModes,
-      commands: cfg.commands, branchCi, templates, printed,
+      commands: cfg.commands, branchCi, templates, printed, spend,
     });
+  }
+
+  /** What a flow has spent over its life, counted off its journal — see
+   * `spendTally`. Never throws: `readJournal` swallows every read failure as
+   * "empty" by contract, and the one thing it does throw on (an id failing
+   * `VALID_FLOW_ID`) cannot come from a flow `readFlows` handed back, since the
+   * store checks the same regex. Zeros for a flow with nothing recorded. */
+  private spendTallyOf(flowId: string): SpendTally {
+    try {
+      return spendTally(readJournal(this.journalIo, this.flowsDir, flowId));
+    } catch {
+      return { sessions: 0, commands: 0 };
+    }
   }
 
   /** This flow's `command-printed` verdicts (`printedVerdicts`), or `undefined`
@@ -1062,6 +1087,46 @@ export class DeckPanel {
           actedTargets.add(f.edge.to);
           return f;
         });
+
+        // The CEILING, before the consent gate: there is no point asking leave to
+        // spend what the flow may not spend. `MAX_LAUNCHES_PER_PASS` bounds one
+        // pass and nothing accumulates across passes — a template instantiated
+        // twenty times is twenty flows each entitled to three spends every six
+        // seconds, forever. `spendCeiling` is the lifetime bound, measured against
+        // the journal's own record of what fired (`spendTally`), so it needs no
+        // counter on the flow and no migration. A pass whose spends would take the
+        // total PAST the ceiling performs NONE of them and disarms the flow,
+        // saying what stopped it; reaching the ceiling exactly is allowed. Whole
+        // pass or nothing, for the reason `overCeiling` gives. The disarm is
+        // written on a fresh read like every other write here, and journaled with
+        // its own `source` so the record says the flow stopped itself.
+        const wanted = firing.filter((f) => f.perform && isSpendAction(f.action)).length;
+        if (wanted > 0 && hasCeiling(fresh)) {
+          const tally = this.spendTallyOf(fresh.id);
+          if (overCeiling(fresh, tally, wanted)) {
+            const atStop = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+            if (atStop) writeFlow(this.flowIo, this.flowsDir, { ...atStop, armed: false });
+            this.pendingResume.delete(flow.id);
+            this.resumeCleared.delete(flow.id);
+            this.journal(flow.id, { kind: "armed", armed: false, source: "ceiling" }, nowMs);
+            trackEvent({
+              name: "flow_armed", armed: false,
+              node_count: fresh.nodes.length, edge_count: fresh.edges.length,
+              unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+              source: "ceiling",
+            });
+            this.log(`deck: flow ${flow.id} disarmed — ${spendTotal(tally)} spent against a ceiling of ${fresh.spendCeiling}, and this pass wanted ${wanted} more`);
+            // A warning, not an error: nothing failed. But it is the one message a
+            // user who set a ceiling is waiting for, so it persists in the bell
+            // rather than as a webview toast nobody sees with the Deck closed.
+            void vscode.window.showWarningMessage(
+              `${fresh.name} was disarmed at its ceiling: ${spendTotal(tally)} of ${fresh.spendCeiling} spent ` +
+                `(${tally.sessions} ${tally.sessions === 1 ? "session" : "sessions"}, ${tally.commands} ${tally.commands === 1 ? "command" : "commands"}), ` +
+                `and this pass would have added ${wanted}. Raise the ceiling or re-arm to continue.`,
+            );
+            continue;
+          }
+        }
 
         // A flow asks ONCE before it ever spends anything, then runs unattended: a
         // mis-wired flow should cost one prompt, not a string of paid sessions. A

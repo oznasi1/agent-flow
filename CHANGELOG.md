@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A spend ceiling per workflow.** The per-pass cap bounds one pass; nothing bounded a
+  workflow's whole life, and templates made twenty armed copies of one shape cheap. A
+  workflow's header now shows what it has spent — sessions opened, commands run — counted
+  off its journal, with an optional **ceiling** beside it. A pass whose spends would cross
+  the ceiling performs none of them, disarms the workflow, and raises a notification naming
+  the count; the journal records the stop as `armed` with `source: "ceiling"`. Nothing is
+  stored but the ceiling itself, so no existing workflow changes.
+
+### Added
+
 - **Consent per command, behind a setting.** `agentFlow.commandConsent: "command"` keys a
   workflow's shell approval to the resolved command text instead of the workflow: each new
   text asks, and the ask offers **Run once**, **Run the next 5**, **Always for this command**,
