@@ -89,6 +89,9 @@ import {
   withNodeCommandRun,
   withNodeCwdRepo,
   withNodeGateQuestion,
+  withNodeGateAskWho,
+  gateRoutingNote,
+  GATE_ASK_WHO_ARIA_LABEL,
   withNodeJoin,
   withNodeNotifyMessage,
   withNote,
@@ -1551,8 +1554,13 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   /** The question, prefixed by the verdict once there is one. The question stays
    * visible in every state on purpose: a node that showed only "approved" would
    * make you select it to find out what you had approved. */
-  const gateBody = (n: GateNode, st: ReturnType<typeof gateStateOf>): string =>
-    st?.answer ? `${st.answer} — ${n.question}` : n.question;
+  const gateBody = (n: GateNode, st: ReturnType<typeof gateStateOf>): string => {
+    const base = st?.answer ? `${st.answer} — ${n.question}` : n.question;
+    // A routed gate says who else holds the question, so a node that looks
+    // stuck reads as "waiting on @alice", not on you.
+    const note = gateRoutingNote(flow, n);
+    return note ? `${base} · ${note}` : base;
+  };
 
   /** Rejected is `--dim`, NOT `--c-danger`. Red on a card means something is
    * broken; a rejection is a decision you made. `--c-attn` is the same amber
@@ -1810,6 +1818,27 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               onBlur={(ev) => p.onSave(withNodeGateQuestion(flow, nodeInsp.id, ev.currentTarget.value))}
             />
           </div>
+          {/* Who else may answer: a forge login. Set, the ask also posts the
+              question on the card's pull request mentioning them, and their
+              `approve` / `reject` there answers the gate (gateRouting.ts). The
+              note below says where the question actually went — an error here
+              is the honest half of routing: a gate nobody sees must not look
+              routed. */}
+          <div className="orch-clause">
+            <span className="orch-kw">ASK ON PR</span>
+            <input
+              className="orch-msg"
+              aria-label={GATE_ASK_WHO_ARIA_LABEL}
+              key={`${nodeInsp.id}-who`}
+              defaultValue={nodeInsp.askWho ?? ""}
+              placeholder="a forge login, e.g. alice — blank asks here only"
+              onBlur={(ev) => p.onSave(withNodeGateAskWho(flow, nodeInsp.id, ev.currentTarget.value))}
+            />
+          </div>
+          {(() => {
+            const note = gateRoutingNote(flow, nodeInsp);
+            return note ? <div className="orch-clause" data-testid="orch-gate-routing">{note}</div> : null;
+          })()}
           {(() => {
             const st = gateStateOf(nodeInsp);
             if (!st?.answer || !st.edgeId) return null;

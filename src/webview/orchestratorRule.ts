@@ -25,6 +25,8 @@ import {
   Flow,
   FlowAction,
   FlowEdge,
+  gateAskEdge,
+  GateNode,
   hasDeadline,
   JoinMode,
   LaunchDest,
@@ -1171,6 +1173,40 @@ export function withNodeNotifyMessage(flow: Flow, nodeId: string, message: strin
  * builder that rewrites one field and leaves the rest of the flow alone. */
 export function withNodeGateQuestion(flow: Flow, id: string, question: string): Flow {
   return { ...flow, nodes: flow.nodes.map((n) => (n.id === id && n.kind === "gate" ? { ...n, question } : n)) };
+}
+
+/** The aria-label of a gate's "ask on the PR as" field. */
+export const GATE_ASK_WHO_ARIA_LABEL = "Ask on the pull request";
+
+/** Write who a gate is routed to (`GateNode.askWho`), or DELETE the field for a
+ * blank — never store `""`, because absent is a meaning (a local gate). A
+ * leading `@` is dropped: a login is stored bare and shown with the sigil. */
+export function withNodeGateAskWho(flow: Flow, id: string, who: string): Flow {
+  const login = who.trim().replace(/^@/, "");
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) => {
+      if (n.id !== id || n.kind !== "gate") return n;
+      if (login === "") {
+        const { askWho: _drop, ...rest } = n;
+        return rest;
+      }
+      return { ...n, askWho: login };
+    }),
+  };
+}
+
+/** One line about where a routed gate's question went, for the node and the
+ * inspector: asked on the PR, could not be posted (and why), or — before the
+ * ask has fired — who it will go to. `undefined` for a local gate. */
+export function gateRoutingNote(flow: Flow, node: GateNode): string | undefined {
+  if (typeof node.askWho !== "string" || node.askWho.trim() === "") return undefined;
+  const who = `@${node.askWho.trim().replace(/^@/, "")}`;
+  const ask = gateAskEdge(flow, node.id);
+  if (!ask) return `will ask ${who} on the pull request`;
+  if (!ask.routed) return `asking ${who} on the pull request…`;
+  if (ask.routed.error) return `could not ask ${who} on the pull request — ${ask.routed.error}`;
+  return ask.gateAnswer ? `${who} answered on the pull request` : `asked ${who} on the pull request`;
 }
 
 /** Which repo's checkout a command node runs in. `""` CLEARS the field rather

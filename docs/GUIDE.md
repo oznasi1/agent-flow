@@ -217,7 +217,10 @@ question; the node shows **Approve** and **Reject**; and a later rule fires on
 once and latches, so Reset on the rule that asked is what poses the question
 again. There is no notification: the gate node itself is the signal — it sits in
 the drawer with its question, an amber state dot, and the two buttons, for as
-long as it is unanswered. A **subflow** node starts a saved template as a child
+long as it is unanswered. Name someone in the node's **Ask on PR** field and the
+question is also posted on the card's pull request mentioning them; their
+`approve` or `reject` reply there answers it (see
+[Routing a gate](ORCHESTRATOR_COMMANDS.md#routing-a-gate-to-someone)). A **subflow** node starts a saved template as a child
 workflow bound to the same card, armed and named after both; a later rule on **the subflow
 finished** waits for every rule in it to settle. The card keeps showing the parent. A **dry run** reports waiting gates in words: a rule
 waiting on a gate reads "waiting for your answer" there. Nothing outside

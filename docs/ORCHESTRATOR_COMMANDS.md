@@ -554,6 +554,60 @@ This is the first time a rule has carried anything but strings and stamps, and
 it is the kind of addition that wants to grow. It is kept this small on
 purpose.
 
+## Routing a gate to someone
+
+A gate closed the "a flow can only tell you, never ask you" gap — for the
+person at the machine that asked. A gate can also name **who should answer**:
+set **Ask on PR** on the node to a forge login (`alice`), and when the ask
+fires the host also posts the question as a comment on the card's pull request
+mentioning them:
+
+> @alice — **Ship it** is waiting on you: deploy to prod?
+> Reply `approve` or `reject` here to answer. (Agent Flow Deck)
+
+Each pass then reads that thread — once a minute per gate, never every six
+seconds — and the first reply *from that login* whose first word is `approve`
+(or `approved`, `lgtm`, `yes`) or `reject` (`rejected`, `no`) answers the gate
+exactly as the node's own buttons do: stamped on the rule that asked,
+journaled as `answered` with `by: alice`, and the downstream rule fires on the
+next pass — the same one-pass latency `the command succeeded` has. The
+Deck reads the thread while it is open; the [headless tick](#a-pass-without-the-editor)
+reads it too, so an answer given from a phone at 2am opens the rule on the next
+scheduled pass with no editor anywhere. A tick never *poses* a gate — that
+still needs an editor — it only reads answers to one the Deck already posted.
+
+The answer path has to be real or the routing is worse than no routing, so:
+
+- **Where it posts is derived, not guessed.** The pull request of the place the
+  gate hangs off — walking back through a command chain if that is what asked
+  it — in the checkout the card holds, through the forge's own CLI (`gh api`,
+  `glab api`). No URL parsing; the CLI resolves the project from the checkout.
+- **A refusal is stamped, never silent.** No place behind the gate, a card not
+  on the board, a repo with no PR yet, a forge that cannot carry a comment
+  (Bitbucket today — see [FORGES.md](FORGES.md)), or a failed post: each is
+  written on the asking rule as `routed.error`, shown on the node and in the
+  inspector as *could not ask @alice on the pull request — …*, journaled as
+  `routed` with the error, and raised as a warning. The local **Approve** and
+  **Reject** are still there in every case. A gate routed to a person who
+  never sees it must look exactly like what it is.
+- **Only the named login answers.** The thread is readable by whoever can read
+  the PR; the gate said who may answer it. Replies before the ask, replies from
+  anyone else, and replies that do not begin with an answer word are ignored —
+  `I would not approve this yet` approves nothing.
+- **First answer wins.** An answer given on the node while the thread was being
+  read stands; the thread never overrides it, and neither overrides the other.
+  Changing your mind is Reset, which re-poses the question — and re-posts it.
+- **An unreadable thread is not silence.** A failed read is skipped and tried
+  again next minute; it never reads as "nobody answered".
+
+What it deliberately is not: no reviewer lists, no quorum, no
+first-response-wins across several people. One login, one thread, one answer.
+The question is visible to everyone who can read the PR — do not route a gate
+whose question should not be.
+
+`askWho` is node configuration, so it travels into templates like the question
+does; every instance of the template asks the same person.
+
 ## Deadlines
 
 An armed flow waiting on something that will never come looks exactly like one

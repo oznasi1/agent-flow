@@ -11,6 +11,7 @@
 import type { BranchCiStatus } from "../orchestrator/branchCi";
 import type { PrProvider } from "../pr/provider";
 import type { ReviewProvider } from "../review/provider";
+import type { GateComment } from "../orchestrator/gateRouting";
 
 /** Why forge reads are off. `missing`: there was no binary to spawn.
  * `signed-out`: a CLI we did find refused `auth status` — no token, or one it
@@ -60,6 +61,21 @@ export interface ForgeCaps {
    *  `gh` can do both; `glab` holds one token per host and can do neither, and
    *  `atlassian-cli` has named profiles it can list but no verb to switch one. */
   accounts: boolean;
+  /** Can a gate question be posted on a pull request and its reply read back
+   *  (`gates` below)? Optional and absent-is-false, so a forge written before
+   *  this capability degrades honestly: a routed gate on it stamps an error naming
+   *  the forge rather than pretending to have asked anyone. */
+  gateRouting?: boolean;
+}
+
+/** How a gate question travels to a person who is not at the Deck: a comment on
+ * the card's pull request, and the replies to it. `post` returns the comment's
+ * URL when the forge gives one; `replies` returns every non-system comment on
+ * the PR since `sinceMs`, or `null` when the thread could not be read — which
+ * the caller treats as "try again later", never as "nobody answered". */
+export interface GateChannel {
+  post(repoPath: string, number: number, body: string): Promise<{ ok: true; url?: string } | { ok: false; message: string }>;
+  replies(repoPath: string, number: number, sinceMs: number): Promise<GateComment[] | null>;
 }
 
 export interface Forge {
@@ -112,4 +128,6 @@ export interface Forge {
    *  a timeout, a rate limit, a shape this build does not recognise, a branch that
    *  does not exist — and `"unknown"` is NOT green. */
   branchCi(repoPath: string, branch: string): Promise<BranchCiStatus>;
+  /** Present exactly when `caps.gateRouting` is true. */
+  readonly gates?: GateChannel;
 }

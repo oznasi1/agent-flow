@@ -182,6 +182,49 @@ describe("runHeadlessPass — what needs an editor", () => {
   });
 });
 
+describe("runHeadlessPass — a routed gate's answer", () => {
+  const gateNode = (): FlowNode => ({ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?", askWho: "alice" });
+  const routed = () => armed(
+    [place("n1", "PROJ-1"), gateNode(), notify("n2", "prod it is")],
+    [
+      edge("ask1", "n1", "g", { firedAt: 5, performed: true, routed: { at: 1_000, login: "alice" } }),
+      edge("e2", "g", "n2", { cond: { kind: "gate-approved" } }),
+    ],
+  );
+  const replies = (login: string, body: string) => [{ login, body, at: 2_000 }];
+
+  it("stamps the named login's reply from the PR, journals who answered, and fires the rule it opens in the same pass", async () => {
+    const w = world([routed()]);
+    const gateReplies = vi.fn(async () => replies("alice", "approve"));
+    const r = await runHeadlessPass(w.deps({ gateReplies }));
+    expect(gateReplies).toHaveBeenCalledWith("/r/aws-ops", 1, 1_000);
+    expect(w.flowsNow().edges[0].gateAnswer).toBe("approved");
+    expect(w.events().find((e) => e.kind === "answered")).toMatchObject({ edge: "ask1", answer: "approved", by: "alice" });
+    expect(r.flows[0].answered).toEqual(["ask1 (n1 → g, ask): @alice approved"]);
+    expect(r.flows[0].notified).toEqual(["Ship the migration: prod it is"]);
+  });
+
+  it("ignores another login, an unreadable thread, and a reply before the ask; polls nothing without a reader", async () => {
+    for (const reader of [async () => replies("bob", "approve"), async () => null, async () => [{ login: "alice", body: "approve", at: 500 }]]) {
+      const w = world([routed()]);
+      const r = await runHeadlessPass(w.deps({ gateReplies: reader }));
+      expect(w.flowsNow().edges[0].gateAnswer).toBeUndefined();
+      expect(r.flows[0].answered).toEqual([]);
+    }
+    const w = world([routed()]);
+    await runHeadlessPass(w.deps());
+    expect(w.flowsNow().edges[0].gateAnswer).toBeUndefined();
+  });
+
+  it("a dry run reports the answer it found and writes nothing", async () => {
+    const w = world([routed()]);
+    const before = { ...w.files };
+    const r = await runHeadlessPass(w.deps({ gateReplies: async () => replies("alice", "reject"), dryRun: true }));
+    expect(r.flows[0].answered).toEqual(["ask1 (n1 → g, ask): @alice rejected"]);
+    expect(w.files).toEqual(before);
+  });
+});
+
 describe("runHeadlessPass — the ceiling, the lock, and a dry run", () => {
   const cmdFlow = (over: Partial<Flow> = {}) =>
     armed([place("n1", "PROJ-1"), command("n2", "deploy.sh")], [edge("e1", "n1", "n2")], { commandConfirmedAt: 5, ...over });

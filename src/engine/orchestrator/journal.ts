@@ -72,7 +72,11 @@ export type JournalEventInput =
    * way: `string`, not the literal union the webview sends, because this module
    * outlives whatever answers a future build adds. Reset deletes `gateAnswer`
    * from the flow file — the journal is the only place the answer survives it. */
-  | { kind: "answered"; edge: string; answer: string }
+  | { kind: "answered"; edge: string; answer: string; by?: string }
+  /** A routed gate's question was posted on the pull request (`url` when the
+   * forge gave one) — or could not be, in which case `error` says why and the
+   * gate stays a local one. `login` is who was asked. */
+  | { kind: "routed"; edge: string; login: string; url?: string; error?: string }
   /** A rule's deadline passed with its condition still unmet, and it was settled
    * with `expiredAt` (model.ts). `since` is the `liveSince` the clock ran from,
    * so the line says how long it actually waited. Not a `fired` and not an

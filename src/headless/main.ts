@@ -74,6 +74,7 @@ export function reportLines(r: PassReport, dryRun: boolean): string[] {
     for (const x of f.expired) lines.push(`expired: ${x}`);
     for (const x of f.needsEditor) lines.push(`needs an editor, left pending: ${x}`);
     for (const x of f.needsConsent) lines.push(`needs consent in the editor, left pending: ${x}`);
+    for (const x of f.answered ?? []) lines.push(`answered on the pull request: ${x}`);
     if (f.disarmedAtCeiling) lines.push(`disarmed at its ceiling: ${f.disarmedAtCeiling}`);
     if (lines.length === 0) lines.push("nothing to do");
     out.push(head, ...lines.map((l) => `  ${l}`));
@@ -126,9 +127,9 @@ export async function main(argv: string[], print: (l: string) => void = console.
   const runs = readRuns(defaultRunsDir());
   const flows = readFlows(nodeFlowIo(), flowsDir);
   const prFacts = reader.get<boolean>("prFacts") ?? true;
+  const forge = resolveForge(String(reader.get<string>("forge") ?? "github"), log);
   if (args.fetch && prFacts && !args.dryRun) {
     const ttl = reader.get<number>("prFactsTtlSeconds");
-    const forge = resolveForge(String(reader.get<string>("forge") ?? "github"), log);
     const n = await refreshWatchedPrs({
       runs, flows, nowMs,
       ttlMs: Math.max(30, typeof ttl === "number" && Number.isFinite(ttl) ? ttl : 120) * 1000,
@@ -163,6 +164,9 @@ export async function main(argv: string[], print: (l: string) => void = console.
     dryRun: args.dryRun,
     token: `tick-${process.pid}-${newFlowId(nowMs)}`,
     tokenSpend: tokenSpendReader(runs, projectsRoot),
+    // Answers to routed gates are read from the same forge the PR facts come
+    // from, fetch or no fetch: reading a thread is not refreshing PR facts.
+    ...(forge.gates ? { gateReplies: (repoPath: string, number: number, sinceMs: number) => forge.gates!.replies(repoPath, number, sinceMs) } : {}),
   });
   for (const l of reportLines(report, args.dryRun)) print(l);
   return report.lock === "busy" ? 2 : 0;

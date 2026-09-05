@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   journaled as `armed` with `source: "token-ceiling"`; the headless tick enforces
   it too. A transcript that cannot be read is "not measured", never zero. Both
   ceilings coexist: they answer different questions.
+- **Gates with someone else's name on them.** A gate node's new **Ask on PR**
+  field names a forge login. When the ask fires, the question is also posted as a
+  comment on the card's pull request mentioning them, and each pass — the Deck's,
+  and the headless tick's — reads that thread once a minute for their `approve` or
+  `reject`, which answers the gate exactly as the node's buttons do and is
+  journaled with who answered. GitHub and GitLab carry it through their CLIs;
+  Bitbucket does not, and says so. Every refusal — no PR, a card off the board, a
+  forge that cannot post, a failed call — is stamped on the asking rule and shown
+  on the node, and the local Approve and Reject stay. One login, one thread, first
+  answer wins; the question is visible to whoever can read the PR.
 - **A command that returns a value, not a substring.** `the command printed…`
   can say whether the word `prod` appeared, not which environment a deploy landed
   in. A command may now print one JSON object as its last line; the host parses it

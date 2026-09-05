@@ -5104,6 +5104,53 @@ describe("a command-printed rule in the inspector", () => {
   });
 });
 
+describe("a routed gate in the drawer", () => {
+  const routedFlow = (ask: Partial<FlowEdge> = {}, gate: Record<string, unknown> = { askWho: "alice" }): Flow => flow({
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "g", kind: "gate", x: 320, y: 24, join: "any", question: "deploy to prod?", ...gate } as Flow["nodes"][number],
+    ],
+    edges: [{ id: "ask1", from: "n1", to: "g", cond: { kind: "pr-merged" }, ...ask }],
+  });
+
+  it("offers an Ask-on-PR field in the inspector that writes the login and clears on blank", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [routedFlow({}, {})] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    const box = screen.getByLabelText("Ask on the pull request") as HTMLInputElement;
+    expect(box.value).toBe("");
+    fireEvent.change(box, { target: { value: "@alice" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).nodes[1]).toMatchObject({ kind: "gate", askWho: "alice" });
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    expect("askWho" in (onSave.mock.calls.at(-1)![0] as Flow).nodes[1]).toBe(false);
+  });
+
+  it("says on the node and in the inspector where the question went — including that it could not be posted", () => {
+    const failed = routedFlow({ firedAt: 5, performed: true, routed: { at: 5, login: "alice", error: "agent-flow has no pull request yet to ask on" } });
+    render(<OrchestratorDrawer {...props({ flows: [failed] })} />);
+    expect(screen.getByTestId("orch-node-g").textContent).toContain("could not ask @alice on the pull request — agent-flow has no pull request yet to ask on");
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    expect(screen.getByTestId("orch-gate-routing").textContent).toContain("could not ask @alice");
+    // The local buttons are still the way through.
+    const node = within(screen.getByTestId("orch-node-g"));
+    expect(node.getByRole("button", { name: /Approve deploy to prod\?/ })).toBeTruthy();
+  });
+
+  it("reads 'asked @alice' once delivered, and shows nothing routing-related on a local gate", () => {
+    const delivered = routedFlow({ firedAt: 5, performed: true, routed: { at: 5, login: "alice", url: "https://gh/c/1" } });
+    const r = render(<OrchestratorDrawer {...props({ flows: [delivered] })} />);
+    expect(screen.getByTestId("orch-node-g").textContent).toContain("asked @alice on the pull request");
+    r.unmount();
+    render(<OrchestratorDrawer {...props({ flows: [routedFlow({ firedAt: 5, performed: true }, {})] })} />);
+    expect(screen.getByTestId("orch-node-g").textContent).not.toContain("pull request");
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    expect(screen.queryByTestId("orch-gate-routing")).toBeNull();
+  });
+});
+
 describe("a command-result rule in the inspector", () => {
   const commandFlow = (): Flow => flow({
     nodes: [

@@ -20,7 +20,7 @@ describe("reportLines", () => {
     expect(reportLines({ lock: "held", flows: [] }, false)).toEqual(["no armed flows"]);
     const lines = reportLines({ lock: "held", flows: [{
       id: "f1", name: "Ship it", fired: ["e2: ran deploy in aws-ops"], notified: ["Ship it: landed"], errored: [],
-      expired: ["e9"], needsEditor: ["e3 (n1 → n2, launch)"], needsConsent: [], disarmedAtCeiling: undefined,
+      expired: ["e9"], needsEditor: ["e3 (n1 → n2, launch)"], needsConsent: [], answered: ["ask1 (n1 → g, ask): @alice approved"], disarmedAtCeiling: undefined,
     }] }, false);
     expect(lines).toEqual([
       "Ship it (f1)",
@@ -28,8 +28,9 @@ describe("reportLines", () => {
       "  fired: e2: ran deploy in aws-ops",
       "  expired: e9",
       "  needs an editor, left pending: e3 (n1 → n2, launch)",
+      "  answered on the pull request: ask1 (n1 → g, ask): @alice approved",
     ]);
-    expect(reportLines({ lock: "held", flows: [{ id: "f1", name: "n", fired: [], notified: [], errored: [], expired: [], needsEditor: [], needsConsent: [] }] }, false))
+    expect(reportLines({ lock: "held", flows: [{ id: "f1", name: "n", fired: [], notified: [], errored: [], expired: [], needsEditor: [], needsConsent: [], answered: [] }] }, false))
       .toEqual(["n (f1)", "  nothing to do"]);
   });
 
