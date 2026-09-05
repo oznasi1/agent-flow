@@ -41,6 +41,13 @@ import {
   notifyMessageOf,
   observationFallback,
   observationOf,
+  DEADLINE_ARIA_LABEL,
+  DEADLINE_HINT,
+  DEADLINE_PLACEHOLDER,
+  deadlineNote,
+  expiredText,
+  parseDeadlineInput,
+  withDeadline,
   isBareCond,
   JOIN_LABEL,
   NODE_KIND_LABEL,
@@ -1396,6 +1403,8 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
 
   const setNote = (e: FlowEdge, note: string) => p.onSave(withNote(flow, e, note));
 
+  const setDeadline = (e: FlowEdge, minutes: number | undefined) => p.onSave(withDeadline(flow, e, minutes));
+
   /** One handler for the Command select's two kinds of choice: the free-text
    * sentinel puts the node into the free-text shape with nothing typed yet
    * (`run: ""`, which `resolveCommand` refuses to execute), anything else names
@@ -2160,9 +2169,16 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               // A `waiting` rule's reason is what its source place looks like
               // right now, which is the inspector's own question — asked through
               // the same pair, not a second phrasing of it.
-              const why = v.verdict === "waiting"
+              const observed = v.verdict === "waiting"
                 ? (observationOf(flow, e, p.runs, p.branchCi) ?? observationFallback(flow, e))
                 : verdictWhy(v);
+              // A running clock is the other half of "why is this still
+              // waiting": the observation says what the card looks like, this
+              // says how long the rule will keep looking. Same `Date.now()` the
+              // preview above was computed against.
+              const why = v.deadlineAt !== undefined
+                ? `${observed === null ? "" : `${observed} · `}${deadlineNote(v.deadlineAt, Date.now())}`
+                : observed;
               return (
                 <div className="r" key={v.edgeId} data-testid={`orch-dryrun-${v.edgeId}`}>
                   <span className={`v ${v.verdict}`}><span className="d" />{verdictLabel(v)}</span>
@@ -2561,6 +2577,32 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 {condParams}
               </div>
             )}
+            {/* The deadline: how long this rule may wait, once its clock is
+                running, before it settles as expired (`timeoutMinutes`,
+                model.ts). Its own clause under WHEN, for every verb — a deadline
+                is about the waiting, not about what the rule then does. Blank
+                means "waits forever", which is what every rule did before this
+                field existed, so the row is present and empty rather than
+                absent: a user has to be able to SEE that no deadline is set.
+                Same `onBlur`/revert idiom as `CondParams`'s minute field. */}
+            <div className="orch-clause" data-testid="orch-deadline">
+              <span className="orch-kw">WITHIN</span>
+              <input
+                className="orch-num"
+                type="number"
+                min={1}
+                aria-label={DEADLINE_ARIA_LABEL}
+                key={`${edge.id}-deadline`}
+                defaultValue={edge.timeoutMinutes ?? ""}
+                placeholder={DEADLINE_PLACEHOLDER}
+                onBlur={(ev) => {
+                  const parsed = parseDeadlineInput(ev.currentTarget.value);
+                  if (parsed.ok) setDeadline(edge, parsed.minutes);
+                  else ev.currentTarget.value = edge.timeoutMinutes === undefined ? "" : String(edge.timeoutMinutes);
+                }}
+              />
+              <span className="orch-plabel">{DEADLINE_HINT}</span>
+            </div>
             {/* THEN is a STATEMENT, not a choice. The action is whatever the
                 node this rule points at implies (`edgeAction`), so a `<select>`
                 here could not decide anything: the pick was silently overridden
@@ -2769,6 +2811,11 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                     // it reads in the row's own dim voice instead of claiming a
                     // failure. See `isMigrationNotice`.
                     <span className={isMigrationNotice(edge.error) ? undefined : "err"}>{edge.error}</span>
+                  ) : edge.expiredAt !== undefined ? (
+                    // The third settled shape, in neither colour: not done —
+                    // nothing ran — and not a failure — nothing broke. The row's
+                    // own dim voice, and the same Reset as the other two.
+                    <span>{expiredText(edge)}</span>
                   ) : (
                     <span className="fired">{edge.firedNote ?? "fired"}</span>
                   )}

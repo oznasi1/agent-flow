@@ -11,8 +11,8 @@
 // never arrive".
 import { RunStatus } from "../../types";
 import { BranchCiStatus } from "./branchCi";
-import { BlockedNote, evaluateFlow } from "./evaluate";
-import { condIncomplete, Flow, isSettled } from "./model";
+import { BlockedNote, evaluateDeadlines, evaluateFlow } from "./evaluate";
+import { condIncomplete, deadlineAt, Flow, isSettled } from "./model";
 
 /** One pending rule's fate, if the flow were armed right now. */
 export interface RulePreview {
@@ -25,8 +25,13 @@ export interface RulePreview {
    *     nothing on any board could satisfy it. `blank` says which. Distinct from
    *     `blocked`, which is about the SOURCE: a blocked rule fires once the card
    *     is back, an unset one never fires until the rule itself is edited.
+   *   - `expire` — its deadline has run out with the condition still unmet, so
+   *     this pass would settle it as expired rather than fire it. Outranks
+   *     `blocked`, `unset` and `waiting` for the same reason `fire` does: it is
+   *     what the engine would actually DO. A sibling `deadline-passed` rule is
+   *     what then acts.
    *   - `waiting` — answerable and false. The ordinary resting state. */
-  verdict: "fire" | "defer" | "blocked" | "unset" | "waiting";
+  verdict: "fire" | "defer" | "expire" | "blocked" | "unset" | "waiting";
   /** Whether this edge would perform its action, or only be stamped. `false` on
    * the non-performing siblings of an "all" junction, which close the join while
    * one edge acts for all of them — so a caller can say "would close" where it
@@ -41,6 +46,12 @@ export interface RulePreview {
    * warning counts. One predicate behind all three, so a dry run cannot call a
    * rule ordinary that arming then calls dead. */
   blank?: string;
+  /** When this rule's clock runs out — `deadlineAt` (model.ts) — carried on a
+   * still-pending verdict (`waiting`, `blocked`, `unset`) whose deadline is set
+   * and whose clock is running. Absent on `fire`/`defer`/`expire` (decided) and
+   * on any rule with no deadline or no clock yet. The drawer and the card's
+   * stepper turn it into "expires in 12m". */
+  deadlineAt?: number;
 }
 
 /** Every rule still in play, with what would become of it. Settled rules are
@@ -84,10 +95,17 @@ export function previewFlow(
   // agree — a note is recorded while answering a condition, which happens before
   // any cap decision.
   const blockedNodes = new Map(capped.blocked.map((b) => [b.nodeId, b.reason]));
+  // The clocks, from the same oracle the two passes above used — so "would
+  // expire" can never sit beside a "would fire" for the same rule: expiry is
+  // only ever reported for a rule whose condition was NOT met.
+  const expiring = new Set(evaluateDeadlines(i).expired);
 
   const out: RulePreview[] = [];
   for (const e of flow.edges) {
     if (isSettled(e)) continue;
+    /** `deadlineAt` for a pending verdict, spread in only when there is one so a
+     * rule with no deadline previews exactly as it always has. */
+    const clock = (() => { const at = deadlineAt(e); return at === undefined ? {} : { deadlineAt: at }; })();
     // Ordered: fired beats held-by-the-cap beats blocked. `blocked` is per-node
     // and cannot coexist with either — a source nobody can observe answers no
     // condition — but reading it last keeps that an observation rather than a
@@ -102,6 +120,12 @@ export function previewFlow(
       out.push({ edgeId: e.id, verdict: "defer", perform: held });
       continue;
     }
+    // AFTER fire and defer — a met rule fires, however late — and BEFORE every
+    // still-pending verdict, because it is not pending: this pass settles it.
+    if (expiring.has(e.id)) {
+      out.push({ edgeId: e.id, verdict: "expire", perform: false });
+      continue;
+    }
     // AFTER fire and defer, deliberately. `evalCond` compares a ticket status by
     // equality, so a rule waiting on the empty string does match a run whose
     // `ticketStatus` is itself `""` — vanishingly rare, but real, and if the
@@ -113,15 +137,15 @@ export function previewFlow(
     // can fix, and putting the card back would still leave it dead.
     const blank = condIncomplete(e.cond);
     if (blank !== undefined) {
-      out.push({ edgeId: e.id, verdict: "unset", perform: false, blank });
+      out.push({ edgeId: e.id, verdict: "unset", perform: false, blank, ...clock });
       continue;
     }
     const reason = blockedNodes.get(e.from);
     if (reason !== undefined) {
-      out.push({ edgeId: e.id, verdict: "blocked", perform: false, reason });
+      out.push({ edgeId: e.id, verdict: "blocked", perform: false, reason, ...clock });
       continue;
     }
-    out.push({ edgeId: e.id, verdict: "waiting", perform: false });
+    out.push({ edgeId: e.id, verdict: "waiting", perform: false, ...clock });
   }
   return out;
 }

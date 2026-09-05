@@ -4989,3 +4989,72 @@ describe("Save as template", () => {
     expect(screen.queryAllByLabelText(/destination/i)).toHaveLength(0);
   });
 });
+
+describe("a rule's deadline in the inspector", () => {
+  const open = (f: Flow, over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [f], ...over })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    return onSave;
+  };
+
+  it("offers a deadline field for every verb — a notify rule too — and writes it on blur", () => {
+    const onSave = open(wired());
+    const box = screen.getByLabelText("Deadline minutes") as HTMLInputElement;
+    expect(box.placeholder).toBe("none");
+    fireEvent.change(box, { target: { value: "60" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].timeoutMinutes).toBe(60);
+  });
+
+  it("clears the deadline when emptied, and puts the old value back on junk without saving", () => {
+    const f = wired();
+    f.edges[0].timeoutMinutes = 60;
+    const onSave = open(f);
+    const box = screen.getByLabelText("Deadline minutes") as HTMLInputElement;
+    expect(box.value).toBe("60");
+    fireEvent.change(box, { target: { value: "0" } });
+    fireEvent.blur(box);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(box.value).toBe("60");
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    expect("timeoutMinutes" in (onSave.mock.calls.at(-1)![0] as Flow).edges[0]).toBe(false);
+  });
+
+  it("shows an expired rule in the dim voice — not done, not red — and offers Reset", () => {
+    const f = wired();
+    f.edges[0] = { ...f.edges[0], timeoutMinutes: 60, liveSince: 1_000, expiredAt: 1_000 + 60 * 60_000 };
+    const onResetEdge = vi.fn();
+    open(f, { onResetEdge });
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).toContain("expired — waited 60m");
+    expect(insp.querySelector(".orch-obs .err")).toBeNull();
+    expect(insp.querySelector(".orch-obs .fired")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /reset/i }));
+    expect(onResetEdge).toHaveBeenCalledWith("f1", "e1");
+  });
+
+  it("the dry run counts down a waiting rule's clock beside what the card looks like", async () => {
+    const f = wired();
+    f.edges[0] = { ...f.edges[0], timeoutMinutes: 30, liveSince: Date.now() - 5 * 60_000 };
+    const runs = [runStatus("PROJ-1", "agent-flow")];
+    render(<OrchestratorDrawer {...props({ flows: [f], runs })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    await waitFor(() => expect(screen.getByTestId("orch-dryrun-e1")).toBeTruthy());
+    const row = screen.getByTestId("orch-dryrun-e1").textContent ?? "";
+    expect(row).toContain("waiting");
+    expect(row).toMatch(/expires in 2[45]m/);
+  });
+
+  it("the dry run says a rule whose clock has run out would expire, and names the fallback condition", async () => {
+    const f = wired();
+    f.edges[0] = { ...f.edges[0], timeoutMinutes: 30, liveSince: Date.now() - 60 * 60_000 };
+    render(<OrchestratorDrawer {...props({ flows: [f], runs: [runStatus("PROJ-1", "agent-flow")] })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    await waitFor(() => expect(screen.getByTestId("orch-dryrun-e1")).toBeTruthy());
+    const row = screen.getByTestId("orch-dryrun-e1").textContent ?? "";
+    expect(row).toContain("would expire");
+    expect(row).toContain("a deadline here passed");
+  });
+});

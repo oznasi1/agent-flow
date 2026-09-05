@@ -7,8 +7,8 @@ import { RunStatus } from "../../types";
 import { BranchCiStatus } from "./branchCi";
 import { CondContext, evalCond, placeActivity } from "./conditions";
 import {
-  Condition, Flow, FlowAction, FlowEdge, edgeAction, findNode, gateAskEdge, incomingEdges, isPlace, isSettled,
-  isSpendAction,
+  Condition, Flow, FlowAction, FlowEdge, deadlineAt, edgeAction, findNode, gateAskEdge, hasDeadline, incomingEdges,
+  isPlace, isSettled, isSpendAction,
 } from "./model";
 
 /** How many SPENDING edges (`launch`, `seed` or `run` — whatever `isSpendAction`
@@ -180,11 +180,42 @@ export interface EvalResult {
   deferred: number;
 }
 
-export function evaluateFlow(i: EvalInput): EvalResult {
-  // A fresh object rather than a shared constant: a caller that mutates the result
-  // must not be able to poison every later disarmed pass.
-  if (!i.flow.armed) return { fired: [], blocked: [], deferred: 0 };
+/** What a pass decided about the CLOCKS, as opposed to the actions: which pending
+ * rules' deadlines started counting this pass, and which ran out. Both are edge
+ * ids; `applyClocks` (runner.ts) turns them into `liveSince` and `expiredAt`
+ * stamps. Kept OUT of `EvalResult` on purpose — `evaluateFlow` answers "what
+ * fires", and a flow with no deadlines must get exactly the answer it always
+ * did — but computed by the same oracle, so the two can never disagree about
+ * whether a condition was met. */
+export interface ClockResult {
+  /** Pending rules that carry a deadline, are live (see `sourceLive`), and have
+   * no `liveSince` yet. */
+  wentLive: string[];
+  /** Pending rules whose deadline has passed with their condition NOT met this
+   * pass. A met rule is never here: `evaluateFlow` fires it instead, because the
+   * condition arrived — the deadline is a fallback, not a cut-off. */
+  expired: string[];
+}
 
+/** Has another rule out of the same source as `e` run out of time? The whole of
+ * `deadline-passed`, answered from the flow alone — the same shape as
+ * `commandSucceeded` and `gateAnswer` above, and intercepted in `isMet` at the
+ * same spot. Siblings only: a rule cannot be met by its own expiry (it is
+ * settled by then and never evaluated again), and an expiry out of a DIFFERENT
+ * node is somebody else's deadline. Reads `expiredAt` off the store, so a
+ * sibling that expires THIS pass is seen on the next one — six seconds, and the
+ * same one-pass latency `command-succeeded` has after its command runs. */
+function deadlinePassed(flow: Flow, e: FlowEdge): boolean {
+  return flow.edges.some((o) => o.id !== e.id && o.from === e.from && o.expiredAt !== undefined);
+}
+
+/** The one place a pass's questions are answered — `met(e)`, `blocked`, and
+ * whether a rule's source is live enough for its clock to run — shared by
+ * `evaluateFlow` and `evaluateDeadlines` so a deadline can never be judged
+ * against a different reading of the board than the rule it belongs to.
+ * `evaluateFlow` used to hold all of this inline; nothing about the answers
+ * changed when it moved here. */
+function metOracle(i: EvalInput) {
   const byKey = new Map(i.statuses.map((s) => [s.run.key, s]));
   const blocked: BlockedNote[] = [];
   const seenBlocked = new Set<string>();
@@ -204,6 +235,12 @@ export function evaluateFlow(i: EvalInput): EvalResult {
     // lookup below, which a command node's incoming edges have no use for and
     // would otherwise report as an unhelpful "gone" or a silent never-fires.
     if (e.cond.kind === "command-succeeded") return commandSucceeded(i.flow, e.from);
+    // Same spot, same reason: a sibling's stamp, not a place's status. Answered
+    // for ANY source kind — a deadline can sit on a rule out of a place, a
+    // command or a gate, and the fallback rule beside it must read it wherever
+    // it is — so this comes before the place lookup that would call a gone card
+    // "gone" instead of answering.
+    if (e.cond.kind === "deadline-passed") return deadlinePassed(i.flow, e);
     // Intercepted here, beside `command-succeeded` and before the place/status
     // lookup, for the same reason: a gate has no `runKey`, so falling through
     // would report the node as "gone" every pass instead of as waiting on you.
@@ -246,6 +283,76 @@ export function evaluateFlow(i: EvalInput): EvalResult {
     if (!metCache.has(e.id)) metCache.set(e.id, isMet(e));
     return metCache.get(e.id);
   };
+
+  /** Is this rule's source far enough along for the rule to be WAITING on it —
+   * the moment a deadline's clock should start? Three answers, one per kind of
+   * node a rule can leave: a place is live while its card is on the board; a
+   * command node once its own incoming rule has performed (ran and succeeded OR
+   * ran and failed — either way the rule past it is now waiting on that
+   * outcome); a gate once its question has been asked. Planned work is not live
+   * — nothing exists to wait on yet — and promotion rewrites it into a place with
+   * the same id, at which point this answers for it as a place. A kind this
+   * build does not know is not live either: waiting costs nothing, and a clock
+   * that starts on a node nobody can read would expire a rule nobody could have
+   * watched.
+   *
+   * Deliberately NOT "met(e) !== undefined": a gate-approved rule out of an
+   * unasked gate is answerable (false) from the moment the flow is armed, and a
+   * clock that started then would count the whole wait for the QUESTION against
+   * a deadline meant for the ANSWER. */
+  const sourceLive = (e: FlowEdge): boolean => {
+    const from = findNode(i.flow, e.from);
+    if (!from) return false;
+    switch (from.kind) {
+      case "place": return byKey.has(from.runKey);
+      case "command": return incomingEdges(i.flow, from.id).some((x) => x.performed === true);
+      case "gate": return gateAskEdge(i.flow, from.id) !== undefined;
+      default: return false;
+    }
+  };
+
+  return { met, blocked, sourceLive };
+}
+
+/** Which pending rules' clocks start this pass, and which have run out. Pure and
+ * total like `evaluateFlow`, answered against the SAME oracle, and — like it —
+ * silent for a disarmed flow: a paused flow's deadlines do not tick, and its
+ * clocks are cleared on re-arm (`flow:arm`, deckView.ts) so they start over.
+ *
+ * Only a rule that carries a deadline ever appears here. That is what keeps this
+ * feature free for every flow that never opted in: no `liveSince` is stamped, so
+ * no write happens, so a pass on such a flow is byte-for-byte what it was.
+ *
+ * Expiry needs three things and one absence: a deadline, a running clock, that
+ * clock past its moment — and the condition NOT met this pass. Met wins: the
+ * deadline exists to catch a condition that never arrives, not to refuse one that
+ * arrives late, and `evaluateFlow` fires that rule in this same pass. Whether the
+ * source is still live is deliberately NOT asked here: the clock started while
+ * it was, and a card that has since gone from the board did not make the
+ * condition arrive. */
+export function evaluateDeadlines(i: EvalInput): ClockResult {
+  if (!i.flow.armed) return { wentLive: [], expired: [] };
+  const { met, sourceLive } = metOracle(i);
+  const wentLive: string[] = [];
+  const expired: string[] = [];
+  for (const e of i.flow.edges) {
+    if (isSettled(e) || !hasDeadline(e)) continue;
+    if (e.liveSince === undefined) {
+      if (sourceLive(e)) wentLive.push(e.id);
+      continue;
+    }
+    const at = deadlineAt(e);
+    if (at !== undefined && i.nowMs >= at && met(e) !== true) expired.push(e.id);
+  }
+  return { wentLive, expired };
+}
+
+export function evaluateFlow(i: EvalInput): EvalResult {
+  // A fresh object rather than a shared constant: a caller that mutates the result
+  // must not be able to poison every later disarmed pass.
+  if (!i.flow.armed) return { fired: [], blocked: [], deferred: 0 };
+
+  const { met, blocked } = metOracle(i);
 
   // A launch or seed is what costs something — a window, an agent session. A
   // notify is a toast, never capped. Only ever asked of the edge that performs.
@@ -293,7 +400,13 @@ export function evaluateFlow(i: EvalInput): EvalResult {
     // re-routing a failed action through a different edge. Bail before ever
     // calling `met` on a sibling, too: an errored junction reports nothing,
     // not even a stale "gone" note for whichever edge happened to error.
-    if (incoming.some((e) => e.error !== undefined)) continue;
+    //
+    // An EXPIRED incoming edge stops it the same way, and must be named here
+    // rather than left to `isSettled` below: `allMet` counts a settled sibling as
+    // an arrival, and an expiry is precisely a sibling that did NOT arrive. A
+    // junction waiting on "both PRs merged" where one ran out of time has not
+    // been met by one PR merging — it has been told the other never will.
+    if (incoming.some((e) => e.error !== undefined || e.expiredAt !== undefined)) continue;
 
     // Already-settled siblings count as satisfied: the junction closes over
     // time, not in one instant, and a flow that forgot its earlier arrivals

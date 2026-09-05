@@ -105,7 +105,15 @@ export type CondKind =
    * disk either way. Reading only half of it would leave a rejected gate
    * indistinguishable from an unanswered one to every downstream rule. */
   | "gate-approved"
-  | "gate-rejected";
+  | "gate-rejected"
+  /** Did ANOTHER rule out of this same source run out of time? Bare, and answered
+   * in the same unusual place as the three above — `evaluate.ts`'s `isMet`
+   * intercepts it before `conditions.ts` — because the fact lives on a SIBLING
+   * edge's `expiredAt`, not on any `RunStatus`. It is what lets a deadline act:
+   * the rule carrying `timeoutMinutes` only settles as expired, and a sibling with
+   * this condition is what then notifies, re-seeds, or launches the fallback.
+   * "If it hasn't merged in an hour, tell me" is two rules out of one place. */
+  | "deadline-passed";
 
 /** The `kind` strings below are serialized into flow files under
  * ~/.agentflow/flows and shared across windows, so they keep their released
@@ -236,6 +244,33 @@ export interface FlowEdge {
   /** The action threw. Never retried until Reset — retrying a launch that failed
    * every poll is how you end up with twenty windows. */
   error?: string;
+  /** How long this rule may WAIT once its clock is running before it settles as
+   * expired — the user's own configuration, kept by Reset and by `toTemplate`
+   * exactly like `note`. Absent (or anything but a positive finite number — a
+   * flow file is hand-editable, see `hasDeadline`) means the rule waits forever,
+   * which is what every rule did before this field existed and what keeps an old
+   * file reading unchanged.
+   *
+   * A deadline does not make the rule fire. It settles it with `expiredAt`, and
+   * a SIBLING out of the same source with the `deadline-passed` condition is what
+   * acts on that — see `CondKind`. */
+  timeoutMinutes?: number;
+  /** When this rule's clock started: the first pass that found it live — its
+   * source a place on the board, a command that has performed, or a gate that
+   * has been asked (see `evaluateDeadlines` in evaluate.ts) — while it carried a
+   * deadline. Stamped only for a rule WITH `timeoutMinutes`, so a flow that never
+   * opted in is never written for this. Host-owned: cleared by Reset
+   * (`stripHostStamps`), and cleared on every pending rule when the flow is
+   * re-armed, so a paused flow's clocks start over rather than expiring the
+   * instant it wakes. */
+  liveSince?: number;
+  /** The THIRD terminal stamp, beside `firedAt` and `error`: the deadline passed
+   * and the condition had not arrived. Distinct from both on purpose — an expired
+   * rule ran nothing (so it is not a `firedAt`, and `commandSucceeded` must never
+   * read it as a performer) and nothing broke (so it is not an `error`, and the
+   * drawer must not show it in red). `isSettled` counts it, so it is never
+   * evaluated again until Reset. */
+  expiredAt?: number;
 }
 
 export interface Flow {
@@ -294,7 +329,26 @@ export function emptyFlow(id: string, name: string, nowMs: number): Flow {
  * reason it will never fire is that it already errored. That drift was a real
  * defect — `armability.ts` used to check only `firedAt`. */
 export function isSettled(e: FlowEdge): boolean {
-  return e.firedAt !== undefined || e.error !== undefined;
+  return e.firedAt !== undefined || e.error !== undefined || e.expiredAt !== undefined;
+}
+
+/** Does this rule carry a deadline it can run out of? A positive, finite minute
+ * count and nothing else: a flow file is JSON somebody can hand-edit, and
+ * `store.ts`'s `validEdge` admits an edge on the strength of its `cond` alone, so
+ * `"timeoutMinutes": "10"` or `0` can reach every reader. Zero and below read as
+ * "no deadline" rather than "expires at once" — a rule that expires the instant
+ * it goes live is not something anyone means by a deadline. */
+export function hasDeadline(e: FlowEdge): boolean {
+  return typeof e.timeoutMinutes === "number" && Number.isFinite(e.timeoutMinutes) && e.timeoutMinutes > 0;
+}
+
+/** The moment this rule's clock runs out, or `undefined` while it has no deadline
+ * or the clock has not started. One arithmetic, shared by the engine's expiry
+ * check, the dry run's "expires in…" and the card's stepper, so no two of them
+ * can disagree about when. */
+export function deadlineAt(e: FlowEdge): number | undefined {
+  if (!hasDeadline(e) || typeof e.liveSince !== "number") return undefined;
+  return e.liveSince + e.timeoutMinutes! * 60_000;
 }
 
 /** Every field the HOST stamps onto an edge as it acts, removed — so the edge is
@@ -308,8 +362,9 @@ export function isSettled(e: FlowEdge): boolean {
  * on `FlowEdge` is therefore forgotten in exactly one place, here, rather than in
  * whichever of two call sites nobody remembered.
  *
- * `mode` and `note` survive on purpose: they are the user's configuration, not a
- * mirror of anything the host decided, and a seed's mode has nowhere else to live. */
+ * `mode`, `note` and `timeoutMinutes` survive on purpose: they are the user's
+ * configuration, not a mirror of anything the host decided, and a seed's mode has
+ * nowhere else to live. */
 export function stripHostStamps(e: FlowEdge): FlowEdge {
   const kept: FlowEdge = { ...e };
   delete kept.firedAt;
@@ -318,6 +373,8 @@ export function stripHostStamps(e: FlowEdge): FlowEdge {
   delete kept.error;
   delete kept.action;
   delete kept.gateAnswer;
+  delete kept.liveSince;
+  delete kept.expiredAt;
   return kept;
 }
 

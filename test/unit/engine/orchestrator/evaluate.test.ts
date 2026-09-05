@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { evaluateFlow, MAX_LAUNCHES_PER_PASS } from "../../../../src/engine/orchestrator/evaluate";
+import { evaluateDeadlines, evaluateFlow, MAX_LAUNCHES_PER_PASS } from "../../../../src/engine/orchestrator/evaluate";
 import { BranchCiStatus } from "../../../../src/engine/orchestrator/branchCi";
 import {
   CommandNode, Flow, FlowEdge, FlowNode, GateNode, JoinMode, NotifyNode, PlaceNode, PlannedNode, emptyFlow,
@@ -653,5 +653,161 @@ describe("evaluateFlow — a gate", () => {
     const r = run(flow, [status("PROJ-1", { merged: true })]);
     expect(r.fired.map((f) => f.edge.id).sort()).toEqual(["ask1", "l1", "l2", "l3"]);
     expect(r.deferred).toBe(0);
+  });
+});
+
+describe("evaluateDeadlines — starting the clock", () => {
+  const clocks = (flow: Flow, statuses: RunStatus[], nowMs = NOW) =>
+    evaluateDeadlines({ flow, statuses, nowMs });
+
+  it("starts the clock on a rule with a deadline whose source is a place on the board", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z", { timeoutMinutes: 10 })]);
+    expect(clocks(flow, [status("PROJ-1")]).wentLive).toEqual(["e1"]);
+  });
+
+  it("starts no clock on a rule without a deadline — a flow that never opted in is never written for this", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z")]);
+    expect(clocks(flow, [status("PROJ-1")])).toEqual({ wentLive: [], expired: [] });
+  });
+
+  it("does not restart a clock that is already running", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: NOW - 1 })]);
+    expect(clocks(flow, [status("PROJ-1")]).wentLive).toEqual([]);
+  });
+
+  it("does not start a clock while the source is planned work, or a place that is gone", () => {
+    const fromPlanned = flowWith([planned("p"), notify("z")], [edge("e1", "p", "z", { timeoutMinutes: 10 })]);
+    expect(clocks(fromPlanned, []).wentLive).toEqual([]);
+    const gone = flowWith([place("a", "PROJ-1"), notify("z")], [edge("e1", "a", "z", { timeoutMinutes: 10 })]);
+    expect(clocks(gone, []).wentLive).toEqual([]);
+  });
+
+  it("starts the clock on a rule out of a command node once the command has performed, not before", () => {
+    const flow = flowWith([place("a", "PROJ-1"), command("c"), notify("z")],
+      [edge("e1", "a", "c", { action: "run" }),
+       edge("e2", "c", "z", { cond: { kind: "command-succeeded" }, timeoutMinutes: 30 })]);
+    expect(clocks(flow, [status("PROJ-1")]).wentLive).toEqual([]);
+    flow.edges[0].performed = true;
+    flow.edges[0].error = "exit 1";
+    // Ran and failed still counts as performed: the rule is now waiting on a
+    // command that will never succeed, which is exactly what a deadline is for.
+    expect(clocks(flow, [status("PROJ-1")]).wentLive).toEqual(["e2"]);
+  });
+
+  it("starts the clock on a rule out of a gate once the question has been asked", () => {
+    const flow = flowWith([place("a", "PROJ-1"), gate("g"), notify("z")],
+      [edge("ask", "a", "g", { action: "ask" }),
+       edge("e2", "g", "z", { cond: { kind: "gate-approved" }, timeoutMinutes: 60 })]);
+    expect(clocks(flow, [status("PROJ-1")]).wentLive).toEqual([]);
+    const posed = flowWith(flow.nodes, [asked({ id: "ask" }), flow.edges[1]]);
+    expect(clocks(posed, [status("PROJ-1")]).wentLive).toEqual(["e2"]);
+  });
+
+  it("does nothing at all for a disarmed flow", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: NOW - 60 * 60_000 })], false);
+    expect(clocks(flow, [status("PROJ-1")])).toEqual({ wentLive: [], expired: [] });
+  });
+
+  it("never touches a settled rule", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z"), notify("y")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, firedAt: 1 }),
+       edge("e2", "a", "y", { timeoutMinutes: 10, liveSince: NOW - 60 * 60_000, error: "boom" })]);
+    expect(clocks(flow, [status("PROJ-1")])).toEqual({ wentLive: [], expired: [] });
+  });
+});
+
+describe("evaluateDeadlines — running out", () => {
+  const clocks = (flow: Flow, statuses: RunStatus[], nowMs = NOW) =>
+    evaluateDeadlines({ flow, statuses, nowMs });
+
+  it("expires a rule whose deadline has passed with its condition still unmet", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: NOW - 10 * 60_000 })]);
+    expect(clocks(flow, [status("PROJ-1")]).expired).toEqual(["e1"]);
+  });
+
+  it("does not expire a rule whose deadline has not passed yet", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: NOW - 10 * 60_000 + 1 })]);
+    expect(clocks(flow, [status("PROJ-1")]).expired).toEqual([]);
+  });
+
+  it("a met rule fires rather than expires, even past its deadline — the condition arrived", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: NOW - 60 * 60_000 })]);
+    const statuses = [status("PROJ-1", { merged: true })];
+    expect(clocks(flow, statuses).expired).toEqual([]);
+    expect(run(flow, statuses).fired.map((f) => f.edge.id)).toEqual(["e1"]);
+  });
+
+  it("expires past the deadline even when the card has since gone from the board", () => {
+    // The clock started while the card was observable; the condition then did
+    // not arrive in time. That the card is now gone does not make it arrive.
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { timeoutMinutes: 10, liveSince: NOW - 60 * 60_000 })]);
+    expect(clocks(flow, []).expired).toEqual(["e1"]);
+  });
+
+  it("does not expire a rule with a running clock but no deadline any more — the user removed it", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { liveSince: NOW - 60 * 60_000 })]);
+    expect(clocks(flow, [status("PROJ-1")]).expired).toEqual([]);
+  });
+});
+
+describe("evaluateFlow — expired edges", () => {
+  it("never re-evaluates an expired edge", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")],
+      [edge("e1", "a", "z", { expiredAt: NOW - 1 })]);
+    expect(run(flow, [status("PROJ-1", { merged: true })]).fired).toEqual([]);
+  });
+
+  it("with join all, an expired incoming edge stops the junction dead — a settled edge that never arrived is not an arrival", () => {
+    const flow = flowWith(
+      [place("a", "PROJ-1"), place("b", "PROJ-2"), notify("z", "all")],
+      [edge("e1", "a", "z", { expiredAt: NOW - 1 }), edge("e2", "b", "z")],
+    );
+    const r = run(flow, [status("PROJ-1", { merged: true }), status("PROJ-2", { merged: true })]);
+    expect(r.fired).toEqual([]);
+    expect(r.blocked).toEqual([]);
+  });
+});
+
+describe("evaluateFlow — deadline-passed", () => {
+  const passed = (id: string, from: string, to: string, over: Partial<FlowEdge> = {}) =>
+    edge(id, from, to, { cond: { kind: "deadline-passed" }, ...over });
+
+  it("fires once a sibling out of the same source has expired", () => {
+    const flow = flowWith([place("a", "PROJ-1"), planned("p"), notify("z")],
+      [edge("e1", "a", "p", { timeoutMinutes: 60, expiredAt: NOW - 1 }), passed("e2", "a", "z")]);
+    expect(run(flow, [status("PROJ-1")]).fired.map((f) => f.edge.id)).toEqual(["e2"]);
+  });
+
+  it("does not fire while the sibling is still waiting", () => {
+    const flow = flowWith([place("a", "PROJ-1"), planned("p"), notify("z")],
+      [edge("e1", "a", "p", { timeoutMinutes: 60, liveSince: NOW - 1 }), passed("e2", "a", "z")]);
+    expect(run(flow, [status("PROJ-1")]).fired).toEqual([]);
+  });
+
+  it("does not fire on a sibling that fired or errored — only an expiry is a deadline passing", () => {
+    const flow = flowWith([place("a", "PROJ-1"), planned("p"), planned("q"), notify("z")],
+      [edge("e1", "a", "p", { firedAt: NOW - 1 }), edge("e3", "a", "q", { error: "boom" }), passed("e2", "a", "z")]);
+    expect(run(flow, [status("PROJ-1")]).fired).toEqual([]);
+  });
+
+  it("reads only siblings out of its OWN source — another node's expiry does not leak in", () => {
+    const flow = flowWith([place("a", "PROJ-1"), place("b", "PROJ-2"), planned("p"), notify("z")],
+      [edge("e1", "b", "p", { expiredAt: NOW - 1 }), passed("e2", "a", "z")]);
+    expect(run(flow, [status("PROJ-1"), status("PROJ-2")]).fired).toEqual([]);
+  });
+
+  it("is answered from the flow, so it works off a source whose card is gone and reports no blocked note", () => {
+    const flow = flowWith([place("a", "PROJ-1"), planned("p"), notify("z")],
+      [edge("e1", "a", "p", { expiredAt: NOW - 1 }), passed("e2", "a", "z")]);
+    const r = run(flow, []);
+    expect(r.fired.map((f) => f.edge.id)).toEqual(["e2"]);
+    expect(r.blocked).toEqual([]);
   });
 });

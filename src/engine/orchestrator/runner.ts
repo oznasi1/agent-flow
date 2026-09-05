@@ -1,8 +1,40 @@
 // What an armed flow's fired edges MEAN: the latches to stamp, and the sentences
 // to show. Pure and total, so both decisions are testable from fixtures without a
 // panel, a filesystem or a clock — the panel does the I/O.
-import { FiredEdge } from "./evaluate";
-import { Flow, findNode, isSpendAction } from "./model";
+import { ClockResult, FiredEdge } from "./evaluate";
+import { Flow, findNode, isSettled, isSpendAction } from "./model";
+
+/** Stamp the clocks a pass decided about: `liveSince` on every rule that went
+ * live, `expiredAt` on every rule that ran out. Returns the SAME flow object when
+ * nothing changed, so the caller can skip the write — a pass on a flow with no
+ * deadlines must cost no write at all, which is what keeps this feature inert
+ * for every flow that never opted in.
+ *
+ * Reads the edge as the store holds it NOW, not as evaluation saw it a store-read
+ * ago, and that is why two of the ids can be ignored: a rule another window has
+ * since settled must not gain an expiry on top of its receipt, and a clock the
+ * store already holds is not restarted (evaluation named it live because ITS copy
+ * had no `liveSince`; the store's copy may, if a parallel pass got there first).
+ * Both are the same discipline `advanceUnderLock`'s `unclaimed` filter applies to
+ * fired edges. */
+export function applyClocks(flow: Flow, clocks: ClockResult, nowMs: number): Flow {
+  const live = new Set(clocks.wentLive);
+  const out = new Set(clocks.expired);
+  let changed = false;
+  const edges = flow.edges.map((e) => {
+    if (isSettled(e)) return e;
+    if (out.has(e.id)) {
+      changed = true;
+      return { ...e, expiredAt: nowMs };
+    }
+    if (live.has(e.id) && e.liveSince === undefined) {
+      changed = true;
+      return { ...e, liveSince: nowMs };
+    }
+    return e;
+  });
+  return changed ? { ...flow, edges } : flow;
+}
 
 /** What actually happened when the caller performed one acting edge. Only the
  * caller can know — a `launch` either opened a window or explained why it did not —

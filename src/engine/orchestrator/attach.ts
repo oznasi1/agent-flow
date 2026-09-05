@@ -56,7 +56,12 @@ export type WorkflowStatus = "disarmed" | "advancing" | "waiting-on-you" | "stop
  * never a sentence this module invents. */
 export interface StepState {
   edgeId: string;
-  state: "done" | "now" | "waiting" | "you" | "fail";
+  /** `expired` is the third settled state, beside `done` and `fail`: the rule's
+   * deadline passed with its condition unmet (`expiredAt`, model.ts). Not a
+   * failure — nothing ran and nothing broke, and a sibling `deadline-passed`
+   * rule may be the one that acts on it — so it neither stops the workflow nor
+   * takes the failure hue. */
+  state: "done" | "now" | "waiting" | "you" | "fail" | "expired";
   /** Text the engine actually RECORDED — the edge's own `firedNote` or `error`, or
    * `previewFlow`'s `blank`. Never a sentence this module composes: wording is the
    * webview's job, and an engine module has no business holding English the UI
@@ -66,6 +71,10 @@ export interface StepState {
    * `"gone"`, `"agent-state-unknown"`, `"awaiting-answer"`. The block turns it into
    * a sentence. */
   reason?: BlockedNote["reason"];
+  /** When this step's deadline runs out — `RulePreview.deadlineAt`, carried
+   * through for a pending step whose clock is running. The block turns it into
+   * "expires in 12m"; the engine only knows the moment. */
+  deadlineAt?: number;
 }
 
 export interface WorkflowState {
@@ -99,6 +108,9 @@ export function workflowState(
   const steps: StepState[] = flow.edges.map((e) => {
     if (e.error !== undefined) return { edgeId: e.id, state: "fail" as const, receipt: e.error };
     if (e.firedAt !== undefined) return { edgeId: e.id, state: "done" as const, receipt: e.firedNote };
+    // No receipt: an expiry records nothing but the moment, and the sentence
+    // for it is the webview's to write (see `receipt`'s own doc comment).
+    if (e.expiredAt !== undefined) return { edgeId: e.id, state: "expired" as const };
 
     const p = previews.get(e.id);
     if (p?.reason === "awaiting-answer") {
@@ -113,7 +125,10 @@ export function workflowState(
     // workflow is doing five things at once.
     const state = firstPending ? ("now" as const) : ("waiting" as const);
     firstPending = false;
-    return { edgeId: e.id, state, receipt: p?.blank ?? undefined, reason: p?.reason };
+    return {
+      edgeId: e.id, state, receipt: p?.blank ?? undefined, reason: p?.reason,
+      ...(p?.deadlineAt !== undefined ? { deadlineAt: p.deadlineAt } : {}),
+    };
   });
 
   const done = flow.edges.filter(isSettled).length;
@@ -125,7 +140,10 @@ export function workflowState(
   if (steps.some((s) => s.state === "fail")) return { ...base, status: "stopped" };
   if (steps.some((s) => s.state === "you")) return { ...base, status: "waiting-on-you" };
   if (!flow.armed) return { ...base, status: "disarmed" };
-  if (steps.every((s) => s.state === "done")) return { ...base, status: "done" };
+  // `done` is the absence of a pending rule, and an expired rule is not pending:
+  // it settled without arriving, and whatever was meant to act on that has by
+  // now either fired (done) or is itself still pending (not done).
+  if (steps.every((s) => s.state === "done" || s.state === "expired")) return { ...base, status: "done" };
   return { ...base, status: "advancing" };
 }
 

@@ -14,9 +14,9 @@ import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, normalizedTem
 import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
-import { evaluateFlow } from "./engine/orchestrator/evaluate";
+import { evaluateDeadlines, evaluateFlow } from "./engine/orchestrator/evaluate";
 import { unfirableRules } from "./engine/orchestrator/armability";
-import { ActOutcome, applyFired, notifyLines } from "./engine/orchestrator/runner";
+import { ActOutcome, applyClocks, applyFired, notifyLines } from "./engine/orchestrator/runner";
 import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
 import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "./engine/orchestrator/command";
@@ -889,6 +889,34 @@ export class DeckPanel {
         continue;
       }
       try {
+        // The CLOCKS, before the actions, and outside every gate below: a
+        // deadline starting or running out is bookkeeping about waiting, not a
+        // spend, so neither the resume gate nor a consent ask holds it back. A
+        // flow with no deadlines gets nothing here — `evaluateDeadlines` names
+        // only rules that carry one and `applyClocks` hands back the same object
+        // when there is nothing to stamp — so a pass on such a flow costs exactly
+        // the writes it always did. Read fresh and written at once, under the
+        // lock this pass holds: the same re-read discipline every other write in
+        // this loop follows. The `expired` line is journaled AFTER the write,
+        // for the reason the fired/errored lines below are.
+        const clocks = evaluateDeadlines({ flow, statuses: runs, nowMs, branchCi });
+        if (clocks.wentLive.length > 0 || clocks.expired.length > 0) {
+          const current = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+          if (current) {
+            const stamped = applyClocks(current, clocks, nowMs);
+            if (stamped !== current) {
+              writeFlow(this.flowIo, this.flowsDir, stamped);
+              for (const e of stamped.edges) {
+                // Only what THIS pass stamped: an edge another window expired a
+                // pass ago carries an older `expiredAt` and its own line already.
+                if (e.expiredAt !== nowMs || !clocks.expired.includes(e.id)) continue;
+                this.journal(flow.id, {
+                  kind: "expired", edge: e.id, from: e.from, to: e.to, since: e.liveSince ?? nowMs,
+                }, nowMs);
+              }
+            }
+          }
+        }
         const result = evaluateFlow({ flow, statuses: runs, nowMs, branchCi });
         if (result.fired.length === 0) {
           // Nothing ready means nothing to approve: clear the gate so a rule
@@ -4225,7 +4253,21 @@ export class DeckPanel {
         if (!getConfig().orchestrator) return;
         const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === m.id);
         if (!flow) return;
-        writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed });
+        // Arming restarts every pending rule's deadline clock. A disarmed flow
+        // is paused — `evaluateDeadlines` never ticks it — and a clock that kept
+        // its old `liveSince` across the pause would expire the instant the flow
+        // woke, for time nobody was waiting. Settled rules keep theirs: an
+        // expiry that already happened is history, and Reset is what clears it.
+        // Deleted rather than set `undefined`, so the stored record does not
+        // gain a key that reads as "present but blank".
+        const edges = m.armed
+          ? flow.edges.map((e) => {
+              if (isSettled(e) || e.liveSince === undefined) return e;
+              const { liveSince: _restart, ...rest } = e;
+              return rest;
+            })
+          : flow.edges;
+        writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed, edges });
         // `source: "toggle"` matches the `flow_armed` telemetry this handler
         // already emits below, so the two records of one gesture agree. The
         // pass's own auto-skip records its disarm as its own `skipped` events

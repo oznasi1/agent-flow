@@ -29,9 +29,14 @@ import {
   seedCond,
   sourceRepoOfNode,
   COND_LABEL,
+  DEADLINE_ARIA_LABEL,
+  DEADLINE_HINT,
+  DEADLINE_PLACEHOLDER,
+  deadlineLabel,
   defaultCondFor,
   DEST_LABEL,
   endLabel,
+  expiredText,
   isMigrationNotice,
   launchDestOf,
   modeDisplayLabel,
@@ -45,11 +50,13 @@ import {
   offeredConds,
   repoOptions,
   OFFERED_DESTS,
+  parseDeadlineInput,
   truncatedNote,
   withCommandId,
   withCommandRun,
   withCond,
   withCondParams,
+  withDeadline,
   withDest,
   withMode,
   withNote,
@@ -202,6 +209,36 @@ function ruleSentence(
           onEdit={(patch) => onSave(withCondParams(flow, e.id, patch))}
         />
       )}
+      {/* The deadline, for every verb: how long this rule may wait once its
+          clock is running before it settles as expired (`timeoutMinutes`,
+          model.ts). Inline after the condition, which is what it is about —
+          "WHEN CI passed within 45m THEN launch PROJ-12". An open row edits it;
+          a closed one says it in two words or stays silent, the same division
+          the note follows. Same `onBlur`/revert idiom as `CondParams`'s minute
+          field: a rule is not rewritten per keystroke, and junk puts the old
+          value back rather than storing something the engine would ignore. */}
+      {open ? (
+        <>
+          <span className="orch-kw">WITHIN</span>
+          <input
+            className="orch-num"
+            type="number"
+            min={1}
+            aria-label={DEADLINE_ARIA_LABEL}
+            key={`${e.id}-deadline`}
+            defaultValue={e.timeoutMinutes ?? ""}
+            placeholder={DEADLINE_PLACEHOLDER}
+            onBlur={(ev) => {
+              const parsed = parseDeadlineInput(ev.currentTarget.value);
+              if (parsed.ok) onSave(withDeadline(flow, e, parsed.minutes));
+              else ev.currentTarget.value = e.timeoutMinutes === undefined ? "" : String(e.timeoutMinutes);
+            }}
+          />
+          <span className="orch-plabel">{DEADLINE_HINT}</span>
+        </>
+      ) : deadlineLabel(e) !== null ? (
+        <span>{deadlineLabel(e)}</span>
+      ) : null}
 
       {/* THEN is a STATEMENT, not a choice — the same conclusion Task 9 reached
           for the canvas inspector, for a reason that applies word for word
@@ -870,6 +907,11 @@ export function FlowList(p: FlowListProps): JSX.Element {
                   // the store's migration notice is not one — see
                   // `isMigrationNotice`.
                   <span className={isMigrationNotice(e.error) ? undefined : "err"}>{e.error}</span>
+                ) : e.expiredAt !== undefined ? (
+                  // Neither licence: not done (nothing ran) and not a failure
+                  // (nothing broke). The row's own dim voice, in the words the
+                  // inspector and the card's stepper spend.
+                  <span>{expiredText(e)}</span>
                 ) : (
                   <span className="fired">{e.firedNote ?? "fired"}</span>
                 )}

@@ -12853,3 +12853,123 @@ describe("hardening — local cards survive a failed rebuild", () => {
     expect(h.openInEditor).toHaveBeenCalledWith("/r/webapp");
   });
 });
+
+describe("deadlines on an armed flow", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** A place feeding a notify terminal, the notify rule carrying a deadline, and
+   * a sibling `deadline-passed` rule out of the same place into a second notify. */
+  const deadlineFlow = (over: Partial<Flow> = {}, edgeOver: Partial<FlowEdge> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the migration has landed" },
+      { id: "n3", kind: "notify", x: 0, y: 0, join: "any", message: "it has not landed in time" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, timeoutMinutes: 10, ...edgeOver },
+      { id: "e2", from: "n1", to: "n3", cond: { kind: "deadline-passed" } },
+    ],
+    ...over,
+  });
+
+  it("starts a rule's clock the first pass its card is on the board, and writes nothing for a flow without deadlines", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [deadlineFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    await openPanel();
+    await settle();
+    const written = h.writeFlow.mock.calls.at(-1)?.[2] as Flow | undefined;
+    expect(written?.edges[0].liveSince).toBeTypeOf("number");
+    // The sibling has no deadline of its own, and nothing else was stamped.
+    expect(written?.edges[1].liveSince).toBeUndefined();
+    expect(written?.edges[0].firedAt).toBeUndefined();
+
+    // Once running, a second pass does not write the clock again.
+    h.writeFlow.mockClear();
+    const { send } = await openPanel();
+    await send({ type: "deck:refresh" });
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("expires a rule whose clock has run out, journals it, and lets the deadline-passed sibling fire on the next pass", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [deadlineFlow({}, { liveSince: Date.now() - 11 * 60_000 })];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    // Warm the resume gate: the first pass holds a ready rule for approval.
+    const { send } = await openPanel();
+    await settle();
+    const afterFirst = h.flows[0];
+    expect(afterFirst.edges[0].expiredAt).toBeTypeOf("number");
+    expect(afterFirst.edges[0].firedAt).toBeUndefined();
+    expect(afterFirst.edges[0].error).toBeUndefined();
+    const expired = journal().filter((e) => e.kind === "expired");
+    expect(expired).toHaveLength(1);
+    expect(expired[0]).toMatchObject({ edge: "e1", from: "n1", to: "n2" });
+    expect(expired[0].since).toBeTypeOf("number");
+
+    await send({ type: "deck:refresh" });
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[1].firedAt).toBeTypeOf("number");
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/not landed in time/));
+    // Expiry is never announced as a notification of its own — it told nobody anything.
+    expect(window.showInformationMessage).not.toHaveBeenCalledWith(expect.stringMatching(/has landed$/));
+  });
+
+  it("does not expire a rule whose condition arrived, however late — it fires instead", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [deadlineFlow({}, { liveSince: Date.now() - 60 * 60_000 })];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    // Nothing expires while the flow is held at the resume gate? No — the clock
+    // is not a spend. But the condition is met from the first pass here, so the
+    // rule must fire, not expire.
+    h.flows = [deadlineFlow({}, { liveSince: Date.now() - 60 * 60_000 })];
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[0].expiredAt).toBeUndefined();
+    expect(h.flows[0].edges[0].firedAt).toBeTypeOf("number");
+  });
+
+  it("re-arming restarts the clocks of pending rules and leaves settled ones alone", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [deadlineFlow({ armed: false, edges: [
+      { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, timeoutMinutes: 10, liveSince: 5 },
+      { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, timeoutMinutes: 10, liveSince: 5, expiredAt: 9 },
+    ] })];
+    const { send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: true });
+    const w = h.writeFlow.mock.calls.find((c) => (c[2] as Flow).armed === true)![2] as Flow;
+    expect("liveSince" in w.edges[0]).toBe(false);
+    expect(w.edges[1].liveSince).toBe(5);
+    expect(w.edges[1].expiredAt).toBe(9);
+  });
+
+  it("disarming does not touch the clocks", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [deadlineFlow({}, { liveSince: 5 })];
+    const { send } = await openPanel();
+    await send({ type: "flow:arm", id: "f1", armed: false });
+    const w = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(w.armed).toBe(false);
+    expect(w.edges[0].liveSince).toBe(5);
+  });
+
+  it("flow:resetEdge clears the clock and the expiry, and keeps the deadline", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [deadlineFlow({}, { liveSince: 5, expiredAt: 9 })];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    const e = (h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0];
+    expect(e.liveSince).toBeUndefined();
+    expect(e.expiredAt).toBeUndefined();
+    expect(e.timeoutMinutes).toBe(10);
+  });
+});
