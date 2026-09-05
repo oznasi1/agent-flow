@@ -422,3 +422,11 @@ describe("printedVerdicts", () => {
     expect(printedVerdicts(f, withOutput("DEPLOYED"))).toEqual({});
   });
 });
+
+describe("the retrying event", () => {
+  it("round-trips the attempt, the allowance and the schedule", () => {
+    const { io } = fakeIo();
+    appendEvent(io, DIR, "f1", { kind: "retrying", edge: "e1", attempt: 1, max: 3, retryAt: 9_000 }, 1_000);
+    expect(readJournal(io, DIR, "f1")[0]).toMatchObject({ kind: "retrying", edge: "e1", attempt: 1, max: 3, retryAt: 9_000 });
+  });
+});

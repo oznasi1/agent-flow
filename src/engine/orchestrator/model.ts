@@ -300,6 +300,32 @@ export interface FlowEdge {
    * drawer must not show it in red). `isSettled` counts it, so it is never
    * evaluated again until Reset. */
   expiredAt?: number;
+  /** OPT-IN retry for a rule that spends. Absent — the default, and every flow on
+   * disk — means what it always meant: a failure is a full stop until Reset.
+   * With it, a failed `launch`, `seed` or `run` is tried again up to `max` more
+   * times, each after `backoffMs`, and only THEN latched. The user's own
+   * configuration, kept by Reset and `toTemplate` like `note`.
+   *
+   * Split by whether the action is safe to repeat, which is the whole care this
+   * feature needs: a launch that failed because a worktree could not be created
+   * is safe to retry; a deploy that half-ran is not. So a `run` rule's retry is
+   * honoured only alongside `retryOk` — the same posture the consent gates take
+   * toward shell. See `retryPolicy`, the one reader. */
+  retry?: { max: number; backoffMs: number };
+  /** The explicit tick that this `run` rule's command is safe to execute twice.
+   * Only ever `true`, only read for `run`, and required for `retry` to mean
+   * anything on one — a retry policy on a command without it is inert. */
+  retryOk?: true;
+  /** Host stamp: how many times this rule's action has FAILED so far. Kept when
+   * it finally succeeds (the receipt says "after 2 retries") and when it gives
+   * up. Cleared by Reset. */
+  attempts?: number;
+  /** Host stamp: the earliest moment the next attempt may run. Its PRESENCE is
+   * what makes an errored rule "pending retry" rather than settled — see
+   * `isSettled` and `retryPending` — and `evaluate.ts` reads it as "not yet"
+   * until the clock passes it. Absent on a terminal failure. Cleared by Reset,
+   * and by the attempt that succeeds. */
+  retryAt?: number;
 }
 
 export interface Flow {
@@ -358,7 +384,34 @@ export function emptyFlow(id: string, name: string, nowMs: number): Flow {
  * reason it will never fire is that it already errored. That drift was a real
  * defect — `armability.ts` used to check only `firedAt`. */
 export function isSettled(e: FlowEdge): boolean {
-  return e.firedAt !== undefined || e.error !== undefined || e.expiredAt !== undefined;
+  // An error with a `retryAt` is a failure that will be tried again — still in
+  // play, not terminal. Every reader of "settled" (the evaluator's skip, the
+  // junction's arithmetic, armability, the stepper's done count) gets that
+  // answer from here alone.
+  return e.firedAt !== undefined || e.expiredAt !== undefined || (e.error !== undefined && e.retryAt === undefined);
+}
+
+/** Has this rule failed and is it waiting to try again? The one shape that is
+ * errored yet not settled. */
+export function retryPending(e: FlowEdge): boolean {
+  return e.error !== undefined && e.retryAt !== undefined;
+}
+
+/** The retry this rule may take for `action`, or `undefined` when it must not.
+ * Three refusals, all deliberate: no policy or a malformed one (a flow file is
+ * hand-editable — `max` must be a positive integer and `backoffMs` a non-negative
+ * finite number); an action that does not spend (a notify or an ask cannot fail
+ * in a way a retry would help, and `applyFired` never asks); and a `run` without
+ * the explicit `retryOk` tick — re-executing shell that half-ran is the failure
+ * mode this whole feature is careful about, so it takes a second, separate yes. */
+export function retryPolicy(e: FlowEdge, action: FlowAction | undefined): { max: number; backoffMs: number } | undefined {
+  const r = e.retry;
+  if (!r || typeof r !== "object") return undefined;
+  if (!Number.isInteger(r.max) || r.max <= 0) return undefined;
+  if (typeof r.backoffMs !== "number" || !Number.isFinite(r.backoffMs) || r.backoffMs < 0) return undefined;
+  if (!isSpendAction(action)) return undefined;
+  if (action === "run" && e.retryOk !== true) return undefined;
+  return { max: r.max, backoffMs: r.backoffMs };
 }
 
 /** Does this rule carry a deadline it can run out of? A positive, finite minute
@@ -404,6 +457,8 @@ export function stripHostStamps(e: FlowEdge): FlowEdge {
   delete kept.gateAnswer;
   delete kept.liveSince;
   delete kept.expiredAt;
+  delete kept.attempts;
+  delete kept.retryAt;
   return kept;
 }
 

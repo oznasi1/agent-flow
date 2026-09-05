@@ -2,7 +2,7 @@ import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, isSpendAction, JoinMode, LaunchDest, PlaceNode, PlannedNode, retryPending } from "../engine/orchestrator/model";
 import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
@@ -48,6 +48,17 @@ import {
   expiredText,
   parseDeadlineInput,
   withDeadline,
+  DEFAULT_RETRY_BACKOFF_MS,
+  RETRY_BACKOFF_ARIA_LABEL,
+  RETRY_COUNT_ARIA_LABEL,
+  RETRY_OK_ARIA_LABEL,
+  RETRY_OK_HINT,
+  failureText,
+  parseBackoffSeconds,
+  parseRetryCount,
+  retryText,
+  withRetry,
+  withRetryOk,
   isBareCond,
   JOIN_LABEL,
   NODE_KIND_LABEL,
@@ -2611,6 +2622,63 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               />
               <span className="orch-plabel">{DEADLINE_HINT}</span>
             </div>
+            {/* Opt-in RETRY, for the verbs that can fail in a way a second attempt
+                helps — the three that spend. Absent means what a failure has
+                always meant here: a full stop until Reset. A `run` gets the extra
+                tick: a launch that lost a worktree race is safe to try again, a
+                deploy that half-ran is not, and `retryPolicy` (model.ts) refuses
+                a command's retry without it. Same onBlur/revert idiom as WITHIN. */}
+            {derived !== undefined && isSpendAction(derived) && (
+              <div className="orch-clause" data-testid="orch-retry">
+                <span className="orch-kw">RETRY</span>
+                <input
+                  className="orch-num"
+                  type="number"
+                  min={1}
+                  step={1}
+                  aria-label={RETRY_COUNT_ARIA_LABEL}
+                  key={`${edge.id}-retry-max`}
+                  defaultValue={edge.retry?.max ?? ""}
+                  placeholder="none"
+                  onBlur={(ev) => {
+                    const parsed = parseRetryCount(ev.currentTarget.value);
+                    if (!parsed.ok) { ev.currentTarget.value = edge.retry?.max === undefined ? "" : String(edge.retry.max); return; }
+                    p.onSave(withRetry(flow, edge, parsed.max === undefined
+                      ? undefined
+                      : { max: parsed.max, backoffMs: edge.retry?.backoffMs ?? DEFAULT_RETRY_BACKOFF_MS }));
+                  }}
+                />
+                <span className="orch-plabel">times, every</span>
+                <input
+                  className="orch-num"
+                  type="number"
+                  min={0}
+                  aria-label={RETRY_BACKOFF_ARIA_LABEL}
+                  key={`${edge.id}-retry-backoff`}
+                  defaultValue={edge.retry ? Math.round(edge.retry.backoffMs / 1000) : ""}
+                  placeholder={String(DEFAULT_RETRY_BACKOFF_MS / 1000)}
+                  disabled={edge.retry === undefined}
+                  onBlur={(ev) => {
+                    if (edge.retry === undefined) return;
+                    const parsed = parseBackoffSeconds(ev.currentTarget.value);
+                    if (parsed.ok) p.onSave(withRetry(flow, edge, { max: edge.retry.max, backoffMs: parsed.backoffMs }));
+                    else ev.currentTarget.value = String(Math.round(edge.retry.backoffMs / 1000));
+                  }}
+                />
+                <span className="orch-plabel">s</span>
+                {derived === "run" && (
+                  <label className="orch-plabel" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <input
+                      type="checkbox"
+                      aria-label={RETRY_OK_ARIA_LABEL}
+                      checked={edge.retryOk === true}
+                      onChange={(ev) => p.onSave(withRetryOk(flow, edge, ev.currentTarget.checked))}
+                    />
+                    {RETRY_OK_HINT}
+                  </label>
+                )}
+              </div>
+            )}
             {/* THEN is a STATEMENT, not a choice. The action is whatever the
                 node this rule points at implies (`edgeAction`), so a `<select>`
                 here could not decide anything: the pick was silently overridden
@@ -2818,7 +2886,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                     // gets the same Reset, but nothing ran and nothing broke, so
                     // it reads in the row's own dim voice instead of claiming a
                     // failure. See `isMigrationNotice`.
-                    <span className={isMigrationNotice(edge.error) ? undefined : "err"}>{edge.error}</span>
+                    <span className={isMigrationNotice(edge.error) ? undefined : "err"}>{failureText(edge)}</span>
                   ) : edge.expiredAt !== undefined ? (
                     // The third settled shape, in neither colour: not done —
                     // nothing ran — and not a failure — nothing broke. The row's
@@ -2827,6 +2895,16 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   ) : (
                     <span className="fired">{edge.firedNote ?? "fired"}</span>
                   )}
+                  <div className="sp" />
+                  <button type="button" className="orch-mini" onClick={() => p.onResetEdge(flow.id, edge.id)}>Reset</button>
+                </>
+              ) : retryPending(edge) ? (
+                // Failed, and will try again: the error keeps its red — it did
+                // fail — and the schedule sits beside it in the row's dim voice.
+                // Reset is offered because "stop retrying" is a thing to want.
+                <>
+                  <span className="err">{edge.error}</span>
+                  <span data-testid="orch-retry-note">{retryText(edge, Date.now())}</span>
                   <div className="sp" />
                   <button type="button" className="orch-mini" onClick={() => p.onResetEdge(flow.id, edge.id)}>Reset</button>
                 </>

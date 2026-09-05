@@ -1324,6 +1324,15 @@ export class DeckPanel {
               kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error,
               ...(output === undefined ? {} : { output }),
             }, nowMs);
+            // The failure was scheduled to try again rather than latched
+            // (`failedStamp`, runner.ts). Its own line, after the error's: the
+            // "why did nothing fire?" query must not mistake a retry for a stop,
+            // and the record must say the retry was the RULE's choice.
+            if (e.retryAt !== undefined) {
+              this.journal(flow.id, {
+                kind: "retrying", edge: e.id, attempt: e.attempts ?? 1, max: e.retry?.max ?? 0, retryAt: e.retryAt,
+              }, nowMs);
+            }
           } else if (e.firedAt !== undefined) {
             this.journal(flow.id, {
               kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "",

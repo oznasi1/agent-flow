@@ -855,3 +855,42 @@ describe("evaluateFlow — command-printed", () => {
     expect(r.fired).toEqual([]);
   });
 });
+
+describe("evaluateFlow — a failure pending retry", () => {
+  const retrying = (retryAt: number) =>
+    flowWith([place("a", "PROJ-1"), planned("p")],
+      [edge("e1", "a", "p", { retry: { max: 3, backoffMs: 60_000 }, error: "no worktree", attempts: 1, retryAt, performed: true })]);
+
+  it("is not fired while its backoff has not elapsed, even with the condition met", () => {
+    expect(run(retrying(NOW + 1), [status("PROJ-1", { merged: true })]).fired).toEqual([]);
+  });
+
+  it("is fired again once the backoff has elapsed and the condition still holds", () => {
+    const r = run(retrying(NOW), [status("PROJ-1", { merged: true })]);
+    expect(r.fired.map((f) => f.edge.id)).toEqual(["e1"]);
+    expect(r.fired[0].action).toBe("launch");
+  });
+
+  it("is not fired after the backoff when the condition no longer holds — a retry is a second attempt at the rule, not a replay", () => {
+    expect(run(retrying(NOW - 1), [status("PROJ-1")]).fired).toEqual([]);
+  });
+
+  it("a terminal failure (no retryAt) stays settled and is never re-evaluated", () => {
+    const flow = flowWith([place("a", "PROJ-1"), planned("p")],
+      [edge("e1", "a", "p", { retry: { max: 3, backoffMs: 60_000 }, error: "gave up", attempts: 4, performed: true })]);
+    expect(run(flow, [status("PROJ-1", { merged: true })]).fired).toEqual([]);
+  });
+
+  it("with join all, a sibling pending retry holds the junction rather than killing it, and the junction fires once it is due", () => {
+    const flow = flowWith(
+      [place("a", "PROJ-1"), place("b", "PROJ-2"), planned("p", "all")],
+      [edge("e1", "a", "p", { retry: { max: 3, backoffMs: 60_000 }, error: "boom", attempts: 1, retryAt: NOW + 1, performed: true }),
+       edge("e2", "b", "p")],
+    );
+    const statuses = [status("PROJ-1", { merged: true }), status("PROJ-2", { merged: true })];
+    expect(run(flow, statuses).fired).toEqual([]);
+    flow.edges[0].retryAt = NOW;
+    const r = run(flow, statuses);
+    expect(r.fired.map((f) => [f.edge.id, f.perform])).toEqual([["e1", true], ["e2", false]]);
+  });
+});

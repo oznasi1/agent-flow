@@ -23,7 +23,7 @@ import type { RunStatus } from "../../types";
 import { BranchCiStatus } from "./branchCi";
 import type { BlockedNote } from "./evaluate";
 import { RulePreview, previewFlow } from "./preview";
-import { Flow, isPlace, isPlanned, isSettled } from "./model";
+import { Flow, isPlace, isPlanned, isSettled, retryPending } from "./model";
 
 /** Does this flow name the given run?
  *
@@ -75,6 +75,10 @@ export interface StepState {
    * through for a pending step whose clock is running. The block turns it into
    * "expires in 12m"; the engine only knows the moment. */
   deadlineAt?: number;
+  /** When a failed step may be tried again — the edge's own `retryAt`, carried
+   * on a pending step whose `receipt` is then the error it is recovering from.
+   * The block turns it into "retry 1 of 3 in 40s". */
+  retryAt?: number;
 }
 
 export interface WorkflowState {
@@ -110,7 +114,11 @@ export function workflowState(
 
   let firstPending = true;
   const steps: StepState[] = flow.edges.map((e) => {
-    if (e.error !== undefined) return { edgeId: e.id, state: "fail" as const, receipt: e.error };
+    // A failure pending retry is NOT a `fail`: it is still in play (`isSettled`
+    // says so) and the workflow has not stopped. It takes the ordinary pending
+    // path below, carrying its error as the receipt and its schedule as
+    // `retryAt`, so the stepper can say "retry 1 of 3 in 40s" under the words.
+    if (e.error !== undefined && !retryPending(e)) return { edgeId: e.id, state: "fail" as const, receipt: e.error };
     if (e.firedAt !== undefined) return { edgeId: e.id, state: "done" as const, receipt: e.firedNote };
     // No receipt: an expiry records nothing but the moment, and the sentence
     // for it is the webview's to write (see `receipt`'s own doc comment).
@@ -130,8 +138,12 @@ export function workflowState(
     const state = firstPending ? ("now" as const) : ("waiting" as const);
     firstPending = false;
     return {
-      edgeId: e.id, state, receipt: p?.blank ?? undefined, reason: p?.reason,
+      edgeId: e.id, state, reason: p?.reason,
+      // The engine's own words first: a pending retry's error outranks a blank
+      // (a rule that failed did fire, so its parameter was not blank).
+      receipt: retryPending(e) ? e.error : p?.blank ?? undefined,
       ...(p?.deadlineAt !== undefined ? { deadlineAt: p.deadlineAt } : {}),
+      ...(retryPending(e) ? { retryAt: e.retryAt } : {}),
     };
   });
 

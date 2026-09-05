@@ -152,6 +152,102 @@ export function expiredText(e: FlowEdge): string {
   return `expired — waited ${Math.max(0, Math.round((e.expiredAt - e.liveSince) / 60_000))}m`;
 }
 
+/** The aria-labels of the three retry controls both presentations render — see
+ * `withRetry`/`withRetryOk` for what each writes. */
+export const RETRY_COUNT_ARIA_LABEL = "Retry count";
+export const RETRY_BACKOFF_ARIA_LABEL = "Retry backoff seconds";
+export const RETRY_OK_ARIA_LABEL = "Safe to re-run";
+
+/** What a fresh retry policy waits between attempts when the count is set and
+ * the backoff field is still blank. A minute: long enough that a worktree
+ * collision or a busy forge has cleared, short enough to be a retry rather than
+ * a deadline. The field beside it is what a user who disagrees changes. */
+export const DEFAULT_RETRY_BACKOFF_MS = 60_000;
+
+/** The sentence beside a `run` rule's safe-to-re-run tick — the one place the
+ * feature's whole caution is said where it is decided. */
+export const RETRY_OK_HINT = "only if running it twice is harmless";
+
+/** Write a rule's retry policy, or DELETE it for `undefined`. On the edge, for
+ * every spending verb; `retryPolicy` (model.ts) is the one reader and is what
+ * refuses to honour it on a `run` without `retryOk`. */
+export function withRetry(flow: Flow, edge: FlowEdge, retry: { max: number; backoffMs: number } | undefined): Flow {
+  return {
+    ...flow,
+    edges: flow.edges.map((x) => {
+      if (x.id !== edge.id) return x;
+      if (retry === undefined) {
+        const { retry: _drop, ...rest } = x;
+        return rest;
+      }
+      return { ...x, retry };
+    }),
+  };
+}
+
+/** Write — or DELETE, for `false` — a `run` rule's explicit "safe to re-run". Only
+ * ever stored as `true`: an absent field is the default and the refusal. */
+export function withRetryOk(flow: Flow, edge: FlowEdge, ok: boolean): Flow {
+  return {
+    ...flow,
+    edges: flow.edges.map((x) => {
+      if (x.id !== edge.id) return x;
+      if (!ok) {
+        const { retryOk: _drop, ...rest } = x;
+        return rest;
+      }
+      return { ...x, retryOk: true };
+    }),
+  };
+}
+
+/** The retry-count field's text, on blur. Blank removes the policy; a positive
+ * whole number is how many retries; anything else is refused so the control puts
+ * the old value back. Same idiom as the deadline and ceiling fields. */
+export function parseRetryCount(raw: string): { ok: true; max: number | undefined } | { ok: false } {
+  if (raw.trim() === "") return { ok: true, max: undefined };
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? { ok: true, max: n } : { ok: false };
+}
+
+/** The backoff field's text, in seconds, on blur. Zero is allowed — "retry at once"
+ * is a real choice for a launch that raced a worktree — but blank is not a value
+ * here (the count field is what removes a policy), and junk is refused. */
+export function parseBackoffSeconds(raw: string): { ok: true; backoffMs: number } | { ok: false } {
+  const n = Number(raw);
+  return raw.trim() !== "" && Number.isFinite(n) && n >= 0 ? { ok: true, backoffMs: Math.round(n * 1000) } : { ok: false };
+}
+
+/** A closed row's word for a rule's retry policy, or `null` without one. */
+export function retryLabel(e: FlowEdge): string | null {
+  return e.retry && Number.isInteger(e.retry.max) && e.retry.max > 0 ? `retry ×${e.retry.max}` : null;
+}
+
+/** What a failure that will be tried again reads as, beside its error: which
+ * retry is next, of how many, and when. Whole seconds, never negative — a
+ * schedule already passed is "on the next pass", the engine's own granularity. */
+export function retryText(e: FlowEdge, nowMs: number): string {
+  const attempt = typeof e.attempts === "number" ? e.attempts : 1;
+  const max = e.retry?.max ?? attempt;
+  const secs = e.retryAt === undefined ? 0 : Math.max(0, Math.ceil((e.retryAt - nowMs) / 1000));
+  return secs > 0 ? `retry ${attempt} of ${max} in ${secs}s` : `retry ${attempt} of ${max} on the next pass`;
+}
+
+/** A terminal failure's error, plus how many retries it burned getting there —
+ * said only when there were any, so a rule that never opted in reads exactly as
+ * it always did. */
+export function failureText(e: FlowEdge): string {
+  return `${e.error ?? ""}${gaveUpSuffix(e)}`;
+}
+
+/** The cost half of `failureText` on its own, for a caller that already holds the
+ * error's words from elsewhere (the card's stepper reads them off `StepState`).
+ * Empty for a rule that never retried, so nothing changes for it. */
+export function gaveUpSuffix(e: FlowEdge): string {
+  const retries = typeof e.attempts === "number" && e.attempts > 1 ? e.attempts - 1 : 0;
+  return retries > 0 ? ` · gave up after ${retries} ${retries === 1 ? "retry" : "retries"}` : "";
+}
+
 /** Every condition kind that carries a parameter, and so needs a seed value the
  * moment a picker names it. One list, in one place, because `withCond` and
  * `CondParams.tsx`'s own controls have to agree about exactly which kinds have a

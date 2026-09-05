@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
-import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP, OrchTarget, OrchView } from "../../src/webview/OrchestratorDrawer";
 import type { WorkflowRow } from "../../src/webview/WorkflowList";
 import { ORCH_ANIM_MS, ORCH_CSS, ORCH_EDGE_PAINT_DY } from "../../src/webview/orchestratorStyles";
@@ -5101,5 +5101,82 @@ describe("a command-printed rule in the inspector", () => {
     const row = screen.getByTestId("orch-dryrun-e2").textContent ?? "";
     expect(row).toContain("waiting");
     expect(row).toContain("waiting for deploy.sh to print “DEPLOYED”");
+  });
+});
+
+describe("opt-in retry in the inspector", () => {
+  const open = (f: Flow, over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [f], ...over })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    return onSave;
+  };
+
+  it("offers the retry controls on a launch rule but not on a notify rule", () => {
+    const r1 = render(<OrchestratorDrawer {...props({ flows: [placeAndPlanned()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByLabelText("Retry count")).toBeTruthy();
+    expect(screen.queryByLabelText("Safe to re-run")).toBeNull();
+    r1.unmount();
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.queryByLabelText("Retry count")).toBeNull();
+  });
+
+  it("writes a policy with the default backoff on the count, then the backoff separately, and clears on blank", () => {
+    const onSave = open(placeAndPlanned());
+    const count = screen.getByLabelText("Retry count") as HTMLInputElement;
+    expect((screen.getByLabelText("Retry backoff seconds") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.change(count, { target: { value: "3" } });
+    fireEvent.blur(count);
+    let saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].retry).toEqual({ max: 3, backoffMs: 60_000 });
+    // Re-render with the saved flow to reach the now-enabled backoff field.
+    cleanup();
+    const onSave2 = open(saved);
+    const backoff = screen.getByLabelText("Retry backoff seconds") as HTMLInputElement;
+    expect(backoff.value).toBe("60");
+    fireEvent.change(backoff, { target: { value: "5" } });
+    fireEvent.blur(backoff);
+    saved = onSave2.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].retry).toEqual({ max: 3, backoffMs: 5_000 });
+    const count2 = screen.getByLabelText("Retry count") as HTMLInputElement;
+    fireEvent.change(count2, { target: { value: "" } });
+    fireEvent.blur(count2);
+    expect("retry" in (onSave2.mock.calls.at(-1)![0] as Flow).edges[0]).toBe(false);
+  });
+
+  it("a run rule gets the safe-to-re-run tick, which writes retryOk", () => {
+    const f = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+        { id: "n2", kind: "command", x: 320, y: 24, join: "any", run: "deploy.sh" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+    });
+    const onSave = open(f);
+    const tick = screen.getByLabelText("Safe to re-run") as HTMLInputElement;
+    expect(tick.checked).toBe(false);
+    fireEvent.click(tick);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].retryOk).toBe(true);
+  });
+
+  it("shows a failure pending retry in red with its schedule beside it, and offers Reset", () => {
+    const f = placeAndPlanned();
+    f.edges[0] = { ...f.edges[0], retry: { max: 3, backoffMs: 60_000 }, error: "no worktree", attempts: 1, retryAt: Date.now() + 40_000, performed: true };
+    const onResetEdge = vi.fn();
+    open(f, { onResetEdge });
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.querySelector(".orch-obs .err")!.textContent).toBe("no worktree");
+    expect(screen.getByTestId("orch-retry-note").textContent).toMatch(/retry 1 of 3 in (39|40)s/);
+    fireEvent.click(screen.getByRole("button", { name: /reset/i }));
+    expect(onResetEdge).toHaveBeenCalledWith("f1", "e1");
+  });
+
+  it("a terminal failure after retries says what it cost", () => {
+    const f = placeAndPlanned();
+    f.edges[0] = { ...f.edges[0], retry: { max: 2, backoffMs: 1 }, error: "no worktree", attempts: 3, performed: true };
+    open(f);
+    expect(screen.getByTestId("orch-inspector").querySelector(".orch-obs .err")!.textContent).toBe("no worktree · gave up after 2 retries");
   });
 });
