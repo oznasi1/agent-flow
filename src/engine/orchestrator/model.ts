@@ -66,7 +66,19 @@ export type CommandNode = NodeBase & {
  * is, which is why it keeps an out port and why the two conditions below read
  * off its incoming edge. It is the only node whose state a PERSON, rather than
  * the world, decides. */
-export type GateNode = NodeBase & { kind: "gate"; question: string };
+export type GateNode = NodeBase & {
+  kind: "gate";
+  question: string;
+  /** Who should answer, as a forge login (`alice`, not `@alice` — either is
+   * accepted). Set, the ask also posts the question as a comment on the card's
+   * pull request mentioning them, and each pass reads that thread for their
+   * `approve` / `reject` (see `gateRouting.ts`). Absent — every gate written
+   * before this field, and the default — means the gate is answered here, on the
+   * node, by whoever is at the Deck. The local Approve/Reject still work on a
+   * routed gate: routing adds a place the answer can come FROM, never takes one
+   * away. Node configuration, so it travels into templates like `question`. */
+  askWho?: string;
+};
 
 /** A workflow inside a workflow: a node that, when a rule reaches it, STARTS a
  * saved template as a child flow bound to the same card, and that a LATER rule
@@ -341,6 +353,15 @@ export interface FlowEdge {
    * Optional, and absent on every flow written before this build: absent means
    * "not answered", which is what keeps an old file reading unchanged. */
   gateAnswer?: "approved" | "rejected";
+  /** Host stamp on a routed gate's PERFORMER edge: the question was posted on
+   * the pull request (`at`, and the comment's `url` when the forge gave one), or
+   * could not be (`error` — no PR on the place, a forge that cannot carry it, or
+   * the call failing). Written after the ask fires, by the host that performed
+   * it; read by the answer poll, which only reads threads for a delivered ask.
+   * Cleared by Reset like every host stamp (`stripHostStamps`), so re-asking
+   * re-posts. Absent on every edge from before this field, and on every gate
+   * with no `askWho`. */
+  routed?: { at: number; login: string; url?: string; error?: string };
   /** Extra, once-off text for the agent this rule starts — appended to the prompt
    * mode's template, or substituted at `{note}` if the template has one. For
    * `launch` and `seed` only; a `notify` rule's words live on its notify node.
@@ -646,6 +667,7 @@ export function stripHostStamps(e: FlowEdge): FlowEdge {
   delete kept.error;
   delete kept.action;
   delete kept.gateAnswer;
+  delete kept.routed;
   delete kept.liveSince;
   delete kept.expiredAt;
   delete kept.attempts;

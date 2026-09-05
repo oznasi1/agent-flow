@@ -16,6 +16,8 @@ import {
   withNodeTemplate,
   COND_LABEL,
   isBareCond,
+  gateRoutingNote,
+  withNodeGateAskWho,
   condOffered,
   condOptionLabel,
   CWD_REPO_DEFAULT,
@@ -433,6 +435,40 @@ describe("deadlines in the rule module", () => {
     } as unknown as RunStatus;
     expect(observationOf(f, f.edges[0], [status])).toBeNull();
     expect(observationFallback(f, f.edges[0])).toMatch(/another rule/);
+  });
+});
+
+describe("a routed gate in the rule module", () => {
+  const gateFlow = (gate: Record<string, unknown> = {}, ask: Partial<Flow["edges"][number]> = {}): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "g", kind: "gate", x: 320, y: 0, join: "any", question: "deploy to prod?", ...gate } as Flow["nodes"][number],
+    ],
+    edges: [{ id: "ask1", from: "n1", to: "g", cond: { kind: "pr-merged" }, ...ask }],
+  });
+
+  it("withNodeGateAskWho stores a bare login, drops the sigil, and DELETES the field for a blank", () => {
+    const set = withNodeGateAskWho(gateFlow(), "g", " @Alice ");
+    expect(set.nodes[1]).toMatchObject({ kind: "gate", askWho: "Alice" });
+    const cleared = withNodeGateAskWho(set, "g", "   ");
+    expect("askWho" in cleared.nodes[1]).toBe(false);
+    // A non-gate node is untouched.
+    expect(withNodeGateAskWho(gateFlow(), "n1", "alice").nodes[0]).toEqual(gateFlow().nodes[0]);
+  });
+
+  it("gateRoutingNote says where the question went, in every state, and nothing for a local gate", () => {
+    const g = (f: Flow) => f.nodes[1] as Parameters<typeof gateRoutingNote>[1];
+    expect(gateRoutingNote(gateFlow(), g(gateFlow()))).toBeUndefined();
+    const local = gateFlow({ askWho: "alice" });
+    expect(gateRoutingNote(local, g(local))).toBe("will ask @alice on the pull request");
+    const asked = gateFlow({ askWho: "alice" }, { firedAt: 5, performed: true });
+    expect(gateRoutingNote(asked, g(asked))).toBe("asking @alice on the pull request…");
+    const delivered = gateFlow({ askWho: "alice" }, { firedAt: 5, performed: true, routed: { at: 5, login: "alice" } });
+    expect(gateRoutingNote(delivered, g(delivered))).toBe("asked @alice on the pull request");
+    const failed = gateFlow({ askWho: "alice" }, { firedAt: 5, performed: true, routed: { at: 5, login: "alice", error: "no PR" } });
+    expect(gateRoutingNote(failed, g(failed))).toBe("could not ask @alice on the pull request — no PR");
+    const answered = gateFlow({ askWho: "alice" }, { firedAt: 5, performed: true, routed: { at: 5, login: "alice" }, gateAnswer: "approved" });
+    expect(gateRoutingNote(answered, g(answered))).toBe("@alice answered on the pull request");
   });
 });
 

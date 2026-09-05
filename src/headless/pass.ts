@@ -27,6 +27,7 @@ import { acquire, LOCK_TTL_MS, LockIo, release, renew } from "../engine/orchestr
 import { chainSourcePlace, CommandRunner, resolveCommand, runCommand } from "../engine/orchestrator/command";
 import { blockedBy } from "../engine/orchestrator/neverAutoRun";
 import { consentCovers, consumeConsent } from "../engine/orchestrator/consent";
+import { gateAnswerFrom, GateComment, gateSourcePlace, routedGatesAwaitingAnswer } from "../engine/orchestrator/gateRouting";
 import { FlowCommand, RunStatus } from "../types";
 
 export interface PassSettings {
@@ -59,6 +60,12 @@ export interface PassDeps {
    * Optional: a caller with no reader (every existing test) has no token
    * ceilings to enforce. */
   tokenSpend?: (runKeys: string[]) => number | undefined;
+  /** The replies on a pull request since `sinceMs`, for a routed gate awaiting
+   * its answer — the forge's `gates.replies`. A tick never POSES a gate (that
+   * needs an editor), but an answer that arrived on the PR to a question the
+   * Deck already posted is exactly what an unattended pass exists to act on.
+   * `null` is "could not read", skipped. Optional: no reader, no polling. */
+  gateReplies?: (repoPath: string, number: number, sinceMs: number) => Promise<GateComment[] | null>;
 }
 
 export interface FlowReport {
@@ -80,6 +87,8 @@ export interface FlowReport {
   /** Set when the pass disarmed the flow at its spend ceiling — the count, or
    * the token figure, whichever it hit. */
   disarmedAtCeiling?: string;
+  /** Routed gates this pass found answered on their pull request. */
+  answered: string[];
 }
 
 export interface PassReport {
@@ -108,15 +117,40 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
     const flows = readFlows(d.flowIo, d.flowsDir);
     for (const flow of flows) {
       if (!flow.armed || lostLock) continue;
-      const report: FlowReport = { id: flow.id, name: flow.name, fired: [], notified: [], errored: [], expired: [], needsEditor: [], needsConsent: [] };
+      const report: FlowReport = { id: flow.id, name: flow.name, fired: [], notified: [], errored: [], expired: [], needsEditor: [], needsConsent: [], answered: [] };
       reports.push(report);
       try {
-        const printed = needsOutputVerdicts(flow)
-          ? printedVerdicts(flow, readJournal(d.journalIo, d.flowsDir, flow.id))
+        // Answers that arrived on a pull request, stamped before evaluation so the
+        // rule they open fires in this pass — the same order the Deck keeps.
+        // First answer wins, as on the node; a thread that cannot be read is
+        // skipped, never read as silence.
+        if (d.gateReplies) {
+          for (const { node, edge } of routedGatesAwaitingAnswer(flow)) {
+            const place = gateSourcePlace(flow, node.id);
+            const status = place ? d.statuses.find((s) => s.run.key === place.runKey) : undefined;
+            const repoPath = place ? status?.run.repos?.find((r) => r.name === place.repo)?.path : undefined;
+            const facts = place ? status?.prs[place.repo]?.facts : undefined;
+            if (!place || !repoPath || !facts) continue;
+            const replies = await d.gateReplies(repoPath, facts.number, edge.routed!.at);
+            const hit = replies ? gateAnswerFrom(replies, edge.routed!.login, edge.routed!.at) : undefined;
+            if (!hit) continue;
+            report.answered.push(`${ruleName(flow, edge, "ask")}: @${edge.routed!.login} ${hit.answer}`);
+            if (d.dryRun) continue;
+            const latest = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
+            const current = latest?.edges.find((e) => e.id === edge.id);
+            if (!latest || !current || current.gateAnswer !== undefined) continue;
+            writeFlow(d.flowIo, d.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === edge.id ? { ...e, gateAnswer: hit.answer } : e)) });
+            journal(flow.id, { kind: "answered", edge: edge.id, answer: hit.answer, by: edge.routed!.login }, d.nowMs);
+          }
+        }
+        // Re-read: an answer just stamped must be what this pass evaluates.
+        const flowNow = d.gateReplies ? (readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id) ?? flow) : flow;
+        const printed = needsOutputVerdicts(flowNow)
+          ? printedVerdicts(flowNow, readJournal(d.journalIo, d.flowsDir, flow.id))
           : undefined;
 
         // Clocks first, as in the Deck: bookkeeping about waiting, not a spend.
-        const clocks = evaluateDeadlines({ flow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
+        const clocks = evaluateDeadlines({ flow: flowNow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
         if (clocks.wentLive.length > 0 || clocks.expired.length > 0) {
           const current = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
           if (current) {
@@ -132,7 +166,7 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           }
         }
 
-        const result = evaluateFlow({ flow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
+        const result = evaluateFlow({ flow: flowNow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
         if (result.fired.length === 0) continue;
 
         const fresh = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);

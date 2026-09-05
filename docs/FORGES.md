@@ -26,8 +26,9 @@ export interface Forge {
 ```
 
 Declared in `src/engine/forge/types.ts`, alongside `ForgeCaps` (what a forge can
-answer — `changesRequested`, `reviewSearch` (see §7), and `accounts`: whether
-its CLI has a multi-account model it can report and change), `ForgeAccount` (one
+answer — `changesRequested`, `reviewSearch` (see §7), `accounts`: whether
+its CLI has a multi-account model it can report and change, and `gateRouting`:
+whether `gates` can post a routed gate's question on a PR and read the reply), `ForgeAccount` (one
 such account: `login`, `active`, `scopes`) and `ForgeGap` (why `probe()` came
 back unhappy: `missing` or `signed-out`). `prs` is a `PrProvider`, `reviews` a
 `ReviewProvider` — both declared in `src/engine/pr/provider.ts` and
@@ -102,6 +103,7 @@ directory. Treat it as no safer to import from webview code than `github.ts` or
 | How many reviews are waiting in total? | `issueCount` | no total in the body | the count is however many rows came back, so a queue longer than 50 reads as complete rather than truncated |
 | Is a skipped required check green? | folded toward `SUCCESS` | `skipped` → `unknown` | GitLab is stricter; a skipped pipeline does not open a deploy gate |
 | Merge with a named strategy | `--squash` / `--merge` / `--rebase` on `gh pr merge` | `squash=true`/`false` on `PUT …/merge_requests/:iid/merge`, issued through `glab api` — the only per-request override there is; the project's own **Merge method** setting decides whether a merge is rebased or fast-forwarded | `agentFlow.mergeMethod: rebase` is REFUSED with a message naming the setting, never silently merged another way — a substituted merge strategy is the one degradation a user cannot see afterwards. **This whole row is untested against a live `glab`** — see below |
+| Post a routed gate's question and read the reply | `gh api repos/{owner}/{repo}/issues/:n/comments` (post and read, `since=`) | `glab api projects/:id/merge_requests/:iid/notes` (post; read oldest-first, system notes dropped) | Both declare `caps.gateRouting`. **Bitbucket does not**: a gate routed on it stamps `routed.error` naming the forge, stays answerable on the node, and the drawer says so. See [Routing a gate to someone](ORCHESTRATOR_COMMANDS.md#routing-a-gate-to-someone). |
 | Which account is reading the board, and switching it | `gh auth status --json hosts` / `gh auth switch` | `glab` stores one token per host with no multi-account model and no `auth switch` equivalent | `caps.accounts: false`; the footer legend names no identity and offers no switch — today's behavior, unchanged, rather than a fabricated single-entry list |
 
 **Account enumeration is `github.com`-only.** `accounts()` reads a single fixed

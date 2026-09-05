@@ -13070,6 +13070,156 @@ describe("a command-printed rule", () => {
   });
 });
 
+describe("a routed gate", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+  /** place → gate (routed to alice) on pr-merged, then gate → notify on you-approved. */
+  const routedFlow = (askOver: Partial<FlowEdge> = {}, gateOver: Record<string, unknown> = { askWho: "alice" }): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?", ...gateOver } as FlowNode,
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "prod it is" },
+    ],
+    edges: [
+      { id: "ask1", from: "n1", to: "g", cond: { kind: "pr-merged" }, ...askOver },
+      { id: "e2", from: "g", to: "n2", cond: { kind: "gate-approved" } },
+    ],
+  });
+  const ghCalls = () => (h.ghRun.mock.calls as unknown as [string, string[]][]).map(([, args]) => args);
+  const comments = (list: { login: string; body: string; at: string }[]) =>
+    JSON.stringify(list.map((c) => ({ user: { login: c.login }, body: c.body, created_at: c.at, html_url: "https://gh/c/1" })));
+
+  /** Warm the resume gate with the PR open, then merge it so the ask fires. */
+  const warmed = async (flow: Flow) => {
+    setConfig({ orchestrator: true });
+    h.flows = [flow];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    h.ghRun.mockClear();
+    return opened;
+  };
+
+  it("posts the question on the place's PR when the ask fires, stamps `routed` with the url, and journals it", async () => {
+    h.ghRun.mockImplementation(async (_f: string, args: string[]) =>
+      args[1]?.includes("/comments") && args[2] === "-f" ? JSON.stringify({ html_url: "https://gh/c/1" }) : "[]");
+    const { send } = await warmed(routedFlow());
+    await send({ type: "deck:refresh" });
+    const post = ghCalls().find((a) => a[0] === "api" && a[1] === "repos/{owner}/{repo}/issues/1/comments" && a[2] === "-f");
+    expect(post).toBeDefined();
+    expect(post![3]).toContain("@alice");
+    expect(post![3]).toContain("deploy to prod?");
+    expect(post![3]).toContain("Ship the migration");
+    expect((h.ghRun.mock.calls.find(([, a]) => a === post) as unknown[])[2]).toMatchObject({ cwd: "/r/aws-ops" });
+    const ask = h.flows[0].edges[0];
+    expect(ask.performed).toBe(true);
+    expect(ask.routed).toEqual({ at: expect.any(Number), login: "alice", url: "https://gh/c/1" });
+    expect(journal().filter((e) => e.kind === "routed").at(-1)).toMatchObject({ edge: "ask1", login: "alice", url: "https://gh/c/1" });
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("posts nothing and stamps the reason when the place has no PR — the gate stays a local one, visibly", async () => {
+    // The ask fires on a clean tree, so no PR is needed for the condition — and
+    // none exists for the delivery to post on.
+    const f = routedFlow();
+    f.edges[0] = { ...f.edges[0], cond: { kind: "tree-clean" } };
+    setConfig({ orchestrator: true });
+    h.flows = [f];
+    const bare = openStatus("PROJ-1", "aws-ops");
+    bare.prs = {};
+    h.buildRunStatus.mockReturnValue(bare);
+    const { send } = await openPanel();
+    await settle();
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await send({ type: "deck:refresh" });
+    expect(ghCalls().some((a) => a[1]?.includes("/comments"))).toBe(false);
+    const ask = h.flows[0].edges[0];
+    expect(ask.performed).toBe(true);
+    expect(ask.routed).toMatchObject({ login: "alice", error: expect.stringContaining("no pull request yet") });
+    expect(journal().filter((e) => e.kind === "routed").at(-1)).toMatchObject({ edge: "ask1", login: "alice", error: expect.stringContaining("no pull request") });
+    expect(window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("Answer it on the node"));
+  });
+
+  it("stamps an error naming the forge when it cannot carry a gate question", async () => {
+    setConfig({ forge: "bitbucket" });
+    const { send } = await warmed(routedFlow());
+    await send({ type: "deck:refresh" });
+    const ask = h.flows[0].edges[0];
+    expect(ask.routed).toMatchObject({ login: "alice", error: expect.stringContaining("Bitbucket cannot carry a gate question") });
+    expect(journal().filter((e) => e.kind === "routed").at(-1)).toMatchObject({ edge: "ask1", error: expect.stringContaining("Bitbucket") });
+    expect(window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("Answer it on the node"));
+  });
+
+  it("never posts for a gate with no askWho", async () => {
+    const { send } = await warmed(routedFlow({}, {}));
+    await send({ type: "deck:refresh" });
+    expect(ghCalls().some((a) => a[1]?.includes("/comments"))).toBe(false);
+    expect(h.flows[0].edges[0].routed).toBeUndefined();
+  });
+
+  it("reads the thread, stamps the named login's answer, journals who answered, and fires the downstream rule", async () => {
+    h.ghRun.mockImplementation(async (_f: string, args: string[]) =>
+      args[1]?.includes("/comments?since=") ? comments([
+        { login: "bob", body: "approve", at: "2026-09-06T10:00:00Z" },
+        { login: "alice", body: "Approve — ship it", at: "2026-09-06T10:05:00Z" },
+      ]) : "[]");
+    setConfig({ orchestrator: true });
+    h.flows = [routedFlow({ firedAt: 5, performed: true, routed: { at: 1_000, login: "alice" } })];
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    // The panel's first pass noted the routed gate off its own read and read the
+    // thread once the lock was released: the answer is stamped, and the rule it
+    // opens waits for the next pass — which here is also behind the resume gate.
+    expect(ghCalls().some((a) => a[1] === "repos/{owner}/{repo}/issues/1/comments?since=1970-01-01T00:00:01.000Z&per_page=100")).toBe(true);
+    expect(h.flows[0].edges[0].gateAnswer).toBe("approved");
+    expect(journal().filter((e) => e.kind === "answered").at(-1)).toMatchObject({ edge: "ask1", answer: "approved", by: "alice" });
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/@alice approved/));
+    expect(h.flows[0].edges[1].firedAt).toBeUndefined();
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[1].firedAt).toBeTypeOf("number");
+  });
+
+  it("ignores replies from anyone but the named login, an unreadable thread, and reads a thread at most once a minute", async () => {
+    h.ghRun.mockImplementation(async (_f: string, args: string[]) =>
+      args[1]?.includes("/comments?since=") ? comments([{ login: "bob", body: "approve", at: "2026-09-06T10:00:00Z" }]) : "[]");
+    setConfig({ orchestrator: true });
+    h.flows = [routedFlow({ firedAt: 5, performed: true, routed: { at: 1_000, login: "alice" } })];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    await send({ type: "deck:refresh" });
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[0].gateAnswer).toBeUndefined();
+    expect(ghCalls().filter((a) => a[1]?.includes("/comments?since=")).length).toBe(1);
+    h.ghRun.mockImplementation(async () => { throw new Error("HTTP 500"); });
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[0].gateAnswer).toBeUndefined();
+  });
+
+  it("keeps an answer given on the node first — the thread never overrides it", async () => {
+    h.ghRun.mockImplementation(async (_f: string, args: string[]) =>
+      args[1]?.includes("/comments?since=") ? comments([{ login: "alice", body: "reject", at: "2026-09-06T10:00:00Z" }]) : "[]");
+    setConfig({ orchestrator: true });
+    h.flows = [routedFlow({ firedAt: 5, performed: true, routed: { at: 1_000, login: "alice" }, gateAnswer: "approved" })];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[0].gateAnswer).toBe("approved");
+    expect(ghCalls().some((a) => a[1]?.includes("/comments?since="))).toBe(false);
+  });
+});
+
 describe("a command-result rule", () => {
   const openPanel = async () => {
     show();

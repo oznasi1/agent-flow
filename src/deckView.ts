@@ -22,6 +22,7 @@ import { chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "
 import { shellCommandRunner } from "./engine/orchestrator/shellRunner";
 import { blockedBy } from "./engine/orchestrator/neverAutoRun";
 import { CONSENT_BATCH, consentCovers, consumeConsent, grantConsent } from "./engine/orchestrator/consent";
+import { GATE_POLL_MS, gateAnswerFrom, gateSourcePlace, isRouted, routedGateQuestion, routedGatesAwaitingAnswer } from "./engine/orchestrator/gateRouting";
 import { buildRunStatus } from "./engine/status";
 import { UsageReader } from "./engine/usageFs";
 import { formatEq, weightedEq, type UsageTotals } from "./engine/usage";
@@ -481,6 +482,18 @@ export class DeckPanel {
    * persisted, and deliberately not a lock: it is about this panel's own re-entrancy,
    * which no file can express. */
   private advanceInFlight = false;
+  /** Routed gate asks this pass fired and must post on the PR once the lock is
+   * released: a forge call under the lock would hold every other window for up
+   * to ten seconds per gate. Drained by `advanceArmedFlows`. */
+  private pendingDeliveries: { flowId: string; edgeId: string }[] = [];
+  /** When each routed gate's thread was last read, by edge id — the throttle
+   * behind `GATE_POLL_MS`. In memory: a poll is not a fact about the flow. */
+  private routedCheckedAt = new Map<string, number>();
+  /** Routed gates the pass under the lock found asked, delivered and unanswered
+   * — read off the SAME `readFlows` the pass evaluates, so polling costs no read
+   * of its own (a second read per pass would also shift every test that
+   * sequences `readFlows` returns). Drained after the lock is released. */
+  private pendingPolls: { flowId: string; flowName: string; edgeId: string; nodeId: string; question: string; login: string; since: number }[] = [];
   /** Flow ids whose first post-start evaluation found rules already met, and which
    * are waiting for the user to approve or disarm. Per panel, deliberately not
    * persisted: the gate exists to protect the moment you come back, and asking on
@@ -718,6 +731,95 @@ export class DeckPanel {
    * "empty" by contract, and the one thing it does throw on (an id failing
    * `VALID_FLOW_ID`) cannot come from a flow `readFlows` handed back, since the
    * store checks the same regex. Zeros for a flow with nothing recorded. */
+  /** Where a routed gate's question goes: the pull request of the place the gate
+   * hangs off, in the checkout the card holds. A reason instead when there is
+   * nowhere to post — a gate wired to no place, a place whose run is not on the
+   * board, or a repo with no PR yet. */
+  private gatePr(flow: Flow, gateNodeId: string, runs: RunStatus[]): { repoPath: string; number: number } | { error: string } {
+    const place = gateSourcePlace(flow, gateNodeId);
+    if (!place) return { error: "the gate is not wired to a place, so there is no pull request to ask on" };
+    const status = runs.find((s) => s.run.key === place.runKey);
+    if (!status) return { error: `${place.runKey} is not on the board, so its pull request cannot be found` };
+    const repoPath = status.run.repos?.find((r) => r.name === place.repo)?.path;
+    const facts = status.prs[place.repo]?.facts;
+    if (!repoPath) return { error: `${place.repo} is not a checkout of ${place.runKey}` };
+    if (!facts) return { error: `${place.repo} has no pull request yet to ask on` };
+    return { repoPath, number: facts.number };
+  }
+
+  /** Post a routed gate's question on its PR and stamp the performer edge with
+   * the outcome (`FlowEdge.routed`). Every refusal is STAMPED, never silent: a
+   * gate routed to a person who never sees it is worse than one that blocks
+   * visibly, so the drawer shows the error on the node and the local
+   * Approve/Reject stay the way through. Fresh read before the write, like every
+   * other stamp this file makes; a gate answered or Reset while the forge call
+   * was in flight is left alone. */
+  private async deliverRoutedAsk(flowId: string, edgeId: string, runs: RunStatus[]): Promise<void> {
+    const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flowId);
+    const edge = flow?.edges.find((e) => e.id === edgeId);
+    const gate = flow && edge ? findNode(flow, edge.to) : undefined;
+    if (!flow || !edge || !gate || gate.kind !== "gate" || !isRouted(gate)) return;
+    if (edge.performed !== true || edge.firedAt === undefined || edge.gateAnswer !== undefined || edge.routed !== undefined) return;
+    const login = gate.askWho!.trim().replace(/^@/, "");
+    const at = Date.now();
+    let routed: NonNullable<FlowEdge["routed"]>;
+    const pr = this.gatePr(flow, gate.id, runs);
+    if ("error" in pr) routed = { at, login, error: pr.error };
+    else if (!this.forge.gates) routed = { at, login, error: `${this.forge.label} cannot carry a gate question — ask on the node instead` };
+    else {
+      const posted = await this.forge.gates.post(pr.repoPath, pr.number, routedGateQuestion(flow.name, gate.question, login));
+      routed = posted.ok ? { at, login, ...(posted.url ? { url: posted.url } : {}) } : { at, login, error: posted.message };
+    }
+    const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flowId);
+    const current = latest?.edges.find((e) => e.id === edgeId);
+    if (!latest || !current || current.performed !== true || current.firedAt === undefined || current.gateAnswer !== undefined) return;
+    writeFlow(this.flowIo, this.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === edgeId ? { ...e, routed } : e)) });
+    this.journal(flowId, { kind: "routed", edge: edgeId, login, ...(routed.url ? { url: routed.url } : {}), ...(routed.error ? { error: routed.error } : {}) }, at);
+    if (routed.error) {
+      this.log(`deck: flow ${flowId} could not route ${edgeId}'s question to @${login} — ${routed.error}`);
+      void vscode.window.showWarningMessage(`${flow.name}: the question for @${login} could not be posted (${routed.error}). Answer it on the node.`);
+    } else this.log(`deck: flow ${flowId} asked @${login} on the PR for ${edgeId}`);
+  }
+
+  /** Read each noted routed gate's thread — at most once per `GATE_POLL_MS` per
+   * gate — and stamp the first answer from the named login as `gateAnswer`,
+   * exactly as `flow:answerGate` would. FIRST ANSWER WINS: a gate answered on
+   * the node while the thread was being read keeps the node's answer, which is
+   * what the fresh read before the write is for. An unreadable thread is
+   * skipped, never read as "no answer". The PR is resolved off the flow as the
+   * pass read it (`polls` carries what it needs), so a miss here costs no read. */
+  private async pollRoutedGates(polls: typeof this.pendingPolls, runs: RunStatus[], nowMs: number): Promise<void> {
+    if (!this.forge.gates || polls.length === 0) return;
+    for (const poll of polls) {
+      const key = `${poll.flowId}/${poll.edgeId}`;
+      const last = this.routedCheckedAt.get(key) ?? 0;
+      if (nowMs - last < GATE_POLL_MS) continue;
+      this.routedCheckedAt.set(key, nowMs);
+      // The place is found off a fresh read of the flow only once the thread
+      // is worth reading — the same flow the pass just evaluated.
+      const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === poll.flowId);
+      if (!flow) continue;
+      const pr = this.gatePr(flow, poll.nodeId, runs);
+      if ("error" in pr) continue;
+      let replies;
+      try {
+        replies = await this.forge.gates.replies(pr.repoPath, pr.number, poll.since);
+      } catch {
+        replies = null;
+      }
+      if (!replies) continue;
+      const hit = gateAnswerFrom(replies, poll.login, poll.since);
+      if (!hit) continue;
+      const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === poll.flowId);
+      const current = latest?.edges.find((e) => e.id === poll.edgeId);
+      if (!latest || !current || current.performed !== true || current.firedAt === undefined || current.gateAnswer !== undefined) continue;
+      writeFlow(this.flowIo, this.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === poll.edgeId ? { ...e, gateAnswer: hit.answer } : e)) });
+      this.journal(poll.flowId, { kind: "answered", edge: poll.edgeId, answer: hit.answer, by: poll.login }, Date.now());
+      this.log(`deck: flow ${poll.flowId} — @${poll.login} ${hit.answer} "${poll.question}" on the PR`);
+      void vscode.window.showInformationMessage(`${poll.flowName}: @${poll.login} ${hit.answer} "${poll.question}" on the pull request.`);
+    }
+  }
+
   private spendTallyOf(flowId: string): SpendTally {
     try {
       return spendTally(readJournal(this.journalIo, this.flowsDir, flowId));
@@ -831,6 +933,12 @@ export class DeckPanel {
       // `flow:resetEdge`, `flow:resumeDisarm`): it re-reads immediately before writing,
       // and it touches only flow-level fields, never an edge stamp.
       for (const ask of asks) await this.askFirstSpend(ask.flow, ask.target);
+      // Routed gate questions, posted with the lock released for the same reason —
+      // and the threads of the ones already posted, read for an answer. An answer
+      // found here is stamped now and opens its rule on the NEXT pass, six seconds
+      // on: the same one-pass latency `command-succeeded` has after its command.
+      for (const d of this.pendingDeliveries.splice(0)) await this.deliverRoutedAsk(d.flowId, d.edgeId, runs);
+      await this.pollRoutedGates(this.pendingPolls.splice(0), runs, nowMs);
     } finally {
       this.advanceInFlight = false;
     }
@@ -879,6 +987,16 @@ export class DeckPanel {
      * an unstamped success is what makes the NEXT pass repeat it. */
     let lostLock = false;
     const flows = readFlows(this.flowIo, this.flowsDir);
+    // Routed gates awaiting an answer, noted off this read for the poll that
+    // runs once the lock is released (see `pendingPolls`).
+    if (this.forge.gates) {
+      for (const f of flows) {
+        if (!f.armed) continue;
+        for (const { node, edge } of routedGatesAwaitingAnswer(f)) {
+          this.pendingPolls.push({ flowId: f.id, flowName: f.name, edgeId: edge.id, nodeId: node.id, question: node.question, login: edge.routed!.login, since: edge.routed!.at });
+        }
+      }
+    }
     // Read ONCE for the whole pass, before any flow is evaluated: two flows waiting
     // on the same branch must be answered by the same verdict, and a fetch per node
     // would be a forge call per rule.
@@ -1457,6 +1575,15 @@ export class DeckPanel {
         // from whatever the user actually is doing.
         for (const line of notifyLines(next, stamping)) {
           void vscode.window.showInformationMessage(line);
+        }
+        // A routed gate's ask, just stamped as asked: its question also travels
+        // to the person named on the node, after the lock is released.
+        for (const f of stamping) {
+          const e = next.edges.find((x) => x.id === f.edge.id);
+          const target = e ? findNode(next, e.to) : undefined;
+          if (e && f.perform && e.performed && e.firedAt !== undefined && target?.kind === "gate" && isRouted(target)) {
+            this.pendingDeliveries.push({ flowId: flow.id, edgeId: e.id });
+          }
         }
         for (const r of receipts) {
           // A successful launch or seed already announces itself by opening a
