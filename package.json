@@ -123,6 +123,11 @@
         "title": "Open the Marketplace",
         "icon": "$(library)",
         "category": "Agent Flow"
+      },
+      {
+        "command": "agentFlow.scheduleTick",
+        "title": "Schedule the Orchestrator Tick…",
+        "category": "Agent Flow"
       }
     ],
     "menus": {

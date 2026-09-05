@@ -136,7 +136,7 @@ export type RepoSource = "preselected" | "destination" | "quickpick";
 export type Outcome = "launched" | "cancelled" | "failed";
 export type CommandId =
   | "refresh" | "setup" | "doctor" | "signIn" | "signOut"
-  | "takeTask" | "openDeck" | "openMarketplace";
+  | "takeTask" | "openDeck" | "openMarketplace" | "scheduleTick";
 
 /** Property names permitted to hold a value that is not an enum member.
  * `flow_id` is a random UUID; `error_class` is an Error's constructor name;

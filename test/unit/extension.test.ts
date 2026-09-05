@@ -620,7 +620,7 @@ describe("activate", () => {
     const { context } = fakeContext();
     activate(context);
     const registered = commands.registerCommand.mock.calls.map(([id]) => id as string);
-    expect(registered).toHaveLength(8);
+    expect(registered).toHaveLength(9);
 
     for (const [id, cb] of commands.registerCommand.mock.calls) {
       trackSpy.mockClear();
