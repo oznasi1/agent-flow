@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import * as os from "os";
 import * as path from "path";
 import {
-  FlowIo, defaultFlowsDir, readFlows, writeFlow, removeFlow,
+  FlowIo, defaultFlowsDir, readFlows, writeFlow, removeFlow, analyticsIdOf,
   defaultTemplatesDir, readTemplates, writeTemplate, removeTemplate,
 } from "../../../../src/engine/orchestrator/store";
 import { Flow, emptyFlow } from "../../../../src/engine/orchestrator/model";
@@ -29,12 +29,83 @@ describe("defaultFlowsDir", () => {
   });
 });
 
+describe("analyticsId — the only workflow identifier telemetry may send", () => {
+  it("mints one on the first write of a flow that has none", () => {
+    const { io } = fakeIo();
+    const written = writeFlow(io, DIR, flow());
+    expect(written.analyticsId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(analyticsIdOf(readFlows(io, DIR)[0])).toBe(written.analyticsId);
+  });
+
+  it("keeps the id it already has across every later write", () => {
+    // The whole point of the field: a workflow's events must join up over its
+    // WHOLE life. A re-mint on any write would silently split one workflow into
+    // as many "workflows" as it had passes, which looks like adoption and is not.
+    const { io } = fakeIo();
+    const first = writeFlow(io, DIR, flow());
+    const second = writeFlow(io, DIR, { ...first, name: "renamed", armed: true });
+    const third = writeFlow(io, DIR, { ...second, armed: false });
+    expect(second.analyticsId).toBe(first.analyticsId);
+    expect(third.analyticsId).toBe(first.analyticsId);
+  });
+
+  it("mints a DIFFERENT id for each flow", () => {
+    const { io } = fakeIo();
+    const a = writeFlow(io, DIR, flow({ id: "f1" }));
+    const b = writeFlow(io, DIR, flow({ id: "f2" }));
+    expect(a.analyticsId).not.toBe(b.analyticsId);
+  });
+
+  it("keeps a hand-written id rather than replacing it", () => {
+    const { io } = fakeIo();
+    const written = writeFlow(io, DIR, flow({ analyticsId: "hand-typed" }));
+    expect(written.analyticsId).toBe("hand-typed");
+  });
+
+  it("never mints one into a TEMPLATE", () => {
+    // A template attached to twenty cards is twenty workflows. If a template
+    // could carry an id, all twenty would report as one, collapsing exactly the
+    // funnel this field exists for. Structural, not a rule anyone has to
+    // remember: templates go through writeTemplate, which is not this path.
+    const { io, files } = fakeIo();
+    const t: FlowTemplate = {
+      id: "t1", name: "Ship", savedAt: 5, schema: 1,
+      flow: { id: "", name: "Ship", armed: false, createdAt: 0, nodes: [], edges: [] },
+    };
+    writeTemplate(io, "/store/templates", t);
+    expect(JSON.stringify(files)).not.toContain("analyticsId");
+    expect(readTemplates(io, "/store/templates")[0].flow.analyticsId).toBeUndefined();
+  });
+
+  it("reports an empty id, never a fresh one, for a flow that has never been written", () => {
+    // A mint here would be a different value every time it was asked for, which
+    // is worse than nothing: each event would look like its own workflow.
+    expect(analyticsIdOf(flow())).toBe("");
+    expect(analyticsIdOf(undefined)).toBe("");
+    expect(analyticsIdOf({ ...flow(), analyticsId: 7 } as unknown as Flow)).toBe("");
+  });
+
+  it("survives an older build reading and rewriting the file", () => {
+    // `coerceFlow` spreads unknown fields through on purpose so a newer build's
+    // flow is not damaged by an older one. That same rule is what carries this
+    // field, and it is worth pinning: without it, one window on an older build
+    // would strip the id and the next write would mint a second one.
+    const { io } = fakeIo();
+    const written = writeFlow(io, DIR, flow());
+    const readBack = readFlows(io, DIR)[0];
+    expect(writeFlow(io, DIR, readBack).analyticsId).toBe(written.analyticsId);
+  });
+});
+
 describe("writeFlow / readFlows", () => {
   it("round-trips a flow", () => {
     const { io, files } = fakeIo();
-    writeFlow(io, DIR, flow());
+    // The RETURN value is what was written: `writeFlow` fills in `action` and
+    // mints `analyticsId`, so the input is no longer the whole truth.
+    const written = writeFlow(io, DIR, flow());
     expect(Object.keys(files)).toEqual([path.join(DIR, "f1.json")]);
-    expect(readFlows(io, DIR)).toEqual([flow()]);
+    expect(readFlows(io, DIR)).toEqual([written]);
+    expect(written).toEqual({ ...flow(), analyticsId: written.analyticsId });
   });
 
   it("writes pretty JSON with a trailing newline, like the runs store", () => {
