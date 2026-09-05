@@ -77,6 +77,9 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   // `condOptionLabel` for a rule that has one. Command-shaped, offered beside
   // `command-succeeded` and nowhere else — see `offeredConds`.
   "command-printed": "the command printed…",
+  // Trailing ellipsis: carries a field and a value. The third command-shaped
+  // kind, and the first to read a VALUE off a command (see `Condition`).
+  "command-result": "the command reported…",
   // Bare; offered off a subflow node only (see `offeredConds`). "finished" and
   // not "done": a child that STOPPED on a failure is not finished, and this
   // condition stays unmet for it.
@@ -85,6 +88,10 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
 
 /** The aria-label of a `command-printed` rule's text field (`CondParams.tsx`). */
 export const PRINTED_TEXT_ARIA_LABEL = "Printed text";
+
+/** The aria-labels of a `command-result` rule's two fields (`CondParams.tsx`). */
+export const RESULT_FIELD_ARIA_LABEL = "Reported field";
+export const RESULT_VALUE_ARIA_LABEL = "Reported value";
 
 /** The aria-label both presentations' deadline `<input>` shares — see
  * `withDeadline` for what the field means. Centralised for the same reason
@@ -272,6 +279,7 @@ const PARAMETERISED_CONDS: Record<Exclude<Condition["kind"], CondKind>, true> = 
   "ticket-status-is": true,
   "branch-ci-passed": true,
   "command-printed": true,
+  "command-result": true,
 };
 
 /** Can `{ kind }` alone be a complete `Condition`? A type guard, not a bare
@@ -333,14 +341,15 @@ export const OFFERED_CONDS: Condition["kind"][] = Object.keys(COND_LABEL) as Con
  * of planned work and break the chain this phase exists to support. */
 export function offeredConds(flow: Flow, fromId: string): Condition["kind"][] {
   const kind = flow.nodes.find((n) => n.id === fromId)?.kind;
-  // Both command-shaped kinds, and only these: one reads the exit, the other the
-  // output, and neither can be answered off anything but a command node.
-  if (kind === "command") return ["command-succeeded", "command-printed"];
+  // The three command-shaped kinds, and only these: one reads the exit, one the
+  // output, one a value the output reported — none can be answered off anything
+  // but a command node.
+  if (kind === "command") return ["command-succeeded", "command-printed", "command-result"];
   // A subflow's one fact, plus the deadline fallback every source may carry.
   if (kind === "subflow") return ["subflow-done", "deadline-passed"];
   if (kind === "gate") return ["gate-approved", "gate-rejected"];
   return OFFERED_CONDS.filter(
-    (k) => k !== "command-succeeded" && k !== "command-printed" && k !== "gate-approved" && k !== "gate-rejected" && k !== "subflow-done",
+    (k) => k !== "command-succeeded" && k !== "command-printed" && k !== "command-result" && k !== "gate-approved" && k !== "gate-rejected" && k !== "subflow-done",
   );
 }
 
@@ -370,6 +379,7 @@ export function condOptionLabel(cond: Condition): string {
     case "ticket-status-is": return `ticket status is ${cond.status}`;
     case "branch-ci-passed": return `CI passed on ${cond.repo}#${cond.branch}`;
     case "command-printed": return `the command printed “${cond.text}”`;
+    case "command-result": return `the command reported ${cond.field} = “${cond.value}”`;
     default: return COND_LABEL[cond.kind];
   }
 }
@@ -719,7 +729,8 @@ export function observationOf(
   // answered host-side and handed to the engine; `describeCond`'s arm throws.
   if (
     e.cond.kind === "command-succeeded" || e.cond.kind === "gate-approved" || e.cond.kind === "gate-rejected" ||
-    e.cond.kind === "deadline-passed" || e.cond.kind === "command-printed" || e.cond.kind === "subflow-done"
+    e.cond.kind === "deadline-passed" || e.cond.kind === "command-printed" || e.cond.kind === "command-result" ||
+    e.cond.kind === "subflow-done"
   ) {
     return null;
   }
@@ -765,6 +776,12 @@ export function observationFallback(flow: Flow, e: FlowEdge): string {
     return from && from.kind === "command"
       ? `waiting for ${commandLabel(from)} to print “${e.cond.text}”`
       : "this rule reads a command's output, but it does not come from one";
+  }
+  if (e.cond.kind === "command-result") {
+    const from = flow.nodes.find((n) => n.id === e.from);
+    return from && from.kind === "command"
+      ? `waiting for ${commandLabel(from)} to report ${e.cond.field} = “${e.cond.value}”`
+      : "this rule reads a command's report, but it does not come from one";
   }
   if (e.cond.kind !== "command-succeeded") return "this card is not on the board right now";
   const from = flow.nodes.find((n) => n.id === e.from);
@@ -834,6 +851,8 @@ export function seedCond(kind: Condition["kind"], repo?: string): Condition {
   // Blank, like a status: there is no text every command prints, and a guess
   // would be a rule that looks configured and waits on the wrong word.
   if (kind === "command-printed") return { kind, text: "" };
+  // Blank field AND value: there is no key every script reports.
+  if (kind === "command-result") return { kind, field: "", value: "" };
   return { kind, repo: repo ?? "", branch: "" };
 }
 

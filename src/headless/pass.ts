@@ -18,11 +18,11 @@
 //
 // Pure over injected IO, like every engine module, so the whole pass is testable
 // from fixtures; `main.ts` wires the real filesystem, shell and forge.
-import { CommandNode, Flow, FlowAction, FlowEdge, atTokenCeiling, findNode, flowRunKeys, hasCeiling, hasTokenCeiling, isPlace, isSettled, isSpendAction, overCeiling, spendTotal } from "../engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, atTokenCeiling, findNode, flowRunKeys, hasCeiling, hasTokenCeiling, isPlace, isSettled, isSpendAction, overCeiling, parseResult, spendTotal } from "../engine/orchestrator/model";
 import { FlowIo, readFlows, writeFlow } from "../engine/orchestrator/store";
 import { evaluateDeadlines, evaluateFlow } from "../engine/orchestrator/evaluate";
 import { ActOutcome, applyClocks, applyFired, notifyLines } from "../engine/orchestrator/runner";
-import { appendEvent, JournalEventInput, JournalIo, printedVerdicts, readJournal, spendTally, truncateOutput } from "../engine/orchestrator/journal";
+import { appendEvent, JournalEventInput, JournalIo, needsOutputVerdicts, printedVerdicts, readJournal, spendTally, truncateOutput } from "../engine/orchestrator/journal";
 import { acquire, LOCK_TTL_MS, LockIo, release, renew } from "../engine/orchestrator/lock";
 import { chainSourcePlace, CommandRunner, resolveCommand, runCommand } from "../engine/orchestrator/command";
 import { blockedBy } from "../engine/orchestrator/neverAutoRun";
@@ -111,7 +111,7 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
       const report: FlowReport = { id: flow.id, name: flow.name, fired: [], notified: [], errored: [], expired: [], needsEditor: [], needsConsent: [] };
       reports.push(report);
       try {
-        const printed = flow.edges.some((e) => e.cond?.kind === "command-printed" && !isSettled(e))
+        const printed = needsOutputVerdicts(flow)
           ? printedVerdicts(flow, readJournal(d.journalIo, d.flowsDir, flow.id))
           : undefined;
 
@@ -183,6 +183,7 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
 
         const outcomes = new Map<string, ActOutcome>();
         const outputs = new Map<string, string>();
+        const results = new Map<string, Record<string, unknown>>();
         const consumed: string[] = [];
         // Targets whose acting edge this pass could not or would not perform. Their
         // siblings are left pending too — stamping them around an unperformed
@@ -256,7 +257,12 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
             lostLock = true;
           }
           if (d.settings.commandConsent === "command") consumed.push(resolved.text);
-          if (outcome.output && outcome.output.length > 0) outputs.set(f.edge.id, truncateOutput(outcome.output));
+          if (outcome.output && outcome.output.length > 0) {
+            // Parsed off the full output before truncation — same as the Deck.
+            const result = parseResult(outcome.output);
+            if (result) results.set(f.edge.id, result);
+            outputs.set(f.edge.id, truncateOutput(outcome.output));
+          }
           outcomes.set(f.edge.id, outcome.ok
             ? { ok: true, note: `ran ${outcome.label} in ${where.repo}` }
             : { ok: false, error: outcome.message });
@@ -278,16 +284,17 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           const e = next.edges.find((x) => x.id === f.edge.id);
           if (!e) continue;
           const output = outputs.get(f.edge.id);
+          const result = results.get(f.edge.id);
           const action = f.action ?? "unknown";
           if (e.error !== undefined) {
             report.errored.push(`${ruleName(next, e, f.action)}: ${e.error}`);
-            journal(flow.id, { kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error, ...(output === undefined ? {} : { output }) }, d.nowMs);
+            journal(flow.id, { kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error, ...(output === undefined ? {} : { output }), ...(result === undefined ? {} : { result }) }, d.nowMs);
             if (e.retryAt !== undefined) {
               journal(flow.id, { kind: "retrying", edge: e.id, attempt: e.attempts ?? 1, max: e.retry?.max ?? 0, retryAt: e.retryAt }, d.nowMs);
             }
           } else if (e.firedAt !== undefined) {
             report.fired.push(`${ruleName(next, e, f.action)}: ${e.firedNote ?? "fired"}`);
-            journal(flow.id, { kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "", ...(output === undefined ? {} : { output }) }, d.nowMs);
+            journal(flow.id, { kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "", ...(output === undefined ? {} : { output }), ...(result === undefined ? {} : { result }) }, d.nowMs);
           }
         }
         for (const line of notifyLines(next, stamping)) report.notified.push(line);

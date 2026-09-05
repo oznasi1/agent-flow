@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   journaled as `armed` with `source: "token-ceiling"`; the headless tick enforces
   it too. A transcript that cannot be read is "not measured", never zero. Both
   ceilings coexist: they answer different questions.
+- **A command that returns a value, not a substring.** `the command printed…`
+  can say whether the word `prod` appeared, not which environment a deploy landed
+  in. A command may now print one JSON object as its last line; the host parses it
+  at capture — off the full output, before the journal truncates it — and stores
+  it on the `fired`/`errored` line as `result`. The new **the command reported…**
+  condition compares one field to a value, exactly and as text, on the same
+  verdict channel `printed…` uses. One object, one line, one top-level field,
+  equality — deliberately narrow, because it is the first thing a rule has carried
+  besides strings and stamps. The 1 MiB output ceiling and the failure on
+  overflow are untouched.
 
 ### Changed
 

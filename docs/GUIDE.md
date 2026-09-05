@@ -165,7 +165,8 @@ the setting, and cards fall back to the git + Jira backbone.
 An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you wire the
 sessions already on the board into a *flow*: drag a card in, connect two nodes, and put a
 condition on the connection — a merged PR, failing CI, a session that ended its turn, a
-clean tree, a Jira status, **the command succeeded**, **the command printed** a given text, or CI passing on a
+clean tree, a Jira status, **the command succeeded**, **the command printed** a given text, **the command
+reported** a field of the JSON object it printed last as a given value, or CI passing on a
 named branch of a named repo. That last one has no picker yet: you get it only by hand-editing the flow file,
 not through the drawer or the list. The drawer resizes by dragging its edge or pressing
 **Expand**, and switching to **List** gives the same flow a keyboard path — build, wire,

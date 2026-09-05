@@ -9123,6 +9123,24 @@ describe("a met run rule acts", () => {
     expect(fired[0].output).toEqual(expect.stringContaining("deploying to staging"));
   });
 
+  it("journals the JSON object a command reports on its last line as `result`, parsed off the full output", async () => {
+    const { send } = await warmed([cmdFlow()]);
+    const chatter = "x".repeat(20_000);
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) => cb(null, `${chatter}\n{"env":"staging","version":"1.4.2"}\n`, ""));
+    await send({ type: "deck:refresh" });
+    const fired = journal().filter((e) => e.kind === "fired") as { output?: string; result?: unknown }[];
+    expect(fired[0].result).toEqual({ env: "staging", version: "1.4.2" });
+    // The output itself was cut — the report survived because it was parsed first.
+    expect(fired[0].output).toContain("bytes elided");
+  });
+
+  it("journals no `result` for a command whose last line is ordinary text", async () => {
+    const { send } = await warmed([cmdFlow()]);
+    h.exec.mockImplementation((_c: string, _o: unknown, cb: ExecCallback) => cb(null, '{"env":"staging"}\nall done\n', ""));
+    await send({ type: "deck:refresh" });
+    expect("result" in journal().filter((e) => e.kind === "fired")[0]).toBe(false);
+  });
+
   it("journals a FAILED command's output — the whole reason this record exists", async () => {
     // The headline case: a 2am deploy that failed, Reset the next morning, and the
     // only evidence of what went wrong was a line in an output channel nobody kept.
@@ -13049,6 +13067,57 @@ describe("a command-printed rule", () => {
     const { p } = await openPanel();
     const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { printed?: Record<string, unknown> };
     expect(msg.printed).toEqual({});
+  });
+});
+
+describe("a command-result rule", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+  /** place → command (already performed) → notify on "the command reported env = staging". */
+  const resultFlow = (): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "c", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "it landed in staging" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "c", cond: { kind: "pr-merged" }, firedAt: 5, firedNote: "ran", performed: true },
+      { id: "e2", from: "c", to: "n2", cond: { kind: "command-result", field: "env", value: "staging" } },
+    ],
+  });
+  const reported = (result: Record<string, unknown>) =>
+    seedJournal("f1", { kind: "fired", edge: "e1", from: "n1", to: "c", action: "run", note: "ran", output: "…", result }, 1_000);
+
+  it("fires when the journal's result carries the field as the value", async () => {
+    reported({ env: "staging", version: "1.4.2" });
+    setConfig({ orchestrator: true });
+    h.flows = [resultFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[1].firedAt).toBeTypeOf("number");
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/landed in staging/));
+  });
+
+  it("waits on another value, and posts the verdict on the printed channel", async () => {
+    reported({ env: "prod" });
+    setConfig({ orchestrator: true });
+    h.flows = [resultFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { p, send } = await openPanel();
+    await settle();
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[1].firedAt).toBeUndefined();
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { printed?: Record<string, Record<string, boolean>> };
+    expect(msg.printed).toEqual({ f1: { e2: false } });
   });
 });
 

@@ -1515,8 +1515,8 @@ describe("the inspector", () => {
     const values = Array.from(
       screen.getByLabelText("Condition").querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    // Both command-shaped kinds, and nothing place- or gate-shaped.
-    expect(values).toEqual(["command-succeeded", "command-printed"]);
+    // The three command-shaped kinds, and nothing place- or gate-shaped.
+    expect(values).toEqual(["command-succeeded", "command-printed", "command-result"]);
   });
 
   // A `<select>` whose `value` matches none of its options has `selectedIndex`
@@ -5101,6 +5101,50 @@ describe("a command-printed rule in the inspector", () => {
     const row = screen.getByTestId("orch-dryrun-e2").textContent ?? "";
     expect(row).toContain("waiting");
     expect(row).toContain("waiting for deploy.sh to print “DEPLOYED”");
+  });
+});
+
+describe("a command-result rule in the inspector", () => {
+  const commandFlow = (): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "c", kind: "command", x: 320, y: 24, join: "any", run: "deploy.sh" },
+      { id: "n2", kind: "notify", x: 620, y: 24, join: "any", message: "done" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "c", cond: { kind: "pr-merged" } },
+      { id: "e2", from: "c", to: "n2", cond: { kind: "command-result", field: "", value: "" } },
+    ],
+  });
+
+  it("offers a field and a value, marks the blank field, and writes each on blur", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [commandFlow()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e2"));
+    expect(screen.getByTestId("orch-inspector").textContent).toContain("no field set");
+    const field = screen.getByLabelText("Reported field");
+    fireEvent.change(field, { target: { value: "env" } });
+    fireEvent.blur(field);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[1].cond).toEqual({ kind: "command-result", field: "env", value: "" });
+    const value = screen.getByLabelText("Reported value");
+    fireEvent.change(value, { target: { value: "staging" } });
+    fireEvent.blur(value);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[1].cond).toMatchObject({ kind: "command-result", value: "staging" });
+  });
+
+  it("the dry run reads the host's verdict for it, on the same channel as printed", async () => {
+    const f = commandFlow();
+    f.edges[0] = { ...f.edges[0], firedAt: 5, firedNote: "ran", performed: true };
+    f.edges[1] = { ...f.edges[1], cond: { kind: "command-result", field: "env", value: "staging" } };
+    const r1 = render(<OrchestratorDrawer {...props({ flows: [f], printed: { f1: { e2: true } } })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    await waitFor(() => expect(screen.getByTestId("orch-dryrun-e2")).toBeTruthy());
+    expect(screen.getByTestId("orch-dryrun-e2").textContent).toContain("would fire");
+    r1.unmount();
+    render(<OrchestratorDrawer {...props({ flows: [f] })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    await waitFor(() => expect(screen.getByTestId("orch-dryrun-e2")).toBeTruthy());
+    expect(screen.getByTestId("orch-dryrun-e2").textContent).toContain("waiting for deploy.sh to report env = “staging”");
   });
 });
 

@@ -69,8 +69,8 @@ it are unaffected.
 | `armed` | `armed`, `source` | The flow was switched on or off. `source` is `toggle`, `resume-banner`, `auto-skip`, `ceiling` (the pass disarmed the flow itself at its spend ceiling), `token-ceiling` (the same, at its token ceiling), or `spawn` (a child a subflow node started). |
 | `consent-asked` | `action`, `target` | A pass needed first-spend approval, so it performed nothing and asked. |
 | `consented` | `answer` | You answered that question: `act`, `disarm`, or `dismissed` — and, under per-command consent, `act-once` or `act-batch` for a bounded approval. |
-| `fired` | `edge`, `from`, `to`, `action`, `note`, `output?` | A rule fired. |
-| `errored` | `edge`, `from`, `to`, `action`, `error`, `output?` | A rule ran or was refused, and was latched with an error. |
+| `fired` | `edge`, `from`, `to`, `action`, `note`, `output?`, `result?` | A rule fired. `result` is the one JSON object a command printed as its last line, parsed from the full output before `output` was truncated — what `the command reported…` reads. Absent when nothing was reported. |
+| `errored` | `edge`, `from`, `to`, `action`, `error`, `output?`, `result?` | A rule ran or was refused, and was latched with an error. `result` as above — a failed command can still report. |
 | `deferred` | `edge`, `reason` | Nothing was decided; the next pass will try again. |
 | `skipped` | `edge`, `reason` | `disarmed-mid-pass` (switched off while a pass was in flight) or `lock-lost` (another window took over). |
 | `promoted` | `node`, `runKey`, `repo` | Planned work became a real place on the board. |

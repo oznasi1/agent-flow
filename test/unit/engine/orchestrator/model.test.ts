@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, gateAskEdge,
-  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy, hasCeiling, overCeiling, spendTotal, hasTokenCeiling, atTokenCeiling, flowRunKeys, isPerformedAction, isSubflow, subflowDone, bindSubflow, subflowDepth, MAX_SUBFLOW_DEPTH, SubflowNode,
+  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy, hasCeiling, overCeiling, spendTotal, hasTokenCeiling, atTokenCeiling, flowRunKeys, parseResult, resultMatches, isPerformedAction, isSubflow, subflowDone, bindSubflow, subflowDepth, MAX_SUBFLOW_DEPTH, SubflowNode,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -391,6 +391,45 @@ describe("command-printed", () => {
     expect(condIncomplete({ kind: "command-printed", text: "" })).toBe("no text set");
     expect(condIncomplete({ kind: "command-printed", text: "ok" })).toBeUndefined();
     expect(condIncomplete({ kind: "command-printed" } as unknown as Condition)).toBe("no text set");
+  });
+});
+
+describe("command-result", () => {
+  it("parseResult reads one JSON object off the LAST non-blank line, and nothing else", () => {
+    expect(parseResult('building…\ndone\n{"env":"staging","version":"1.4.2"}\n\n')).toEqual({ env: "staging", version: "1.4.2" });
+    expect(parseResult('{"a":1}')).toEqual({ a: 1 });
+    // Not last: ordinary text after the object means the object was not the report.
+    expect(parseResult('{"env":"prod"}\nall done')).toBeUndefined();
+    // Not an object: arrays, scalars, null, and broken JSON all read as "reported nothing".
+    expect(parseResult("[1,2]")).toBeUndefined();
+    expect(parseResult("42")).toBeUndefined();
+    expect(parseResult("null")).toBeUndefined();
+    expect(parseResult('{"env": staging}')).toBeUndefined();
+    expect(parseResult("")).toBeUndefined();
+    expect(parseResult("DEPLOYED")).toBeUndefined();
+  });
+
+  it("resultMatches compares one field as text, exactly, over JSON primitives only", () => {
+    const r = { env: "staging", version: 1.4, ok: true, gone: null, nested: { a: 1 }, list: [1] };
+    expect(resultMatches(r, "env", "staging")).toBe(true);
+    expect(resultMatches(r, "env", "Staging")).toBe(false);
+    expect(resultMatches(r, " env ", " staging ")).toBe(true);
+    expect(resultMatches(r, "version", "1.4")).toBe(true);
+    expect(resultMatches(r, "ok", "true")).toBe(true);
+    expect(resultMatches(r, "gone", "null")).toBe(true);
+    expect(resultMatches(r, "nested", '{"a":1}')).toBe(false);
+    expect(resultMatches(r, "list", "1")).toBe(false);
+    expect(resultMatches(r, "missing", "")).toBe(false);
+    expect(resultMatches(r, "", "staging")).toBe(false);
+    expect(resultMatches(undefined, "env", "staging")).toBe(false);
+    // An inherited property is not a reported field.
+    expect(resultMatches(r, "toString", String(r.toString))).toBe(false);
+  });
+
+  it("condIncomplete reports a blank field only — a blank value is a real thing a script can report", () => {
+    expect(condIncomplete({ kind: "command-result", field: "", value: "x" })).toBe("no field set");
+    expect(condIncomplete({ kind: "command-result", field: "env", value: "" })).toBeUndefined();
+    expect(condIncomplete({ kind: "command-result" } as unknown as Condition)).toBe("no field set");
   });
 });
 
