@@ -142,7 +142,36 @@ export type Condition =
    * Verdicts arrive on `CondContext.branchCi`, keyed `repo#branch`, and only an
    * explicit `"passed"` satisfies it: this condition is built to gate a deploy,
    * so an unreadable branch reads as not met (see `conditions.ts`'s arm). */
-  | { kind: "branch-ci-passed"; repo: string; branch: string };
+  | { kind: "branch-ci-passed"; repo: string; branch: string }
+  /** Did the command this rule points past PRINT `text` — anywhere in its
+   * captured stdout+stderr, case-insensitively (`outputContains`)? The second
+   * command-shaped condition beside `command-succeeded`, and the first that
+   * reads more than one bit off a command: "deploy printed ROLLBACK, so page me"
+   * and "the smoke test printed 0 failures, so promote" are both this.
+   *
+   * The output itself never crosses into the engine. It lives in the flow's
+   * journal (`fired`/`errored` lines carry `output`), which is host-side: the
+   * host reads it once per pass, answers this rule (`printedVerdicts`,
+   * journal.ts), and hands the verdict in on `EvalInput.printed` keyed by THIS
+   * rule's edge id — the same route `branch-ci-passed` takes for its `gh` call,
+   * and for the same reason: `conditions.ts` and `evaluate.ts` are bundled into
+   * the webview and can reach neither a forge nor a file. Answered only once the
+   * command's own rule has performed (see `evaluate.ts`'s `commandPrinted`) —
+   * ran and succeeded OR ran and failed, since a failure's output is often
+   * exactly the text worth acting on. */
+  | { kind: "command-printed"; text: string };
+
+/** Does a command's captured output carry `text`? Case-insensitive substring —
+ * not a regex, not a glob. A deploy script's "DEPLOYED" and a human's "deployed"
+ * are the same fact, and a `*` in a rule that means "literal asterisk" is a trap
+ * `agentFlow.neverAutoRun`'s globbing already sets once in this codebase. Blank
+ * text matches nothing: a rule with no text is incomplete (`condIncomplete`),
+ * never one that fires on any output at all. The ONE place the match is
+ * defined, so the host's verdict and any future reader agree. */
+export function outputContains(output: string, text: string): boolean {
+  const needle = text.trim().toLowerCase();
+  return needle !== "" && output.toLowerCase().includes(needle);
+}
 
 /** What a rule does when its condition is met, derived from the node it points
  * at — see `actionFor`. `run` executes a command node's command.
@@ -530,6 +559,11 @@ export function condIncomplete(cond: Condition): string | undefined {
     case "branch-ci-passed":
       if (blank(cond.repo)) return "no repo set";
       return blank(cond.branch) ? "no branch set" : undefined;
+    case "command-printed":
+      // `outputContains` matches nothing for blank text, so this is a rule the
+      // engine would evaluate forever and never satisfy — the same shape as a
+      // blank status, and reported the same way.
+      return blank(cond.text) ? "no text set" : undefined;
     default:
       return undefined;
   }

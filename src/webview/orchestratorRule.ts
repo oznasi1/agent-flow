@@ -70,7 +70,14 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   // a SIBLING rule out of the same source, and a label without it would read as
   // if this rule had a deadline of its own.
   "deadline-passed": "a deadline here passed",
+  // Trailing ellipsis: carries a parameter (the text), filled in by
+  // `condOptionLabel` for a rule that has one. Command-shaped, offered beside
+  // `command-succeeded` and nowhere else — see `offeredConds`.
+  "command-printed": "the command printed…",
 };
+
+/** The aria-label of a `command-printed` rule's text field (`CondParams.tsx`). */
+export const PRINTED_TEXT_ARIA_LABEL = "Printed text";
 
 /** The aria-label both presentations' deadline `<input>` shares — see
  * `withDeadline` for what the field means. Centralised for the same reason
@@ -161,6 +168,7 @@ const PARAMETERISED_CONDS: Record<Exclude<Condition["kind"], CondKind>, true> = 
   "agent-idle-over": true,
   "ticket-status-is": true,
   "branch-ci-passed": true,
+  "command-printed": true,
 };
 
 /** Can `{ kind }` alone be a complete `Condition`? A type guard, not a bare
@@ -222,10 +230,12 @@ export const OFFERED_CONDS: Condition["kind"][] = Object.keys(COND_LABEL) as Con
  * of planned work and break the chain this phase exists to support. */
 export function offeredConds(flow: Flow, fromId: string): Condition["kind"][] {
   const kind = flow.nodes.find((n) => n.id === fromId)?.kind;
-  if (kind === "command") return ["command-succeeded"];
+  // Both command-shaped kinds, and only these: one reads the exit, the other the
+  // output, and neither can be answered off anything but a command node.
+  if (kind === "command") return ["command-succeeded", "command-printed"];
   if (kind === "gate") return ["gate-approved", "gate-rejected"];
   return OFFERED_CONDS.filter(
-    (k) => k !== "command-succeeded" && k !== "gate-approved" && k !== "gate-rejected",
+    (k) => k !== "command-succeeded" && k !== "command-printed" && k !== "gate-approved" && k !== "gate-rejected",
   );
 }
 
@@ -254,6 +264,7 @@ export function condOptionLabel(cond: Condition): string {
     case "agent-idle-over": return `session idle over ${cond.minutes}m`;
     case "ticket-status-is": return `ticket status is ${cond.status}`;
     case "branch-ci-passed": return `CI passed on ${cond.repo}#${cond.branch}`;
+    case "command-printed": return `the command printed “${cond.text}”`;
     default: return COND_LABEL[cond.kind];
   }
 }
@@ -590,9 +601,12 @@ export function observationOf(
   //
   // `deadline-passed` is the fourth: its fact is a sibling rule's `expiredAt`,
   // read by `evaluate.ts` alone, and `describeCond`'s arm for it throws.
+  //
+  // `command-printed` is the fifth: its fact is a command's journaled output,
+  // answered host-side and handed to the engine; `describeCond`'s arm throws.
   if (
     e.cond.kind === "command-succeeded" || e.cond.kind === "gate-approved" || e.cond.kind === "gate-rejected" ||
-    e.cond.kind === "deadline-passed"
+    e.cond.kind === "deadline-passed" || e.cond.kind === "command-printed"
   ) {
     return null;
   }
@@ -627,6 +641,12 @@ export function observationFallback(flow: Flow, e: FlowEdge): string {
   // Nothing is missing here either: the rule is waiting on a sibling's clock,
   // which is not on any board to observe.
   if (e.cond.kind === "deadline-passed") return "waiting for another rule from here to run out of time";
+  if (e.cond.kind === "command-printed") {
+    const from = flow.nodes.find((n) => n.id === e.from);
+    return from && from.kind === "command"
+      ? `waiting for ${commandLabel(from)} to print “${e.cond.text}”`
+      : "this rule reads a command's output, but it does not come from one";
+  }
   if (e.cond.kind !== "command-succeeded") return "this card is not on the board right now";
   const from = flow.nodes.find((n) => n.id === e.from);
   return from && from.kind === "command"
@@ -692,6 +712,9 @@ export function seedCond(kind: Condition["kind"], repo?: string): Condition {
   if (isBareCond(kind)) return { kind };
   if (kind === "agent-idle-over") return { kind, minutes: DEFAULT_IDLE_MINUTES };
   if (kind === "ticket-status-is") return { kind, status: "" };
+  // Blank, like a status: there is no text every command prints, and a guess
+  // would be a rule that looks configured and waits on the wrong word.
+  if (kind === "command-printed") return { kind, text: "" };
   return { kind, repo: repo ?? "", branch: "" };
 }
 

@@ -180,6 +180,35 @@ Every armed flow also keeps an append-only record of what it did — see
 > nothing was stamped — and the next pass will run it again. This is the
 > same gap the launch path has.
 
+## Reading what a command printed
+
+`the command succeeded` reads one bit off a command. `the command printed…`
+reads its output: a rule out of a command node with a **text**, met when the
+command's captured stdout+stderr contains that text — anywhere, as a plain
+case-insensitive substring, not a pattern. "Deploy printed `ROLLBACK`, so page
+me" and "the smoke test printed `0 failures`, so promote" are both this.
+
+The output never enters the engine. It lives in the flow's
+[journal](FLOW_JOURNAL.md) — the `fired` and `errored` lines carry it — and the
+engine is bundled into the webview, which can open no file. So the host reads
+each such flow's journal once per pass, answers every `printed…` rule off the
+command's **latest** `fired`/`errored` line, and hands the verdicts to the
+engine alongside the branch-CI verdicts; the same map rides `deck:flows` so the
+dry run and the card's stepper say what the engine says. Three consequences:
+
+- **A failed command counts.** The rule is answered once the command's own rule
+  has *performed* — ran and succeeded or ran and failed — because a failure's
+  output is often exactly the text worth acting on. Before it has run there is
+  nothing to have printed, and the rule waits.
+- **Reset resets the reading.** After Reset the command's rule is pending again,
+  and this rule waits for the *next* run rather than re-reading the last one's
+  line — the engine checks the performer's stamps, not just the verdict.
+- **No journal, no match.** If the journal could not be written (the output
+  channel says so once), a `printed…` rule waits forever. It never guesses.
+
+A blank text is a rule that can never fire, reported as such in the inspector
+and at arm time, like a blank status.
+
 ## Deadlines
 
 An armed flow waiting on something that will never come looks exactly like one

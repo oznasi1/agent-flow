@@ -113,6 +113,31 @@ function gateAnswer(flow: Flow, gateNodeId: string): "approved" | "rejected" | u
   return gateAskEdge(flow, gateNodeId)?.gateAnswer;
 }
 
+/** Did the command this rule leaves print the rule's text? Two facts, from two
+ * places, and both are required:
+ *
+ * The command must have PERFORMED — the same `performed`-keyed search
+ * `commandSucceeded` makes, and for its reasons, but settled either way
+ * (`firedAt` OR `error`): a failed deploy's output is exactly what a rule like
+ * "printed ROLLBACK → page me" exists to read. Before the command has run there
+ * is no output to have printed anything, so this is `false` — waiting — never a
+ * verdict read off an older run: a Reset clears the performer's stamps, and this
+ * guard is what stops last cycle's journal line answering for this cycle.
+ *
+ * The verdict itself comes in on `printed`, keyed by THIS rule's edge id,
+ * computed host-side from the journal (`printedVerdicts`, journal.ts). An
+ * absent map or an absent key is `false`, for the reason `branch-ci-passed`
+ * gives about an absent `branchCi` entry: a fact nobody fetched is not a match.
+ *
+ * Source-kind guard first, as in `commandSucceeded`: a hand-edited rule of this
+ * kind wired off a place must not read a place's incoming edges as a performer. */
+function commandPrinted(flow: Flow, e: FlowEdge, printed: Record<string, boolean> | undefined): boolean {
+  if (findNode(flow, e.from)?.kind !== "command") return false;
+  const performer = incomingEdges(flow, e.from).find((x) => x.performed === true && isSettled(x));
+  if (performer === undefined) return false;
+  return printed?.[e.id] === true;
+}
+
 export interface EvalInput {
   flow: Flow;
   /** Every status the Deck built this pass, in any order. */
@@ -129,6 +154,14 @@ export interface EvalInput {
    * existing test — which is safe rather than merely convenient: an absent map reads
    * as `"unknown"`, and `"unknown"` is not met. */
   branchCi?: Record<string, BranchCiStatus>;
+  /** `command-printed` verdicts for this pass, keyed by the RULE's edge id (not
+   * the command's): did the command that rule leaves print the rule's text? Read
+   * by the host off the flow's journal once per pass (`printedVerdicts`,
+   * journal.ts) and handed in here, exactly as `branchCi` is, because the
+   * output lives in a file this module cannot open. Omitted by every caller with
+   * no such rule, and by every existing test — safe, not merely convenient: an
+   * absent map reads as "did not print", which is waiting. */
+  printed?: Record<string, boolean>;
 }
 
 export interface FiredEdge {
@@ -235,6 +268,9 @@ function metOracle(i: EvalInput) {
     // lookup below, which a command node's incoming edges have no use for and
     // would otherwise report as an unhelpful "gone" or a silent never-fires.
     if (e.cond.kind === "command-succeeded") return commandSucceeded(i.flow, e.from);
+    // Same spot, same reason — a command node's fact, not a place's — with the
+    // verdict itself handed in by the host. See `commandPrinted`.
+    if (e.cond.kind === "command-printed") return commandPrinted(i.flow, e, i.printed);
     // Same spot, same reason: a sibling's stamp, not a place's status. Answered
     // for ANY source kind — a deadline can sit on a rule out of a place, a
     // command or a gate, and the fallback rule beside it must read it wherever

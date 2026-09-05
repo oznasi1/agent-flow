@@ -98,11 +98,15 @@ export function workflowState(
   runs: RunStatus[],
   nowMs: number,
   branchCi?: Record<string, BranchCiStatus>,
+  /** `command-printed` verdicts for EVERY flow, keyed flow id → rule edge id —
+   * the shape `deck:flows` carries — so a caller with many flows passes the one
+   * map and this picks its own flow's slice. */
+  printed?: Record<string, Record<string, boolean>>,
 ): WorkflowState {
   const previews = new Map<string, RulePreview>();
   // `previewFlow` evaluates as if armed, which is what makes it answer for a
   // disarmed workflow too: the steps still say what WOULD happen, greyed.
-  for (const p of previewFlow(flow, runs, nowMs, branchCi)) previews.set(p.edgeId, p);
+  for (const p of previewFlow(flow, runs, nowMs, branchCi, printed?.[flow.id])) previews.set(p.edgeId, p);
 
   let firstPending = true;
   const steps: StepState[] = flow.edges.map((e) => {
@@ -159,10 +163,11 @@ export function rankByState(
   runs: RunStatus[],
   nowMs: number,
   branchCi?: Record<string, BranchCiStatus>,
+  printed?: Record<string, Record<string, boolean>>,
 ): Flow[] {
   return [...flows].sort((a, b) => {
-    const ra = RANK[workflowState(a, runs, nowMs, branchCi).status];
-    const rb = RANK[workflowState(b, runs, nowMs, branchCi).status];
+    const ra = RANK[workflowState(a, runs, nowMs, branchCi, printed).status];
+    const rb = RANK[workflowState(b, runs, nowMs, branchCi, printed).status];
     return ra !== rb ? ra - rb : a.createdAt - b.createdAt;
   });
 }
@@ -227,9 +232,12 @@ export function cardWorkflow(
   runs: RunStatus[],
   nowMs: number,
   branchCi?: Record<string, BranchCiStatus>,
+  printed?: Record<string, Record<string, boolean>>,
 ): CardWorkflow | undefined {
   const attached = attachedWorkflows(flows, status.run.key, boundTicketKeyOf(status));
-  const wf = rankByState(attached, runs, nowMs, branchCi)[0];
+  const wf = rankByState(attached, runs, nowMs, branchCi, printed)[0];
   if (!wf) return undefined;
-  return { flow: wf, state: workflowState(wf, runs, nowMs, branchCi), extraCount: Math.max(attached.length - 1, 0) };
+  return {
+    flow: wf, state: workflowState(wf, runs, nowMs, branchCi, printed), extraCount: Math.max(attached.length - 1, 0),
+  };
 }
