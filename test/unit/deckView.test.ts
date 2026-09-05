@@ -13384,3 +13384,113 @@ describe("a flow's spend ceiling", () => {
     expect(msg.spend).toEqual({});
   });
 });
+
+describe("a subflow node", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+  const shipIt = (id = "k1"): FlowTemplate => ({
+    schema: 1, id, name: "Ship it", params: {}, savedAt: 1_000,
+    flow: { id: "unused", name: "Ship it", armed: false, createdAt: 0, edges: [], nodes: [
+      { id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["aws-ops"], mode: "plan", dest: "worktree" },
+    ] },
+  });
+  /** place → subflow(k1) on pr-merged, then subflow → notify on subflow-done. */
+  const parentFlow = (over: Partial<Flow> = {}, subOver: Record<string, unknown> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "s", kind: "subflow", x: 0, y: 0, join: "any", templateId: "k1", ...subOver } as FlowNode,
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the subflow finished" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" } },
+      { id: "e2", from: "s", to: "n2", cond: { kind: "subflow-done" } },
+    ],
+    ...over,
+  });
+  const warmed = async (flows: Flow[]) => {
+    setConfig({ orchestrator: true });
+    h.templates = [shipIt()];
+    h.flows = flows;
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    return opened;
+  };
+
+  it("starts the template as an ARMED child bound to the source place's card, points the node at it, and journals both sides", async () => {
+    const { send } = await warmed([parentFlow()]);
+    await send({ type: "deck:refresh" });
+    const child = h.flows.find((f) => f.id !== "f1")!;
+    expect(child).toBeTruthy();
+    expect(child.armed).toBe(true);
+    expect(child.parentFlow).toBe("f1");
+    expect(child.parentNode).toBe("s");
+    expect(child.name).toBe("Ship the migration › Ship it");
+    expect(child.fromTemplate).toBe("k1");
+    expect(child.nodes.filter((n) => n.kind === "planned").every((n) => (n as { ticketKey: string }).ticketKey === "PROJ-1")).toBe(true);
+    // No consent inherited: the child asks before its own first spend.
+    expect(child.launchConfirmedAt).toBeUndefined();
+    const parent = h.flows.find((f) => f.id === "f1")!;
+    expect((parent.nodes[1] as { childFlowId?: string }).childFlowId).toBe(child.id);
+    expect(parent.edges[0].firedAt).toBeTypeOf("number");
+    expect(parent.edges[0].firedNote).toBe("started Ship it");
+    expect(journal().find((j) => j.kind === "fired")).toMatchObject({ action: "spawn", edge: "e1" });
+    expect(journal().find((j) => j.kind === "spawned")).toMatchObject({ node: "s", template: "k1", child: child.id });
+    expect(journal().find((j) => j.kind === "armed")).toMatchObject({ armed: true, source: "spawn", flow: child.id });
+    // Spawning is not a spend: no consent was asked and nothing was launched.
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("fires the parent's subflow-done rule once the child has settled every rule", async () => {
+    const child: Flow = {
+      ...mkFlow("c1", "Ship the migration › Ship it"), armed: true, parentFlow: "f1", parentNode: "s",
+      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "m" }],
+      edges: [{ id: "k1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, firedAt: 5, firedNote: "told you" }],
+    };
+    const parent = parentFlow({ edges: [
+      { id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" }, firedAt: 4, firedNote: "started Ship it", performed: true },
+      { id: "e2", from: "s", to: "n2", cond: { kind: "subflow-done" } },
+    ] }, { childFlowId: "c1" });
+    const { send } = await warmed([parent, child]);
+    // The child is settled from the first look, so the resume gate holds the
+    // parent's ready rule until Go — the same gate every first-look fire meets.
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await send({ type: "deck:refresh" });
+    expect(h.flows.find((f) => f.id === "f1")!.edges[1].firedAt).toBeTypeOf("number");
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/the subflow finished/));
+  });
+
+  it("refuses to nest past the depth limit, and a template that is gone, latching the rule with the reason", async () => {
+    const chain: Flow[] = [
+      { ...mkFlow("g1", "g1"), armed: false },
+      { ...mkFlow("g2", "g2"), armed: false, parentFlow: "g1" },
+      { ...mkFlow("g3", "g3"), armed: false, parentFlow: "g2" },
+    ];
+    const { send } = await warmed([parentFlow({ parentFlow: "g3" }), ...chain]);
+    await send({ type: "deck:refresh" });
+    const deep = h.flows.find((f) => f.id === "f1")!;
+    expect(deep.edges[0].error).toMatch(/subflows deep/);
+    expect(h.flows.filter((f) => f.parentFlow === "f1")).toHaveLength(0);
+
+    const again = await warmed([parentFlow({}, { templateId: "nope" })]);
+    await again.send({ type: "deck:refresh" });
+    expect(h.flows.find((f) => f.id === "f1")!.edges[0].error).toMatch(/no longer on disk/);
+  });
+
+  it("does not start a second child from a node that already started one", async () => {
+    const { send } = await warmed([parentFlow({ edges: [{ id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" } }] }, { childFlowId: "c-old" })]);
+    await send({ type: "deck:refresh" });
+    expect(h.flows.find((f) => f.id === "f1")!.edges[0].error).toMatch(/already started a subflow/);
+    expect(h.flows).toHaveLength(1);
+  });
+});

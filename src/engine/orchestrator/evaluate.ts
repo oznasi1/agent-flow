@@ -8,7 +8,7 @@ import { BranchCiStatus } from "./branchCi";
 import { CondContext, evalCond, placeActivity } from "./conditions";
 import {
   Condition, Flow, FlowAction, FlowEdge, deadlineAt, edgeAction, findNode, gateAskEdge, hasDeadline, incomingEdges,
-  isPlace, isSettled, isSpendAction, retryPending,
+  isPlace, isSettled, isSpendAction, retryPending, subflowDone,
 } from "./model";
 
 /** How many SPENDING edges (`launch`, `seed` or `run` — whatever `isSpendAction`
@@ -162,6 +162,11 @@ export interface EvalInput {
    * no such rule, and by every existing test — safe, not merely convenient: an
    * absent map reads as "did not print", which is waiting. */
   printed?: Record<string, boolean>;
+  /** Every flow the caller holds, for `subflow-done`: the child a `subflow`
+   * node started is another file, and its settledness is what that condition
+   * reads (`subflowDone`, model.ts). Omitted by every caller with no such rule —
+   * an absent list reads as "no child", which is waiting. */
+  flows?: readonly Flow[];
 }
 
 export interface FiredEdge {
@@ -284,6 +289,8 @@ function metOracle(i: EvalInput) {
     // it is — so this comes before the place lookup that would call a gone card
     // "gone" instead of answering.
     if (e.cond.kind === "deadline-passed") return deadlinePassed(i.flow, e);
+    // The fifth flow-answered kind: the child's file, handed in on `flows`.
+    if (e.cond.kind === "subflow-done") return subflowDone(i.flow, e.from, i.flows ?? []);
     // Intercepted here, beside `command-succeeded` and before the place/status
     // lookup, for the same reason: a gate has no `runKey`, so falling through
     // would report the node as "gone" every pass instead of as waiting on you.
@@ -350,6 +357,8 @@ function metOracle(i: EvalInput) {
       case "place": return byKey.has(from.runKey);
       case "command": return incomingEdges(i.flow, from.id).some((x) => x.performed === true);
       case "gate": return gateAskEdge(i.flow, from.id) !== undefined;
+      // Live once the child exists: before that there is nothing to wait on.
+      case "subflow": return from.childFlowId !== undefined;
       default: return false;
     }
   };

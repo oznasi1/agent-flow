@@ -232,3 +232,14 @@ describe("commandCwd", () => {
     expect(commandCwd(rootless, rootless.edges[0], rootless.nodes[1] as never, [], () => undefined)).toMatchObject({ error: expect.stringContaining("nothing upstream") });
   });
 });
+
+describe("runHeadlessPass — a subflow", () => {
+  it("holds a met spawn as needing an editor, and writes nothing", async () => {
+    const sub: FlowNode = { id: "s", kind: "subflow", x: 0, y: 0, join: "any", templateId: "t" };
+    const w = world([armed([place("n1", "PROJ-1"), sub], [edge("e1", "n1", "s")])]);
+    const before = w.files[path.join(DIR, "f1.json")];
+    const r = await runHeadlessPass(w.deps());
+    expect(r.flows[0].needsEditor).toEqual(["e1 (n1 → s, spawn)"]);
+    expect(w.files[path.join(DIR, "f1.json")]).toBe(before);
+  });
+});

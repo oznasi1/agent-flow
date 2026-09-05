@@ -29,6 +29,8 @@ message. One fact, one place.
 | `place`     | seed    | Sends a prompt into a live session — real money  |
 | `command`   | run     | Executes shell on your machine                   |
 | `notify`    | notify  | Nothing — a toast on the Deck, and a receipt on the rule |
+| `gate`      | ask     | Nothing — the node shows Approve/Reject and a later rule reads the answer |
+| `subflow`   | start   | Nothing directly — the child workflow it starts spends under its own consent |
 
 Condition **keys** keep their released spelling — `agent-ended-turn`,
 `agent-idle-over`, `no-agent-left` — because they are serialized into flow
@@ -166,6 +168,49 @@ reopens the journal's copy in its own editor tab — the way to read it back
 after the output channel itself has scrolled past it or the window has
 closed. The rule's own receipt carries the exit code and a sentence, not the
 output.
+
+## Subflows
+
+A **subflow** node starts a saved template as a workflow of its own — a
+workflow inside a workflow. It is what lets a starter compose into a bigger
+shape instead of being copied into it: "when this merges, run the *Ship it*
+template on this card, and when *that* finishes, notify me" is a place, a
+subflow node and a notify node.
+
+Add one from **+ Add subflow…** (the picker lists your templates and the
+starters). A rule that reaches the node **starts** the template — the same
+`instantiate` the card's own Attach uses, with the same repos and modes —
+bound to the card the rule's **source place** is on. The child is written
+**armed**, named `<parent> › <template>`, and carries a pointer back
+(`parentFlow`, `parentNode`); the node records the child's id (`childFlowId`)
+in the same write as the rule's stamp. A later rule out of the node on
+**the subflow finished** fires once every rule in the child has settled; a
+child that *stopped* on a failure has not finished, and a deadline on that rule
+is how a parent bounds the wait.
+
+Three things are deliberately so:
+
+- **Starting is not a spend.** No cap, no consent modal for the start itself.
+  The child spends under its **own** consent — it inherits none, so its first
+  launch or command asks exactly as an attached template's would — and it sits
+  behind its own resume gate on a fresh Deck.
+- **The card keeps showing the parent.** A child binds the same card its parent
+  does; it is never offered as the card's workflow, so "one workflow per card"
+  stays a question about the parent alone. The child is still a real flow in
+  the Workflows list and on the canvas (the node's inspector opens it), armable,
+  resettable and deletable on its own.
+- **It nests three deep and no deeper.** A template that starts itself is
+  refused outright; a chain already three subflows deep refuses a fourth, with
+  the reason on the rule. Reset on the rule that started a child does **not**
+  clear the node's pointer — the child exists, with its own history — so a rule
+  into a node that already started one latches with that fact; delete the child
+  to start it again.
+
+Deleting a parent leaves its children where they are. The journal records the
+start as `fired` (action `spawn`) and `spawned` on the parent, and `armed` with
+`source: "spawn"` on the child. A headless tick does not start subflows: it
+needs the templates store and the card's ticket, which live with the editor, so
+it leaves the rule pending and says so.
 
 ## A pass without the editor
 

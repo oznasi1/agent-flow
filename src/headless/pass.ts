@@ -109,7 +109,7 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           : undefined;
 
         // Clocks first, as in the Deck: bookkeeping about waiting, not a spend.
-        const clocks = evaluateDeadlines({ flow, statuses: d.statuses, nowMs: d.nowMs, printed });
+        const clocks = evaluateDeadlines({ flow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
         if (clocks.wentLive.length > 0 || clocks.expired.length > 0) {
           const current = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
           if (current) {
@@ -125,7 +125,7 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           }
         }
 
-        const result = evaluateFlow({ flow, statuses: d.statuses, nowMs: d.nowMs, printed });
+        const result = evaluateFlow({ flow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
         if (result.fired.length === 0) continue;
 
         const fresh = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
@@ -172,7 +172,10 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           // A gate's `ask` spends nothing, so `isSpendAction` would let it through
           // to be stamped as posed — but a question posed with nobody there to
           // answer it is the degradation the backlog forbids. Held, like a launch.
-          if (f.action === "ask") {
+          // A `spawn` spends nothing either, but starting a child needs the
+          // templates store and the card's ticket, which live with the editor;
+          // held the same way, and stated.
+          if (f.action === "ask" || f.action === "spawn") {
             heldTargets.add(f.edge.to);
             report.needsEditor.push(ruleName(fresh, f.edge, f.action));
             continue;

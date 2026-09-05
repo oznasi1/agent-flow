@@ -9,6 +9,11 @@ import { emptyFlow, type Flow } from "../../src/engine/orchestrator/model";
 import type { RulePreview } from "../../src/engine/orchestrator/preview";
 import type { RunStatus } from "../../src/types";
 import {
+  ACTION_LABEL,
+  NODE_KIND_LABEL,
+  addSubflowNode,
+  subflowName,
+  withNodeTemplate,
   COND_LABEL,
   condOffered,
   condOptionLabel,
@@ -317,8 +322,8 @@ describe("gate nodes in the pickers", () => {
     expect(off).toContain("pr-merged");
     expect(off).toContain("ci-passed");
     expect(off).not.toContain("command-succeeded");
-    // Minus the two gate kinds and the two command-shaped kinds.
-    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 4);
+    // Minus the two gate kinds, the two command-shaped kinds and the subflow kind.
+    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 5);
   });
 
   it("still offers the command-shaped conditions off a command, and no gate condition", () => {
@@ -516,5 +521,41 @@ describe("a flow's spend ceiling in the rule module", () => {
     expect(spendSummary({ sessions: 3, commands: 2 }, undefined)).toBe("3 sessions · 2 commands spent");
     expect(spendSummary({ sessions: 3, commands: 2 }, 10)).toBe("3 sessions · 2 commands spent · 5 of 10");
     expect(spendSummary({ sessions: 0, commands: 0 }, 10)).toBe("nothing spent yet · 0 of 10");
+  });
+});
+
+describe("subflow nodes in the rule module", () => {
+  const withSub = (childFlowId?: string): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "s", kind: "subflow", x: 320, y: 0, join: "any", templateId: "t-ship", ...(childFlowId ? { childFlowId } : {}) },
+      { id: "n2", kind: "notify", x: 640, y: 0, join: "any", message: "done" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" } }, { id: "e2", from: "s", to: "n2", cond: { kind: "subflow-done" } }],
+  });
+
+  it("labels the verb start, the node Subflow, and offers exactly the subflow's own conditions off it", () => {
+    expect(ACTION_LABEL.spawn).toBe("start");
+    expect(NODE_KIND_LABEL.subflow).toBe("Subflow");
+    expect(COND_LABEL["subflow-done"]).toBe("the subflow finished");
+    expect(offeredConds(withSub(), "s")).toEqual(["subflow-done", "deadline-passed"]);
+    expect(offeredConds(withSub(), "n1")).not.toContain("subflow-done");
+    expect(defaultCondFor(withSub(), "s")).toEqual({ kind: "subflow-done" });
+    expect(endLabel(withSub(), "s")).toBe("subflow t-ship");
+  });
+
+  it("adds a subflow node for a template, retargets it, and names it from the template list", () => {
+    const f = addSubflowNode(wired(), "t-ship");
+    const added = f.nodes.at(-1)!;
+    expect(added).toMatchObject({ kind: "subflow", templateId: "t-ship" });
+    expect(withNodeTemplate(f, added.id, "t-other").nodes.at(-1)).toMatchObject({ templateId: "t-other" });
+    expect(subflowName({ templateId: "t-ship" }, [{ id: "t-ship", name: "Ship it" }])).toBe("Ship it");
+    expect(subflowName({ templateId: "t-gone" }, [])).toBe("t-gone (not on disk)");
+  });
+
+  it("has no place-shaped observation, and its fallback says whether the child has started", () => {
+    expect(observationOf(withSub(), withSub().edges[1], [])).toBeNull();
+    expect(observationFallback(withSub(), withSub().edges[1])).toBe("waiting for the subflow to start");
+    expect(observationFallback(withSub("c1"), withSub("c1").edges[1])).toBe("waiting for the subflow to finish");
   });
 });

@@ -80,7 +80,11 @@ export type JournalEventInput =
    * has now failed, `max` how many retries it may take, `retryAt` when the next
    * one is allowed. Always follows the `errored` line for the same failure —
    * that one says what went wrong, this one says what happens next. */
-  | { kind: "retrying"; edge: string; attempt: number; max: number; retryAt: number };
+  | { kind: "retrying"; edge: string; attempt: number; max: number; retryAt: number }
+  /** A `subflow` node started a child flow. `child` is its id — the pointer a
+   * reader follows to the child's own journal; the parent's `fired` line for the
+   * same rule carries the receipt. */
+  | { kind: "spawned"; node: string; template: string; child: string };
 
 /** An event as it sits on disk, minus `sum` — which is a property of the LINE,
  * not of the event, and is consumed by `readJournal` rather than handed on. */

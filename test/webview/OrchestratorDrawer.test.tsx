@@ -5222,3 +5222,62 @@ describe("a flow's spend ceiling in the header", () => {
     expect(screen.queryByTestId("orch-spend")).toBeNull();
   });
 });
+
+describe("a subflow node on the canvas", () => {
+  const subFlow = (childFlowId?: string): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "s", kind: "subflow", x: 320, y: 24, join: "any", templateId: "builtin-ship-it", ...(childFlowId ? { childFlowId } : {}) },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" } }],
+  });
+
+  it("adds a subflow node per ticked template from the Add picker", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()], templates: [template()] })} />);
+    pickFromCombo("Add a subflow", ["Ship it (template)"]);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes.at(-1)).toMatchObject({ kind: "subflow", templateId: "builtin-ship-it" });
+  });
+
+  it("names the node after its template, says whether it has started, and lets the inspector retarget it", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [subFlow()], templates: [template(), template({ id: "t2", name: "Other" })] })} />);
+    const chip = screen.getByTestId("orch-node-s");
+    expect(chip.className).toContain("subflow");
+    expect(chip.textContent).toContain("Ship it (template)");
+    expect(chip.textContent).toContain("starts a subflow");
+    fireEvent.pointerDown(chip, { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+    const sel = screen.getByLabelText("Template") as HTMLSelectElement;
+    expect(sel.value).toBe("builtin-ship-it");
+    fireEvent.change(sel, { target: { value: "t2" } });
+    expect((onSave.mock.calls.at(-1)![0] as Flow).nodes[1]).toMatchObject({ templateId: "t2" });
+    expect(screen.queryByTestId("orch-subflow-child")).toBeNull();
+  });
+
+  it("once started, names the child and opens it", () => {
+    const onOpen = vi.fn();
+    const child = flow({ id: "c1", name: "Ship the migration › Ship it", parentFlow: "f1", parentNode: "s" });
+    render(<OrchestratorDrawer {...props({ onOpen, flows: [subFlow("c1"), child], templates: [template()] })} />);
+    const chip = screen.getByTestId("orch-node-s");
+    expect(chip.textContent).toContain("subflow started");
+    fireEvent.pointerDown(chip, { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+    expect(screen.getByTestId("orch-subflow-child").textContent).toContain("Ship the migration › Ship it");
+    fireEvent.click(screen.getByRole("button", { name: "Open subflow" }));
+    expect(onOpen).toHaveBeenCalledWith("c1");
+  });
+
+  it("offers subflow-done off the subflow node's rule and reads the node's verb as start", () => {
+    const f = subFlow();
+    f.nodes.push({ id: "n2", kind: "notify", x: 640, y: 24, join: "any", message: "m" });
+    f.edges.push({ id: "e2", from: "s", to: "n2", cond: { kind: "subflow-done" } });
+    render(<OrchestratorDrawer {...props({ flows: [f], templates: [template()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e2"));
+    const values = Array.from(screen.getByLabelText("Condition").querySelectorAll("option")).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["subflow-done", "deadline-passed"]);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByTestId("orch-then").textContent).toContain("start");
+  });
+});

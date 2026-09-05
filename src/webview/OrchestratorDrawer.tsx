@@ -28,6 +28,9 @@ import {
   defaultCondFor,
   DEST_LABEL,
   endLabel,
+  addSubflowNode,
+  subflowName,
+  withNodeTemplate,
   INSPECTOR_NONE,
   isMigrationNotice,
   launchDestOf,
@@ -599,7 +602,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // template. A dry run is a verdict about being armed, and a template cannot
   // be armed, so it has nothing to verdict either way.
   const dry = dryRun && flow && !editingTemplate
-    ? previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id])
+    ? previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id], p.flows)
     : [];
   const firing = dry.filter((v) => v.verdict === "fire").length;
   /** The Save-as-template dialog's own state: whether it is open, the name
@@ -985,7 +988,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * node. Named by the two kinds it admits rather than as "not an agent node", the
    * same lesson `isAgentNode`'s own doc comment records: a `!==` filter is what let
    * a command node into a list that then read `.runKey` off it. */
-  const actionNodes = flow.nodes.filter((n) => n.kind === "notify" || n.kind === "command" || n.kind === "gate");
+  const actionNodes = flow.nodes.filter((n) => n.kind === "notify" || n.kind === "command" || n.kind === "gate" || n.kind === "subflow");
   /** How many rules cannot advance. Driven by the edges' own `error` — the half of
    * `isSettled` that means "tried and failed" rather than "ran". An armed flow with
    * one of these is not simply watching, and the footer must not say it is. */
@@ -1193,6 +1196,28 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       nodes: [...flow.nodes, { id: nextNodeId(flow), kind: "gate", x: 320, y: 24, join: "any", question: "ok to continue?" }],
     });
 
+  /** One subflow node per ticked template, in one write — the same batching the
+   * command picker does. A template being EDITED is not offered to itself: a
+   * template that starts itself would never end (`instantiate` refuses it too). */
+  const addSubflows = (ids: string[]) => {
+    let next = flow;
+    for (const id of ids) next = addSubflowNode(next, id);
+    if (next !== flow) addAndSelect(next);
+  };
+  const subflowOptions = p.templates
+    .filter((t) => !(editingTemplate && p.openId?.kind === "template" && p.openId.id === t.id))
+    .map((t) => ({ value: t.id, label: t.name }));
+  const addSubflowPicker = (
+    <MultiCombo
+      trigger="+ Add subflow…"
+      ariaLabel="Add a subflow"
+      searchPlaceholder="Filter templates…"
+      options={subflowOptions}
+      emptyLabel="(no templates saved yet)"
+      onCommit={addSubflows}
+    />
+  );
+
   // Unlike every other node this drawer builds, a `planned` node ordinarily
   // cannot be assembled here: it names a ticket, and the webview has no task
   // connector to ask for one — it must not import `fs`/`os`/`path`/
@@ -1398,7 +1423,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const nodeJoins = inspNode !== undefined && incomingEdges(flow, inspNode.id).length > 1;
   const nodeInsp =
     inspNode && (inspNode.kind === "command" || inspNode.kind === "notify"
-      || inspNode.kind === "gate" || nodeJoins) ? inspNode : undefined;
+      || inspNode.kind === "gate" || inspNode.kind === "subflow" || nodeJoins) ? inspNode : undefined;
   /** How the node inspector names the node it is about — the same `endLabel`
    * every other surface names it with. Also what its controls' aria-labels are
    * scoped by: "Command", bare, is the edge inspector's and an open list row's
@@ -1738,6 +1763,38 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             onBlur={(ev) => p.onSave(withNodeNotifyMessage(flow, nodeInsp.id, ev.currentTarget.value))}
           />
         </div>
+      ) : nodeInsp.kind === "subflow" ? (
+        <>
+          <div className="orch-clause">
+            <span className="orch-kw">STARTS</span>
+            <select
+              className="orch-sel"
+              aria-label="Template"
+              value={nodeInsp.templateId}
+              onChange={(ev) => p.onSave(withNodeTemplate(flow, nodeInsp.id, ev.currentTarget.value))}
+            >
+              {/* The same not-on-disk option the command and mode pickers add: a
+                  select whose value matches nothing shows its FIRST option. */}
+              {!p.templates.some((t) => t.id === nodeInsp.templateId) && (
+                <option value={nodeInsp.templateId}>{subflowName(nodeInsp, p.templates)}</option>
+              )}
+              {subflowOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          {nodeInsp.childFlowId !== undefined && (() => {
+            const childId = nodeInsp.childFlowId;
+            const child = p.flows.find((f) => f.id === childId);
+            return (
+              <div className="orch-clause" data-testid="orch-subflow-child">
+                <span className="orch-kw">STARTED</span>
+                <span>{child ? child.name : `${childId} (deleted)`}</span>
+                {child && (
+                  <button type="button" className="orch-mini" onClick={() => p.onOpen(childId)}>Open subflow</button>
+                )}
+              </div>
+            );
+          })()}
+        </>
       ) : nodeInsp.kind === "gate" ? (
         <>
           <div className="orch-clause">
@@ -2070,7 +2127,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                       // held by the cap, unobservable or blank alike — which is why it and
                       // `fired` need not add up to `edges`: a settled rule is in neither.
                       if (!dryRun) {
-                        const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id]);
+                        const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id], p.flows);
                         send({
                           type: "flow:dryRun",
                           edges: flow.edges.length,
@@ -2282,6 +2339,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <button type="button" className="orch-mini" onClick={addGate}>+ Gate</button>
               <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
               {addCommandPicker}
+              {addSubflowPicker}
               {/* A place binds a LIVE running card's `runKey` into the graph —
                   see `attachAt`'s own comment for why that is the opposite of
                   what a template is for. Hidden rather than left to hit
@@ -2402,6 +2460,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           <button type="button" className="orch-mini" onClick={addGate}>+ Gate</button>
           <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
           {addCommandPicker}
+          {addSubflowPicker}
         </div>
         <div
           ref={graphRef}
@@ -2455,7 +2514,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <div
                 key={n.id}
                 data-testid={`orch-node-${n.id}`}
-                className={`orch-node${n.kind === "planned" ? " plan" : ""}${n.kind === "notify" ? " notify" : ""}${n.kind === "gate" ? " gate" : ""}${sel === n.id ? " sel" : ""}${wiring === n.id ? " src" : ""}`}
+                className={`orch-node${n.kind === "planned" ? " plan" : ""}${n.kind === "notify" ? " notify" : ""}${n.kind === "gate" ? " gate" : ""}${n.kind === "subflow" ? " subflow" : ""}${sel === n.id ? " sel" : ""}${wiring === n.id ? " src" : ""}`}
                 style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
                 onPointerDown={(e) => startDrag(n.id, e)}
                 onPointerUp={() => wiring && finishWire(n.id)}
@@ -2470,7 +2529,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                       node the literal word "notify" — a canvas chip lying
                       about what it does — because it fell to the same default
                       a genuine notify node reads correctly. */}
-                  <span className="k">{endLabel(flow, n.id)}</span>
+                  <span className="k">{n.kind === "subflow" ? subflowName(n, p.templates) : endLabel(flow, n.id)}</span>
                 </div>
                 <div className="st">
                   {n.kind === "place" ? n.repo
@@ -2478,6 +2537,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                     : n.kind === "notify" ? n.message
                     : n.kind === "command" ? "runs a command"
                     : n.kind === "gate" ? gateBody(n, gateStateOf(n))
+                    : n.kind === "subflow" ? (n.childFlowId === undefined ? "starts a subflow" : "subflow started")
                     : ""}
                 </div>
                 {n.kind === "gate" && (() => {

@@ -68,7 +68,24 @@ export type CommandNode = NodeBase & {
  * the world, decides. */
 export type GateNode = NodeBase & { kind: "gate"; question: string };
 
-export type FlowNode = PlaceNode | PlannedNode | NotifyNode | CommandNode | GateNode;
+/** A workflow inside a workflow: a node that, when a rule reaches it, STARTS a
+ * saved template as a child flow bound to the same card, and that a LATER rule
+ * can wait on with `subflow-done`. It is what lets a starter compose into a
+ * bigger shape instead of being copied into it.
+ *
+ * `templateId` is the user's configuration. `childFlowId` is a host stamp: set
+ * once the child exists (`bindSubflow`), never carried into a template
+ * (`normalizedTemplateFlow` strips it), and — deliberately — NOT cleared by Reset
+ * on the rule that started it: the child is a real flow on disk with its own
+ * history, and a second start would leave two. Reset the child's own rules, or
+ * delete it, to run it again.
+ *
+ * The child carries `parentFlow`/`parentNode` (see `Flow`) and is excluded from
+ * card attachment (`attachedWorkflows`), which is what keeps "one workflow per
+ * card" a question about the parent alone. */
+export type SubflowNode = NodeBase & { kind: "subflow"; templateId: string; childFlowId?: string };
+
+export type FlowNode = PlaceNode | PlannedNode | NotifyNode | CommandNode | GateNode | SubflowNode;
 
 /** Every condition kind that needs no parameter. */
 export type CondKind =
@@ -113,7 +130,14 @@ export type CondKind =
    * the rule carrying `timeoutMinutes` only settles as expired, and a sibling with
    * this condition is what then notifies, re-seeds, or launches the fallback.
    * "If it hasn't merged in an hour, tell me" is two rules out of one place. */
-  | "deadline-passed";
+  | "deadline-passed"
+  /** Has the child workflow a `subflow` node started FINISHED — every rule in it
+   * settled? Bare, and answered in the same unusual place as the four above:
+   * `evaluate.ts`'s `isMet` reads the child off `EvalInput.flows`, because the
+   * fact lives in another flow's file, not on any `RunStatus`. A child that
+   * stopped on a failure is not done — it is stopped — and this stays unmet; a
+   * deadline on the rule is how a parent bounds that wait. */
+  | "subflow-done";
 
 /** The `kind` strings below are serialized into flow files under
  * ~/.agentflow/flows and shared across windows, so they keep their released
@@ -178,7 +202,7 @@ export function outputContains(output: string, text: string): boolean {
  *
  * Nothing here instructs a RUNNING agent; that remains impossible (see the
  * spec's out-of-scope note on `tell`). */
-export type FlowAction = "launch" | "seed" | "notify" | "run" | "ask";
+export type FlowAction = "launch" | "seed" | "notify" | "run" | "ask" | "spawn";
 
 export interface FlowEdge {
   id: string;
@@ -397,6 +421,13 @@ export interface Flow {
   spendCeiling?: number;
 
   commandConsents?: Record<string, CommandConsent>;
+  /** Set on a flow a `subflow` node started: the flow and node it was started
+   * from. Absent on every hand-drawn or attached flow. What it changes: the
+   * child is never offered as a card's workflow (`attachedWorkflows`), so the
+   * card keeps showing the parent; the child is still a real flow in the
+   * Workflows list, armable, resettable and deletable on its own. */
+  parentFlow?: string;
+  parentNode?: string;
 }
 
 /** One per-command approval — see `Flow.commandConsents`. */
@@ -564,9 +595,66 @@ export function stripHostStamps(e: FlowEdge): FlowEdge {
  * "notify">` would let the type system believe an edge past this guard could
  * still be `ask`, which is exactly the false belief `deckView.ts`'s dispatch
  * would otherwise be handed. */
-export function isSpendAction(action: FlowAction | undefined): action is Exclude<FlowAction, "notify" | "ask"> {
+export function isSpendAction(action: FlowAction | undefined): action is Exclude<FlowAction, "notify" | "ask" | "spawn"> {
   return action === "launch" || action === "seed" || action === "run";
 }
+
+/** Does the HOST have to do something for this verb — as opposed to a verb whose
+ * whole action is the stamp (`notify` is a toast off the receipt, `ask` is the
+ * question the stamp poses)? Every spending verb, plus `spawn`: starting a child
+ * flow writes a file but spends nothing itself — the child spends under its own
+ * consent — so it must be dispatched and must report an outcome (`applyFired`
+ * demands one) without being capped or consent-gated as a spend. The one place
+ * this second allowlist lives, for the reason `isSpendAction` gives about its. */
+export function isPerformedAction(action: FlowAction | undefined): action is Exclude<FlowAction, "notify" | "ask"> {
+  return isSpendAction(action) || action === "spawn";
+}
+
+export function isSubflow(n: FlowNode): n is SubflowNode {
+  return n.kind === "subflow";
+}
+
+/** Has the child a `subflow` node started finished? Every rule settled, and at
+ * least one rule — an empty child has nothing to finish. `flows` is every flow
+ * the caller has (the child is another file); a missing child, or a node that
+ * has not started one yet, is simply not done. */
+export function subflowDone(flow: Flow, nodeId: string, flows: readonly Flow[]): boolean {
+  const node = findNode(flow, nodeId);
+  if (!node || node.kind !== "subflow" || node.childFlowId === undefined) return false;
+  const child = flows.find((f) => f.id === node.childFlowId);
+  return child !== undefined && child.edges.length > 0 && child.edges.every(isSettled);
+}
+
+/** Record which child a `subflow` node started. A node rewrite, like
+ * `promoteToPlace`: the fact is about the node, and a later rule reads it there. */
+export function bindSubflow(flow: Flow, nodeId: string, childFlowId: string): Flow {
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) => (n.id === nodeId && n.kind === "subflow" ? { ...n, childFlowId } : n)),
+  };
+}
+
+/** How many ancestors a flow has — 0 for a top-level flow. Bounded by
+ * `MAX_SUBFLOW_DEPTH` at spawn time: a template that starts a template that
+ * starts a template is a fork bomb six seconds at a time, and the guard has to
+ * live where the chain grows. Stops at a cycle or a missing parent rather than
+ * looping. */
+export function subflowDepth(flow: Flow, flows: readonly Flow[]): number {
+  const seen = new Set<string>([flow.id]);
+  let depth = 0;
+  let cur: Flow | undefined = flow;
+  while (cur?.parentFlow !== undefined) {
+    const parent = flows.find((f) => f.id === cur!.parentFlow);
+    if (!parent || seen.has(parent.id)) break;
+    seen.add(parent.id);
+    depth++;
+    cur = parent;
+  }
+  return depth;
+}
+
+/** Nesting a subflow inside a subflow inside a subflow is as deep as this goes. */
+export const MAX_SUBFLOW_DEPTH = 3;
 
 export function isPlace(n: FlowNode): n is PlaceNode {
   return n.kind === "place";
@@ -637,6 +725,7 @@ export function actionFor(kind: string): FlowAction | undefined {
     case "notify": return "notify";
     case "command": return "run";
     case "gate": return "ask";
+    case "subflow": return "spawn";
     default: return undefined;
   }
 }

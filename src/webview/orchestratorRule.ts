@@ -76,6 +76,10 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   // `condOptionLabel` for a rule that has one. Command-shaped, offered beside
   // `command-succeeded` and nowhere else — see `offeredConds`.
   "command-printed": "the command printed…",
+  // Bare; offered off a subflow node only (see `offeredConds`). "finished" and
+  // not "done": a child that STOPPED on a failure is not finished, and this
+  // condition stays unmet for it.
+  "subflow-done": "the subflow finished",
 };
 
 /** The aria-label of a `command-printed` rule's text field (`CondParams.tsx`). */
@@ -331,9 +335,11 @@ export function offeredConds(flow: Flow, fromId: string): Condition["kind"][] {
   // Both command-shaped kinds, and only these: one reads the exit, the other the
   // output, and neither can be answered off anything but a command node.
   if (kind === "command") return ["command-succeeded", "command-printed"];
+  // A subflow's one fact, plus the deadline fallback every source may carry.
+  if (kind === "subflow") return ["subflow-done", "deadline-passed"];
   if (kind === "gate") return ["gate-approved", "gate-rejected"];
   return OFFERED_CONDS.filter(
-    (k) => k !== "command-succeeded" && k !== "command-printed" && k !== "gate-approved" && k !== "gate-rejected",
+    (k) => k !== "command-succeeded" && k !== "command-printed" && k !== "gate-approved" && k !== "gate-rejected" && k !== "subflow-done",
   );
 }
 
@@ -379,6 +385,7 @@ export function defaultCondFor(flow: Flow, fromId: string): Condition {
   const kind = flow.nodes.find((n) => n.id === fromId)?.kind;
   if (kind === "command") return { kind: "command-succeeded" };
   if (kind === "gate") return { kind: "gate-approved" };
+  if (kind === "subflow") return { kind: "subflow-done" };
   return { kind: "pr-merged" };
 }
 
@@ -405,6 +412,7 @@ export const NODE_KIND_LABEL: Partial<Record<string, string>> = {
   notify: "Notify",
   command: "Command",
   gate: "Gate",
+  subflow: "Subflow",
 };
 
 /** The verb (and, for `notify`, the whole rest of the clause) a rule's action
@@ -422,7 +430,10 @@ export const ACTION_LABEL: Record<FlowAction, string> = {
   seed: "seed",
   notify: "Notify me in VS Code",
   run: "run",
+  // "start", not "launch": launch is a paid session, and this is a workflow —
+  // the two must not read as the same spend.
   ask: "Ask me to approve",
+  spawn: "start",
 };
 
 /** How a launch destination reads as words — the closed row's own text and
@@ -587,6 +598,9 @@ export function endLabel(flow: Flow, id: string): string {
   if (n.kind === "command") return commandLabel(n);
   if (n.kind === "notify") return "notify";
   if (n.kind === "gate") return "gate";
+  // The template's ID: `endLabel` has no template list to name it from. The
+  // canvas chip and the inspector, which do, use `subflowName` instead.
+  if (n.kind === "subflow") return `subflow ${n.templateId}`;
   // A kind this build does not know — `store.ts`'s `validNode` admits one on
   // purpose so a flow written by a NEWER build still renders. It has no
   // identifier to show, and it is certainly not a notify terminal: naming
@@ -704,7 +718,7 @@ export function observationOf(
   // answered host-side and handed to the engine; `describeCond`'s arm throws.
   if (
     e.cond.kind === "command-succeeded" || e.cond.kind === "gate-approved" || e.cond.kind === "gate-rejected" ||
-    e.cond.kind === "deadline-passed" || e.cond.kind === "command-printed"
+    e.cond.kind === "deadline-passed" || e.cond.kind === "command-printed" || e.cond.kind === "subflow-done"
   ) {
     return null;
   }
@@ -739,6 +753,12 @@ export function observationFallback(flow: Flow, e: FlowEdge): string {
   // Nothing is missing here either: the rule is waiting on a sibling's clock,
   // which is not on any board to observe.
   if (e.cond.kind === "deadline-passed") return "waiting for another rule from here to run out of time";
+  if (e.cond.kind === "subflow-done") {
+    const from = flow.nodes.find((n) => n.id === e.from);
+    return from && from.kind === "subflow"
+      ? (from.childFlowId === undefined ? "waiting for the subflow to start" : "waiting for the subflow to finish")
+      : "this rule waits on a subflow, but it does not come from one";
+  }
   if (e.cond.kind === "command-printed") {
     const from = flow.nodes.find((n) => n.id === e.from);
     return from && from.kind === "command"
@@ -1001,6 +1021,34 @@ export const COMMAND_NONE_LABEL = "(none configured — set agentFlow.commands)"
  * user their only move was to wire it up first. */
 export const INSPECTOR_NONE =
   "Select a connection to set its condition, or a command or notify node to set what it does.";
+
+/** Add a subflow node for a template — from the same "+ Add…" pickers a command
+ * node comes from, and positioned the same way. What it STARTS is the template
+ * as saved; binding to a card happens when a rule reaches it (`performSpawn`,
+ * deckView.ts). */
+export function addSubflowNode(flow: Flow, templateId: string): Flow {
+  return {
+    ...flow,
+    nodes: [
+      ...flow.nodes,
+      { id: nextNodeId(flow), kind: "subflow", x: 320, y: 24 + flow.nodes.length * 88, join: "any", templateId },
+    ],
+  };
+}
+
+/** Point a subflow node at a different template. A node that already started a
+ * child keeps its `childFlowId`: the child exists whatever this node says now. */
+export function withNodeTemplate(flow: Flow, nodeId: string, templateId: string): Flow {
+  return { ...flow, nodes: flow.nodes.map((n) => (n.id === nodeId && n.kind === "subflow" ? { ...n, templateId } : n)) };
+}
+
+/** What a subflow node is called on the canvas and in its inspector: the
+ * template's name when the list has it, else the id with a not-set voice —
+ * a template deleted from disk must read as such, not as configured. */
+export function subflowName(n: { templateId: string }, templates: readonly { id: string; name: string }[]): string {
+  const t = templates.find((x) => x.id === n.templateId);
+  return t ? t.name : `${n.templateId} (not on disk)`;
+}
 
 /** Add a command node. `seed` is exactly what the picker chose: a configured
  * command's id, or the free-text shape — an EMPTY `run`, which is the node
