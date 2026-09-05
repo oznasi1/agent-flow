@@ -3,7 +3,7 @@ import * as path from "path";
 import type { Flow, FlowEdge, FlowNode } from "../../../../src/engine/orchestrator/model";
 import { stripHostStamps } from "../../../../src/engine/orchestrator/model";
 import {
-  canBindTicket, instantiate, placesToDemote, toTemplate, validTemplate, type FlowTemplate,
+  canBindTicket, instantiate, normalizedTemplateFlow, placesToDemote, toTemplate, validTemplate, type FlowTemplate,
 } from "../../../../src/engine/orchestrator/templates";
 import { FlowIo, readFlows, writeFlow } from "../../../../src/engine/orchestrator/store";
 
@@ -368,5 +368,35 @@ describe("instantiate resolving repos and mode", () => {
       flow: { id: "u", name: "n", armed: false, createdAt: 0, nodes: [notify("n1")], edges: [] },
     });
     expect(() => instantiate(t, "PROJ-1", "f1", 1, ctx)).toThrow(/no planned step/);
+  });
+});
+
+describe("subflows in templates", () => {
+  it("instantiate refuses a template that starts itself", () => {
+    const self = template({ flow: {
+      id: "unused", name: "Ship it", armed: false, createdAt: 0,
+      nodes: [planned("n1"), { id: "s", kind: "subflow", x: 0, y: 0, join: "any", templateId: "k3f9-ship" }],
+      edges: [edge("e1", "n1", "s")],
+    } });
+    expect(() => instantiate(self, "PROJ-1", "f-new", 1, defaultCtx)).toThrow(/starts itself/);
+  });
+
+  it("instantiate carries a subflow node pointing at ANOTHER template through, with fresh ids", () => {
+    const t = template({ flow: {
+      id: "unused", name: "Ship it", armed: false, createdAt: 0,
+      nodes: [planned("n1"), { id: "s", kind: "subflow", x: 0, y: 0, join: "any", templateId: "other" }],
+      edges: [edge("e1", "n1", "s")],
+    } });
+    const f = instantiate(t, "PROJ-1", "f-new", 1, defaultCtx);
+    expect(f.nodes.find((n) => n.kind === "subflow")).toMatchObject({ templateId: "other" });
+  });
+
+  it("normalizedTemplateFlow strips a subflow node's childFlowId — a template carries the shape, never this machine's child", () => {
+    const flow: Flow = {
+      id: "f1", name: "n", armed: true, createdAt: 0, edges: [],
+      nodes: [{ id: "s", kind: "subflow", x: 0, y: 0, join: "any", templateId: "other", childFlowId: "c9" }],
+    };
+    const out = normalizedTemplateFlow(flow, "n", flow.nodes);
+    expect(out.nodes[0]).toEqual({ id: "s", kind: "subflow", x: 0, y: 0, join: "any", templateId: "other" });
   });
 });

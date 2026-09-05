@@ -372,3 +372,11 @@ describe("workflowState — a failure pending retry", () => {
     expect(s.status).toBe("stopped");
   });
 });
+
+describe("attachedWorkflows — subflow children", () => {
+  it("never offers a child a subflow started as a card's workflow, however it binds — the parent is the card's workflow", () => {
+    const parent = { ...flow("f1", [place("n1", "PROJ-142")]), armed: true };
+    const child = { ...flow("f2", [place("n1", "PROJ-142")]), parentFlow: "f1", parentNode: "s" };
+    expect(attachedWorkflows([child, parent], "PROJ-142", "PROJ-142").map((f) => f.id)).toEqual(["f1"]);
+  });
+});

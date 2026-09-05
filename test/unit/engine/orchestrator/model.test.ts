@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, gateAskEdge,
-  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy, hasCeiling, overCeiling, spendTotal,
+  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy, hasCeiling, overCeiling, spendTotal, isPerformedAction, isSubflow, subflowDone, bindSubflow, subflowDepth, MAX_SUBFLOW_DEPTH, SubflowNode,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -456,5 +456,62 @@ describe("a flow's spend ceiling", () => {
 
   it("spendTotal adds sessions and commands — one ceiling covers both kinds of spend", () => {
     expect(spendTotal({ sessions: 3, commands: 2 })).toBe(5);
+  });
+});
+
+describe("a subflow node", () => {
+  const sub = (id: string, over: Partial<SubflowNode> = {}): SubflowNode =>
+    ({ id, kind: "subflow", x: 0, y: 0, join: "any", templateId: "t-ship", ...over });
+  const withNodes = (nodes: FlowNode[], edges: FlowEdge[] = [], over: Partial<Flow> = {}): Flow =>
+    ({ ...emptyFlow("f1", "f", 0), nodes, edges, ...over });
+
+  it("derives the spawn verb, which the host performs but nothing spends", () => {
+    expect(actionFor("subflow")).toBe("spawn");
+    expect(isSpendAction("spawn")).toBe(false);
+    expect(isPerformedAction("spawn")).toBe(true);
+    expect(isPerformedAction("launch")).toBe(true);
+    expect(isPerformedAction("notify")).toBe(false);
+    expect(isPerformedAction("ask")).toBe(false);
+    expect(isSubflow(sub("s"))).toBe(true);
+    expect(isSubflow(place("p"))).toBe(false);
+  });
+
+  it("subflowDone reads the CHILD's settledness off the flows it is handed", () => {
+    const parent = withNodes([place("p"), sub("s", { childFlowId: "c1" })]);
+    const running: Flow = { ...emptyFlow("c1", "child", 0), edges: [edge("e1", "a", "b")] };
+    const done: Flow = { ...running, edges: [edge("e1", "a", "b", { firedAt: 1 })] };
+    const stopped: Flow = { ...running, edges: [edge("e1", "a", "b", { error: "boom" })] };
+    expect(subflowDone(parent, "s", [running])).toBe(false);
+    expect(subflowDone(parent, "s", [done])).toBe(true);
+    // Settled by error counts: the child has nothing left to do, whatever its outcome.
+    expect(subflowDone(parent, "s", [stopped])).toBe(true);
+    // No child yet, a missing child, an empty child, a non-subflow node: not done.
+    expect(subflowDone(withNodes([sub("s")]), "s", [done])).toBe(false);
+    expect(subflowDone(parent, "s", [])).toBe(false);
+    expect(subflowDone(parent, "s", [{ ...done, edges: [] }])).toBe(false);
+    expect(subflowDone(parent, "p", [done])).toBe(false);
+  });
+
+  it("bindSubflow records the child on that node alone, and only on a subflow node", () => {
+    const f = withNodes([place("p"), sub("s")]);
+    const out = bindSubflow(f, "s", "c9");
+    expect((out.nodes[1] as SubflowNode).childFlowId).toBe("c9");
+    expect(out.nodes[0]).toEqual(f.nodes[0]);
+    expect(bindSubflow(f, "p", "c9")).toEqual(f);
+  });
+
+  it("subflowDepth counts ancestors and stops at a cycle or a missing parent", () => {
+    const top: Flow = emptyFlow("a", "a", 0);
+    const mid: Flow = { ...emptyFlow("b", "b", 0), parentFlow: "a" };
+    const leaf: Flow = { ...emptyFlow("c", "c", 0), parentFlow: "b" };
+    const all = [top, mid, leaf];
+    expect(subflowDepth(top, all)).toBe(0);
+    expect(subflowDepth(mid, all)).toBe(1);
+    expect(subflowDepth(leaf, all)).toBe(2);
+    expect(subflowDepth(leaf, [leaf])).toBe(0);
+    const loopA: Flow = { ...emptyFlow("x", "x", 0), parentFlow: "y" };
+    const loopB: Flow = { ...emptyFlow("y", "y", 0), parentFlow: "x" };
+    expect(subflowDepth(loopA, [loopA, loopB])).toBe(1);
+    expect(MAX_SUBFLOW_DEPTH).toBe(3);
   });
 });

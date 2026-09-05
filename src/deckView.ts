@@ -5,7 +5,7 @@ import * as path from "path";
 import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, PlaceNode, PlannedNode, emptyFlow, findNode, isCommand, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, SpendTally, hasCeiling, overCeiling, spendTotal } from "./engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal } from "./engine/orchestrator/model";
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, findEdgeOutput, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
@@ -267,6 +267,9 @@ interface EdgeDone {
   kind: "done";
   outcome: ActOutcome;
   promote?: { nodeId: string; runKey: string; repo: string };
+  /** A `spawn` started this child flow; `bindSubflow` records it on the node in
+   * the same write as the stamps, the way `promote` rewrites a planned node. */
+  spawn?: { nodeId: string; childFlowId: string; template: string };
   receipt?: { level: "success" | "error"; message: string };
   /** A command's stdout+stderr, for the journal. `ActOutcome` cannot carry it:
    * that type is what `applyFired` stamps onto the edge, and an edge receipt is
@@ -880,7 +883,7 @@ export class DeckPanel {
         // Read once per flow per pass, before either evaluation, so the clocks
         // and the actions are judged against the same output — see `printedFor`.
         const printed = this.printedFor(flow);
-        const clocks = evaluateDeadlines({ flow, statuses: runs, nowMs, branchCi, printed });
+        const clocks = evaluateDeadlines({ flow, statuses: runs, nowMs, branchCi, printed, flows });
         if (clocks.wentLive.length > 0 || clocks.expired.length > 0) {
           const current = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
           if (current) {
@@ -898,7 +901,7 @@ export class DeckPanel {
             }
           }
         }
-        const result = evaluateFlow({ flow, statuses: runs, nowMs, branchCi, printed });
+        const result = evaluateFlow({ flow, statuses: runs, nowMs, branchCi, printed, flows });
         if (result.fired.length === 0) {
           // Nothing ready means nothing to approve: clear the gate so a rule
           // that becomes met later in this session fires without ceremony.
@@ -1006,7 +1009,9 @@ export class DeckPanel {
         // target a deferred target can never also have a successful stamp to drop.
         const actedTargets = new Set<string>();
         const firing = unclaimed.map((f) => {
-          if (!f.perform || !isSpendAction(f.action)) return f;
+          // `isPerformedAction`: a `spawn` is deduped per target too — two rules
+          // into one subflow node must start ONE child, not two.
+          if (!f.perform || !isPerformedAction(f.action)) return f;
           if (actedTargets.has(f.edge.to)) return { ...f, perform: false };
           actedTargets.add(f.edge.to);
           return f;
@@ -1108,6 +1113,7 @@ export class DeckPanel {
         // sentence. The output is for the journal alone.
         const outputs = new Map<string, string>();
         const promotions: { nodeId: string; runKey: string; repo: string }[] = [];
+        const spawns: { nodeId: string; childFlowId: string; template: string }[] = [];
         const receipts: { level: "success" | "error"; message: string }[] = [];
         // Resolved texts of the `run` rules this pass performed under per-command
         // consent, each to be counted against its bounded approval at write time.
@@ -1136,7 +1142,10 @@ export class DeckPanel {
           }
           // A stamped-only sibling performs nothing, and a notify's whole action is
           // the toast `notifyLines` produces below.
-          if (!f.perform || !isSpendAction(f.action)) continue;
+          // `isPerformedAction`, not `isSpendAction`: a `spawn` spends nothing (no
+          // cap, no consent gate above) but the host performs it — it writes the
+          // child flow — so it is dispatched here and owes `applyFired` an outcome.
+          if (!f.perform || !isPerformedAction(f.action)) continue;
           // Re-read and check `armed` immediately before THIS edge, not once for the
           // whole flow: a launch or seed is its own `await`, and up to three of them
           // can run in one pass (the per-pass cap), each one long enough for
@@ -1247,6 +1256,7 @@ export class DeckPanel {
             outputs.set(f.edge.id, truncateOutput(done.output));
           }
           if (done.promote) promotions.push(done.promote);
+          if (done.spawn) spawns.push(done.spawn);
           if (done.receipt) receipts.push(done.receipt);
         }
         // A deferred rule is left exactly as it was, so the next pass retries it —
@@ -1306,6 +1316,10 @@ export class DeckPanel {
         // line above: a promotion settles the rules that pointed at the node as
         // planned work, and those stamps belong to this pass, not to a later read.
         for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo, nowMs);
+        // The child exists on disk already (written in `performSpawn`); this is
+        // the parent's pointer to it, in the same write as the rule's stamp so a
+        // crash between the two cannot leave a started child nobody can find.
+        for (const sp of spawns) next = bindSubflow(next, sp.nodeId, sp.childFlowId);
         // Count each run against its bounded per-command approval — on `atWrite`'s
         // copy of the record, like everything else this write carries.
         for (const text of consumed) next = consumeConsent(next, text);
@@ -1347,6 +1361,9 @@ export class DeckPanel {
         }
         for (const p of promotions) {
           this.journal(flow.id, { kind: "promoted", node: p.nodeId, runKey: p.runKey, repo: p.repo }, nowMs);
+        }
+        for (const sp of spawns) {
+          this.journal(flow.id, { kind: "spawned", node: sp.nodeId, template: sp.template, child: sp.childFlowId }, nowMs);
         }
         // After the write, and computed from `next` AFTER the promotions: a
         // promotion settles the rules that pointed at the node as planned work,
@@ -1719,6 +1736,7 @@ export class DeckPanel {
   ): Promise<EdgeResult> {
     if (action === "seed") return this.performSeed(flow, edge, statuses);
     if (action === "run") return this.performRun(flow, edge, statuses);
+    if (action === "spawn") return this.performSpawn(flow, edge);
     const node = this.plannedTarget(flow, edge);
     if (!node) {
       return {
@@ -1916,6 +1934,71 @@ export class DeckPanel {
    * command-node version of "one bad rule becomes twenty windows", except each
    * retry is a real side effect on real infrastructure. `runCommand` never throws
    * by contract, so the only way out of here is a decided one. */
+  /** Start a child flow from the template a `subflow` node names, bound to the
+   * card the rule's SOURCE PLACE is on — the same `instantiate` the card's own
+   * Attach uses, with the same repos and modes, so a subflow is exactly "this
+   * template, attached to this card, armed", plus a pointer back to its parent.
+   *
+   * Every refusal here is deterministic and latches: a source that is not a
+   * place (there is no card to bind), a template that is gone, a template with
+   * nothing to bind, a chain already `MAX_SUBFLOW_DEPTH` deep, or a node that
+   * already started a child (Reset on the rule does not clear `childFlowId` —
+   * see `SubflowNode` — because the child is a real flow with its own history).
+   *
+   * The child is written ARMED, because a subflow nobody arms does nothing, and
+   * it inherits NO consent: its first spend asks, exactly as an attached
+   * template's would. Journalled on the child as `armed` with `source: "spawn"`
+   * — not a toggle, not a banner. */
+  private async performSpawn(flow: Flow, edge: FlowEdge): Promise<EdgeResult> {
+    const node = findNode(flow, edge.to);
+    if (!node || node.kind !== "subflow") {
+      return { kind: "done", outcome: { ok: false, error: `a subflow rule must point at a subflow node, and ${edge.to} is not.` } };
+    }
+    const sub: SubflowNode = node;
+    if (sub.childFlowId !== undefined) {
+      return { kind: "done", outcome: { ok: false, error: `${sub.id} already started a subflow (${sub.childFlowId}); delete or reset that flow to start it again.` } };
+    }
+    const source = findNode(flow, edge.from);
+    if (!source || !isPlace(source)) {
+      return { kind: "done", outcome: { ok: false, error: `a subflow starts from a place — ${edge.from} is not one, so there is no card to bind it to.` } };
+    }
+    const t = this.allTemplates().find((x) => x.id === sub.templateId);
+    if (!t) {
+      return { kind: "done", outcome: { ok: false, error: `the template this subflow starts (${sub.templateId}) is no longer on disk.` } };
+    }
+    const flows = readFlows(this.flowIo, this.flowsDir);
+    if (subflowDepth(flow, flows) >= MAX_SUBFLOW_DEPTH) {
+      return { kind: "done", outcome: { ok: false, error: `this workflow is already ${MAX_SUBFLOW_DEPTH} subflows deep — not nesting another.` } };
+    }
+    const cfg = getConfig();
+    const run = this.run(source.runKey);
+    const ticketKey = run ? ticketKeyFor(run, this.connector) : source.runKey;
+    const taken = new Set(flows.map((f) => f.id));
+    const now = Date.now();
+    let id = newFlowId(now);
+    for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+    if (taken.has(id)) return { kind: "defer", reason: "could not mint a flow id for the subflow" };
+    let child: Flow;
+    try {
+      const onDisk = new Set(discoverRepos(cfg.reposRoot, cfg.repoBlocklist).map((r) => r.name));
+      child = instantiate(t, ticketKey, id, now, {
+        repos: run ? run.repos.map((r) => r.name).filter((n) => onDisk.has(n)) : [source.repo],
+        modes: cfg.promptModes.map((m) => m.id),
+      });
+    } catch (e) {
+      return { kind: "done", outcome: { ok: false, error: (e as Error).message } };
+    }
+    child = { ...child, name: `${flow.name} › ${t.name}`, armed: true, parentFlow: flow.id, parentNode: sub.id };
+    writeFlow(this.flowIo, this.flowsDir, child);
+    this.journal(child.id, { kind: "armed", armed: true, source: "spawn" }, now);
+    return {
+      kind: "done",
+      outcome: { ok: true, note: `started ${t.name}` },
+      spawn: { nodeId: sub.id, childFlowId: child.id, template: t.id },
+      receipt: { level: "success", message: `${flow.name}: started the "${t.name}" subflow.` },
+    };
+  }
+
   private async performRun(flow: Flow, edge: FlowEdge, statuses: RunStatus[]): Promise<EdgeResult> {
     const node = this.commandTarget(flow, edge);
     if (!node) {

@@ -359,7 +359,7 @@ export type UsageEvent =
   // planned node carries all three. `"notify"` is reserved: a notify spends
   // nothing and is not performed through this seam, so nothing emits it today.
   | {
-      name: "flow_edge_fired"; edge_action: "launch" | "seed" | "notify" | "run"; ok: boolean;
+      name: "flow_edge_fired"; edge_action: "launch" | "seed" | "notify" | "run" | "spawn"; ok: boolean;
       deferred: boolean; dest?: "worktree" | "new-window" | "current-window";
       prompt_mode?: PromptModeProp; repo_count?: number;
     }

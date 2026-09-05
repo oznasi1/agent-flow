@@ -353,6 +353,9 @@ export const ORCH_CSS = `
      GATE_H (layout.ts): edges anchor through boxOf at GATE_H/2, and a node that
      rendered at a different height would show its wire missing its own port. */
   .orch-node.gate { height: 70px; }
+  /* A workflow inside a workflow: a double border, the chip's own way of saying
+     "there is another one of these inside". */
+  .orch-node.subflow { border-style: double; }
   .orch-node .gbtns { display: flex; gap: 5px; margin-top: 6px; }
   .orch-node .gbtn { flex: 1; height: 18px; border-radius: var(--r-chip);
     border: 1px solid var(--edge); background: transparent; color: var(--vscode-foreground);

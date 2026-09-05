@@ -894,3 +894,47 @@ describe("evaluateFlow — a failure pending retry", () => {
     expect(r.fired.map((f) => [f.edge.id, f.perform])).toEqual([["e1", true], ["e2", false]]);
   });
 });
+
+describe("evaluateFlow — subflow-done", () => {
+  const sub = (id: string, childFlowId?: string): FlowNode =>
+    ({ id, kind: "subflow", x: 0, y: 0, join: "any", templateId: "t", ...(childFlowId ? { childFlowId } : {}) });
+  const parent = (childFlowId?: string) =>
+    flowWith([place("a", "PROJ-1"), sub("s", childFlowId), notify("z")],
+      [edge("e1", "a", "s", { firedAt: NOW - 1, performed: true }), edge("e2", "s", "z", { cond: { kind: "subflow-done" } })]);
+  const child = (settled: boolean): Flow =>
+    ({ ...emptyFlow("c1", "child", 0), armed: true, nodes: [place("x", "PROJ-9"), notify("y")],
+      edges: [edge("k1", "x", "y", settled ? { firedAt: 1 } : {})] });
+
+  it("fires once the child a subflow node started has every rule settled", () => {
+    const r = evaluateFlow({ flow: parent("c1"), statuses: [status("PROJ-1")], nowMs: NOW, flows: [child(true)] });
+    expect(r.fired.map((f) => f.edge.id)).toEqual(["e2"]);
+    expect(r.fired[0].action).toBe("notify");
+    expect(r.blocked).toEqual([]);
+  });
+
+  it("waits while the child is running, when no child was started, when the child is missing, and with no flows handed in", () => {
+    expect(evaluateFlow({ flow: parent("c1"), statuses: [status("PROJ-1")], nowMs: NOW, flows: [child(false)] }).fired).toEqual([]);
+    expect(evaluateFlow({ flow: parent(), statuses: [status("PROJ-1")], nowMs: NOW, flows: [child(true)] }).fired).toEqual([]);
+    expect(evaluateFlow({ flow: parent("c1"), statuses: [status("PROJ-1")], nowMs: NOW, flows: [] }).fired).toEqual([]);
+    expect(evaluateFlow({ flow: parent("c1"), statuses: [status("PROJ-1")], nowMs: NOW }).fired).toEqual([]);
+  });
+
+  it("carries spawn as the action of a rule into a subflow node, and never counts it against the cap", () => {
+    const flow = flowWith([place("a", "PROJ-1"), sub("s"), planned("p1"), planned("p2"), planned("p3")],
+      [edge("sp", "a", "s"), edge("l1", "a", "p1"), edge("l2", "a", "p2"), edge("l3", "a", "p3")]);
+    const r = run(flow, [status("PROJ-1", { merged: true })]);
+    expect(r.fired.find((f) => f.edge.id === "sp")?.action).toBe("spawn");
+    expect(r.fired.map((f) => f.edge.id).sort()).toEqual(["l1", "l2", "l3", "sp"]);
+    expect(r.deferred).toBe(0);
+  });
+
+  it("a deadline on a subflow-done rule starts its clock once the child exists", () => {
+    const withDeadline = (childFlowId?: string) => {
+      const f = parent(childFlowId);
+      f.edges[1].timeoutMinutes = 30;
+      return f;
+    };
+    expect(evaluateDeadlines({ flow: withDeadline(), statuses: [status("PROJ-1")], nowMs: NOW }).wentLive).toEqual([]);
+    expect(evaluateDeadlines({ flow: withDeadline("c1"), statuses: [status("PROJ-1")], nowMs: NOW }).wentLive).toEqual(["e2"]);
+  });
+});

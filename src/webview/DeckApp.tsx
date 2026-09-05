@@ -1077,7 +1077,7 @@ export function DeckApp(): JSX.Element {
       const w = workflowByCard.get(c.id);
       if (w) entries.push({ card: c, w });
     }
-    const order = rankByState(entries.map((e) => e.w.flow), runs, now, branchCi, printed);
+    const order = rankByState(entries.map((e) => e.w.flow), runs, now, branchCi, printed, flows);
     const rank = new Map(order.map((f, i) => [f, i]));
     return entries
       .slice()

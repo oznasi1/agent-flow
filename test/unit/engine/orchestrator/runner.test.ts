@@ -506,3 +506,27 @@ describe("applyFired — opt-in retry", () => {
     expect(out.retryAt).toBeUndefined();
   });
 });
+
+describe("applyFired — a spawn edge", () => {
+  const subFlow = () => {
+    const sub = { id: "s", kind: "subflow" as const, x: 0, y: 0, join: "any" as const, templateId: "t" };
+    return flowWith([place("a", "PROJ-1"), sub], [edge("e1", "a", "s")]);
+  };
+
+  it("is performed by the host and so owes an outcome: a success stamps the receipt, no outcome fails closed", () => {
+    const flow = subFlow();
+    const ok = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "spawn" }], NOW,
+      new Map([["e1", { ok: true, note: "started Ship it" } as const]])).edges[0];
+    expect(ok).toMatchObject({ firedAt: NOW, firedNote: "started Ship it", performed: true });
+    const none = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "spawn" }], NOW).edges[0];
+    expect(none.error).toBe("spawn was not performed");
+    expect(none.firedAt).toBeUndefined();
+  });
+
+  it("a refusal latches the rule with the host's error", () => {
+    const flow = subFlow();
+    const out = applyFired(flow, [{ edge: flow.edges[0], perform: true, action: "spawn" }], NOW,
+      new Map([["e1", { ok: false, error: "the template is gone" } as const]])).edges[0];
+    expect(out).toMatchObject({ error: "the template is gone", performed: true });
+  });
+});

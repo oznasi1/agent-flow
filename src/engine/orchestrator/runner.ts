@@ -2,7 +2,7 @@
 // to show. Pure and total, so both decisions are testable from fixtures without a
 // panel, a filesystem or a clock — the panel does the I/O.
 import { ClockResult, FiredEdge } from "./evaluate";
-import { Flow, FlowAction, FlowEdge, findNode, isSettled, isSpendAction, retryPolicy } from "./model";
+import { Flow, FlowAction, FlowEdge, findNode, isPerformedAction, isSettled, isSpendAction, retryPolicy } from "./model";
 
 /** Stamp the clocks a pass decided about: `liveSince` on every rule that went
  * live, `expiredAt` on every rule that ran out. Returns the SAME flow object when
@@ -139,7 +139,10 @@ export function applyFired(
       // outcome" IS that allowlist, by construction. A fifth, non-spending verb is
       // never dispatched, so demanding an outcome from it would latch a rule
       // nothing was ever asked to perform.
-      if (hit.perform && isSpendAction(hit.action)) {
+      // `isPerformedAction`, not `isSpendAction`: `spawn` spends nothing and is
+      // neither capped nor consent-gated, but the host DOES perform it (it writes
+      // the child flow) and so owes an outcome exactly like a launch does.
+      if (hit.perform && isPerformedAction(hit.action)) {
         const outcome = outcomes?.get(e.id);
         // Terminal, and never retried: nothing ran, so there is no failure a
         // second attempt could be a second attempt AT. `retryAt` is dropped in

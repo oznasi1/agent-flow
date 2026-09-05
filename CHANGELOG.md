@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Subflow nodes.** A workflow can start a saved template as a child workflow: add a
+  **subflow** node from **+ Add subflow…**, and a rule reaching it starts the template on the
+  rule's source card, armed, named `<parent> › <template>`, with a pointer both ways. A later
+  rule on **the subflow finished** fires when every rule in the child has settled. Starting is
+  not a spend — the child asks its own consent — and the card keeps showing the parent. A
+  template that starts itself is refused; nesting stops three deep.
+
 - **A pass without the editor.** The extension now ships `dist/tick.js`: one orchestrator
   pass from a shell, over the same flows, lock and journal the Deck uses, reading the
   editor's own `settings.json`. It performs notify rules and already-consented run rules,
