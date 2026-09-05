@@ -15,6 +15,7 @@ import {
   subflowName,
   withNodeTemplate,
   COND_LABEL,
+  isBareCond,
   condOffered,
   condOptionLabel,
   CWD_REPO_DEFAULT,
@@ -324,15 +325,15 @@ describe("gate nodes in the pickers", () => {
     expect(off).toContain("pr-merged");
     expect(off).toContain("ci-passed");
     expect(off).not.toContain("command-succeeded");
-    // Minus the two gate kinds, the two command-shaped kinds and the subflow kind.
-    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 5);
+    // Minus the two gate kinds, the three command-shaped kinds and the subflow kind.
+    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 6);
   });
 
   it("still offers the command-shaped conditions off a command, and no gate condition", () => {
-    // Two now, not one: `command-printed` joined `command-succeeded` as the second
-    // kind answered off a command node. The pin is still that no gate (or
-    // place-shaped) kind leaks in here.
-    expect(offeredConds(gateFlow(), "c")).toEqual(["command-succeeded", "command-printed"]);
+    // Three now: `command-printed` and `command-result` joined `command-succeeded`
+    // as the kinds answered off a command node. The pin is still that no gate
+    // (or place-shaped) kind leaks in here.
+    expect(offeredConds(gateFlow(), "c")).toEqual(["command-succeeded", "command-printed", "command-result"]);
   });
 
   it("seeds a new wire out of a gate with gate-approved", () => {
@@ -432,6 +433,37 @@ describe("deadlines in the rule module", () => {
     } as unknown as RunStatus;
     expect(observationOf(f, f.edges[0], [status])).toBeNull();
     expect(observationFallback(f, f.edges[0])).toMatch(/another rule/);
+  });
+});
+
+describe("command-result in the rule module", () => {
+  const commandFlow = (): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "c", kind: "command", x: 320, y: 0, join: "any", run: "deploy.sh" },
+      { id: "n2", kind: "notify", x: 640, y: 0, join: "any", message: "done" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "c", cond: { kind: "pr-merged" } },
+      { id: "e2", from: "c", to: "n2", cond: { kind: "command-result", field: "env", value: "staging" } },
+    ],
+  });
+
+  it("is labelled with the parameter mark, offered off a command node only, seeded blank, and described with its field", () => {
+    expect(COND_LABEL["command-result"]).toBe("the command reported…");
+    expect(offeredConds(commandFlow(), "c")).toContain("command-result");
+    expect(offeredConds(commandFlow(), "n1")).not.toContain("command-result");
+    expect(isBareCond("command-result")).toBe(false);
+    expect(seedCond("command-result")).toEqual({ kind: "command-result", field: "", value: "" });
+    expect(condOptionLabel({ kind: "command-result", field: "env", value: "staging" })).toBe("the command reported env = “staging”");
+  });
+
+  it("has no place-shaped observation, and its fallback names the command and the field", () => {
+    const f = commandFlow();
+    expect(observationOf(f, f.edges[1], [], {})).toBeNull();
+    expect(observationFallback(f, f.edges[1])).toBe("waiting for deploy.sh to report env = “staging”");
+    const off = { ...f, edges: [{ ...f.edges[1], from: "n1" }] };
+    expect(observationFallback(off, off.edges[0])).toBe("this rule reads a command's report, but it does not come from one");
   });
 });
 

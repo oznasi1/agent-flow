@@ -183,7 +183,60 @@ export type Condition =
    * command's own rule has performed (see `evaluate.ts`'s `commandPrinted`) —
    * ran and succeeded OR ran and failed, since a failure's output is often
    * exactly the text worth acting on. */
-  | { kind: "command-printed"; text: string };
+  | { kind: "command-printed"; text: string }
+  /** Did the command this rule points past REPORT `field` as `value`? The
+   * first condition to read a VALUE off a command rather than a bit or a
+   * substring: `command-printed` can say whether the word "prod" appeared,
+   * not which environment a deploy landed in. A command may print one JSON
+   * object as its LAST line — `{"env":"staging","version":"1.4.2"}` — which the
+   * host parses at capture (`parseResult`), stores on the journal line as
+   * `result`, and answers this rule from (`printedVerdicts`, journal.ts) on the
+   * same `EvalInput.printed` channel the substring rule uses. Compared as text,
+   * exactly and case-sensitively, so `"1.4.2"` and `1.4.2` are the same fact
+   * and `"Prod"` is not `"prod"`. The narrow version, deliberately: one object,
+   * one line, one field, equality — the first new data model a rule has ever
+   * carried, and the kind of addition that wants to grow. */
+  | { kind: "command-result"; field: string; value: string };
+
+/** The one JSON object a command may report on its LAST non-blank line, or
+ * `undefined` when there is none — anything but a plain object (an array, a
+ * number, `null`, a parse error) reads as "reported nothing", never as an
+ * error: a script that prints ordinary text last has simply not reported. The
+ * ONE place the shape is defined, so the two capture sites and every reader
+ * agree. Parsed from the FULL output at capture, before truncation, so a chatty
+ * command's report is never lost to the journal's head/tail cut. */
+export function parseResult(output: string): Record<string, unknown> | undefined {
+  const lines = output.split("\n");
+  let last = "";
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim() !== "") {
+      last = lines[i].trim();
+      break;
+    }
+  }
+  if (!last.startsWith("{") || !last.endsWith("}")) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(last);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Does a reported object carry `field` as `value`? Text equality over the
+ * primitives JSON can carry — a string as itself, a number or boolean as its
+ * text, `null` as "null" — so the field a person types in the inspector matches
+ * what they see in the output. A nested object or array never matches: there
+ * is no one text for it, and guessing one (JSON? whitespace-sensitive?) would
+ * make a rule that works on one script and not the next. Blank `field` matches
+ * nothing, for the reason `outputContains` gives about blank text. */
+export function resultMatches(result: Record<string, unknown> | undefined, field: string, value: string): boolean {
+  const key = field.trim();
+  if (key === "" || result === undefined || !Object.hasOwn(result, key)) return false;
+  const v = result[key];
+  if (v !== null && typeof v === "object") return false;
+  return String(v) === value.trim();
+}
 
 /** Does a command's captured output carry `text`? Case-insensitive substring —
  * not a regex, not a glob. A deploy script's "DEPLOYED" and a human's "deployed"
@@ -815,6 +868,10 @@ export function condIncomplete(cond: Condition): string | undefined {
       // engine would evaluate forever and never satisfy — the same shape as a
       // blank status, and reported the same way.
       return blank(cond.text) ? "no text set" : undefined;
+    case "command-result":
+      // A blank FIELD can never match (`resultMatches`). A blank VALUE can: a
+      // script may well report `"warnings": ""`, so it is a rule that works.
+      return blank(cond.field) ? "no field set" : undefined;
     default:
       return undefined;
   }

@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   JournalIo, journalPath, createIdMinter, appendEvent, readJournal, findEdgeOutput,
-  truncateOutput, printedVerdicts, spendTally, JOURNAL_CAP_BYTES, JOURNAL_TRIM_TO_BYTES, OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES,
+  truncateOutput, printedVerdicts, needsOutputVerdicts, spendTally, JOURNAL_CAP_BYTES, JOURNAL_TRIM_TO_BYTES, OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES,
 } from "../../../../src/engine/orchestrator/journal";
 
 /** An in-memory JournalIo. `files` is the whole store. */
@@ -361,6 +361,52 @@ describe("the expired event", () => {
     appendEvent(io, DIR, "f1", { kind: "reset", edge: "e1" }, 1_001);
     appendEvent(io, DIR, "f1", { kind: "expired", edge: "e1", from: "n1", to: "n2", since: 1_001 }, 1_002);
     expect(findEdgeOutput(readJournal(io, DIR, "f1"), "e1")).toMatchObject({ ok: true, output: "hello" });
+  });
+});
+
+describe("printedVerdicts — command-result", () => {
+  const flow = (field = "env", value = "staging") => ({
+    id: "f1", name: "f", armed: true, createdAt: 0,
+    nodes: [
+      { id: "a", kind: "place" as const, x: 0, y: 0, join: "any" as const, runKey: "PROJ-1", repo: "r" },
+      { id: "c", kind: "command" as const, x: 0, y: 0, join: "any" as const, run: "deploy.sh" },
+      { id: "z", kind: "notify" as const, x: 0, y: 0, join: "any" as const, message: "m" },
+    ],
+    edges: [
+      { id: "e1", from: "a", to: "c", cond: { kind: "pr-merged" as const }, firedAt: 1_000, performed: true as const },
+      { id: "e2", from: "c", to: "z", cond: { kind: "command-result" as const, field, value } },
+    ],
+  });
+  const ranWith = (extra: { output?: string; result?: Record<string, unknown> }) => {
+    const { io } = fakeIo();
+    appendEvent(io, DIR, "f1", { kind: "fired", edge: "e1", from: "a", to: "c", action: "run", note: "ran", output: "…", ...extra }, 1_000);
+    return readJournal(io, DIR, "f1");
+  };
+
+  it("answers off the line's parsed result, not its output text", () => {
+    expect(printedVerdicts(flow(), ranWith({ result: { env: "staging" } }))).toEqual({ e2: true });
+    expect(printedVerdicts(flow(), ranWith({ result: { env: "prod" } }))).toEqual({ e2: false });
+    // The word in the output is not the report: a line with no `result` reports nothing.
+    expect(printedVerdicts(flow(), ranWith({ output: '{"env":"staging"}' }))).toEqual({ e2: false });
+    expect(printedVerdicts(flow(), [])).toEqual({ e2: false });
+  });
+
+  it("round-trips the result through the checksummed line and hands it back on findEdgeOutput", () => {
+    const events = ranWith({ result: { env: "staging", version: "1.4.2" } });
+    expect(events[0]).toMatchObject({ kind: "fired", result: { env: "staging", version: "1.4.2" } });
+    const hit = findEdgeOutput(events, "e1");
+    expect(hit.ok && hit.result).toEqual({ env: "staging", version: "1.4.2" });
+    const plain = findEdgeOutput(ranWith({}), "e1");
+    expect(plain.ok && "result" in plain).toBe(false);
+  });
+
+  it("answers both kinds on the one channel, and needsOutputVerdicts knows both", () => {
+    const both = flow();
+    both.edges.push({ id: "e3", from: "c", to: "z", cond: { kind: "command-printed" as const, text: "staging" } } as never);
+    expect(printedVerdicts(both as never, ranWith({ output: "landed in staging", result: { env: "prod" } }))).toEqual({ e2: false, e3: true });
+    expect(needsOutputVerdicts(flow() as never)).toBe(true);
+    expect(needsOutputVerdicts({ ...flow(), edges: [flow().edges[0]] } as never)).toBe(false);
+    expect(needsOutputVerdicts({ ...flow(), edges: [{ ...flow().edges[1], firedAt: 5 }] } as never)).toBe(false);
   });
 });
 

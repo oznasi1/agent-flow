@@ -260,7 +260,7 @@ reads them. Workspace-level settings are not: a tick has no workspace.
   too, so an `"all"` junction is never half-stamped.
 
 Deadlines tick, the spend ceiling disarms, retries are scheduled and honoured,
-and `the command printed…` is answered from the journal — every rule the engine
+and `the command printed…` and `the command reported…` are answered from the journal — every rule the engine
 knows behaves the same, because it is the same engine.
 
 **What is different, and stated.**
@@ -512,6 +512,47 @@ dry run and the card's stepper say what the engine says. Three consequences:
 
 A blank text is a rule that can never fire, reported as such in the inspector
 and at arm time, like a blank status.
+
+## A command that reports a value
+
+`the command printed…` asks whether a word appeared. That covers the common
+case — a smoke test printing `OK` — and stops exactly where a typed result
+begins: nothing downstream can read *which* environment a deploy landed in,
+only whether the word appeared. `the command reported…` is the narrow answer.
+
+A command may print **one JSON object as its last line**:
+
+```sh
+deploy.sh … && echo '{"env":"staging","version":"1.4.2"}'
+```
+
+The host parses that line at capture — off the **full** output, before the
+journal's head/tail cut, so a chatty script's report is never the part that
+gets elided — and stores it on the `fired`/`errored` line as `result`. A rule
+out of the command node with a **field** and a **value** is met when the
+report carries that field as that value: `env` is `staging` promotes, `env`
+is `prod` pages you. It rides the same journal read and the same verdict
+channel `printed…` uses, so everything said above holds — a failed command's
+report counts, Reset resets the reading, no journal means no match.
+
+What it deliberately is not:
+
+- **Not a pattern, not a path.** One object, one line, one top-level field,
+  compared as text and case-sensitively: `"1.4.2"` and `1.4.2` are the same
+  fact, `"Prod"` is not `"prod"`. A nested object or an array never matches.
+- **Not the last line unless it is an object.** A script whose last line is
+  ordinary text — or `[1,2]`, or a number — reported nothing, and the rule
+  waits. Broken JSON reads the same way: never an error.
+- **Not a change to the output rules.** The 1 MiB output ceiling, the failure
+  on overflow, and the journal's truncation are exactly where they were; a
+  command torn down at the ceiling reports nothing.
+
+A blank field is a rule that can never fire, reported like a blank text. A
+blank value is not: a script may well report `"warnings": ""`.
+
+This is the first time a rule has carried anything but strings and stamps, and
+it is the kind of addition that wants to grow. It is kept this small on
+purpose.
 
 ## Deadlines
 

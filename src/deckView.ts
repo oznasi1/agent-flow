@@ -5,10 +5,10 @@ import * as path from "path";
 import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal, atTokenCeiling, flowRunKeys, hasTokenCeiling } from "./engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal, atTokenCeiling, flowRunKeys, hasTokenCeiling, parseResult } from "./engine/orchestrator/model";
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
-import { appendEvent, truncateOutput, findEdgeOutput, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
+import { appendEvent, truncateOutput, findEdgeOutput, needsOutputVerdicts, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
 import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, normalizedTemplateFlow, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
 import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
@@ -763,7 +763,7 @@ export class DeckPanel {
    * for the reason `branchCiWanted` gives: this can run on a hand-edited flow. */
   private printedFor(flow: Flow): Record<string, boolean> | undefined {
     const edges = Array.isArray(flow.edges) ? flow.edges : [];
-    if (!edges.some((e) => e && e.cond?.kind === "command-printed" && !isSettled(e))) return undefined;
+    if (!needsOutputVerdicts(flow)) return undefined;
     try {
       return printedVerdicts(flow, readJournal(this.journalIo, this.flowsDir, flow.id));
     } catch {
@@ -1172,6 +1172,9 @@ export class DeckPanel {
         // what `applyFired` stamps onto the edge, and an edge receipt is one
         // sentence. The output is for the journal alone.
         const outputs = new Map<string, string>();
+        // The JSON object a command reported on its last line, per edge — see
+        // `parseResult`. Journaled beside `output`, and read by `command-result`.
+        const results = new Map<string, Record<string, unknown>>();
         const promotions: { nodeId: string; runKey: string; repo: string }[] = [];
         const spawns: { nodeId: string; childFlowId: string; template: string }[] = [];
         const receipts: { level: "success" | "error"; message: string }[] = [];
@@ -1313,6 +1316,11 @@ export class DeckPanel {
           }
           outcomes.set(f.edge.id, done.outcome);
           if (done.output !== undefined && done.output.length > 0) {
+            // The report is parsed off the FULL output, before the head/tail cut
+            // below — a chatty command's last line is exactly what truncation
+            // would otherwise throw away.
+            const result = parseResult(done.output);
+            if (result) results.set(f.edge.id, result);
             outputs.set(f.edge.id, truncateOutput(done.output));
           }
           if (done.promote) promotions.push(done.promote);
@@ -1397,11 +1405,13 @@ export class DeckPanel {
           const e = next.edges.find((x) => x.id === f.edge.id);
           if (!e) continue;
           const output = outputs.get(f.edge.id);
+          const result = results.get(f.edge.id);
           const action = f.action ?? "unknown";
           if (e.error !== undefined) {
             this.journal(flow.id, {
               kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error,
               ...(output === undefined ? {} : { output }),
+              ...(result === undefined ? {} : { result }),
             }, nowMs);
             // The failure was scheduled to try again rather than latched
             // (`failedStamp`, runner.ts). Its own line, after the error's: the
@@ -1416,6 +1426,7 @@ export class DeckPanel {
             this.journal(flow.id, {
               kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "",
               ...(output === undefined ? {} : { output }),
+              ...(result === undefined ? {} : { result }),
             }, nowMs);
           }
         }

@@ -856,6 +856,29 @@ describe("evaluateFlow — command-printed", () => {
   });
 });
 
+describe("evaluateFlow — command-result", () => {
+  const resultRule = (id: string, from: string, to: string) =>
+    edge(id, from, to, { cond: { kind: "command-result", field: "env", value: "staging" } });
+  const ran = (performerOver: Partial<FlowEdge> = { firedAt: NOW - 1, performed: true }) =>
+    flowWith([place("a", "PROJ-1"), command("c"), notify("z")],
+      [edge("e1", "a", "c", { action: "run", ...performerOver }), resultRule("e2", "c", "z")]);
+
+  it("fires on the host's verdict once the command has performed — succeeded or failed — and not before", () => {
+    expect(evaluateFlow({ flow: ran(), statuses: [status("PROJ-1")], nowMs: NOW, printed: { e2: true } }).fired.map((f) => f.edge.id)).toEqual(["e2"]);
+    expect(evaluateFlow({ flow: ran({ error: "exit 1", performed: true }), statuses: [status("PROJ-1")], nowMs: NOW, printed: { e2: true } }).fired.map((f) => f.edge.id)).toEqual(["e2"]);
+    expect(evaluateFlow({ flow: ran({}), statuses: [status("PROJ-1")], nowMs: NOW, printed: { e2: true } }).fired).toEqual([]);
+    expect(evaluateFlow({ flow: ran(), statuses: [status("PROJ-1")], nowMs: NOW }).fired).toEqual([]);
+    expect(evaluateFlow({ flow: ran(), statuses: [status("PROJ-1")], nowMs: NOW, printed: { e2: false } }).fired).toEqual([]);
+  });
+
+  it("refuses the kind wired off a place, silently", () => {
+    const flow = flowWith([place("a", "PROJ-1"), notify("z")], [resultRule("e1", "a", "z")]);
+    const r = evaluateFlow({ flow, statuses: [status("PROJ-1")], nowMs: NOW, printed: { e1: true } });
+    expect(r.fired).toEqual([]);
+    expect(r.blocked).toEqual([]);
+  });
+});
+
 describe("evaluateFlow — a failure pending retry", () => {
   const retrying = (retryAt: number) =>
     flowWith([place("a", "PROJ-1"), planned("p")],

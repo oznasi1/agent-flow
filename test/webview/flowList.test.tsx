@@ -961,8 +961,8 @@ describe("a parameterised condition", () => {
     const values = Array.from(
       screen.getByLabelText("Condition").querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    // Both command-shaped kinds, and nothing place- or gate-shaped.
-    expect(values).toEqual(["command-succeeded", "command-printed"]);
+    // The three command-shaped kinds, and nothing place- or gate-shaped.
+    expect(values).toEqual(["command-succeeded", "command-printed", "command-result"]);
   });
 });
 
@@ -1014,7 +1014,7 @@ describe("adding a rule from the keyboard", () => {
     expect(cond.value).toBe("pr-merged");
     fireEvent.change(within(bar).getByLabelText("From node"), { target: { value: "n2" } });
     expect(Array.from(cond.querySelectorAll("option")).map((o) => (o as HTMLOptionElement).value))
-      .toEqual(["command-succeeded", "command-printed"]);
+      .toEqual(["command-succeeded", "command-printed", "command-result"]);
     // Asserted on the rule the bar actually BUILDS, not on the select's rendered
     // value: jsdom resolves a value matching no option to the FIRST option, so a
     // draft still holding `pr-merged` would read as "command-succeeded" here

@@ -103,6 +103,16 @@ describe("runHeadlessPass — run", () => {
     expect(w.events()[0]).toMatchObject({ kind: "fired", action: "run", output: "DEPLOYED\n" });
   });
 
+  it("journals the JSON object a command reports on its last line as `result`, parsed before truncation", async () => {
+    const w = world([cmdFlow({ commandConfirmedAt: 5 })]);
+    const chatter = "x".repeat(20_000);
+    w.runner.mockResolvedValueOnce({ code: 0, stdout: `${chatter}\n{"env":"staging","version":"1.4.2"}\n`, stderr: "" });
+    await runHeadlessPass(w.deps());
+    const fired = w.events().find((e) => e.kind === "fired") as { output?: string; result?: unknown };
+    expect(fired.result).toEqual({ env: "staging", version: "1.4.2" });
+    expect(fired.output).toContain("bytes elided");
+  });
+
   it("leaves an UNCONSENTED command pending, says so, and never asks or invents an approval", async () => {
     const w = world([cmdFlow()]);
     const r = await runHeadlessPass(w.deps());

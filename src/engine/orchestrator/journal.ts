@@ -9,7 +9,7 @@
 // and no real clock. `path` is the only import, exactly as in `store.ts` — this
 // module is host-side and never reachable from a webview entry point.
 import * as path from "path";
-import { Flow, findNode, incomingEdges, isSettled, outputContains } from "./model";
+import { Flow, findNode, incomingEdges, isSettled, outputContains, resultMatches } from "./model";
 import { FlowAction, isSpendAction, SpendTally } from "./model";
 import { VALID_FLOW_ID } from "./store";
 
@@ -56,8 +56,13 @@ export type JournalEventInput =
   | { kind: "armed"; armed: boolean; source: string }
   | { kind: "consent-asked"; action: string; target: string }
   | { kind: "consented"; answer: string }
-  | { kind: "fired"; edge: string; from: string; to: string; action: string; note: string; output?: string }
-  | { kind: "errored"; edge: string; from: string; to: string; action: string; error: string; output?: string }
+  /** `result` is the one JSON object a command reported on its last line
+   * (`parseResult`, model.ts), parsed from the full output at capture — so it
+   * survives the head/tail truncation `output` takes, and a `command-result`
+   * rule reads a value rather than a substring. Absent when the command
+   * reported nothing, and on every line written before this field existed. */
+  | { kind: "fired"; edge: string; from: string; to: string; action: string; note: string; output?: string; result?: Record<string, unknown> }
+  | { kind: "errored"; edge: string; from: string; to: string; action: string; error: string; output?: string; result?: Record<string, unknown> }
   | { kind: "deferred"; edge: string; reason: string }
   | { kind: "skipped"; edge: string; reason: "disarmed-mid-pass" | "lock-lost" }
   | { kind: "promoted"; node: string; runKey: string; repo: string }
@@ -297,7 +302,7 @@ export type EdgeOutputRefusal =
   | "no-output"; // this edge fired or errored, but that event carries no `output`
 
 export type EdgeOutputResult =
-  | { ok: true; output: string; kind: "fired" | "errored"; action: string; at: number }
+  | { ok: true; output: string; kind: "fired" | "errored"; action: string; at: number; result?: Record<string, unknown> }
   | { ok: false; reason: EdgeOutputRefusal };
 
 /** What `flow:openOutput` shows for one edge: the OUTPUT half of its most
@@ -322,13 +327,16 @@ export type EdgeOutputResult =
 export function findEdgeOutput(events: JournalEvent[], edgeId: string): EdgeOutputResult {
   if (events.length === 0) return { ok: false, reason: "no-journal" };
   const forEdge = events.filter(
-    (e): e is JournalEvent & { kind: "fired" | "errored"; output?: string } =>
+    (e): e is JournalEvent & { kind: "fired" | "errored"; output?: string; result?: Record<string, unknown> } =>
       (e.kind === "fired" || e.kind === "errored") && e.edge === edgeId,
   );
   if (forEdge.length === 0) return { ok: false, reason: "no-event" };
   const latest = forEdge[forEdge.length - 1];
   if (latest.output === undefined) return { ok: false, reason: "no-output" };
-  return { ok: true, output: latest.output, kind: latest.kind, action: latest.action, at: latest.at };
+  // `result` rides along only when the line carries a plain object — a
+  // hand-mangled line can hold anything, and a reader must not have to guard.
+  const result = latest.result !== null && typeof latest.result === "object" && !Array.isArray(latest.result) ? latest.result : undefined;
+  return { ok: true, output: latest.output, kind: latest.kind, action: latest.action, at: latest.at, ...(result ? { result } : {}) };
 }
 
 /** Every `command-printed` rule's verdict for one flow, keyed by the RULE's edge
@@ -350,7 +358,10 @@ export function findEdgeOutput(events: JournalEvent[], edgeId: string): EdgeOutp
 export function printedVerdicts(flow: Flow, events: JournalEvent[]): Record<string, boolean> {
   const out: Record<string, boolean> = {};
   for (const e of flow.edges) {
-    if (e.cond.kind !== "command-printed" || isSettled(e)) continue;
+    // Both kinds that read a command's output, on the one channel: the
+    // substring rule reads `output`, the value rule reads the `result` the
+    // capture parsed off it. Same performer, same latest-line rule.
+    if ((e.cond.kind !== "command-printed" && e.cond.kind !== "command-result") || isSettled(e)) continue;
     if (findNode(flow, e.from)?.kind !== "command") continue;
     const performer = incomingEdges(flow, e.from).find((x) => x.performed === true && isSettled(x));
     if (performer === undefined) {
@@ -358,9 +369,19 @@ export function printedVerdicts(flow: Flow, events: JournalEvent[]): Record<stri
       continue;
     }
     const output = findEdgeOutput(events, performer.id);
-    out[e.id] = output.ok && outputContains(output.output, e.cond.text);
+    out[e.id] = output.ok && (e.cond.kind === "command-printed"
+      ? outputContains(output.output, e.cond.text)
+      : resultMatches(output.result, e.cond.field, e.cond.value));
   }
   return out;
+}
+
+/** Does this flow carry a rule the journal answers — `command-printed` or
+ * `command-result` — that is still pending? The host reads a journal only for
+ * such a flow; the ONE predicate both hosts use, so neither can forget a kind. */
+export function needsOutputVerdicts(flow: Flow): boolean {
+  const edges = Array.isArray(flow.edges) ? flow.edges : [];
+  return edges.some((e) => e && (e.cond?.kind === "command-printed" || e.cond?.kind === "command-result") && !isSettled(e));
 }
 /** What a flow has spent over its life, read off its `fired` lines: every
  * `launch` or `seed` opened a session, every `run` executed a command. Only
