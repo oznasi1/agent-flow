@@ -419,6 +419,21 @@ export interface Flow {
    * reads as "no ceiling" — what every flow had. Anything but a positive finite
    * number reads the same way (`hasCeiling`). */
   spendCeiling?: number;
+  /** The second ceiling, denominated in what the work actually costs rather than
+   * in events: effort-weighted token equivalents (`weightedEq`, engine/usage.ts
+   * — the `eq` figure a Deck card already prints), summed across the runs this
+   * flow's places belong to (`flowRunKeys`). `spendCeiling` counts a
+   * six-hour session and a one-minute one as one each; this does not. Kept as
+   * well as the count — they answer different questions.
+   *
+   * Measured host-side off the same transcripts the card reads (`UsageReader`),
+   * never stored: the figure is cumulative for the run, so it counts what you
+   * spent by hand in that run too, and Reset un-spends none of it. A pass that
+   * wants to spend while the figure is AT or past this stops before spending —
+   * a new session's cost is unknowable in advance, so there is no "would land
+   * under" arithmetic as there is for the count. Absent, or anything but a
+   * positive finite number, means no token ceiling (`hasTokenCeiling`). */
+  tokenCeiling?: number;
 
   commandConsents?: Record<string, CommandConsent>;
   /** Set on a flow a `subflow` node started: the flow and node it was started
@@ -445,6 +460,11 @@ export interface CommandConsent {
 export interface SpendTally {
   sessions: number;
   commands: number;
+  /** Effort-weighted token equivalents spent by the runs this flow's places
+   * belong to — the `eq` unit, see `Flow.tokenCeiling`. Present only when the
+   * host read it, which it does for a flow carrying a token ceiling; absent
+   * reads as "not measured", never as zero. */
+  eq?: number;
 }
 
 export function spendTotal(t: SpendTally): number {
@@ -466,6 +486,26 @@ export function hasCeiling(f: Flow): boolean {
  * performer that never ran. */
 export function overCeiling(f: Flow, tally: SpendTally, wanted: number): boolean {
   return hasCeiling(f) && spendTotal(tally) + wanted > f.spendCeiling!;
+}
+
+/** Does this flow have a token ceiling? Same tolerance as `hasCeiling`. */
+export function hasTokenCeiling(f: Flow): boolean {
+  return typeof f.tokenCeiling === "number" && Number.isFinite(f.tokenCeiling) && f.tokenCeiling > 0;
+}
+
+/** Has this flow's token spend reached its ceiling? AT the ceiling counts — the
+ * next spend would take it past by an amount nobody can know in advance — and a
+ * tally with no `eq` (not measured) never does: an unreadable transcript is not
+ * evidence of spend, and the count ceiling still stands. */
+export function atTokenCeiling(f: Flow, tally: SpendTally): boolean {
+  return hasTokenCeiling(f) && typeof tally.eq === "number" && tally.eq >= f.tokenCeiling!;
+}
+
+/** The runs this flow's places belong to, each once, in node order — what the
+ * token tally is summed over. A planned node has no run yet and contributes
+ * nothing until it is promoted to a place. */
+export function flowRunKeys(f: Flow): string[] {
+  return Array.from(new Set(f.nodes.filter(isPlace).map((n) => n.runKey)));
 }
 
 export function emptyFlow(id: string, name: string, nowMs: number): Flow {

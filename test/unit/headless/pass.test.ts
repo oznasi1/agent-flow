@@ -186,6 +186,30 @@ describe("runHeadlessPass — the ceiling, the lock, and a dry run", () => {
     expect(w.events().at(-1)).toMatchObject({ kind: "armed", armed: false, source: "ceiling" });
   });
 
+  it("disarms at the TOKEN ceiling when the runs' eq has reached it, reads only the flow's runs, and journals its own source", async () => {
+    const w = world([cmdFlow({ tokenCeiling: 500_000 })]);
+    const tokenSpend = vi.fn((_keys: string[]) => 500_000);
+    const r = await runHeadlessPass(w.deps({ tokenSpend }));
+    expect(tokenSpend).toHaveBeenCalledWith(["PROJ-1"]);
+    expect(w.runner).not.toHaveBeenCalled();
+    expect(r.flows[0].disarmedAtCeiling).toBe("500000 eq of 500000 eq spent, and this pass wanted 1");
+    expect(w.flowsNow().armed).toBe(false);
+    expect(w.events().at(-1)).toMatchObject({ kind: "armed", armed: false, source: "token-ceiling" });
+  });
+
+  it("runs while the token spend is under the ceiling, and when nothing could be measured", async () => {
+    const under = world([cmdFlow({ tokenCeiling: 500_000 })]);
+    await runHeadlessPass(under.deps({ tokenSpend: () => 499_999 }));
+    expect(under.runner).toHaveBeenCalledTimes(1);
+    const unread = world([cmdFlow({ tokenCeiling: 1 })]);
+    await runHeadlessPass(unread.deps({ tokenSpend: () => undefined }));
+    expect(unread.runner).toHaveBeenCalledTimes(1);
+    // No reader at all — every existing caller — enforces no token ceiling.
+    const none = world([cmdFlow({ tokenCeiling: 1 })]);
+    await runHeadlessPass(none.deps());
+    expect(none.runner).toHaveBeenCalledTimes(1);
+  });
+
   it("does nothing at all when another process holds the lock", async () => {
     const w = world([cmdFlow()]);
     w.lockIo.tryCreate(lockPath(DIR), JSON.stringify({ token: "other", at: NOW }));

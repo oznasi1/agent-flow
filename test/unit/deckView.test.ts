@@ -13390,6 +13390,90 @@ describe("a flow's spend ceiling", () => {
   });
 });
 
+describe("a flow's token ceiling", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+  const launchFlow = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "planned", x: 0, y: 0, join: "any", ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    ...over,
+  });
+  /** `weightedEq` of this is 1 + 5·output: 200_000 output tokens read as 1,000,001 eq. */
+  const usage = (output: number) => ({ input: 1, output, cacheWrite: 0, cacheRead: 0 });
+  const warmed = async (flow: Flow) => {
+    setConfig({ orchestrator: true });
+    h.flows = [flow];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "aws-ops", path: "/r/aws-ops", isGit: true }] })];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    h.usageReadRun.mockClear();
+    return opened;
+  };
+
+  it("disarms instead of launching once the runs' token spend has reached the ceiling, and says so in eq", async () => {
+    h.usageReadRun.mockReturnValue(usage(200_000));
+    const { send } = await warmed(launchFlow({ tokenCeiling: 1_000_000 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    // Read off the flow's run — its repos' paths — and nothing else.
+    expect(h.usageReadRun).toHaveBeenCalledWith(expect.any(String), ["/r/aws-ops"]);
+    const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(written.armed).toBe(false);
+    expect(written.edges[0].firedAt).toBeUndefined();
+    const msg = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(msg).toContain("token ceiling");
+    expect(msg).toContain("1.0M eq of 1.0M eq");
+    expect(journal().filter((e) => e.kind === "armed").at(-1)).toMatchObject({ armed: false, source: "token-ceiling" });
+    expect(trackSpy).toHaveBeenCalledWith(expect.objectContaining({ name: "flow_armed", armed: false, source: "token-ceiling" }));
+  });
+
+  it("launches while the token spend is under the ceiling", async () => {
+    h.usageReadRun.mockReturnValue(usage(100_000));
+    const { send } = await warmed(launchFlow({ tokenCeiling: 1_000_000 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("never reads a transcript for a flow with no token ceiling", async () => {
+    const { send } = await warmed(launchFlow({ spendCeiling: 50 }));
+    await send({ type: "deck:refresh" });
+    expect(h.usageReadRun).not.toHaveBeenCalled();
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats an unreadable transcript as not measured — the flow launches, and the count ceiling still stands", async () => {
+    h.usageReadRun.mockImplementation(() => { throw new Error("EACCES"); });
+    const { send } = await warmed(launchFlow({ tokenCeiling: 1 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("posts the eq figure on deck:flows only for a flow carrying a token ceiling", async () => {
+    h.usageReadRun.mockReturnValue(usage(200_000));
+    setConfig({ orchestrator: true });
+    h.flows = [launchFlow({ armed: false, tokenCeiling: 2_000_000 })];
+    h.runs = [mkRun({ key: "PROJ-1", repos: [{ name: "aws-ops", path: "/r/aws-ops", isGit: true }] })];
+    const { p } = await openPanel();
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { spend?: Record<string, unknown> };
+    expect(msg.spend).toEqual({ f1: { sessions: 0, commands: 0, eq: 1_000_001 } });
+  });
+});
+
 describe("a subflow node", () => {
   const openPanel = async () => {
     show();

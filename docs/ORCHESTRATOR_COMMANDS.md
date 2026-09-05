@@ -60,7 +60,9 @@ first four steps can end the pass without a command ever running.
    ceiling** bounds what it may spend over its whole life — sessions opened
    plus commands run — counted off its own journal. A pass whose spends would
    take that total past the ceiling performs none of them, disarms the flow,
-   and says so in a notification. See [The ceiling](#the-ceiling).
+   and says so in a notification. A second, optional **token ceiling** does
+   the same in the card's `eq` unit, read off the runs' transcripts. See
+   [The ceiling](#the-ceiling).
 5. **Ask for consent.** Two separate gates: one covers launching and seeding
    sessions, asked once per flow; the other covers running shell, asked once
    per **distinct command text** by default (`agentFlow.commandConsent`, see
@@ -409,6 +411,42 @@ the ceiling, or re-arm, to continue.
 One honest caveat: the journal is capped at 1 MB and trims its oldest lines.
 A flow chatty enough to be trimmed has lost its oldest spends, so on such a
 flow the count is a floor, not an exact total.
+
+### A ceiling in tokens, not events
+
+Sessions opened and commands run are the units you worry about at 2am, but a
+poor proxy for cost: a session that loops for six hours and one that answers in
+a minute both count as one. The second field in the header — **token ceiling**
+— is denominated in what the work actually cost: the effort-weighted **token
+equivalent** (`eq`) a Deck card already prints, computed by `engine/usage.ts`
+from the same Claude Code transcripts, and summed over the runs this flow's
+places belong to. Type it the way the card shows it — `800k`, `1.5M`, or a
+plain number.
+
+It is a second reader of a number already computed, not new machinery, and it
+keeps a few honest edges:
+
+- **It is the runs' figure, not the flow's.** A transcript does not say which
+  session a workflow started and which you opened by hand, so the tally is
+  everything spent in those runs, including your own sessions there. Reset
+  un-spends none of it; neither does deleting the flow.
+- **At the ceiling stops.** A new session's cost cannot be known in advance, so
+  there is no "would land under" arithmetic as there is for the count: a pass
+  that wants to spend while the figure is at or past the ceiling performs
+  nothing, disarms the flow, and says so — journaled as `armed` with
+  `source: "token-ceiling"`. A session already running keeps spending; the
+  ceiling stops the flow from starting the next one.
+- **Not measured is not zero.** A transcript that cannot be read is no evidence
+  of spend, so such a flow is not stopped by its token ceiling — the count
+  ceiling still is, and the header shows `—` where the figure would be.
+- **Only a flow that sets one is read.** The figure costs a `stat` per
+  transcript on every pass, so the header shows `eq` only once a token ceiling
+  is on the flow. To pick a sensible number, read the card: its footer prints
+  the run's `eq` today.
+
+Keep both: the count answers "how many times did this start something", the
+token figure answers "what has this cost". The headless tick enforces both
+from the same transcripts.
 
 ## Retry, if you ask for it
 
@@ -788,6 +826,7 @@ there, which closes the picker and opens the drawer's Templates view instead.
 | Kill signal                    | SIGKILL        | A script that traps TERM would otherwise run past its own deadline.        |
 | Consent prompts                | 1 per flow for sessions, 1 per distinct command text for shell | Sessions ask once and are remembered; shell asks per resolved text, sized once / next 5 / always. `agentFlow.commandConsent: flow` makes shell ask once per flow instead, as every release before 0.69 did. |
 | Spend ceiling                  | none by default | Optional lifetime bound per flow on sessions + commands, counted off the journal; the pass that would cross it disarms the flow instead. |
+| Token ceiling                  | none by default | Optional bound per flow in effort-weighted token equivalents (`eq`), read off the runs' transcripts; a pass that wants to spend at or past it disarms the flow instead. |
 | Telemetry about commands       | count only     | Never an id, a label, or the command text: a `run` string carries hostnames and sometimes tokens. |
 
 ## Proven in a real editor

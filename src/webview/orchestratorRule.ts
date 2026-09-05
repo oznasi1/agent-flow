@@ -35,6 +35,7 @@ import {
   spendTotal,
 } from "../engine/orchestrator/model";
 import { hasNote } from "../engine/prompt";
+import { formatEq } from "../engine/usage";
 import { BranchCiStatus, FlowCommand, FlowPromptMode, RunStatus } from "../types";
 
 /** The drawer's own wording for a condition. `describeCond` says what a place
@@ -960,13 +961,45 @@ export function parseCeilingInput(raw: string): { ok: true; ceiling: number | un
  * its life, and — when a ceiling is set — where that stands against it. Reads
  * "session", the vocabulary's word for one run of a coding tool (a Deck card),
  * never the other word. "nothing spent yet" rather than "0 sessions · 0
- * commands": a flow that has never acted should read as quiet, not as a tally. */
-export function spendSummary(t: SpendTally, ceiling: number | undefined): string {
+ * commands": a flow that has never acted should read as quiet, not as a tally.
+ * With a token ceiling the line gains the `eq` figure against it, in the card's
+ * own compact unit (`formatEq`); "—" while the host has not measured it. */
+export function spendSummary(t: SpendTally, ceiling: number | undefined, tokenCeiling?: number): string {
   const parts: string[] = [];
   if (t.sessions > 0) parts.push(`${t.sessions} ${t.sessions === 1 ? "session" : "sessions"}`);
   if (t.commands > 0) parts.push(`${t.commands} ${t.commands === 1 ? "command" : "commands"}`);
   const spent = parts.length === 0 ? "nothing spent yet" : `${parts.join(" · ")} spent`;
-  return ceiling === undefined ? spent : `${spent} · ${spendTotal(t)} of ${ceiling}`;
+  const counted = ceiling === undefined ? spent : `${spent} · ${spendTotal(t)} of ${ceiling}`;
+  if (tokenCeiling === undefined) return counted;
+  return `${counted} · ${t.eq === undefined ? "—" : formatEq(t.eq)} of ${formatEq(tokenCeiling)} eq`;
+}
+
+/** The aria-label of the flow header's token ceiling `<input>`. */
+export const TOKEN_CEILING_ARIA_LABEL = "Token ceiling";
+
+/** Write a flow's token ceiling (in `eq`), or DELETE it for `undefined` — the
+ * same shape as `withCeiling`, for the same reason: never store a blank. */
+export function withTokenCeiling(flow: Flow, ceiling: number | undefined): Flow {
+  if (ceiling === undefined) {
+    const { tokenCeiling: _drop, ...rest } = flow;
+    return rest;
+  }
+  return { ...flow, tokenCeiling: ceiling };
+}
+
+/** What the token ceiling field's text means, on blur. Blank removes it; a
+ * positive number, with an optional `k` or `M` suffix as the card prints them
+ * (`800k`, `1.5M`, `250000`), is a ceiling in `eq`, rounded to a whole unit;
+ * anything else is refused so the control reverts. Case-insensitive on the
+ * suffix — `1.5m` is what a person types. */
+export function parseEqInput(raw: string): { ok: true; ceiling: number | undefined } | { ok: false } {
+  const text = raw.trim();
+  if (text === "") return { ok: true, ceiling: undefined };
+  const m = /^(\d+(?:\.\d+)?)\s*([kKmM])?$/.exec(text);
+  if (!m) return { ok: false };
+  const scale = m[2] === undefined ? 1 : m[2].toLowerCase() === "k" ? 1_000 : 1_000_000;
+  const n = Math.round(Number(m[1]) * scale);
+  return Number.isFinite(n) && n > 0 ? { ok: true, ceiling: n } : { ok: false };
 }
 
 /** Write a rule's once-off note. Unlike `withMode`, there is exactly ONE home

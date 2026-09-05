@@ -5219,7 +5219,36 @@ describe("a flow's spend ceiling in the header", () => {
   it("offers no ceiling while editing a template — a template spends nothing", () => {
     render(<OrchestratorDrawer {...props({ flows: [], templates: [template()], openId: { kind: "template", id: "t1" } as OrchTarget })} />);
     expect(screen.queryByLabelText("Spend ceiling")).toBeNull();
+    expect(screen.queryByLabelText("Token ceiling")).toBeNull();
     expect(screen.queryByTestId("orch-spend")).toBeNull();
+  });
+
+  it("offers a token ceiling field beside the count, taking the card's suffixes and writing eq on blur", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()] })} />);
+    const box = screen.getByLabelText("Token ceiling") as HTMLInputElement;
+    expect(box.placeholder).toBe("none");
+    fireEvent.change(box, { target: { value: "1.5M" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).tokenCeiling).toBe(1_500_000);
+    expect("spendCeiling" in (onSave.mock.calls.at(-1)![0] as Flow)).toBe(false);
+  });
+
+  it("shows the host's eq figure against the token ceiling, reverts junk, and clears on blank", () => {
+    const f = wired();
+    f.tokenCeiling = 2_000_000;
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [f], spend: { f1: { sessions: 1, commands: 0, eq: 1_234_000 } } })} />);
+    expect(screen.getByTestId("orch-spend").textContent).toContain("1.2M of 2.0M eq");
+    const box = screen.getByLabelText("Token ceiling") as HTMLInputElement;
+    expect(box.value).toBe("2000000");
+    fireEvent.change(box, { target: { value: "a lot" } });
+    fireEvent.blur(box);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(box.value).toBe("2000000");
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    expect("tokenCeiling" in (onSave.mock.calls.at(-1)![0] as Flow)).toBe(false);
   });
 });
 

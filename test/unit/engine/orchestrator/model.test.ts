@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, gateAskEdge,
-  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy, hasCeiling, overCeiling, spendTotal, isPerformedAction, isSubflow, subflowDone, bindSubflow, subflowDepth, MAX_SUBFLOW_DEPTH, SubflowNode,
+  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy, hasCeiling, overCeiling, spendTotal, hasTokenCeiling, atTokenCeiling, flowRunKeys, isPerformedAction, isSubflow, subflowDone, bindSubflow, subflowDepth, MAX_SUBFLOW_DEPTH, SubflowNode,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -456,6 +456,41 @@ describe("a flow's spend ceiling", () => {
 
   it("spendTotal adds sessions and commands — one ceiling covers both kinds of spend", () => {
     expect(spendTotal({ sessions: 3, commands: 2 })).toBe(5);
+  });
+});
+
+describe("a flow's token ceiling", () => {
+  const f = (tokenCeiling?: number): Flow => ({ ...emptyFlow("f1", "f", 0), ...(tokenCeiling === undefined ? {} : { tokenCeiling }) });
+
+  it("hasTokenCeiling is true only for a positive finite number, like hasCeiling", () => {
+    expect(hasTokenCeiling(f())).toBe(false);
+    expect(hasTokenCeiling(f(0))).toBe(false);
+    expect(hasTokenCeiling(f(Number.POSITIVE_INFINITY))).toBe(false);
+    expect(hasTokenCeiling({ ...f(), tokenCeiling: "1M" as unknown as number })).toBe(false);
+    expect(hasTokenCeiling(f(1_000_000))).toBe(true);
+  });
+
+  it("atTokenCeiling is reached AT the ceiling, never by an unmeasured tally, and never without a ceiling", () => {
+    expect(atTokenCeiling(f(1_000), { sessions: 0, commands: 0, eq: 999 })).toBe(false);
+    expect(atTokenCeiling(f(1_000), { sessions: 0, commands: 0, eq: 1_000 })).toBe(true);
+    expect(atTokenCeiling(f(1_000), { sessions: 0, commands: 0, eq: 5_000 })).toBe(true);
+    // Not measured is not zero: an unreadable transcript is no evidence either way.
+    expect(atTokenCeiling(f(1_000), { sessions: 9, commands: 9 })).toBe(false);
+    expect(atTokenCeiling(f(), { sessions: 0, commands: 0, eq: 5_000 })).toBe(false);
+  });
+
+  it("flowRunKeys names each place's run once, in node order, and skips planned work", () => {
+    const flow: Flow = {
+      ...emptyFlow("f1", "f", 0),
+      nodes: [
+        { id: "a", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r1" },
+        { id: "b", kind: "planned", x: 0, y: 0, join: "any", ticketKey: "PROJ-2", repos: ["r1"], mode: "plan", dest: "worktree" },
+        { id: "c", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r2" },
+        { id: "d", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-3", repo: "r1" },
+      ],
+    };
+    expect(flowRunKeys(flow)).toEqual(["PROJ-1", "PROJ-3"]);
+    expect(flowRunKeys(emptyFlow("f2", "f", 0))).toEqual([]);
   });
 });
 

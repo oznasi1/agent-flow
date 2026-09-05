@@ -348,8 +348,10 @@ export type UsageEvent =
       name: "flow_armed"; armed: boolean; node_count: number; edge_count: number;
       unfirable_live: number; unfirable_pr_facts: number; unfirable_forge: number;
       // `ceiling`: the pass disarmed the flow itself because its next spend would
-      // have taken it past `spendCeiling`. Not a gesture in any window.
-      source: "toggle" | "resume-banner" | "auto-skip" | "ceiling";
+      // have taken it past `spendCeiling`. `token-ceiling`: the same, because the
+      // flow's token spend had reached `tokenCeiling`. Neither is a gesture in
+      // any window.
+      source: "toggle" | "resume-banner" | "auto-skip" | "ceiling" | "token-ceiling";
     }
   // One per edge this pass actually performed — never one per evaluation pass,
   // and never for a rule merely stamped as a sibling. `deferred` is a pre-flight

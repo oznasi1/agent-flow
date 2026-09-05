@@ -66,7 +66,7 @@ it are unaffected.
 
 | `kind` | Extra fields | Meaning |
 |---|---|---|
-| `armed` | `armed`, `source` | The flow was switched on or off. `source` is `toggle`, `resume-banner`, `auto-skip`, `ceiling`, or `spawn` (a child a subflow node started) — the last when the pass disarmed the flow itself at its spend ceiling. |
+| `armed` | `armed`, `source` | The flow was switched on or off. `source` is `toggle`, `resume-banner`, `auto-skip`, `ceiling` (the pass disarmed the flow itself at its spend ceiling), `token-ceiling` (the same, at its token ceiling), or `spawn` (a child a subflow node started). |
 | `consent-asked` | `action`, `target` | A pass needed first-spend approval, so it performed nothing and asked. |
 | `consented` | `answer` | You answered that question: `act`, `disarm`, or `dismissed` — and, under per-command consent, `act-once` or `act-batch` for a bounded approval. |
 | `fired` | `edge`, `from`, `to`, `action`, `note`, `output?` | A rule fired. |

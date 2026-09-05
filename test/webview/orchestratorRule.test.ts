@@ -45,7 +45,9 @@ import {
   retryLabel,
   failureText,
   withCeiling,
+  withTokenCeiling,
   parseCeilingInput,
+  parseEqInput,
   spendSummary,
   withNodeCwdRepo,
   withNodeJoin,
@@ -513,6 +515,31 @@ describe("a flow's spend ceiling in the rule module", () => {
     expect(parseCeilingInput("0")).toEqual({ ok: false });
     expect(parseCeilingInput("2.5")).toEqual({ ok: false });
     expect(parseCeilingInput("lots")).toEqual({ ok: false });
+  });
+
+  it("withTokenCeiling writes an eq figure on the flow and DELETES the field for none", () => {
+    const set = withTokenCeiling(wired(), 1_500_000);
+    expect(set.tokenCeiling).toBe(1_500_000);
+    expect("tokenCeiling" in withTokenCeiling(set, undefined)).toBe(false);
+  });
+
+  it("parseEqInput takes the card's own suffixes, rounds to a whole eq, and refuses the rest", () => {
+    expect(parseEqInput("")).toEqual({ ok: true, ceiling: undefined });
+    expect(parseEqInput("250000")).toEqual({ ok: true, ceiling: 250_000 });
+    expect(parseEqInput("800k")).toEqual({ ok: true, ceiling: 800_000 });
+    expect(parseEqInput(" 1.5M ")).toEqual({ ok: true, ceiling: 1_500_000 });
+    expect(parseEqInput("2m")).toEqual({ ok: true, ceiling: 2_000_000 });
+    expect(parseEqInput("0")).toEqual({ ok: false });
+    expect(parseEqInput("0.0001k")).toEqual({ ok: false });
+    expect(parseEqInput("-5")).toEqual({ ok: false });
+    expect(parseEqInput("lots")).toEqual({ ok: false });
+    expect(parseEqInput("1.5G")).toEqual({ ok: false });
+  });
+
+  it("appends the eq figure against a token ceiling, and a dash while it is unmeasured", () => {
+    expect(spendSummary({ sessions: 1, commands: 0, eq: 1_234_000 }, undefined, 2_000_000)).toBe("1 session spent · 1.2M of 2.0M eq");
+    expect(spendSummary({ sessions: 1, commands: 0 }, 5, 800_000)).toBe("1 session spent · 1 of 5 · — of 800k eq");
+    expect(spendSummary({ sessions: 0, commands: 0, eq: 5 }, undefined, undefined)).toBe("nothing spent yet");
   });
 
   it("sums up what a flow has spent, in the vocabulary — sessions, not the other word", () => {

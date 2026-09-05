@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseArgs, reportLines, USAGE } from "../../../src/headless/main";
+import { parseArgs, reportLines, tokenSpendReader, USAGE } from "../../../src/headless/main";
 
 describe("parseArgs", () => {
   it("reads the three flags and the settings path", () => {
@@ -37,5 +37,24 @@ describe("reportLines", () => {
     expect(USAGE).toContain("--settings");
     expect(USAGE).toContain("--dry-run");
     expect(USAGE).toContain("--no-fetch");
+  });
+});
+
+describe("tokenSpendReader", () => {
+  const runs = [
+    { key: "PROJ-1", repos: [{ path: "/r/a" }, { path: "/r/b" }] },
+    { key: "PROJ-2", repos: [{ path: "/r/c" }] },
+  ];
+
+  it("sums weighted eq over the named runs' repos, skipping a run it does not know", () => {
+    const readRun = (_root: string, cwds: string[]) => ({ input: cwds.length, output: 0, cacheWrite: 0, cacheRead: 0 });
+    const read = tokenSpendReader(runs, "/projects", { readRun } as never);
+    expect(read(["PROJ-1", "PROJ-2", "PROJ-9"])).toBe(3);
+    expect(read([])).toBe(0);
+  });
+
+  it("answers undefined — not measured — when the reader throws", () => {
+    const read = tokenSpendReader(runs, "/projects", { readRun: () => { throw new Error("EACCES"); } } as never);
+    expect(read(["PROJ-1"])).toBeUndefined();
   });
 });
