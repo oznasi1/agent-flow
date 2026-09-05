@@ -5,8 +5,8 @@ import * as path from "path";
 import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal } from "./engine/orchestrator/model";
-import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal, analyticsShape, retryPolicy } from "./engine/orchestrator/model";
+import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate, analyticsIdOf } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, findEdgeOutput, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
 import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, normalizedTemplateFlow, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
@@ -73,7 +73,7 @@ import { CardAgent, FlowPromptMode, InboundMessage, MergeMethod, OpenSession, Ou
 // card), unrelated to analytics — every later Deck telemetry emit goes through
 // `trackEvent`/`trackError` instead, never the bare names.
 import { track as trackEvent, trackError } from "./telemetry/telemetry";
-import { classifyFailure, DeckAction, Op, STOCK_REVIEW_MODES, toPromptModeProp, type TaskModeProp } from "./telemetry/events";
+import { classifyFailure, DeckAction, Op, STOCK_REVIEW_MODES, toFlowActionProp, toPromptModeProp, type TaskModeProp } from "./telemetry/events";
 import { modeProp } from "./telemetry/settingsSnapshot";
 
 export const POLL_MS = 6000;
@@ -323,6 +323,46 @@ const DECK_MESSAGE_OPS: Partial<Record<string, Op>> = {
 
 /** The Deck: a full-window board of every task launched via Agent Flow Deck, opened as a
  * singleton editor-area panel. Reuses the Jira client, runs store, and status engine. */
+/** The workflow-shape counts, spelled as the event catalog spells them. Built here
+ * rather than in `analyticsShape` so the engine module stays free of the wire
+ * format: `model.ts` answers what a workflow is made of, and this decides what of
+ * that we are willing to say. Spread into an event LITERAL at each call site —
+ * `track`'s `NoExcess` generic re-checks the merged result, so a property this
+ * helper grew that the catalog does not declare still fails to compile. */
+function analyticsProps(flow: Flow): {
+  rules_with_deadline: number;
+  rules_with_retry: number;
+  rules_with_output_condition: number;
+  subflow_node_count: number;
+} {
+  const shape = analyticsShape(flow);
+  return {
+    rules_with_deadline: shape.withDeadline,
+    rules_with_retry: shape.withRetry,
+    rules_with_output_condition: shape.withOutputCondition,
+    subflow_node_count: shape.subflowNodes,
+  };
+}
+
+/** `retries_used` for a rule about to be reported as fired, or nothing at all for
+ * a rule that carries no retry it could take.
+ *
+ * The distinction is deliberate and load-bearing for the analysis: an ABSENT
+ * property means "retries are not configured here", which is what every rule in
+ * every flow written before 0.68.0 has, while a present `0` means "a retry was
+ * configured and the first attempt worked". Collapsing the two would make the
+ * feature look adopted everywhere it is not.
+ *
+ * `e.attempts` counts FAILURES (runner.ts), and `e` here is the pre-act copy, so
+ * its value is exactly how many attempts this rule already burned before the one
+ * being reported. `retryPolicy` — not `e.retry` — decides whether a retry exists,
+ * so a RETRY typed onto a rule that could never take one (a notify, or a `run`
+ * without its explicit `retryOk` tick) reports nothing rather than a phantom. */
+function retryProps(e: FlowEdge, action: FlowAction | undefined): { retries_used?: number } {
+  if (retryPolicy(e, action) === undefined) return {};
+  return { retries_used: typeof e.attempts === "number" && e.attempts > 0 ? e.attempts : 0 };
+}
+
 export class DeckPanel {
   private static current: DeckPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
@@ -938,7 +978,7 @@ export class DeckPanel {
         // The write is based on `fresh`, not on the `flow` this pass evaluated:
         // writing the stale copy would erase the other window's stamp on the edge
         // we just decided not to claim, un-latching it so it fires all over again.
-        const fresh = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+        let fresh = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
         // Gone from the store between the two reads (another window deleted it).
         // Writing would resurrect a file the user removed. Stated explicitly rather
         // than left to `fresh?.edges ?? []` — that would land in the same place (no
@@ -946,6 +986,20 @@ export class DeckPanel {
         // written) but only by accident, and the plausible convenience spelling,
         // `fresh ?? flow`, silently recreates the deleted flow.
         if (!fresh) continue;
+        // Give this flow its reporting id before anything in the pass reports on
+        // it. Lazily, on the first pass that sees a flow without one, rather than
+        // as a migration over the whole store: a flow nobody runs is a flow
+        // nothing needs to say anything about, and rewriting every file on disk at
+        // upgrade time to add an analytics field would be exactly the kind of
+        // uninvited write this store is careful never to make. Costs one extra
+        // write, once, per flow — and only for flows written before this build.
+        if (!fresh.analyticsId) fresh = writeFlow(this.flowIo, this.flowsDir, fresh);
+        const flowUid = analyticsIdOf(fresh);
+        // A child's own rules report the depth they ran at, so a funnel can ask
+        // whether nested workflows behave like top-level ones. Computed once per
+        // pass rather than per rule: it cannot change mid-pass, and `subflowDepth`
+        // walks the whole store to answer.
+        const flowDepth = fresh.parentFlow === undefined ? undefined : subflowDepth(fresh, flows);
         const freshById = new Map(fresh.edges.map((e) => [e.id, e]));
         const unclaimed = result.fired
           .filter((f) => {
@@ -1039,9 +1093,16 @@ export class DeckPanel {
             this.resumeCleared.delete(flow.id);
             this.journal(flow.id, { kind: "armed", armed: false, source: "ceiling" }, nowMs);
             trackEvent({
-              name: "flow_armed", armed: false,
+              name: "flow_armed", armed: false, flow_uid: flowUid,
               node_count: fresh.nodes.length, edge_count: fresh.edges.length,
               unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+              // The one disarm where the ceiling numbers are the whole story:
+              // `spend_total` here is what the flow had spent when it stopped, and
+              // the ceiling it stopped against is `fresh.spendCeiling` — sent only
+              // as `has_ceiling`, because the ceiling itself is a number the user
+              // chose and the tally already says how far they got.
+              has_ceiling: true, spend_total: spendTotal(tally),
+              ...analyticsProps(fresh),
               source: "ceiling",
             });
             this.log(`deck: flow ${flow.id} disarmed — ${spendTotal(tally)} spent against a ceiling of ${fresh.spendCeiling}, and this pass wanted ${wanted} more`);
@@ -1170,9 +1231,11 @@ export class DeckPanel {
               // is the only place that fact exists. Nothing here computes an
               // armability split, so the three counts are zero.
               trackEvent({
-                name: "flow_armed", armed: false,
+                name: "flow_armed", armed: false, flow_uid: flowUid,
                 node_count: fresh.nodes.length, edge_count: fresh.edges.length,
                 unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+                has_ceiling: hasCeiling(fresh), spend_total: spendTotal(this.spendTallyOf(fresh.id)),
+                ...analyticsProps(fresh),
                 source: "auto-skip",
               });
             }
@@ -1215,12 +1278,16 @@ export class DeckPanel {
                 ? launched.dest
                 : undefined;
             trackEvent({
-              name: "flow_edge_fired", edge_action: "launch", ok: edgeOk, deferred: done.kind === "defer",
+              name: "flow_edge_fired", edge_action: "launch", ok: edgeOk, flow_uid: flowUid,
+              deferred: done.kind === "defer",
               ...(dest ? { dest } : {}), prompt_mode: toPromptModeProp(launched.mode), repo_count: launched.repos.length,
+              ...retryProps(f.edge, f.action), ...(flowDepth === undefined ? {} : { depth: flowDepth }),
             });
           } else {
             trackEvent({
-              name: "flow_edge_fired", edge_action: f.action, ok: edgeOk, deferred: done.kind === "defer",
+              name: "flow_edge_fired", edge_action: f.action, ok: edgeOk, flow_uid: flowUid,
+              deferred: done.kind === "defer",
+              ...retryProps(f.edge, f.action), ...(flowDepth === undefined ? {} : { depth: flowDepth }),
             });
           }
           // Renewed AFTER the act, against the real clock rather than this pass's
@@ -1371,7 +1438,15 @@ export class DeckPanel {
         // state — "settled" is every edge stamped or errored — so this is derived
         // here rather than read off a field.
         if (!wasSettled && next.edges.length > 0 && next.edges.every(isSettled)) {
-          trackEvent({ name: "flow_settled", node_count: next.nodes.length, edge_count: next.edges.length });
+          trackEvent({
+            name: "flow_settled", flow_uid: flowUid,
+            node_count: next.nodes.length, edge_count: next.edges.length,
+            // Off `next`, the copy just written — the same one the settled test
+            // above read — so the split describes the flow that actually settled.
+            // An edge is settled three ways and only one of them is a success.
+            expired_count: next.edges.filter((e) => e.expiredAt !== undefined).length,
+            errored_count: next.edges.filter((e) => e.error !== undefined && e.retryAt === undefined).length,
+          });
         }
         // `next`, not `fresh`: the message should describe what was actually just
         // written — same reasoning as building `next` from `atWrite` above — and
@@ -4443,7 +4518,10 @@ export class DeckPanel {
               return rest;
             })
           : flow.edges;
-        writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed, edges });
+        // The RETURN value, not the flow passed in: `writeFlow` mints the
+        // reporting id when the flow has none, and the event below must send the
+        // id that is now on disk rather than the empty one this copy came with.
+        const written = writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed, edges });
         // `source: "toggle"` matches the `flow_armed` telemetry this handler
         // already emits below, so the two records of one gesture agree. The
         // pass's own auto-skip records its disarm as its own `skipped` events
@@ -4513,9 +4591,15 @@ export class DeckPanel {
           this.resumeCleared.delete(m.id);
         }
         trackEvent({
-          name: "flow_armed", armed: m.armed,
+          name: "flow_armed", armed: m.armed, flow_uid: analyticsIdOf(written),
           node_count: flow.nodes.length, edge_count: flow.edges.length,
           unfirable_live: unfirable.live, unfirable_pr_facts: unfirable.pr, unfirable_forge: unfirable.forge,
+          // Sent on a disarm as well as an arm, deliberately: a workflow's spend
+          // at the moment its owner switched it off is the more interesting half
+          // of the pair, and reading headroom needs both numbers whether or not a
+          // ceiling was ever set.
+          has_ceiling: hasCeiling(flow), spend_total: spendTotal(this.spendTallyOf(flow.id)),
+          ...analyticsProps(flow),
           source: "toggle",
         });
         this.postFlows();
@@ -4706,7 +4790,7 @@ export class DeckPanel {
         if (!flow) return;
         this.pendingResume.delete(m.id);
         this.resumeCleared.add(m.id);
-        writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: false });
+        const written = writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: false });
         // `source: "resume-banner"` matches the `flow_armed` telemetry below, so
         // the two records of one gesture agree — the same rule the `flow:arm`
         // site follows. A disarm from the banner switches the flow off exactly as
@@ -4720,9 +4804,11 @@ export class DeckPanel {
         // split: nothing computes one on a disarm.
         trackEvent({ name: "flow_action", action: "resume_disarm" });
         trackEvent({
-          name: "flow_armed", armed: false,
+          name: "flow_armed", armed: false, flow_uid: analyticsIdOf(written),
           node_count: flow.nodes.length, edge_count: flow.edges.length,
           unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+          has_ceiling: hasCeiling(flow), spend_total: spendTotal(this.spendTallyOf(flow.id)),
+          ...analyticsProps(flow),
           source: "resume-banner",
         });
         this.postFlows();

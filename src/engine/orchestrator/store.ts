@@ -1,6 +1,7 @@
 // Flow persistence, one file per flow, beside the runs store. IO is injected for
 // the same reason `retire.ts` injects `exists`: it keeps this module free of `fs`
 // and every rule here testable without a temp directory.
+import { randomUUID } from "crypto";
 import * as os from "os";
 import * as path from "path";
 import { ACTION_MISMATCH_PREFIX, edgeAction, Flow, FlowEdge, FlowNode, isSettled } from "./model";
@@ -168,7 +169,19 @@ function latchActionMismatches(flow: Flow): Flow {
   };
 }
 
-export function writeFlow(io: FlowIo, dir: string, flow: Flow): void {
+/** Persist a flow, returning what was actually written — which is not always what
+ * was passed: `action` is filled in below, and a flow with no `analyticsId` is
+ * given one here. Callers that go on to REPORT on the flow they just wrote must
+ * use the return value, or they would send the pre-mint (empty) id.
+ *
+ * Minting here, on the write, rather than on the read or in a migration, is what
+ * keeps it honest three ways: nothing rewrites a file the user has not otherwise
+ * touched; a flow gets exactly one id for its whole life, because the field is
+ * only ever filled when absent; and TEMPLATES cannot acquire one at all, since
+ * they are written by `writeTemplate` and this function is never in their path.
+ * (`instantiate` and `normalizedTemplateFlow` build their output from a fresh
+ * object literal, so a template's inner flow cannot carry one in either.) */
+export function writeFlow(io: FlowIo, dir: string, flow: Flow): Flow {
   // Keep `action` in step with the node each edge points at — EXCEPT where a
   // stored value already disagrees with it. That disagreement must survive
   // the write, not just the read: `latchActionMismatches` only runs in
@@ -192,9 +205,23 @@ export function writeFlow(io: FlowIo, dir: string, flow: Flow): void {
   // on a downgrade or a rollback. Only a PRE-EXISTING disagreement survives.
   const normalised: Flow = {
     ...flow,
+    // `??`, not a truthiness check: an id already on disk is kept whatever it
+    // says, including a hand-typed one. Re-minting would break the one property
+    // the field has — that a workflow's events join up over its whole life.
+    analyticsId: flow.analyticsId ?? randomUUID(),
     edges: flow.edges.map((e) => ({ ...e, action: e.action ?? edgeAction(flow, e) })),
   };
   io.writeFile(fileFor(dir, flow.id), JSON.stringify(normalised, null, 2) + "\n");
+  return normalised;
+}
+
+/** The id to report this flow under, or `""` for a flow that has never been
+ * written by this build. Empty rather than a freshly minted value on purpose: a
+ * mint here would be a different id every time it was asked for, which is worse
+ * than no id at all — it would look like a new workflow per event. Every emit
+ * site reads through this, so "no id yet" is one shape everywhere. */
+export function analyticsIdOf(flow: Flow | undefined): string {
+  return typeof flow?.analyticsId === "string" ? flow.analyticsId : "";
 }
 
 /** Every flow in the store, newest first. Malformed files are skipped, not fatal;

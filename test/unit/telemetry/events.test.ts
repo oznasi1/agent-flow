@@ -54,9 +54,19 @@ const SAMPLES = [
   { name: "explore_started", flow_id: "f1", mode: "debug", source: "command" },
   { name: "explore_completed", flow_id: "f1", outcome: "cancelled", mode: "debug", cancel_point: "topic", repo_count: 2, duration_ms: 30 },
   { name: "flow_action", action: "dry_run", edge_count: 3, fired_count: 1, blocked_count: 0 },
-  { name: "flow_armed", armed: true, node_count: 4, edge_count: 3, unfirable_live: 0, unfirable_pr_facts: 1, unfirable_forge: 0, source: "toggle" },
-  { name: "flow_edge_fired", edge_action: "launch", ok: true, deferred: false, dest: "worktree", prompt_mode: "implementation", repo_count: 1 },
-  { name: "flow_settled", node_count: 4, edge_count: 3 },
+  {
+    name: "flow_armed", armed: true, flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e",
+    node_count: 4, edge_count: 3, unfirable_live: 0, unfirable_pr_facts: 1, unfirable_forge: 0,
+    has_ceiling: true, spend_total: 6, rules_with_deadline: 2, rules_with_retry: 1,
+    rules_with_output_condition: 0, subflow_node_count: 1, source: "toggle",
+  },
+  { name: "flow_edge_fired", edge_action: "launch", ok: true, flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", deferred: false, dest: "worktree", prompt_mode: "implementation", repo_count: 1, retries_used: 2, depth: 1 },
+  { name: "flow_settled", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", node_count: 4, edge_count: 3, expired_count: 1, errored_count: 0 },
+  { name: "flow_rule_expired", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", edge_action: "run", within_min: 60, waited_ms: 3_600_000 },
+  { name: "flow_rule_retried", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", edge_action: "launch", attempt: 2, max: 3, gave_up: false },
+  { name: "flow_consent_answered", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", mode: "command", action: "run", answer: "batch" },
+  { name: "flow_subflow", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", event: "refused", depth: 3, refusal: "depth" },
+  { name: "headless_tick", dry_run: false, flow_count: 5, armed_count: 2, fired: 3, errored: 0, deferred: 1, refused_pending: 2, duration_ms: 812 },
   { name: "marketplace_opened", revealed: false, asset_count: 7, plugin_count: 2, marketplace_count: 1, skills: 3, commands: 2, agents: 1, hooks: 1, not_set_up: false },
   { name: "marketplace_action", action: "read", truncated: true },
   { name: "tasks_fetched", filter: "sprint", lens: "mysprint", size: "any", task_count: 12, repo_count: 3, live_window_count: 2, authed: true },
@@ -85,7 +95,7 @@ describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
     const names = SAMPLES.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(33);
+    expect(names).toHaveLength(39);
   });
 
   it("carries no free-form strings outside the allow-list", () => {
