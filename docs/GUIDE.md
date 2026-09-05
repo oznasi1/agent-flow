@@ -237,11 +237,12 @@ back. Before it ever launches or seeds for the first time, a flow asks once — 
 ticket, the repos, and the prompt mode it would use — and only then runs unattended. Running
 its first command asks again, separately: approving a flow's launches only approves opening
 sessions, never running a shell command on your machine, so a flow you already
-confirmed for a launch still asks the first time one of its rules would run a command — and
-then, like a launch, runs unattended after that. If that is too coarse — a template attached
-to many cards asks once each and then spends freely — `agentFlow.commandConsent: "command"`
-asks per distinct command text instead, and lets you approve one run, the next five, or
-always. At most three of these — launches, seeds and
+confirmed for a launch still asks before one of its rules would run a command — and asks
+per distinct command text, letting you approve one run, the next five, or always for that
+text. A different command, or the same one with a different note, asks on its own.
+`agentFlow.commandConsent: "flow"` asks once per flow instead and then runs every command
+the flow holds unattended, which is what every release before 0.69 did. At most three of
+these — launches, seeds and
 commands together — happen in a single pass, with the rest picked up on the next one. A flow
 can also carry a **spend ceiling** — a lifetime cap on sessions opened plus commands run,
 counted off its journal and shown in its header — and a pass that would cross it performs

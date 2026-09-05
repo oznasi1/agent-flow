@@ -16,6 +16,7 @@ import { disposeTelemetry, initTelemetry, track } from "./telemetry/telemetry";
 import { settingsSnapshot } from "./telemetry/settingsSnapshot";
 import { maybeShowTelemetryNotice } from "./telemetry/notice";
 import { maybeShowModesNotice } from "./modesNotice";
+import { maybeShowConsentNotice } from "./consentNotice";
 import { CommandId } from "./telemetry/events";
 
 const INSTALLED_KEY = "agentFlow.telemetry.installReported";
@@ -214,6 +215,7 @@ export function activate(context: vscode.ExtensionContext): void {
     );
     void maybeShowTelemetryNotice(context, { setupRunning: isFirstEver });
     void maybeShowModesNotice(context, { setupRunning: isFirstEver });
+    void maybeShowConsentNotice(context, { setupRunning: isFirstEver });
   } catch (e) {
     log(`activation: optional step failed (extension still active): ${e instanceof Error ? e.message : String(e)}`);
   }

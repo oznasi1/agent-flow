@@ -151,6 +151,8 @@ const LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "the repository URL" },
   { location: "src/telemetry/notice.ts", text: "https://github.com/oznasi1/agent-flow/blob/main/docs/TELEMETRY.md",
     why: "the repository URL" },
+  { location: "src/consentNotice.ts", text: "https://github.com/oznasi1/agent-flow/blob/main/docs/ORCHESTRATOR_COMMANDS.md#consent-per-command",
+    why: "the repository URL" },
   { location: "src/tasksView.ts", text: "e.g. the deck-agents-view task",
     why: "an example branch name in a placeholder, not the noun" },
   // Task 6: explore_completed's cancel_point wire value naming the step where

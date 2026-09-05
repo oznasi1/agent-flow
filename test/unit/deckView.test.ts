@@ -9061,7 +9061,12 @@ describe("a met run rule acts", () => {
   /** Open with the conditions UNMET so the resume gate clears itself, then arm the
    * met ones — the same two-pass idiom every firing test in this file uses. */
   const warmed = async (flows: Flow[], log?: (m: string) => void) => {
-    setConfig({ orchestrator: true });
+    // The once-per-flow shell gate (`commandConfirmedAt`) is what every case in
+    // this block exercises, and `cmdFlow` pre-stamps it. It stopped being the
+    // default in 0.69 — the default keys consent to the command text and never
+    // reads that stamp (see "per-command consent" below) — so the mode is pinned
+    // here rather than assumed. Nothing about the mode itself changed.
+    setConfig({ orchestrator: true, commandConsent: "flow" });
     h.flows = flows;
     h.buildRunStatus.mockReturnValue(runStatus("OPEN", false));
     const opened = await openPanel(log);
@@ -10020,7 +10025,7 @@ describe("a met run rule acts", () => {
     // Not `warmed`: this rule's condition is met from the very first evaluation
     // (its performer is already stamped in the fixture), so the resume gate holds
     // it and approval — not a second poll — is what lets the pass act.
-    setConfig({ orchestrator: true });
+    setConfig({ orchestrator: true, commandConsent: "flow" }); // see `warmed`
     h.flows = [chainRootUnknown()];
     h.buildRunStatus.mockReturnValue(runStatus("MERGED"));
     const { send } = await openPanel();
@@ -10055,7 +10060,7 @@ describe("a met run rule acts", () => {
         { id: "e2", from: "n2", to: "n3", cond: { kind: "command-succeeded" }, action: "run" },
       ],
     });
-    setConfig({ orchestrator: true });
+    setConfig({ orchestrator: true, commandConsent: "flow" }); // see `warmed`
     h.flows = [chainRootGone()];
     h.buildRunStatus.mockReturnValue(runStatus("MERGED"));
     const { send } = await openPanel();

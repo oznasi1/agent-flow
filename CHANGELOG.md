@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Per-command consent is the default.** A workflow now asks before each distinct
+  shell command text it runs — Run once, Run the next 5, Always for this command,
+  or Disarm — instead of once per workflow. `agentFlow.commandConsent` was shipped
+  inert at `flow` so existing workflows survived that upgrade; templates and
+  subflows since made one drawn shape many live flows, each spending freely on a
+  single approval, while the denylist and the spend ceiling now bound what any of
+  them can do. A workflow whose commands you approved under `flow` asks again, once
+  per command text. The first activation after upgrading says so, once, to anyone
+  with the orchestrator on who has not set the mode themselves, and offers **Ask
+  once per workflow** as a one-click return; `agentFlow.commandConsent: "flow"`
+  is unchanged and still reads the approvals it always did. Only the exact string
+  `flow` opts back, so a typo lands in the safer mode.
+
 ## [0.68.1] — 2026-09-06
 
 ### Security

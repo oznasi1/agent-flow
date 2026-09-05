@@ -61,12 +61,13 @@ first four steps can end the pass without a command ever running.
    plus commands run — counted off its own journal. A pass whose spends would
    take that total past the ceiling performs none of them, disarms the flow,
    and says so in a notification. See [The ceiling](#the-ceiling).
-5. **Ask for consent, once per kind of spend.** Two separate gates: one
-   covers launching and seeding sessions, the other covers running
-   shell. Consent to open a session is **not** consent to execute a command,
-   so a flow you approved before commands existed is asked again. The modal
-   names the actual command text. The pass that asks performs nothing —
-   approval only lets the *next* pass act.
+5. **Ask for consent.** Two separate gates: one covers launching and seeding
+   sessions, asked once per flow; the other covers running shell, asked once
+   per **distinct command text** by default (`agentFlow.commandConsent`, see
+   [Consent per command](#consent-per-command)). Consent to open a session is
+   **not** consent to execute a command, so a flow you approved before commands
+   existed is asked again. The modal names the actual command text. The pass
+   that asks performs nothing — approval only lets the *next* pass act.
 6. **Run it.** Resolve the command (a named entry from settings, or the free
    text on the node), substitute `{note}`, decide the working directory, then
    hand it to the shell with a hard 120-second deadline.
@@ -125,13 +126,14 @@ literal — a `.` means a dot, not "any character" — and matching ignores case
 
 It is empty by default, so nothing changes until you add a pattern.
 
-Why this exists and not a finer consent: the two approvals a flow stores
-(`launchConfirmedAt`, `commandConfirmedAt`) are per flow and permanent. Approve
-one `deploy.sh` and every command node in that flow runs unattended from then
-on, **including ones added afterwards** — and a note added later can extend the
-command it lands in. An approval given once cannot know what it will authorise
-later. This list can, because it is checked against the text that is actually
-about to run, every time.
+Why this exists beside consent: an approval is given about the text as it read
+when you were asked. Under `agentFlow.commandConsent: flow` that approval is per
+flow and permanent — approve one `deploy.sh` and every command node in that flow
+runs unattended from then on, **including ones added afterwards**. Under the
+default per-command mode a changed note is a changed text and asks again, but
+"Always for this command" is still a standing approval for a string you read
+once. Neither can know what it will authorise later. This list can, because it
+is checked against the text that is actually about to run, every time.
 
 The check happens in two places: the rule never reaches the consent modal (you
 are not asked to approve something that cannot happen), and it is refused again
@@ -242,9 +244,9 @@ reads them. Workspace-level settings are not: a tick has no workspace.
 - **`notify`** fires: the rule is stamped with its receipt and the line the Deck
   would have toasted is printed instead. Nobody is notified beyond your log —
   a cron job's stdout is the notification.
-- **`run`** fires **only when the flow already consented** — `commandConfirmedAt`
-  under the default consent mode, a covering per-command record under
-  `agentFlow.commandConsent: command` (a bounded approval is counted down). The
+- **`run`** fires **only when the flow already consented** — a covering
+  per-command record under the default `agentFlow.commandConsent: command` (a
+  bounded approval is counted down), or `commandConfirmedAt` under `flow`. The
   tick never asks and never invents an approval; an unconsented command is left
   pending and named in the report. `agentFlow.neverAutoRun` is honoured before
   consent is even consulted, and the command runs through the same runner, with
@@ -278,27 +280,42 @@ writes nothing, runs nothing, and takes no lock.
 
 ## Consent per command
 
-The two consent gates are still two timestamps per flow, and that is
-proportionate for a flow drawn once by hand. It is not for a template: a shape
-attached to twenty cards is twenty flows, each asking once about its first
-`deploy.sh` and then running every command it has — including ones added to it
-later — unattended from then on. The denylist bounds what can never run; it
-says nothing about the far larger set of commands that are fine once and
-surprising the twentieth time.
+The session gate is one timestamp per flow, and that is proportionate: a
+launch names its ticket and repos, and the next one looks the same. The shell
+gate used to be one timestamp too, and that was not proportionate for a
+template: a shape attached to twenty cards is twenty flows, each asking once
+about its first `deploy.sh` and then running every command it has — including
+ones added to it later — unattended from then on. The denylist bounds what can
+never run; it says nothing about the far larger set of commands that are fine
+once and surprising the twentieth time.
 
-`agentFlow.commandConsent: "command"` keys the approval to the **resolved
-command text** instead — the string the modal shows, and the same one
-`agentFlow.neverAutoRun` matches against. Each new text asks, and the ask
-offers the approval's size: **Run once**, **Run the next 5**, **Always for this
-command**, or **Disarm**. A bounded approval counts down one per run, failures
-included (the command ran), and asks again when spent. A different command —
-or the same command with a different note spliced in, which is a different text
-— asks on its own. The answer lands in the flow's `commandConsents` record,
-never in `commandConfirmedAt`, so switching the setting back finds exactly the
-flow-wide approvals you actually gave and none you did not.
+So the shell gate is **per command** by default (`agentFlow.commandConsent:
+"command"`): the approval is keyed to the **resolved command text** — the
+string the modal shows, and the same one `agentFlow.neverAutoRun` matches
+against. Each new text asks, and the ask offers the approval's size: **Run
+once**, **Run the next 5**, **Always for this command**, or **Disarm**. A
+bounded approval counts down one per run, failures included (the command ran),
+and asks again when spent. A different command — or the same command with a
+different note spliced in, which is a different text — asks on its own. The
+answer lands in the flow's `commandConsents` record, never in
+`commandConfirmedAt`.
 
-The default, `"flow"`, is the released behaviour byte for byte. Sessions
-(launch and seed) are unchanged either way — their gate was never the problem.
+`agentFlow.commandConsent: "flow"` is the behaviour every install had before
+0.69: one approval per flow, then every command it holds runs unattended. It
+is still there, and it reads exactly the `commandConfirmedAt` stamps it always
+did — switching back finds the flow-wide approvals you actually gave and none
+you did not. Switching *to* per-command has the opposite effect, and it is the
+one thing the upgrade changes for an existing user: a flow whose commands you
+approved under `flow` asks again, once per command text, because the per-flow
+stamp is not consulted. The first activation after the upgrade says so, once,
+to anyone with the orchestrator on who has not set the mode themselves, and
+offers **Ask once per workflow** as a one-click return. Two things make the
+switch safe now that did not exist when the concern was first raised: the
+denylist outranks every approval, and [the ceiling](#the-ceiling) caps what any
+one flow can do before it disarms itself.
+
+Sessions (launch and seed) are unchanged either way — their gate was never the
+problem.
 
 ## The latch
 
@@ -725,7 +742,7 @@ there, which closes the picker and opens the drawer's Templates view instead.
 | Flows lock TTL                 | 300 s          | Held across a whole pass; a stale lock is reaped, never stolen.             |
 | Max output                     | 1 MiB          | Beyond it the process is torn down and the rule latches errored.            |
 | Kill signal                    | SIGKILL        | A script that traps TERM would otherwise run past its own deadline.        |
-| Consent prompts                | 2 per flow     | One for sessions, one for shell — asked once each, then remembered. With `agentFlow.commandConsent: command`, shell asks once per distinct command text instead, sized once / next 5 / always. |
+| Consent prompts                | 1 per flow for sessions, 1 per distinct command text for shell | Sessions ask once and are remembered; shell asks per resolved text, sized once / next 5 / always. `agentFlow.commandConsent: flow` makes shell ask once per flow instead, as every release before 0.69 did. |
 | Spend ceiling                  | none by default | Optional lifetime bound per flow on sessions + commands, counted off the journal; the pass that would cross it disarms the flow instead. |
 | Telemetry about commands       | count only     | Never an id, a label, or the command text: a `run` string carries hostnames and sometimes tokens. |
 
