@@ -208,6 +208,7 @@ export interface SettingsSnapshot {
   merge_writes: boolean;
   merge_method: "squash" | "merge" | "rebase" | "invalid";
   orchestrator: boolean;
+  command_consent: "flow" | "command" | "invalid";
   child_worktrees: boolean;
   stamp_label_on_write: boolean;
   track_open_windows: boolean;

@@ -27,7 +27,7 @@ const SAMPLES = [
     remote_control: "off", default_filter: "mysprint", task_mode: "ask",
     seed_agent: true, filters_size: true, filters_status: true, filters_repo: true,
     filters_search: true, pr_review_auto_fix: true, pr_facts: true, review_requests: true,
-    open_agents: true, review_writes: false, merge_writes: false, merge_method: "squash", orchestrator: false, child_worktrees: false, stamp_label_on_write: true, track_open_windows: true,
+    open_agents: true, review_writes: false, merge_writes: false, merge_method: "squash", orchestrator: false, command_consent: "flow", child_worktrees: false, stamp_label_on_write: true, track_open_windows: true,
     batch_confirm_threshold: 6, repo_blocklist_count: 0, commands_count: 0,
     prompt_modes_count: 6, prompt_modes_overridden: 0, prompt_modes_custom: 0, prompt_modes_hidden: 0,
     explore_prompts_customized: false, environments_customized: false,
@@ -95,7 +95,7 @@ describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
     const names = SAMPLES.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(39);
+    expect(names).toHaveLength(38);
   });
 
   it("carries no free-form strings outside the allow-list", () => {
@@ -118,8 +118,13 @@ describe("the event catalog", () => {
     }
   });
 
-  it("allow-lists only the three opaque string properties", () => {
-    expect([...OPEN_STRING_PROPS].sort()).toEqual(["error_class", "flow_id", "stack_digest"].sort());
+  it("allow-lists only the four opaque string properties", () => {
+    // Both open ids are random UUIDs minted by us and derived from nothing about
+    // the user: `flow_id` per Take (telemetry.ts's `startFlow`), `flow_uid` per
+    // orchestrator workflow (`Flow.analyticsId`). Neither is the orchestrator's
+    // own clock-derived flow id, which is absent from this list because it is
+    // never sent in any form, hashed or otherwise.
+    expect([...OPEN_STRING_PROPS].sort()).toEqual(["error_class", "flow_id", "flow_uid", "stack_digest"].sort());
   });
 });
 
