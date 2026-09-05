@@ -2,7 +2,7 @@ import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, hasCeiling, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode, SpendTally } from "../engine/orchestrator/model";
 import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
@@ -31,6 +31,11 @@ import {
   INSPECTOR_NONE,
   isMigrationNotice,
   launchDestOf,
+  CEILING_ARIA_LABEL,
+  CEILING_PLACEHOLDER,
+  parseCeilingInput,
+  spendSummary,
+  withCeiling,
   modeValueOf,
   nextEdgeId,
   nextNodeId,
@@ -441,6 +446,14 @@ export interface OrchestratorDrawerProps {
    * before the first post, and whenever PR facts are off (the host refuses to
    * serve a verdict it would not act on itself). */
   branchCi: Record<string, BranchCiStatus>;
+  /** What each flow has spent over its life, keyed by flow id — the host's own
+   * count off the journal (`spendTally`), because the webview cannot read a
+   * journal. Shown beside the ceiling the header lets a user set against it. A
+   * flow with no entry has spent nothing: the host omits flows with no journal
+   * rather than sending zeros for them. Optional, defaulting to that reading,
+   * so a caller without a tally (the card drawer's `flows` are not this prop)
+   * needs no second wire. */
+  spend?: Record<string, SpendTally>;
   /** Every saved template, from the same `deck:flows` post as `flows` itself
    * (`postFlows` in deckView.ts). Rendered on the Templates tab of the flow
    * switcher — never armed, disarmed or detached, because a template is not
@@ -1885,6 +1898,38 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 {nodeCount} {nodeCount === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
                 {flow.edges.length === 1 ? "rule" : "rules"}
               </span>
+              {/* The money line, and the one control that bounds it. Workflow-only,
+                  like Arm and the dry run beside it: a template spends nothing and
+                  has no journal to count. The tally is the HOST's (see the `spend`
+                  prop); the ceiling is written on the flow through the same
+                  `onSave` every other flow-level edit takes. `key={openKey}` for the
+                  reason the name input above gives: an uncontrolled field must reset
+                  when a different flow opens. */}
+              {!editingTemplate && (
+                <span
+                  className="row"
+                  data-testid="orch-spend"
+                  style={{ gap: 6, marginLeft: 10, fontSize: "var(--t-micro)", color: "var(--dim)" }}
+                >
+                  <span>· {spendSummary(p.spend?.[flow.id] ?? { sessions: 0, commands: 0 }, hasCeiling(flow) ? flow.spendCeiling : undefined)}</span>
+                  <span>· ceiling</span>
+                  <input
+                    className="orch-num"
+                    type="number"
+                    min={1}
+                    step={1}
+                    aria-label={CEILING_ARIA_LABEL}
+                    key={openKey}
+                    defaultValue={hasCeiling(flow) ? flow.spendCeiling : ""}
+                    placeholder={CEILING_PLACEHOLDER}
+                    onBlur={(ev) => {
+                      const parsed = parseCeilingInput(ev.currentTarget.value);
+                      if (parsed.ok) p.onSave(withCeiling(flow, parsed.ceiling));
+                      else ev.currentTarget.value = hasCeiling(flow) ? String(flow.spendCeiling) : "";
+                    }}
+                  />
+                </span>
+              )}
               <div className="sp" />
               {/* Every control in the `!editingTemplate` branch below is a
                   WORKFLOW verb — Save-as-template makes a NEW template from

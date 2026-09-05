@@ -9,6 +9,7 @@
 // and no real clock. `path` is the only import, exactly as in `store.ts` — this
 // module is host-side and never reachable from a webview entry point.
 import * as path from "path";
+import { FlowAction, isSpendAction, SpendTally } from "./model";
 import { VALID_FLOW_ID } from "./store";
 
 /** The only IO surface. `append` MUST open with `O_APPEND` so two windows writing
@@ -310,4 +311,26 @@ export function findEdgeOutput(events: JournalEvent[], edgeId: string): EdgeOutp
   const latest = forEdge[forEdge.length - 1];
   if (latest.output === undefined) return { ok: false, reason: "no-output" };
   return { ok: true, output: latest.output, kind: latest.kind, action: latest.action, at: latest.at };
+}
+
+/** What a flow has spent over its life, read off its `fired` lines: every
+ * `launch` or `seed` opened a session, every `run` executed a command. Only
+ * `fired` counts — an `errored` launch opened nothing, and a `reset` undoes the
+ * rule's receipt but not the money — and only a spending action does, through
+ * `isSpendAction` so this and the consent gate cannot disagree about what spends.
+ *
+ * Derived rather than stored (see `Flow.spendCeiling`), which carries one honest
+ * caveat: the journal is capped (`JOURNAL_CAP_BYTES`) and a flow chatty enough to
+ * be trimmed loses its oldest lines — and with them the oldest spends. A ceiling
+ * on such a flow is a floor on how much it has spent, not an exact count. */
+export function spendTally(events: JournalEvent[]): SpendTally {
+  const t: SpendTally = { sessions: 0, commands: 0 };
+  for (const e of events) {
+    // `action` is a `string` on the wire (a newer build's verb must still parse);
+    // `isSpendAction` answers `false` for anything it does not know.
+    if (e.kind !== "fired" || !isSpendAction(e.action as FlowAction)) continue;
+    if (e.action === "run") t.commands++;
+    else t.sessions++;
+  }
+  return t;
 }

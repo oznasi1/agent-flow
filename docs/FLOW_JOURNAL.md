@@ -66,7 +66,7 @@ it are unaffected.
 
 | `kind` | Extra fields | Meaning |
 |---|---|---|
-| `armed` | `armed`, `source` | The flow was switched on or off. |
+| `armed` | `armed`, `source` | The flow was switched on or off. `source` is `toggle`, `resume-banner`, `auto-skip`, or `ceiling` — the last when the pass disarmed the flow itself at its spend ceiling. |
 | `consent-asked` | `action`, `target` | A pass needed first-spend approval, so it performed nothing and asked. |
 | `consented` | `answer` | You answered that question: `act`, `disarm`, or `dismissed`. |
 | `fired` | `edge`, `from`, `to`, `action`, `note`, `output?` | A rule fired. |

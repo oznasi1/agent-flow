@@ -278,6 +278,54 @@ export interface Flow {
    * reads the same as "not from a template", the honest answer for a
    * hand-drawn one. */
   fromTemplate?: string;
+  /** How much this flow may spend over its whole life — sessions opened plus
+   * commands run — before it disarms itself. The count it is measured against is
+   * DERIVED from the flow's journal (`spendTally`, journal.ts), never stored here:
+   * every fired spend is already a journal line, so a stored counter would be a
+   * second copy of a fact that could drift from the first, and would need a
+   * migration for every flow already on disk. The journal is lifetime — Reset
+   * clears a rule's receipt but not its line — which is exactly what makes this
+   * a ceiling rather than a per-cycle budget.
+   *
+   * A pass whose spends would take the total PAST the ceiling performs none of
+   * them and disarms the flow, saying so (`advanceUnderLock`, deckView.ts). The
+   * per-pass cap (`MAX_LAUNCHES_PER_PASS`) bounds one pass; this bounds all of
+   * them, which matters most for a template instantiated many times over.
+   *
+   * Optional, and absent on every flow written before this field existed, which
+   * reads as "no ceiling" — what every flow had. Anything but a positive finite
+   * number reads the same way (`hasCeiling`). */
+  spendCeiling?: number;
+}
+
+/** What a flow has spent so far, counted off its journal's `fired` lines: a
+ * `launch` or a `seed` opened a session, a `run` executed a command. Defined here
+ * rather than in journal.ts because the webview shows it (`deck:flows` carries
+ * one per flow) and journal.ts imports `path`, which no browser bundle can take. */
+export interface SpendTally {
+  sessions: number;
+  commands: number;
+}
+
+export function spendTotal(t: SpendTally): number {
+  return t.sessions + t.commands;
+}
+
+/** Does this flow have a ceiling it can hit? A positive finite number and nothing
+ * else — same tolerance `hasDeadline`-style readers extend to a hand-edited file:
+ * `"spendCeiling": "10"` or `0` reaches here, and neither is a ceiling. */
+export function hasCeiling(f: Flow): boolean {
+  return typeof f.spendCeiling === "number" && Number.isFinite(f.spendCeiling) && f.spendCeiling > 0;
+}
+
+/** Would performing `wanted` more spends take this flow past its ceiling?
+ * Reaching the ceiling exactly is allowed — a ceiling of 10 means ten — and a flow
+ * with no ceiling is never over it. Asked of the WHOLE pass's spends rather than
+ * one at a time, so a pass either performs everything it decided or nothing: a
+ * half-performed pass would leave a junction's siblings stamped around a
+ * performer that never ran. */
+export function overCeiling(f: Flow, tally: SpendTally, wanted: number): boolean {
+  return hasCeiling(f) && spendTotal(tally) + wanted > f.spendCeiling!;
 }
 
 export function emptyFlow(id: string, name: string, nowMs: number): Flow {

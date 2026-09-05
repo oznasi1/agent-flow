@@ -2,7 +2,7 @@
 // Type-only: src/tasks/provider.ts imports Filter/Task/Size from here, so a
 // value import would be a runtime cycle. `import type` is erased at build time.
 import type { SerializedCaps, TaskConnector } from "./tasks/provider";
-import type { Flow } from "./engine/orchestrator/model";
+import type { Flow, SpendTally } from "./engine/orchestrator/model";
 import type { UsageTotals } from "./engine/usage";
 // A verdict enum, not a value module — `deck:flows` carries a map of these so the
 // drawer can say what a branch-CI rule is waiting on. Re-exported because the
@@ -975,10 +975,16 @@ export type OutboundMessage =
   // `templates` rides the same emptied-with-`flows` rule as `pendingResume` and
   // for the same reason: with the setting off there is nothing to attach, and
   // silence must not read as "not loaded yet".
+  // `spend` is what each flow has spent over its life, keyed by flow id and read
+  // off its journal by the host (`spendTally`) — the webview cannot read a
+  // journal, and the drawer shows the count beside the ceiling a user sets
+  // against it. Optional on the wire so an older webview bundle's fixture still
+  // typechecks; the drawer defaults a missing map to "nothing spent yet".
   | {
       type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[];
       promptModes: FlowPromptMode[]; commands: FlowCommand[];
       branchCi: Record<string, BranchCiStatus>; templates: FlowTemplate[];
+      spend?: Record<string, SpendTally>;
     }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }

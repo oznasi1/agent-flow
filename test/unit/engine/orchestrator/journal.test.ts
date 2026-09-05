@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   JournalIo, journalPath, createIdMinter, appendEvent, readJournal, findEdgeOutput,
-  truncateOutput, JOURNAL_CAP_BYTES, JOURNAL_TRIM_TO_BYTES, OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES,
+  truncateOutput, spendTally, JOURNAL_CAP_BYTES, JOURNAL_TRIM_TO_BYTES, OUTPUT_HEAD_BYTES, OUTPUT_TAIL_BYTES,
 } from "../../../../src/engine/orchestrator/journal";
 
 /** An in-memory JournalIo. `files` is the whole store. */
@@ -341,5 +341,28 @@ describe("findEdgeOutput", () => {
       { id: "r", at: 3, flow: "f1", kind: "reset" as const, edge: "e1" },
     ];
     expect(findEdgeOutput(events, "e1")).toEqual({ ok: true, output: "mine", kind: "fired", action: "run", at: 1 });
+  });
+});
+
+describe("spendTally", () => {
+  const fired = (edge: string, action: string) =>
+    ({ kind: "fired", edge, from: "n1", to: "n2", action, note: "" }) as const;
+
+  it("counts launches and seeds as sessions and runs as commands, off fired events alone", () => {
+    const { io } = fakeIo();
+    appendEvent(io, DIR, "f1", fired("e1", "launch"), 1_000);
+    appendEvent(io, DIR, "f1", fired("e2", "seed"), 1_001);
+    appendEvent(io, DIR, "f1", fired("e3", "run"), 1_002);
+    appendEvent(io, DIR, "f1", fired("e4", "notify"), 1_003);
+    appendEvent(io, DIR, "f1", fired("e5", "ask"), 1_004);
+    // A refusal spent nothing: a launch that could not open a window opened none.
+    appendEvent(io, DIR, "f1", { kind: "errored", edge: "e6", from: "n1", to: "n2", action: "launch", error: "x" }, 1_005);
+    // A Reset does not un-spend: the tally is lifetime, which is the point.
+    appendEvent(io, DIR, "f1", { kind: "reset", edge: "e1" }, 1_006);
+    expect(spendTally(readJournal(io, DIR, "f1"))).toEqual({ sessions: 2, commands: 1 });
+  });
+
+  it("is zero for a flow with no journal", () => {
+    expect(spendTally([])).toEqual({ sessions: 0, commands: 0 });
   });
 });

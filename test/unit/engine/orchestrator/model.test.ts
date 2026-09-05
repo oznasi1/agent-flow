@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, gateAskEdge,
-  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId,
+  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasCeiling, overCeiling, spendTotal,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -339,5 +339,29 @@ describe("gateAskEdge", () => {
   it("is undefined for a node that is not a gate, and for one that does not exist", () => {
     expect(gateAskEdge(gateAt([ask(), outgoing]), "n1")).toBeUndefined();
     expect(gateAskEdge(gateAt([ask(), outgoing]), "nope")).toBeUndefined();
+  });
+});
+
+describe("a flow's spend ceiling", () => {
+  const f = (spendCeiling?: number): Flow => ({ ...emptyFlow("f1", "f", 0), ...(spendCeiling === undefined ? {} : { spendCeiling }) });
+
+  it("hasCeiling is true only for a positive finite number — a hand-edited file can carry anything", () => {
+    expect(hasCeiling(f())).toBe(false);
+    expect(hasCeiling(f(0))).toBe(false);
+    expect(hasCeiling(f(-1))).toBe(false);
+    expect(hasCeiling({ ...f(), spendCeiling: "5" as unknown as number })).toBe(false);
+    expect(hasCeiling(f(5))).toBe(true);
+  });
+
+  it("overCeiling asks whether THIS pass's spends would take the lifetime total past the ceiling", () => {
+    const tally = { sessions: 3, commands: 1 };
+    expect(overCeiling(f(5), tally, 1)).toBe(false); // 4 + 1 = 5, at the ceiling is allowed
+    expect(overCeiling(f(5), tally, 2)).toBe(true); // 4 + 2 = 6
+    expect(overCeiling(f(), tally, 99)).toBe(false); // no ceiling, nothing to exceed
+    expect(overCeiling(f(5), { sessions: 0, commands: 0 }, 0)).toBe(false);
+  });
+
+  it("spendTotal adds sessions and commands — one ceiling covers both kinds of spend", () => {
+    expect(spendTotal({ sessions: 3, commands: 2 })).toBe(5);
   });
 });

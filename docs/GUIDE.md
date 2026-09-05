@@ -225,7 +225,10 @@ its first command asks again, separately: approving a flow's launches only appro
 sessions, never running a shell command on your machine, so a flow you already
 confirmed for a launch still asks the first time one of its rules would run a command — and
 then, like a launch, runs unattended after that. At most three of these — launches, seeds and
-commands together — happen in a single pass, with the rest picked up on the next one. A
+commands together — happen in a single pass, with the rest picked up on the next one. A flow
+can also carry a **spend ceiling** — a lifetime cap on sessions opened plus commands run,
+counted off its journal and shown in its header — and a pass that would cross it performs
+nothing and disarms the flow with a notification saying so. A
 launch, seed or command that fails stamps its rule as errored and stops it there until you
 **Reset** it; a pre-flight read that fails instead — Jira unreachable, say — is retried on the
 next pass rather than latched as a failure. Two VS Code windows with the Deck open cannot fire

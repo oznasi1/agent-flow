@@ -12853,3 +12853,109 @@ describe("hardening — local cards survive a failed rebuild", () => {
     expect(h.openInEditor).toHaveBeenCalledWith("/r/webapp");
   });
 });
+
+describe("a flow's spend ceiling", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** A place feeding planned work — the launch shape — already consented, so the
+   * only thing between a met rule and a launch is the ceiling. */
+  const launchFlow = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "planned", x: 0, y: 0, join: "any", ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    ...over,
+  });
+
+  const fired = (edge: string, action: string) =>
+    ({ kind: "fired", edge, from: "n1", to: "n2", action, note: "" }) as const;
+
+  /** Warm the resume gate with an unmet condition, then arm the met one. */
+  const warmed = async (flow: Flow) => {
+    setConfig({ orchestrator: true });
+    h.flows = [flow];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    return opened;
+  };
+
+  it("disarms instead of launching when this pass would take the lifetime spend past the ceiling, and says so", async () => {
+    // Four sessions and one command already on the record; a ceiling of 5; one
+    // more launch wanted. 5 + 1 > 5.
+    for (let i = 0; i < 4; i++) seedJournal("f1", fired(`e${i}`, "launch"), 1_000 + i);
+    seedJournal("f1", fired("e9", "run"), 1_010);
+    const { send } = await warmed(launchFlow({ spendCeiling: 5 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(written.armed).toBe(false);
+    expect(written.edges[0].firedAt).toBeUndefined();
+    expect(written.edges[0].error).toBeUndefined();
+    const msg = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(msg).toContain("Ship the migration");
+    expect(msg).toContain("5 of 5");
+    expect(msg).toContain("4 sessions");
+    expect(msg).toContain("1 command");
+    expect(journal().filter((e) => e.kind === "armed").at(-1)).toMatchObject({ armed: false, source: "ceiling" });
+    expect(trackSpy).toHaveBeenCalledWith(expect.objectContaining({ name: "flow_armed", armed: false, source: "ceiling" }));
+  });
+
+  it("launches while the spend would land AT or under the ceiling", async () => {
+    for (let i = 0; i < 4; i++) seedJournal("f1", fired(`e${i}`, "launch"), 1_000 + i);
+    const { send } = await warmed(launchFlow({ spendCeiling: 5 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(true);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("counts only what actually FIRED — an errored launch and a reset spent nothing and un-spend nothing", async () => {
+    for (let i = 0; i < 4; i++) seedJournal("f1", fired(`e${i}`, "launch"), 1_000 + i);
+    seedJournal("f1", { kind: "errored", edge: "e8", from: "n1", to: "n2", action: "launch", error: "no worktree" }, 1_008);
+    seedJournal("f1", { kind: "reset", edge: "e0" }, 1_009);
+    const { send } = await warmed(launchFlow({ spendCeiling: 5 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a ceiling that is not a positive number, as a hand-edited file can carry", async () => {
+    for (let i = 0; i < 9; i++) seedJournal("f1", fired(`e${i}`, "launch"), 1_000 + i);
+    const { send } = await warmed(launchFlow({ spendCeiling: 0 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+  });
+
+  it("posts the flow's tally on deck:flows, off the journal — launches and seeds as sessions, runs as commands", async () => {
+    // One flow only: the journal fake here reflects `h.journalLines` back for
+    // every flow id alike, so a second flow would read the first one's lines.
+    seedJournal("f1", fired("e1", "launch"), 1_000);
+    seedJournal("f1", fired("e2", "seed"), 1_001);
+    seedJournal("f1", fired("e3", "run"), 1_002);
+    seedJournal("f1", fired("e4", "notify"), 1_003);
+    setConfig({ orchestrator: true });
+    h.flows = [launchFlow({ armed: false })];
+    const { p } = await openPanel();
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { spend?: Record<string, unknown> };
+    expect(msg.spend).toEqual({ f1: { sessions: 2, commands: 1 } });
+  });
+
+  it("posts an empty tally for a flow with no journal — nothing spent is no entry, not zeros", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [launchFlow({ armed: false })];
+    const { p } = await openPanel();
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { spend?: Record<string, unknown> };
+    expect(msg.spend).toEqual({});
+  });
+});
