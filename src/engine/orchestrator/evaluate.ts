@@ -8,7 +8,7 @@ import { BranchCiStatus } from "./branchCi";
 import { CondContext, evalCond, placeActivity } from "./conditions";
 import {
   Condition, Flow, FlowAction, FlowEdge, deadlineAt, edgeAction, findNode, gateAskEdge, hasDeadline, incomingEdges,
-  isPlace, isSettled, isSpendAction,
+  isPlace, isSettled, isSpendAction, retryPending,
 } from "./model";
 
 /** How many SPENDING edges (`launch`, `seed` or `run` — whatever `isSpendAction`
@@ -267,6 +267,13 @@ function metOracle(i: EvalInput) {
     // `commandSucceeded`'s own doc comment. Intercepted before the place/status
     // lookup below, which a command node's incoming edges have no use for and
     // would otherwise report as an unhelpful "gone" or a silent never-fires.
+    // A failed rule waiting out its backoff is "not yet", whatever its condition
+    // says — first, so a junction reading this sibling sees the same answer the
+    // runner would act on. `false`, not `undefined`: nothing is unobservable,
+    // the rule is simply not due. Once the clock passes `retryAt` it is
+    // evaluated exactly as if it had never fired, and the condition must still
+    // hold — a retry is a second attempt at the same rule, not a replay.
+    if (e.retryAt !== undefined && i.nowMs < e.retryAt) return false;
     if (e.cond.kind === "command-succeeded") return commandSucceeded(i.flow, e.from);
     // Same spot, same reason — a command node's fact, not a place's — with the
     // verdict itself handed in by the host. See `commandPrinted`.
@@ -442,7 +449,12 @@ export function evaluateFlow(i: EvalInput): EvalResult {
     // an arrival, and an expiry is precisely a sibling that did NOT arrive. A
     // junction waiting on "both PRs merged" where one ran out of time has not
     // been met by one PR merging — it has been told the other never will.
-    if (incoming.some((e) => e.error !== undefined || e.expiredAt !== undefined)) continue;
+    //
+    // A failure that is PENDING RETRY (`retryPending`) is neither: it is still in
+    // play and will be re-evaluated, so it is left to the `allMet` check below —
+    // where its "not due yet" reads as unmet and holds the junction, and its
+    // due retry performs again as the same edge it always was.
+    if (incoming.some((e) => (e.error !== undefined && !retryPending(e)) || e.expiredAt !== undefined)) continue;
 
     // Already-settled siblings count as satisfied: the junction closes over
     // time, not in one instant, and a flow that forgot its earlier arrivals

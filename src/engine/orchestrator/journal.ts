@@ -73,7 +73,13 @@ export type JournalEventInput =
    * `errored` — it ran nothing and nothing broke — and deliberately not read by
    * `findEdgeOutput`, which would otherwise hide the output of a command that
    * DID run before a Reset-then-expire. */
-  | { kind: "expired"; edge: string; from: string; to: string; since: number };
+  | { kind: "expired"; edge: string; from: string; to: string; since: number }
+  /** A rule failed and, because it opted into retry (`FlowEdge.retry`), was
+   * scheduled to try again rather than latched: `attempt` is how many times it
+   * has now failed, `max` how many retries it may take, `retryAt` when the next
+   * one is allowed. Always follows the `errored` line for the same failure —
+   * that one says what went wrong, this one says what happens next. */
+  | { kind: "retrying"; edge: string; attempt: number; max: number; retryAt: number };
 
 /** An event as it sits on disk, minus `sum` — which is a property of the LINE,
  * not of the event, and is consumed by `readJournal` rather than handed on. */

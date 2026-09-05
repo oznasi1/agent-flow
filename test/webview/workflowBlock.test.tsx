@@ -520,3 +520,33 @@ describe("WorkflowBlock — a step with a deadline", () => {
     }
   });
 });
+
+describe("WorkflowBlock — a failure pending retry", () => {
+  it("reads as the current step with the error and the schedule, and offers Reset and Output", async () => {
+    const base = makeBase();
+    const retryingFlow: Flow = {
+      ...runFlow,
+      edges: [{ ...edge("e1"), retry: { max: 3, backoffMs: 60_000 }, retryOk: true, error: "exit 1", attempts: 1, retryAt: Date.now() + 30_000, performed: true }],
+    };
+    render(<WorkflowBlock {...base} flow={retryingFlow} state={{
+      status: "advancing", done: 0, total: 1,
+      steps: [{ edgeId: "e1", state: "now", receipt: "exit 1", retryAt: Date.now() + 30_000 }],
+    }} />);
+    expect(document.querySelector("li.wf-step")!.className).toBe("wf-step wf-now");
+    expect(screen.getByText(/exit 1 · retry 1 of 3 in (29|30)s/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Output" })).toBeTruthy();
+    await userEvent.click(screen.getByRole("button", { name: "Reset" }));
+    expect(base.onResetEdge).toHaveBeenCalledWith("e1");
+  });
+
+  it("a terminal failure after retries says what it cost", () => {
+    const failedFlow: Flow = {
+      ...runFlow,
+      edges: [{ ...edge("e1"), retry: { max: 2, backoffMs: 1 }, retryOk: true, error: "exit 1", attempts: 3, performed: true }],
+    };
+    render(<WorkflowBlock {...makeBase()} flow={failedFlow} state={{
+      status: "stopped", done: 1, total: 1, steps: [{ edgeId: "e1", state: "fail", receipt: "exit 1" }],
+    }} />);
+    expect(screen.getByText("exit 1 · gave up after 2 retries")).toBeTruthy();
+  });
+});

@@ -180,6 +180,42 @@ Every armed flow also keeps an append-only record of what it did — see
 > nothing was stamped — and the next pass will run it again. This is the
 > same gap the launch path has.
 
+## Retry, if you ask for it
+
+A failure is still a full stop — for every rule that has not said otherwise,
+which is every rule on disk today. But it over-applied in one place: a launch
+that failed because a worktree could not be created is safe to try again, and
+latching it until someone presses Reset at 2am helps nobody.
+
+A rule that **spends** — launch, seed or run — can carry a **RETRY**: how many
+more times to try, and how long to wait between tries. Off by default. When set,
+a failed attempt keeps its error (the drawer shows it in red, as it always did)
+but is not settled: it gains a schedule, the dry run and the card's stepper read
+`retry 1 of 3 in 40s`, and once the wait has passed the rule is evaluated again
+exactly as if it had never fired — the condition must still hold, and the
+consent the flow already gave still covers it. A success clears the error and
+says what it took (`opened bite-me-3a · after 2 retries`). The last allowed
+retry failing is the full stop, with the count kept: `gave up after 3 retries`.
+
+**A command is different, and the difference is the whole point.** A `run`
+rule's retry is honoured only alongside an explicit **safe to re-run** tick on
+that rule. A deploy that half-ran is not safe to run twice, and no default can
+know which of your commands are idempotent — so the retry policy on a command
+without the tick is inert, and the tick is asked for where it is decided, with
+the one sentence that matters beside it.
+
+Reset still works on a rule mid-retry — it is how you say "stop trying" — and
+clears the count and the schedule while keeping the policy. The journal records
+each scheduled retry as its own `retrying` line after the `errored` line, so
+"why did nothing fire?" does not mistake a retry for a stop.
+
+Two things a retry does **not** do. It does not retry a refusal — a rule whose
+target vanished under it, or a command `agentFlow.neverAutoRun` blocked, was
+never performed, so there is nothing to attempt again. And it does not paper
+over the act-then-record gap described under [The latch](#the-latch): an act
+whose write failed looks unfired, not failed, and is re-run by the ordinary
+path regardless of any retry policy.
+
 ## Reading what a command printed
 
 `the command succeeded` reads one bit off a command. `the command printed…`

@@ -15,7 +15,7 @@
 // living in this file. A second copy, even a faithful one today, is exactly
 // the drift "one model, two presentations" is warning against.
 import * as React from "react";
-import { CondKind, Condition, edgeAction, Flow, FlowEdge, isSettled, LaunchDest } from "../engine/orchestrator/model";
+import { CondKind, Condition, edgeAction, Flow, FlowEdge, isSettled, isSpendAction, LaunchDest, retryPending } from "../engine/orchestrator/model";
 import { FlowCommand, FlowPromptMode, RunStatus } from "../types";
 import {
   ACTION_LABEL,
@@ -51,6 +51,18 @@ import {
   repoOptions,
   OFFERED_DESTS,
   parseDeadlineInput,
+  DEFAULT_RETRY_BACKOFF_MS,
+  RETRY_BACKOFF_ARIA_LABEL,
+  RETRY_COUNT_ARIA_LABEL,
+  RETRY_OK_ARIA_LABEL,
+  RETRY_OK_HINT,
+  failureText,
+  parseBackoffSeconds,
+  parseRetryCount,
+  retryLabel,
+  retryText,
+  withRetry,
+  withRetryOk,
   truncatedNote,
   withCommandId,
   withCommandRun,
@@ -239,6 +251,62 @@ function ruleSentence(
       ) : deadlineLabel(e) !== null ? (
         <span>{deadlineLabel(e)}</span>
       ) : null}
+      {/* Opt-in retry, for the three verbs that spend — the same controls and
+          the same writers the inspector's RETRY clause uses; see its comment.
+          Inline here, like WITHIN: "…within 45m retry 3 times every 60s". */}
+      {derived !== undefined && isSpendAction(derived) && (open ? (
+        <>
+          <span className="orch-kw">RETRY</span>
+          <input
+            className="orch-num"
+            type="number"
+            min={1}
+            step={1}
+            aria-label={RETRY_COUNT_ARIA_LABEL}
+            key={`${e.id}-retry-max`}
+            defaultValue={e.retry?.max ?? ""}
+            placeholder="none"
+            onBlur={(ev) => {
+              const parsed = parseRetryCount(ev.currentTarget.value);
+              if (!parsed.ok) { ev.currentTarget.value = e.retry?.max === undefined ? "" : String(e.retry.max); return; }
+              onSave(withRetry(flow, e, parsed.max === undefined
+                ? undefined
+                : { max: parsed.max, backoffMs: e.retry?.backoffMs ?? DEFAULT_RETRY_BACKOFF_MS }));
+            }}
+          />
+          <span className="orch-plabel">times, every</span>
+          <input
+            className="orch-num"
+            type="number"
+            min={0}
+            aria-label={RETRY_BACKOFF_ARIA_LABEL}
+            key={`${e.id}-retry-backoff`}
+            defaultValue={e.retry ? Math.round(e.retry.backoffMs / 1000) : ""}
+            placeholder={String(DEFAULT_RETRY_BACKOFF_MS / 1000)}
+            disabled={e.retry === undefined}
+            onBlur={(ev) => {
+              if (e.retry === undefined) return;
+              const parsed = parseBackoffSeconds(ev.currentTarget.value);
+              if (parsed.ok) onSave(withRetry(flow, e, { max: e.retry.max, backoffMs: parsed.backoffMs }));
+              else ev.currentTarget.value = String(Math.round(e.retry.backoffMs / 1000));
+            }}
+          />
+          <span className="orch-plabel">s</span>
+          {derived === "run" && (
+            <label className="orch-plabel" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+              <input
+                type="checkbox"
+                aria-label={RETRY_OK_ARIA_LABEL}
+                checked={e.retryOk === true}
+                onChange={(ev) => onSave(withRetryOk(flow, e, ev.currentTarget.checked))}
+              />
+              {RETRY_OK_HINT}
+            </label>
+          )}
+        </>
+      ) : retryLabel(e) !== null ? (
+        <span>{retryLabel(e)}</span>
+      ) : null)}
 
       {/* THEN is a STATEMENT, not a choice — the same conclusion Task 9 reached
           for the canvas inspector, for a reason that applies word for word
@@ -871,7 +939,10 @@ export function FlowList(p: FlowListProps): JSX.Element {
     <div className="fl-list" role="list" aria-label="Rules" data-testid="orch-list">
       {rows.map((e, i) => {
         const open = openId === e.id;
-        const settled = isSettled(e);
+        // A failure pending retry gets the receipt row too — its error, the
+        // schedule, and Reset — even though it is not settled: "stop retrying"
+        // has to be reachable from the list as well as the canvas.
+        const settled = isSettled(e) || retryPending(e);
         return (
           <div
             key={e.id}
@@ -906,7 +977,10 @@ export function FlowList(p: FlowListProps): JSX.Element {
                   // same exception: red is for a rule that tried and failed, and
                   // the store's migration notice is not one — see
                   // `isMigrationNotice`.
-                  <span className={isMigrationNotice(e.error) ? undefined : "err"}>{e.error}</span>
+                  <>
+                    <span className={isMigrationNotice(e.error) ? undefined : "err"}>{retryPending(e) ? e.error : failureText(e)}</span>
+                    {retryPending(e) && <span>{retryText(e, Date.now())}</span>}
+                  </>
                 ) : e.expiredAt !== undefined ? (
                   // Neither licence: not done (nothing ran) and not a failure
                   // (nothing broke). The row's own dim voice, in the words the

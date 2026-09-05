@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, gateAskEdge,
-  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition,
+  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -391,5 +391,46 @@ describe("command-printed", () => {
     expect(condIncomplete({ kind: "command-printed", text: "" })).toBe("no text set");
     expect(condIncomplete({ kind: "command-printed", text: "ok" })).toBeUndefined();
     expect(condIncomplete({ kind: "command-printed" } as unknown as Condition)).toBe("no text set");
+  });
+});
+
+describe("opt-in retry", () => {
+  const failed = (over: Partial<FlowEdge> = {}) => edge("e1", "a", "z", { error: "boom", ...over });
+
+  it("an errored edge with a retryAt is pending retry, not settled; without one it is settled as always", () => {
+    expect(isSettled(failed())).toBe(true);
+    expect(retryPending(failed())).toBe(false);
+    expect(isSettled(failed({ retryAt: 5 }))).toBe(false);
+    expect(retryPending(failed({ retryAt: 5 }))).toBe(true);
+    // A retryAt with no error is a hand-edited oddity, not a pending retry.
+    expect(retryPending(edge("e1", "a", "z", { retryAt: 5 }))).toBe(false);
+  });
+
+  it("retryPolicy honours a well-formed policy on a launch or a seed, and refuses the rest", () => {
+    const e = edge("e1", "a", "z", { retry: { max: 3, backoffMs: 60_000 } });
+    expect(retryPolicy(e, "launch")).toEqual({ max: 3, backoffMs: 60_000 });
+    expect(retryPolicy(e, "seed")).toEqual({ max: 3, backoffMs: 60_000 });
+    expect(retryPolicy(e, "notify")).toBeUndefined();
+    expect(retryPolicy(e, "ask")).toBeUndefined();
+    expect(retryPolicy(e, undefined)).toBeUndefined();
+    expect(retryPolicy(edge("e1", "a", "z"), "launch")).toBeUndefined();
+    expect(retryPolicy(edge("e1", "a", "z", { retry: { max: 0, backoffMs: 1 } }), "launch")).toBeUndefined();
+    expect(retryPolicy(edge("e1", "a", "z", { retry: { max: 2.5, backoffMs: 1 } }), "launch")).toBeUndefined();
+    expect(retryPolicy(edge("e1", "a", "z", { retry: { max: 2, backoffMs: -1 } }), "launch")).toBeUndefined();
+    expect(retryPolicy(edge("e1", "a", "z", { retry: "3" as unknown as { max: number; backoffMs: number } }), "launch")).toBeUndefined();
+  });
+
+  it("retryPolicy refuses a run without the explicit safe-to-re-run tick, and honours it with", () => {
+    const e = edge("e1", "a", "z", { retry: { max: 2, backoffMs: 0 } });
+    expect(retryPolicy(e, "run")).toBeUndefined();
+    expect(retryPolicy({ ...e, retryOk: true }, "run")).toEqual({ max: 2, backoffMs: 0 });
+  });
+
+  it("stripHostStamps drops attempts and retryAt, and keeps the policy and the tick", () => {
+    const out = stripHostStamps(edge("e1", "a", "z", { retry: { max: 2, backoffMs: 1 }, retryOk: true, attempts: 2, retryAt: 9, error: "x" }));
+    expect(out.attempts).toBeUndefined();
+    expect(out.retryAt).toBeUndefined();
+    expect(out.retry).toEqual({ max: 2, backoffMs: 1 });
+    expect(out.retryOk).toBe(true);
   });
 });

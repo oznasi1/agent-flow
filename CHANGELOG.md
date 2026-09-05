@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Opt-in retry on a rule that spends.** Off by default, so a failure is still the full stop
+  it always was. A launch, seed or run rule can carry a **RETRY** count and wait; a failed
+  attempt keeps its red error but is not settled, reads `retry 1 of 3 in 40s`, and is tried
+  again once the wait passes — the condition must still hold and the flow's consent already
+  covers it. A success says `after 2 retries`; the last failure says `gave up after 3
+  retries`. A command's retry is honoured only with an explicit **safe to re-run** tick on
+  that rule. Reset mid-retry stops it. The journal gains a `retrying` event.
+
 - **A rule can read what a command printed.** A new condition off a command node, **the
   command printed…**, is met when the command's captured output contains a text — a plain
   case-insensitive substring — so "deploy printed `ROLLBACK`, page me" is one rule. The host

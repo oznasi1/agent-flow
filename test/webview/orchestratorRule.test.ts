@@ -32,6 +32,13 @@ import {
   withCond,
   withCondParams,
   withDeadline,
+  withRetry,
+  withRetryOk,
+  parseRetryCount,
+  parseBackoffSeconds,
+  retryText,
+  retryLabel,
+  failureText,
   withNodeCwdRepo,
   withNodeJoin,
 } from "../../src/webview/orchestratorRule";
@@ -447,5 +454,39 @@ describe("command-printed in the rule module", () => {
     const f = commandFlow();
     expect(observationOf(f, f.edges[1], [])).toBeNull();
     expect(observationFallback(f, f.edges[1])).toBe("waiting for deploy.sh to print “DEPLOYED”");
+  });
+});
+
+describe("opt-in retry in the rule module", () => {
+  it("withRetry writes a policy on the edge and DELETES it for none; withRetryOk stores only true", () => {
+    const f = wired();
+    const set = withRetry(f, f.edges[0], { max: 3, backoffMs: 60_000 });
+    expect(set.edges[0].retry).toEqual({ max: 3, backoffMs: 60_000 });
+    expect("retry" in withRetry(set, set.edges[0], undefined).edges[0]).toBe(false);
+    const ok = withRetryOk(f, f.edges[0], true);
+    expect(ok.edges[0].retryOk).toBe(true);
+    expect("retryOk" in withRetryOk(ok, ok.edges[0], false).edges[0]).toBe(false);
+  });
+
+  it("parses the count and the backoff the way the other numeric fields do", () => {
+    expect(parseRetryCount("")).toEqual({ ok: true, max: undefined });
+    expect(parseRetryCount("3")).toEqual({ ok: true, max: 3 });
+    expect(parseRetryCount("0")).toEqual({ ok: false });
+    expect(parseRetryCount("1.5")).toEqual({ ok: false });
+    expect(parseBackoffSeconds("90")).toEqual({ ok: true, backoffMs: 90_000 });
+    expect(parseBackoffSeconds("0")).toEqual({ ok: true, backoffMs: 0 });
+    expect(parseBackoffSeconds("")).toEqual({ ok: false });
+    expect(parseBackoffSeconds("-1")).toEqual({ ok: false });
+  });
+
+  it("words a pending retry, a closed row, and a terminal failure's cost", () => {
+    const e = { ...wired().edges[0], retry: { max: 3, backoffMs: 60_000 }, error: "no worktree", attempts: 1, retryAt: 100_000 };
+    expect(retryText(e, 100_000 - 40_000)).toBe("retry 1 of 3 in 40s");
+    expect(retryText(e, 100_000 + 5)).toBe("retry 1 of 3 on the next pass");
+    expect(retryLabel(e)).toBe("retry ×3");
+    expect(retryLabel(wired().edges[0])).toBeNull();
+    expect(failureText({ ...wired().edges[0], error: "gave up", attempts: 4 })).toBe("gave up · gave up after 3 retries");
+    expect(failureText({ ...wired().edges[0], error: "boom" })).toBe("boom");
+    expect(failureText({ ...wired().edges[0], error: "boom", attempts: 1 })).toBe("boom");
   });
 });

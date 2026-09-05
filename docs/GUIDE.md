@@ -195,7 +195,10 @@ all, not a bug waiting on a fix: quoting is the template author's job. A command
 goes on to spawn can outlive the kill. Its captured output is capped at 1 MiB; a chattier
 command is killed the same way and its rule latched as a failure. A failed command (like a
 failed launch or seed) latches and is never retried automatically until you click **Reset** —
-deliberately, so a broken deploy doesn't run again every six seconds. Any rule can also carry a
+deliberately, so a broken deploy doesn't run again every six seconds. A rule can opt into a
+**RETRY** — a count and a wait — and then a failed launch or seed is tried again that many
+times before it latches; a command's retry counts only once you have also ticked **safe to
+re-run** on that rule, because no default can know which of your commands are harmless twice. Any rule can also carry a
 **deadline** — a number of minutes in its **WITHIN** field — after which, if its condition
 still hasn't arrived, it settles as *expired* rather than waiting forever: not a failure, not
 red, just over. A sibling rule out of the same node on **a deadline here passed** is what then

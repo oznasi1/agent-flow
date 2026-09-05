@@ -77,6 +77,7 @@ it are unaffected.
 | `reset` | `edge` | A rule's receipt was cleared so it can fire again. |
 | `answered` | `edge`, `answer` | You approved or rejected a gate, on the rule that asked. |
 | `expired` | `edge`, `from`, `to`, `since` | A rule's deadline passed with its condition unmet; `since` is when its clock started. It ran nothing — see [Deadlines](ORCHESTRATOR_COMMANDS.md#deadlines). |
+| `retrying` | `edge`, `attempt`, `max`, `retryAt` | A failed rule that opted into retry was scheduled to try again rather than latched — always right after its `errored` line. See [Retry](ORCHESTRATOR_COMMANDS.md#retry-if-you-ask-for-it). |
 
 `output` carries a command's stdout and stderr, truncated to the first and last
 4 KB with the elided byte count stated in between.

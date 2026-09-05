@@ -13042,3 +13042,97 @@ describe("a command-printed rule", () => {
     expect(msg.printed).toEqual({});
   });
 });
+
+describe("opt-in retry on an armed flow", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** A consented launch rule that opted into two retries, 30s apart. */
+  const retryFlow = (edgeOver: Partial<FlowEdge> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "planned", x: 0, y: 0, join: "any", ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, retry: { max: 2, backoffMs: 30_000 }, ...edgeOver }],
+  });
+
+  const warmed = async (flow: Flow) => {
+    setConfig({ orchestrator: true });
+    h.flows = [flow];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    return opened;
+  };
+
+  it("schedules a retry when a launch fails, journals errored then retrying, and does not try again before the backoff", async () => {
+    h.launchPlanned.mockResolvedValueOnce({ ok: false, message: "worktree exists" });
+    const { send } = await warmed(retryFlow());
+    await send({ type: "deck:refresh" });
+    const e = h.flows[0].edges[0];
+    expect(e.error).toMatch(/worktree exists/);
+    expect(e.attempts).toBe(1);
+    expect(e.retryAt).toBeTypeOf("number");
+    const kinds = journal().map((j) => j.kind);
+    expect(kinds.indexOf("retrying")).toBe(kinds.indexOf("errored") + 1);
+    expect(journal().find((j) => j.kind === "retrying")).toMatchObject({ edge: "e1", attempt: 1, max: 2 });
+    // Not due yet: nothing launches on the next pass.
+    h.launchPlanned.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("tries again once the backoff has elapsed, and a success clears the failure", async () => {
+    const { send } = await warmed(retryFlow({ error: "worktree exists", attempts: 1, retryAt: Date.now() - 1, performed: true }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    const e = h.flows[0].edges[0];
+    expect(e.firedAt).toBeTypeOf("number");
+    expect(e.error).toBeUndefined();
+    expect(e.retryAt).toBeUndefined();
+    expect(e.firedNote).toMatch(/after 1 retry/);
+    // No consent asked again: the flow's first spend was already approved.
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("latches for good once the retries are spent", async () => {
+    h.launchPlanned.mockResolvedValueOnce({ ok: false, message: "still no worktree" });
+    const { send } = await warmed(retryFlow({ error: "worktree exists", attempts: 2, retryAt: Date.now() - 1, performed: true }));
+    await send({ type: "deck:refresh" });
+    const e = h.flows[0].edges[0];
+    expect(e.attempts).toBe(3);
+    expect(e.retryAt).toBeUndefined();
+    expect(journal().some((j) => j.kind === "retrying")).toBe(false);
+  });
+
+  it("a rule that never opted in fails exactly as before — no retry stamps, no retrying line", async () => {
+    h.launchPlanned.mockResolvedValueOnce({ ok: false, message: "worktree exists" });
+    const { send } = await warmed(retryFlow({ retry: undefined }));
+    await send({ type: "deck:refresh" });
+    const e = h.flows[0].edges[0];
+    expect(e.error).toMatch(/worktree exists/);
+    expect(e.retryAt).toBeUndefined();
+    expect(journal().some((j) => j.kind === "retrying")).toBe(false);
+  });
+
+  it("flow:resetEdge clears attempts and retryAt and keeps the policy", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [retryFlow({ error: "x", attempts: 1, retryAt: 5, retryOk: true })];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    const e = (h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0];
+    expect(e.attempts).toBeUndefined();
+    expect(e.retryAt).toBeUndefined();
+    expect(e.retry).toEqual({ max: 2, backoffMs: 30_000 });
+    expect(e.retryOk).toBe(true);
+  });
+});
