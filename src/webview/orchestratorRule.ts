@@ -31,6 +31,8 @@ import {
   nextEdgeId,
   nextNodeId,
   PlannedNode,
+  SpendTally,
+  spendTotal,
 } from "../engine/orchestrator/model";
 import { hasNote } from "../engine/prompt";
 import { BranchCiStatus, FlowCommand, FlowPromptMode, RunStatus } from "../types";
@@ -70,7 +72,18 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   // a SIBLING rule out of the same source, and a label without it would read as
   // if this rule had a deadline of its own.
   "deadline-passed": "a deadline here passed",
+  // Trailing ellipsis: carries a parameter (the text), filled in by
+  // `condOptionLabel` for a rule that has one. Command-shaped, offered beside
+  // `command-succeeded` and nowhere else — see `offeredConds`.
+  "command-printed": "the command printed…",
+  // Bare; offered off a subflow node only (see `offeredConds`). "finished" and
+  // not "done": a child that STOPPED on a failure is not finished, and this
+  // condition stays unmet for it.
+  "subflow-done": "the subflow finished",
 };
+
+/** The aria-label of a `command-printed` rule's text field (`CondParams.tsx`). */
+export const PRINTED_TEXT_ARIA_LABEL = "Printed text";
 
 /** The aria-label both presentations' deadline `<input>` shares — see
  * `withDeadline` for what the field means. Centralised for the same reason
@@ -145,6 +158,102 @@ export function expiredText(e: FlowEdge): string {
   return `expired — waited ${Math.max(0, Math.round((e.expiredAt - e.liveSince) / 60_000))}m`;
 }
 
+/** The aria-labels of the three retry controls both presentations render — see
+ * `withRetry`/`withRetryOk` for what each writes. */
+export const RETRY_COUNT_ARIA_LABEL = "Retry count";
+export const RETRY_BACKOFF_ARIA_LABEL = "Retry backoff seconds";
+export const RETRY_OK_ARIA_LABEL = "Safe to re-run";
+
+/** What a fresh retry policy waits between attempts when the count is set and
+ * the backoff field is still blank. A minute: long enough that a worktree
+ * collision or a busy forge has cleared, short enough to be a retry rather than
+ * a deadline. The field beside it is what a user who disagrees changes. */
+export const DEFAULT_RETRY_BACKOFF_MS = 60_000;
+
+/** The sentence beside a `run` rule's safe-to-re-run tick — the one place the
+ * feature's whole caution is said where it is decided. */
+export const RETRY_OK_HINT = "only if running it twice is harmless";
+
+/** Write a rule's retry policy, or DELETE it for `undefined`. On the edge, for
+ * every spending verb; `retryPolicy` (model.ts) is the one reader and is what
+ * refuses to honour it on a `run` without `retryOk`. */
+export function withRetry(flow: Flow, edge: FlowEdge, retry: { max: number; backoffMs: number } | undefined): Flow {
+  return {
+    ...flow,
+    edges: flow.edges.map((x) => {
+      if (x.id !== edge.id) return x;
+      if (retry === undefined) {
+        const { retry: _drop, ...rest } = x;
+        return rest;
+      }
+      return { ...x, retry };
+    }),
+  };
+}
+
+/** Write — or DELETE, for `false` — a `run` rule's explicit "safe to re-run". Only
+ * ever stored as `true`: an absent field is the default and the refusal. */
+export function withRetryOk(flow: Flow, edge: FlowEdge, ok: boolean): Flow {
+  return {
+    ...flow,
+    edges: flow.edges.map((x) => {
+      if (x.id !== edge.id) return x;
+      if (!ok) {
+        const { retryOk: _drop, ...rest } = x;
+        return rest;
+      }
+      return { ...x, retryOk: true };
+    }),
+  };
+}
+
+/** The retry-count field's text, on blur. Blank removes the policy; a positive
+ * whole number is how many retries; anything else is refused so the control puts
+ * the old value back. Same idiom as the deadline and ceiling fields. */
+export function parseRetryCount(raw: string): { ok: true; max: number | undefined } | { ok: false } {
+  if (raw.trim() === "") return { ok: true, max: undefined };
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? { ok: true, max: n } : { ok: false };
+}
+
+/** The backoff field's text, in seconds, on blur. Zero is allowed — "retry at once"
+ * is a real choice for a launch that raced a worktree — but blank is not a value
+ * here (the count field is what removes a policy), and junk is refused. */
+export function parseBackoffSeconds(raw: string): { ok: true; backoffMs: number } | { ok: false } {
+  const n = Number(raw);
+  return raw.trim() !== "" && Number.isFinite(n) && n >= 0 ? { ok: true, backoffMs: Math.round(n * 1000) } : { ok: false };
+}
+
+/** A closed row's word for a rule's retry policy, or `null` without one. */
+export function retryLabel(e: FlowEdge): string | null {
+  return e.retry && Number.isInteger(e.retry.max) && e.retry.max > 0 ? `retry ×${e.retry.max}` : null;
+}
+
+/** What a failure that will be tried again reads as, beside its error: which
+ * retry is next, of how many, and when. Whole seconds, never negative — a
+ * schedule already passed is "on the next pass", the engine's own granularity. */
+export function retryText(e: FlowEdge, nowMs: number): string {
+  const attempt = typeof e.attempts === "number" ? e.attempts : 1;
+  const max = e.retry?.max ?? attempt;
+  const secs = e.retryAt === undefined ? 0 : Math.max(0, Math.ceil((e.retryAt - nowMs) / 1000));
+  return secs > 0 ? `retry ${attempt} of ${max} in ${secs}s` : `retry ${attempt} of ${max} on the next pass`;
+}
+
+/** A terminal failure's error, plus how many retries it burned getting there —
+ * said only when there were any, so a rule that never opted in reads exactly as
+ * it always did. */
+export function failureText(e: FlowEdge): string {
+  return `${e.error ?? ""}${gaveUpSuffix(e)}`;
+}
+
+/** The cost half of `failureText` on its own, for a caller that already holds the
+ * error's words from elsewhere (the card's stepper reads them off `StepState`).
+ * Empty for a rule that never retried, so nothing changes for it. */
+export function gaveUpSuffix(e: FlowEdge): string {
+  const retries = typeof e.attempts === "number" && e.attempts > 1 ? e.attempts - 1 : 0;
+  return retries > 0 ? ` · gave up after ${retries} ${retries === 1 ? "retry" : "retries"}` : "";
+}
+
 /** Every condition kind that carries a parameter, and so needs a seed value the
  * moment a picker names it. One list, in one place, because `withCond` and
  * `CondParams.tsx`'s own controls have to agree about exactly which kinds have a
@@ -161,6 +270,7 @@ const PARAMETERISED_CONDS: Record<Exclude<Condition["kind"], CondKind>, true> = 
   "agent-idle-over": true,
   "ticket-status-is": true,
   "branch-ci-passed": true,
+  "command-printed": true,
 };
 
 /** Can `{ kind }` alone be a complete `Condition`? A type guard, not a bare
@@ -222,10 +332,14 @@ export const OFFERED_CONDS: Condition["kind"][] = Object.keys(COND_LABEL) as Con
  * of planned work and break the chain this phase exists to support. */
 export function offeredConds(flow: Flow, fromId: string): Condition["kind"][] {
   const kind = flow.nodes.find((n) => n.id === fromId)?.kind;
-  if (kind === "command") return ["command-succeeded"];
+  // Both command-shaped kinds, and only these: one reads the exit, the other the
+  // output, and neither can be answered off anything but a command node.
+  if (kind === "command") return ["command-succeeded", "command-printed"];
+  // A subflow's one fact, plus the deadline fallback every source may carry.
+  if (kind === "subflow") return ["subflow-done", "deadline-passed"];
   if (kind === "gate") return ["gate-approved", "gate-rejected"];
   return OFFERED_CONDS.filter(
-    (k) => k !== "command-succeeded" && k !== "gate-approved" && k !== "gate-rejected",
+    (k) => k !== "command-succeeded" && k !== "command-printed" && k !== "gate-approved" && k !== "gate-rejected" && k !== "subflow-done",
   );
 }
 
@@ -254,6 +368,7 @@ export function condOptionLabel(cond: Condition): string {
     case "agent-idle-over": return `session idle over ${cond.minutes}m`;
     case "ticket-status-is": return `ticket status is ${cond.status}`;
     case "branch-ci-passed": return `CI passed on ${cond.repo}#${cond.branch}`;
+    case "command-printed": return `the command printed “${cond.text}”`;
     default: return COND_LABEL[cond.kind];
   }
 }
@@ -270,6 +385,7 @@ export function defaultCondFor(flow: Flow, fromId: string): Condition {
   const kind = flow.nodes.find((n) => n.id === fromId)?.kind;
   if (kind === "command") return { kind: "command-succeeded" };
   if (kind === "gate") return { kind: "gate-approved" };
+  if (kind === "subflow") return { kind: "subflow-done" };
   return { kind: "pr-merged" };
 }
 
@@ -296,6 +412,7 @@ export const NODE_KIND_LABEL: Partial<Record<string, string>> = {
   notify: "Notify",
   command: "Command",
   gate: "Gate",
+  subflow: "Subflow",
 };
 
 /** The verb (and, for `notify`, the whole rest of the clause) a rule's action
@@ -313,7 +430,10 @@ export const ACTION_LABEL: Record<FlowAction, string> = {
   seed: "seed",
   notify: "Notify me in VS Code",
   run: "run",
+  // "start", not "launch": launch is a paid session, and this is a workflow —
+  // the two must not read as the same spend.
   ask: "Ask me to approve",
+  spawn: "start",
 };
 
 /** How a launch destination reads as words — the closed row's own text and
@@ -478,6 +598,9 @@ export function endLabel(flow: Flow, id: string): string {
   if (n.kind === "command") return commandLabel(n);
   if (n.kind === "notify") return "notify";
   if (n.kind === "gate") return "gate";
+  // The template's ID: `endLabel` has no template list to name it from. The
+  // canvas chip and the inspector, which do, use `subflowName` instead.
+  if (n.kind === "subflow") return `subflow ${n.templateId}`;
   // A kind this build does not know — `store.ts`'s `validNode` admits one on
   // purpose so a flow written by a NEWER build still renders. It has no
   // identifier to show, and it is certainly not a notify terminal: naming
@@ -590,9 +713,12 @@ export function observationOf(
   //
   // `deadline-passed` is the fourth: its fact is a sibling rule's `expiredAt`,
   // read by `evaluate.ts` alone, and `describeCond`'s arm for it throws.
+  //
+  // `command-printed` is the fifth: its fact is a command's journaled output,
+  // answered host-side and handed to the engine; `describeCond`'s arm throws.
   if (
     e.cond.kind === "command-succeeded" || e.cond.kind === "gate-approved" || e.cond.kind === "gate-rejected" ||
-    e.cond.kind === "deadline-passed"
+    e.cond.kind === "deadline-passed" || e.cond.kind === "command-printed" || e.cond.kind === "subflow-done"
   ) {
     return null;
   }
@@ -627,6 +753,18 @@ export function observationFallback(flow: Flow, e: FlowEdge): string {
   // Nothing is missing here either: the rule is waiting on a sibling's clock,
   // which is not on any board to observe.
   if (e.cond.kind === "deadline-passed") return "waiting for another rule from here to run out of time";
+  if (e.cond.kind === "subflow-done") {
+    const from = flow.nodes.find((n) => n.id === e.from);
+    return from && from.kind === "subflow"
+      ? (from.childFlowId === undefined ? "waiting for the subflow to start" : "waiting for the subflow to finish")
+      : "this rule waits on a subflow, but it does not come from one";
+  }
+  if (e.cond.kind === "command-printed") {
+    const from = flow.nodes.find((n) => n.id === e.from);
+    return from && from.kind === "command"
+      ? `waiting for ${commandLabel(from)} to print “${e.cond.text}”`
+      : "this rule reads a command's output, but it does not come from one";
+  }
   if (e.cond.kind !== "command-succeeded") return "this card is not on the board right now";
   const from = flow.nodes.find((n) => n.id === e.from);
   return from && from.kind === "command"
@@ -692,6 +830,9 @@ export function seedCond(kind: Condition["kind"], repo?: string): Condition {
   if (isBareCond(kind)) return { kind };
   if (kind === "agent-idle-over") return { kind, minutes: DEFAULT_IDLE_MINUTES };
   if (kind === "ticket-status-is") return { kind, status: "" };
+  // Blank, like a status: there is no text every command prints, and a guess
+  // would be a rule that looks configured and waits on the wrong word.
+  if (kind === "command-printed") return { kind, text: "" };
   return { kind, repo: repo ?? "", branch: "" };
 }
 
@@ -785,6 +926,49 @@ export function withDest(flow: Flow, edge: FlowEdge, dest: LaunchDest): Flow {
   };
 }
 
+/** The aria-label of the flow header's ceiling `<input>` — see `withCeiling`. */
+export const CEILING_ARIA_LABEL = "Spend ceiling";
+
+/** What the ceiling field shows when the flow has none: "none", not a number,
+ * for the same reason `DEADLINE`-style fields say so — a number here would read
+ * as a configured value, and "no ceiling" is a real choice. */
+export const CEILING_PLACEHOLDER = "none";
+
+/** Write a flow's lifetime spend ceiling, or DELETE it for `undefined` — never
+ * store a blank. On the FLOW, not a rule: the ceiling is about everything the
+ * flow spends, and the tally it is measured against is per flow (`spendTally`). */
+export function withCeiling(flow: Flow, ceiling: number | undefined): Flow {
+  if (ceiling === undefined) {
+    const { spendCeiling: _drop, ...rest } = flow;
+    return rest;
+  }
+  return { ...flow, spendCeiling: ceiling };
+}
+
+/** What the ceiling field's text means, on blur. Blank removes the ceiling; a
+ * positive WHOLE number is one — a ceiling counts sessions and commands, and
+ * two and a half of either is not a thing; anything else is refused so the
+ * control puts the old value back rather than storing what `hasCeiling` would
+ * then ignore. */
+export function parseCeilingInput(raw: string): { ok: true; ceiling: number | undefined } | { ok: false } {
+  if (raw.trim() === "") return { ok: true, ceiling: undefined };
+  const n = Number(raw);
+  return Number.isInteger(n) && n > 0 ? { ok: true, ceiling: n } : { ok: false };
+}
+
+/** The header's one line about money: what this flow has opened and run over
+ * its life, and — when a ceiling is set — where that stands against it. Reads
+ * "session", the vocabulary's word for one run of a coding tool (a Deck card),
+ * never the other word. "nothing spent yet" rather than "0 sessions · 0
+ * commands": a flow that has never acted should read as quiet, not as a tally. */
+export function spendSummary(t: SpendTally, ceiling: number | undefined): string {
+  const parts: string[] = [];
+  if (t.sessions > 0) parts.push(`${t.sessions} ${t.sessions === 1 ? "session" : "sessions"}`);
+  if (t.commands > 0) parts.push(`${t.commands} ${t.commands === 1 ? "command" : "commands"}`);
+  const spent = parts.length === 0 ? "nothing spent yet" : `${parts.join(" · ")} spent`;
+  return ceiling === undefined ? spent : `${spent} · ${spendTotal(t)} of ${ceiling}`;
+}
+
 /** Write a rule's once-off note. Unlike `withMode`, there is exactly ONE home
  * for this fact regardless of what the rule DOES — a launch's mode moves to its
  * target node because a place has no mode field to share, but nothing about a
@@ -837,6 +1021,34 @@ export const COMMAND_NONE_LABEL = "(none configured — set agentFlow.commands)"
  * user their only move was to wire it up first. */
 export const INSPECTOR_NONE =
   "Select a connection to set its condition, or a command or notify node to set what it does.";
+
+/** Add a subflow node for a template — from the same "+ Add…" pickers a command
+ * node comes from, and positioned the same way. What it STARTS is the template
+ * as saved; binding to a card happens when a rule reaches it (`performSpawn`,
+ * deckView.ts). */
+export function addSubflowNode(flow: Flow, templateId: string): Flow {
+  return {
+    ...flow,
+    nodes: [
+      ...flow.nodes,
+      { id: nextNodeId(flow), kind: "subflow", x: 320, y: 24 + flow.nodes.length * 88, join: "any", templateId },
+    ],
+  };
+}
+
+/** Point a subflow node at a different template. A node that already started a
+ * child keeps its `childFlowId`: the child exists whatever this node says now. */
+export function withNodeTemplate(flow: Flow, nodeId: string, templateId: string): Flow {
+  return { ...flow, nodes: flow.nodes.map((n) => (n.id === nodeId && n.kind === "subflow" ? { ...n, templateId } : n)) };
+}
+
+/** What a subflow node is called on the canvas and in its inspector: the
+ * template's name when the list has it, else the id with a not-set voice —
+ * a template deleted from disk must read as such, not as configured. */
+export function subflowName(n: { templateId: string }, templates: readonly { id: string; name: string }[]): string {
+  const t = templates.find((x) => x.id === n.templateId);
+  return t ? t.name : `${n.templateId} (not on disk)`;
+}
 
 /** Add a command node. `seed` is exactly what the picker chose: a configured
  * command's id, or the free-text shape — an EMPTY `run`, which is the node

@@ -25,7 +25,7 @@
 import * as React from "react";
 import { Flow, FlowEdge, edgeAction, gateAskEdge } from "../engine/orchestrator/model";
 import { StepState, WorkflowState, WorkflowStatus } from "../engine/orchestrator/attach";
-import { deadlineNote, expiredText, reasonWhy, ruleOneLine } from "./orchestratorRule";
+import { deadlineNote, expiredText, gaveUpSuffix, reasonWhy, retryText, ruleOneLine } from "./orchestratorRule";
 
 export interface WorkflowBlockProps {
   /** `undefined` — nothing binds this card — is a state in its own right, not an
@@ -91,6 +91,10 @@ const MARK: Record<StepState["state"], string> = {
  * and the sentence belongs here with the other three presentations' copy. */
 function stepText(step: StepState, edge: FlowEdge, nowMs: number): string | undefined {
   if (step.state === "expired") return expiredText(edge);
+  // A failure that will be tried again: the engine's error, then the schedule.
+  if (step.retryAt !== undefined) return `${step.receipt ?? ""} · ${retryText(edge, nowMs)}`;
+  // The engine's recorded error, plus what the retries cost when there were any.
+  if (step.state === "fail") return `${step.receipt ?? ""}${gaveUpSuffix(edge)}`;
   if (step.receipt !== undefined) return step.receipt;
   if (step.reason !== undefined) return reasonWhy(step.reason);
   if (step.deadlineAt !== undefined) return deadlineNote(step.deadlineAt, nowMs);
@@ -189,6 +193,30 @@ function WorkflowStep({
         </div>
       )}
       {step.state === "fail" && (
+        <div className="wf-step-acts">
+          {canShowOutput && (
+            <button
+              type="button"
+              className="dd-pact"
+              aria-describedby={descId}
+              onClick={() => onOutput(step.edgeId)}
+            >
+              Output
+            </button>
+          )}
+          <button
+            type="button"
+            className="dd-pact"
+            aria-describedby={descId}
+            onClick={() => onResetEdge(step.edgeId)}
+          >
+            Reset
+          </button>
+        </div>
+      )}
+      {/* A failure waiting to retry: Reset is how you say "stop retrying" from
+          the card, and Output is there because the failed attempt DID run. */}
+      {step.retryAt !== undefined && (
         <div className="wf-step-acts">
           {canShowOutput && (
             <button

@@ -9,8 +9,14 @@ import { emptyFlow, type Flow } from "../../src/engine/orchestrator/model";
 import type { RulePreview } from "../../src/engine/orchestrator/preview";
 import type { RunStatus } from "../../src/types";
 import {
+  ACTION_LABEL,
+  NODE_KIND_LABEL,
+  addSubflowNode,
+  subflowName,
+  withNodeTemplate,
   COND_LABEL,
   condOffered,
+  condOptionLabel,
   CWD_REPO_DEFAULT,
   deadlineLabel,
   deadlineNote,
@@ -31,6 +37,16 @@ import {
   withCond,
   withCondParams,
   withDeadline,
+  withRetry,
+  withRetryOk,
+  parseRetryCount,
+  parseBackoffSeconds,
+  retryText,
+  retryLabel,
+  failureText,
+  withCeiling,
+  parseCeilingInput,
+  spendSummary,
   withNodeCwdRepo,
   withNodeJoin,
 } from "../../src/webview/orchestratorRule";
@@ -306,11 +322,15 @@ describe("gate nodes in the pickers", () => {
     expect(off).toContain("pr-merged");
     expect(off).toContain("ci-passed");
     expect(off).not.toContain("command-succeeded");
-    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 3);
+    // Minus the two gate kinds, the two command-shaped kinds and the subflow kind.
+    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 5);
   });
 
-  it("still offers command-succeeded off a command, and no gate condition", () => {
-    expect(offeredConds(gateFlow(), "c")).toEqual(["command-succeeded"]);
+  it("still offers the command-shaped conditions off a command, and no gate condition", () => {
+    // Two now, not one: `command-printed` joined `command-succeeded` as the second
+    // kind answered off a command node. The pin is still that no gate (or
+    // place-shaped) kind leaks in here.
+    expect(offeredConds(gateFlow(), "c")).toEqual(["command-succeeded", "command-printed"]);
   });
 
   it("seeds a new wire out of a gate with gate-approved", () => {
@@ -410,5 +430,132 @@ describe("deadlines in the rule module", () => {
     } as unknown as RunStatus;
     expect(observationOf(f, f.edges[0], [status])).toBeNull();
     expect(observationFallback(f, f.edges[0])).toMatch(/another rule/);
+  });
+});
+
+describe("command-printed in the rule module", () => {
+  const commandFlow = (): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "c", kind: "command", x: 200, y: 0, join: "any", run: "deploy.sh" },
+      { id: "n2", kind: "notify", x: 400, y: 0, join: "any", message: "done" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "c", cond: { kind: "pr-merged" } },
+      { id: "e2", from: "c", to: "n2", cond: { kind: "command-printed", text: "DEPLOYED" } },
+    ],
+  });
+
+  it("is offered off a command node and nowhere else, labelled with the parameter ellipsis", () => {
+    expect(COND_LABEL["command-printed"].endsWith("…")).toBe(true);
+    expect(offeredConds(commandFlow(), "c")).toContain("command-printed");
+    expect(offeredConds(commandFlow(), "n1")).not.toContain("command-printed");
+  });
+
+  it("seeds with blank text, names the text in a rule's option label, and marks the blank", () => {
+    expect(seedCond("command-printed")).toEqual({ kind: "command-printed", text: "" });
+    expect(condOptionLabel({ kind: "command-printed", text: "DEPLOYED" })).toBe("the command printed “DEPLOYED”");
+    expect(withCond(commandFlow(), "e2", "command-succeeded").edges[1].cond).toEqual({ kind: "command-succeeded" });
+  });
+
+  it("has no place-shaped observation, and its fallback names the command and the text", () => {
+    const f = commandFlow();
+    expect(observationOf(f, f.edges[1], [])).toBeNull();
+    expect(observationFallback(f, f.edges[1])).toBe("waiting for deploy.sh to print “DEPLOYED”");
+  });
+});
+
+describe("opt-in retry in the rule module", () => {
+  it("withRetry writes a policy on the edge and DELETES it for none; withRetryOk stores only true", () => {
+    const f = wired();
+    const set = withRetry(f, f.edges[0], { max: 3, backoffMs: 60_000 });
+    expect(set.edges[0].retry).toEqual({ max: 3, backoffMs: 60_000 });
+    expect("retry" in withRetry(set, set.edges[0], undefined).edges[0]).toBe(false);
+    const ok = withRetryOk(f, f.edges[0], true);
+    expect(ok.edges[0].retryOk).toBe(true);
+    expect("retryOk" in withRetryOk(ok, ok.edges[0], false).edges[0]).toBe(false);
+  });
+
+  it("parses the count and the backoff the way the other numeric fields do", () => {
+    expect(parseRetryCount("")).toEqual({ ok: true, max: undefined });
+    expect(parseRetryCount("3")).toEqual({ ok: true, max: 3 });
+    expect(parseRetryCount("0")).toEqual({ ok: false });
+    expect(parseRetryCount("1.5")).toEqual({ ok: false });
+    expect(parseBackoffSeconds("90")).toEqual({ ok: true, backoffMs: 90_000 });
+    expect(parseBackoffSeconds("0")).toEqual({ ok: true, backoffMs: 0 });
+    expect(parseBackoffSeconds("")).toEqual({ ok: false });
+    expect(parseBackoffSeconds("-1")).toEqual({ ok: false });
+  });
+
+  it("words a pending retry, a closed row, and a terminal failure's cost", () => {
+    const e = { ...wired().edges[0], retry: { max: 3, backoffMs: 60_000 }, error: "no worktree", attempts: 1, retryAt: 100_000 };
+    expect(retryText(e, 100_000 - 40_000)).toBe("retry 1 of 3 in 40s");
+    expect(retryText(e, 100_000 + 5)).toBe("retry 1 of 3 on the next pass");
+    expect(retryLabel(e)).toBe("retry ×3");
+    expect(retryLabel(wired().edges[0])).toBeNull();
+    expect(failureText({ ...wired().edges[0], error: "gave up", attempts: 4 })).toBe("gave up · gave up after 3 retries");
+    expect(failureText({ ...wired().edges[0], error: "boom" })).toBe("boom");
+    expect(failureText({ ...wired().edges[0], error: "boom", attempts: 1 })).toBe("boom");
+  });
+});
+
+describe("a flow's spend ceiling in the rule module", () => {
+  it("withCeiling writes a positive count on the flow and DELETES the field for none", () => {
+    const set = withCeiling(wired(), 10);
+    expect(set.spendCeiling).toBe(10);
+    const cleared = withCeiling(set, undefined);
+    expect("spendCeiling" in cleared).toBe(false);
+  });
+
+  it("parseCeilingInput accepts blank as none and a positive whole number, and refuses the rest", () => {
+    expect(parseCeilingInput("")).toEqual({ ok: true, ceiling: undefined });
+    expect(parseCeilingInput("10")).toEqual({ ok: true, ceiling: 10 });
+    expect(parseCeilingInput("0")).toEqual({ ok: false });
+    expect(parseCeilingInput("2.5")).toEqual({ ok: false });
+    expect(parseCeilingInput("lots")).toEqual({ ok: false });
+  });
+
+  it("sums up what a flow has spent, in the vocabulary — sessions, not the other word", () => {
+    expect(spendSummary({ sessions: 0, commands: 0 }, undefined)).toBe("nothing spent yet");
+    expect(spendSummary({ sessions: 1, commands: 0 }, undefined)).toBe("1 session spent");
+    expect(spendSummary({ sessions: 3, commands: 2 }, undefined)).toBe("3 sessions · 2 commands spent");
+    expect(spendSummary({ sessions: 3, commands: 2 }, 10)).toBe("3 sessions · 2 commands spent · 5 of 10");
+    expect(spendSummary({ sessions: 0, commands: 0 }, 10)).toBe("nothing spent yet · 0 of 10");
+  });
+});
+
+describe("subflow nodes in the rule module", () => {
+  const withSub = (childFlowId?: string): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "s", kind: "subflow", x: 320, y: 0, join: "any", templateId: "t-ship", ...(childFlowId ? { childFlowId } : {}) },
+      { id: "n2", kind: "notify", x: 640, y: 0, join: "any", message: "done" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" } }, { id: "e2", from: "s", to: "n2", cond: { kind: "subflow-done" } }],
+  });
+
+  it("labels the verb start, the node Subflow, and offers exactly the subflow's own conditions off it", () => {
+    expect(ACTION_LABEL.spawn).toBe("start");
+    expect(NODE_KIND_LABEL.subflow).toBe("Subflow");
+    expect(COND_LABEL["subflow-done"]).toBe("the subflow finished");
+    expect(offeredConds(withSub(), "s")).toEqual(["subflow-done", "deadline-passed"]);
+    expect(offeredConds(withSub(), "n1")).not.toContain("subflow-done");
+    expect(defaultCondFor(withSub(), "s")).toEqual({ kind: "subflow-done" });
+    expect(endLabel(withSub(), "s")).toBe("subflow t-ship");
+  });
+
+  it("adds a subflow node for a template, retargets it, and names it from the template list", () => {
+    const f = addSubflowNode(wired(), "t-ship");
+    const added = f.nodes.at(-1)!;
+    expect(added).toMatchObject({ kind: "subflow", templateId: "t-ship" });
+    expect(withNodeTemplate(f, added.id, "t-other").nodes.at(-1)).toMatchObject({ templateId: "t-other" });
+    expect(subflowName({ templateId: "t-ship" }, [{ id: "t-ship", name: "Ship it" }])).toBe("Ship it");
+    expect(subflowName({ templateId: "t-gone" }, [])).toBe("t-gone (not on disk)");
+  });
+
+  it("has no place-shaped observation, and its fallback says whether the child has started", () => {
+    expect(observationOf(withSub(), withSub().edges[1], [])).toBeNull();
+    expect(observationFallback(withSub(), withSub().edges[1])).toBe("waiting for the subflow to start");
+    expect(observationFallback(withSub("c1"), withSub("c1").edges[1])).toBe("waiting for the subflow to finish");
   });
 });

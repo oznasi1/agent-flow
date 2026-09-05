@@ -23,7 +23,7 @@ import type { RunStatus } from "../../types";
 import { BranchCiStatus } from "./branchCi";
 import type { BlockedNote } from "./evaluate";
 import { RulePreview, previewFlow } from "./preview";
-import { Flow, isPlace, isPlanned, isSettled } from "./model";
+import { Flow, isPlace, isPlanned, isSettled, retryPending } from "./model";
 
 /** Does this flow name the given run?
  *
@@ -43,7 +43,12 @@ export function bindsRun(flow: Flow, runKey: string, ticketKey: string | undefin
  * Sorted by `createdAt` here; a later task re-ranks by state on top of this —
  * the two are kept separate so the ordering rule is testable without a board. */
 export function attachedWorkflows(flows: Flow[], runKey: string, ticketKey: string | undefined): Flow[] {
-  return flows.filter((f) => bindsRun(f, runKey, ticketKey)).sort((a, b) => a.createdAt - b.createdAt);
+  // A child a `subflow` node started binds the same card its parent does — that
+  // is the point of it — and must NOT compete with the parent for the card's one
+  // slot: the card shows the parent, whose own step is what says the child is
+  // running. This is the whole answer to the "one workflow per card" ambiguity
+  // nesting would otherwise multiply.
+  return flows.filter((f) => f.parentFlow === undefined && bindsRun(f, runKey, ticketKey)).sort((a, b) => a.createdAt - b.createdAt);
 }
 
 /** What the card chip and the block header say. Six states, and each is a
@@ -75,6 +80,10 @@ export interface StepState {
    * through for a pending step whose clock is running. The block turns it into
    * "expires in 12m"; the engine only knows the moment. */
   deadlineAt?: number;
+  /** When a failed step may be tried again — the edge's own `retryAt`, carried
+   * on a pending step whose `receipt` is then the error it is recovering from.
+   * The block turns it into "retry 1 of 3 in 40s". */
+  retryAt?: number;
 }
 
 export interface WorkflowState {
@@ -98,15 +107,25 @@ export function workflowState(
   runs: RunStatus[],
   nowMs: number,
   branchCi?: Record<string, BranchCiStatus>,
+  /** `command-printed` verdicts for EVERY flow, keyed flow id → rule edge id —
+   * the shape `deck:flows` carries — so a caller with many flows passes the one
+   * map and this picks its own flow's slice. */
+  printed?: Record<string, Record<string, boolean>>,
+  /** Every flow, for `subflow-done` — see `EvalInput.flows`. */
+  flows?: readonly Flow[],
 ): WorkflowState {
   const previews = new Map<string, RulePreview>();
   // `previewFlow` evaluates as if armed, which is what makes it answer for a
   // disarmed workflow too: the steps still say what WOULD happen, greyed.
-  for (const p of previewFlow(flow, runs, nowMs, branchCi)) previews.set(p.edgeId, p);
+  for (const p of previewFlow(flow, runs, nowMs, branchCi, printed?.[flow.id], flows)) previews.set(p.edgeId, p);
 
   let firstPending = true;
   const steps: StepState[] = flow.edges.map((e) => {
-    if (e.error !== undefined) return { edgeId: e.id, state: "fail" as const, receipt: e.error };
+    // A failure pending retry is NOT a `fail`: it is still in play (`isSettled`
+    // says so) and the workflow has not stopped. It takes the ordinary pending
+    // path below, carrying its error as the receipt and its schedule as
+    // `retryAt`, so the stepper can say "retry 1 of 3 in 40s" under the words.
+    if (e.error !== undefined && !retryPending(e)) return { edgeId: e.id, state: "fail" as const, receipt: e.error };
     if (e.firedAt !== undefined) return { edgeId: e.id, state: "done" as const, receipt: e.firedNote };
     // No receipt: an expiry records nothing but the moment, and the sentence
     // for it is the webview's to write (see `receipt`'s own doc comment).
@@ -126,8 +145,12 @@ export function workflowState(
     const state = firstPending ? ("now" as const) : ("waiting" as const);
     firstPending = false;
     return {
-      edgeId: e.id, state, receipt: p?.blank ?? undefined, reason: p?.reason,
+      edgeId: e.id, state, reason: p?.reason,
+      // The engine's own words first: a pending retry's error outranks a blank
+      // (a rule that failed did fire, so its parameter was not blank).
+      receipt: retryPending(e) ? e.error : p?.blank ?? undefined,
       ...(p?.deadlineAt !== undefined ? { deadlineAt: p.deadlineAt } : {}),
+      ...(retryPending(e) ? { retryAt: e.retryAt } : {}),
     };
   });
 
@@ -159,10 +182,12 @@ export function rankByState(
   runs: RunStatus[],
   nowMs: number,
   branchCi?: Record<string, BranchCiStatus>,
+  printed?: Record<string, Record<string, boolean>>,
+  all?: readonly Flow[],
 ): Flow[] {
   return [...flows].sort((a, b) => {
-    const ra = RANK[workflowState(a, runs, nowMs, branchCi).status];
-    const rb = RANK[workflowState(b, runs, nowMs, branchCi).status];
+    const ra = RANK[workflowState(a, runs, nowMs, branchCi, printed, all).status];
+    const rb = RANK[workflowState(b, runs, nowMs, branchCi, printed, all).status];
     return ra !== rb ? ra - rb : a.createdAt - b.createdAt;
   });
 }
@@ -227,9 +252,12 @@ export function cardWorkflow(
   runs: RunStatus[],
   nowMs: number,
   branchCi?: Record<string, BranchCiStatus>,
+  printed?: Record<string, Record<string, boolean>>,
 ): CardWorkflow | undefined {
   const attached = attachedWorkflows(flows, status.run.key, boundTicketKeyOf(status));
-  const wf = rankByState(attached, runs, nowMs, branchCi)[0];
+  const wf = rankByState(attached, runs, nowMs, branchCi, printed, flows)[0];
   if (!wf) return undefined;
-  return { flow: wf, state: workflowState(wf, runs, nowMs, branchCi), extraCount: Math.max(attached.length - 1, 0) };
+  return {
+    flow: wf, state: workflowState(wf, runs, nowMs, branchCi, printed, flows), extraCount: Math.max(attached.length - 1, 0),
+  };
 }

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { describe, it, expect, vi } from "vitest";
 import * as React from "react";
-import { act, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
+import { act, cleanup, render, screen, fireEvent, waitFor, within } from "@testing-library/react";
 import { OrchestratorDrawer, DRAG_SEP, OrchTarget, OrchView } from "../../src/webview/OrchestratorDrawer";
 import type { WorkflowRow } from "../../src/webview/WorkflowList";
 import { ORCH_ANIM_MS, ORCH_CSS, ORCH_EDGE_PAINT_DY } from "../../src/webview/orchestratorStyles";
@@ -1499,7 +1499,7 @@ describe("the inspector", () => {
     expect(values).toContain("pr-merged");
   });
 
-  it("offers only the command condition on a rule out of a command node", () => {
+  it("offers only the command-shaped conditions on a rule out of a command node", () => {
     // The mirror, and the reason the filter is a split rather than a subtraction:
     // `isMet` reads every place-shaped condition off the source's `RunStatus`,
     // which a command node has none of, so all of them are inert here.
@@ -1515,7 +1515,8 @@ describe("the inspector", () => {
     const values = Array.from(
       screen.getByLabelText("Condition").querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    expect(values).toEqual(["command-succeeded"]);
+    // Both command-shaped kinds, and nothing place- or gate-shaped.
+    expect(values).toEqual(["command-succeeded", "command-printed"]);
   });
 
   // A `<select>` whose `value` matches none of its options has `selectedIndex`
@@ -5056,5 +5057,227 @@ describe("a rule's deadline in the inspector", () => {
     const row = screen.getByTestId("orch-dryrun-e1").textContent ?? "";
     expect(row).toContain("would expire");
     expect(row).toContain("a deadline here passed");
+  });
+});
+
+describe("a command-printed rule in the inspector", () => {
+  const commandFlow = (): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "c", kind: "command", x: 320, y: 24, join: "any", run: "deploy.sh" },
+      { id: "n2", kind: "notify", x: 620, y: 24, join: "any", message: "done" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "c", cond: { kind: "pr-merged" } },
+      { id: "e2", from: "c", to: "n2", cond: { kind: "command-printed", text: "" } },
+    ],
+  });
+
+  it("offers a text field, marks it blank until typed, and writes the text on blur", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [commandFlow()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e2"));
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.textContent).toContain("no text set");
+    const box = screen.getByLabelText("Printed text");
+    fireEvent.change(box, { target: { value: "DEPLOYED" } });
+    fireEvent.blur(box);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[1].cond).toEqual({ kind: "command-printed", text: "DEPLOYED" });
+  });
+
+  it("the dry run reads the host's verdict — would fire with it, waiting without", async () => {
+    const f = commandFlow();
+    f.edges[0] = { ...f.edges[0], firedAt: 5, firedNote: "ran", performed: true };
+    f.edges[1] = { ...f.edges[1], cond: { kind: "command-printed", text: "DEPLOYED" } };
+    const r1 = render(<OrchestratorDrawer {...props({ flows: [f], printed: { f1: { e2: true } } })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    await waitFor(() => expect(screen.getByTestId("orch-dryrun-e2")).toBeTruthy());
+    expect(screen.getByTestId("orch-dryrun-e2").textContent).toContain("would fire");
+    r1.unmount();
+    render(<OrchestratorDrawer {...props({ flows: [f] })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    await waitFor(() => expect(screen.getByTestId("orch-dryrun-e2")).toBeTruthy());
+    const row = screen.getByTestId("orch-dryrun-e2").textContent ?? "";
+    expect(row).toContain("waiting");
+    expect(row).toContain("waiting for deploy.sh to print “DEPLOYED”");
+  });
+});
+
+describe("opt-in retry in the inspector", () => {
+  const open = (f: Flow, over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [f], ...over })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    return onSave;
+  };
+
+  it("offers the retry controls on a launch rule but not on a notify rule", () => {
+    const r1 = render(<OrchestratorDrawer {...props({ flows: [placeAndPlanned()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByLabelText("Retry count")).toBeTruthy();
+    expect(screen.queryByLabelText("Safe to re-run")).toBeNull();
+    r1.unmount();
+    render(<OrchestratorDrawer {...props({ flows: [wired()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.queryByLabelText("Retry count")).toBeNull();
+  });
+
+  it("writes a policy with the default backoff on the count, then the backoff separately, and clears on blank", () => {
+    const onSave = open(placeAndPlanned());
+    const count = screen.getByLabelText("Retry count") as HTMLInputElement;
+    expect((screen.getByLabelText("Retry backoff seconds") as HTMLInputElement).disabled).toBe(true);
+    fireEvent.change(count, { target: { value: "3" } });
+    fireEvent.blur(count);
+    let saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].retry).toEqual({ max: 3, backoffMs: 60_000 });
+    // Re-render with the saved flow to reach the now-enabled backoff field.
+    cleanup();
+    const onSave2 = open(saved);
+    const backoff = screen.getByLabelText("Retry backoff seconds") as HTMLInputElement;
+    expect(backoff.value).toBe("60");
+    fireEvent.change(backoff, { target: { value: "5" } });
+    fireEvent.blur(backoff);
+    saved = onSave2.mock.calls.at(-1)![0] as Flow;
+    expect(saved.edges[0].retry).toEqual({ max: 3, backoffMs: 5_000 });
+    const count2 = screen.getByLabelText("Retry count") as HTMLInputElement;
+    fireEvent.change(count2, { target: { value: "" } });
+    fireEvent.blur(count2);
+    expect("retry" in (onSave2.mock.calls.at(-1)![0] as Flow).edges[0]).toBe(false);
+  });
+
+  it("a run rule gets the safe-to-re-run tick, which writes retryOk", () => {
+    const f = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+        { id: "n2", kind: "command", x: 320, y: 24, join: "any", run: "deploy.sh" },
+      ],
+      edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" } }],
+    });
+    const onSave = open(f);
+    const tick = screen.getByLabelText("Safe to re-run") as HTMLInputElement;
+    expect(tick.checked).toBe(false);
+    fireEvent.click(tick);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[0].retryOk).toBe(true);
+  });
+
+  it("shows a failure pending retry in red with its schedule beside it, and offers Reset", () => {
+    const f = placeAndPlanned();
+    f.edges[0] = { ...f.edges[0], retry: { max: 3, backoffMs: 60_000 }, error: "no worktree", attempts: 1, retryAt: Date.now() + 40_000, performed: true };
+    const onResetEdge = vi.fn();
+    open(f, { onResetEdge });
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.querySelector(".orch-obs .err")!.textContent).toBe("no worktree");
+    expect(screen.getByTestId("orch-retry-note").textContent).toMatch(/retry 1 of 3 in (39|40)s/);
+    fireEvent.click(screen.getByRole("button", { name: /reset/i }));
+    expect(onResetEdge).toHaveBeenCalledWith("f1", "e1");
+  });
+
+  it("a terminal failure after retries says what it cost", () => {
+    const f = placeAndPlanned();
+    f.edges[0] = { ...f.edges[0], retry: { max: 2, backoffMs: 1 }, error: "no worktree", attempts: 3, performed: true };
+    open(f);
+    expect(screen.getByTestId("orch-inspector").querySelector(".orch-obs .err")!.textContent).toBe("no worktree · gave up after 2 retries");
+  });
+});
+
+describe("a flow's spend ceiling in the header", () => {
+  it("says what the flow has spent, from the host's tally, and offers a ceiling field that writes on blur", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()], spend: { f1: { sessions: 3, commands: 1 } } })} />);
+    expect(screen.getByTestId("orch-spend").textContent).toContain("3 sessions · 1 command spent");
+    const box = screen.getByLabelText("Spend ceiling") as HTMLInputElement;
+    expect(box.placeholder).toBe("none");
+    fireEvent.change(box, { target: { value: "10" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).spendCeiling).toBe(10);
+  });
+
+  it("reads a flow with no tally yet as having spent nothing, and shows the ceiling it is under", () => {
+    const f = wired();
+    f.spendCeiling = 10;
+    render(<OrchestratorDrawer {...props({ flows: [f] })} />);
+    expect(screen.getByTestId("orch-spend").textContent).toContain("nothing spent yet · 0 of 10");
+    expect((screen.getByLabelText("Spend ceiling") as HTMLInputElement).value).toBe("10");
+  });
+
+  it("clears the ceiling when emptied and reverts junk without saving", () => {
+    const f = wired();
+    f.spendCeiling = 10;
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [f] })} />);
+    const box = screen.getByLabelText("Spend ceiling") as HTMLInputElement;
+    fireEvent.change(box, { target: { value: "-4" } });
+    fireEvent.blur(box);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(box.value).toBe("10");
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    expect("spendCeiling" in (onSave.mock.calls.at(-1)![0] as Flow)).toBe(false);
+  });
+
+  it("offers no ceiling while editing a template — a template spends nothing", () => {
+    render(<OrchestratorDrawer {...props({ flows: [], templates: [template()], openId: { kind: "template", id: "t1" } as OrchTarget })} />);
+    expect(screen.queryByLabelText("Spend ceiling")).toBeNull();
+    expect(screen.queryByTestId("orch-spend")).toBeNull();
+  });
+});
+
+describe("a subflow node on the canvas", () => {
+  const subFlow = (childFlowId?: string): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "s", kind: "subflow", x: 320, y: 24, join: "any", templateId: "builtin-ship-it", ...(childFlowId ? { childFlowId } : {}) },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" } }],
+  });
+
+  it("adds a subflow node per ticked template from the Add picker", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()], templates: [template()] })} />);
+    pickFromCombo("Add a subflow", ["Ship it (template)"]);
+    const saved = onSave.mock.calls.at(-1)![0] as Flow;
+    expect(saved.nodes.at(-1)).toMatchObject({ kind: "subflow", templateId: "builtin-ship-it" });
+  });
+
+  it("names the node after its template, says whether it has started, and lets the inspector retarget it", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [subFlow()], templates: [template(), template({ id: "t2", name: "Other" })] })} />);
+    const chip = screen.getByTestId("orch-node-s");
+    expect(chip.className).toContain("subflow");
+    expect(chip.textContent).toContain("Ship it (template)");
+    expect(chip.textContent).toContain("starts a subflow");
+    fireEvent.pointerDown(chip, { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+    const sel = screen.getByLabelText("Template") as HTMLSelectElement;
+    expect(sel.value).toBe("builtin-ship-it");
+    fireEvent.change(sel, { target: { value: "t2" } });
+    expect((onSave.mock.calls.at(-1)![0] as Flow).nodes[1]).toMatchObject({ templateId: "t2" });
+    expect(screen.queryByTestId("orch-subflow-child")).toBeNull();
+  });
+
+  it("once started, names the child and opens it", () => {
+    const onOpen = vi.fn();
+    const child = flow({ id: "c1", name: "Ship the migration › Ship it", parentFlow: "f1", parentNode: "s" });
+    render(<OrchestratorDrawer {...props({ onOpen, flows: [subFlow("c1"), child], templates: [template()] })} />);
+    const chip = screen.getByTestId("orch-node-s");
+    expect(chip.textContent).toContain("subflow started");
+    fireEvent.pointerDown(chip, { clientX: 0, clientY: 0 });
+    fireEvent.pointerUp(window);
+    expect(screen.getByTestId("orch-subflow-child").textContent).toContain("Ship the migration › Ship it");
+    fireEvent.click(screen.getByRole("button", { name: "Open subflow" }));
+    expect(onOpen).toHaveBeenCalledWith("c1");
+  });
+
+  it("offers subflow-done off the subflow node's rule and reads the node's verb as start", () => {
+    const f = subFlow();
+    f.nodes.push({ id: "n2", kind: "notify", x: 640, y: 24, join: "any", message: "m" });
+    f.edges.push({ id: "e2", from: "s", to: "n2", cond: { kind: "subflow-done" } });
+    render(<OrchestratorDrawer {...props({ flows: [f], templates: [template()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e2"));
+    const values = Array.from(screen.getByLabelText("Condition").querySelectorAll("option")).map((o) => (o as HTMLOptionElement).value);
+    expect(values).toEqual(["subflow-done", "deadline-passed"]);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    expect(screen.getByTestId("orch-then").textContent).toContain("start");
   });
 });

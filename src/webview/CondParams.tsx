@@ -20,7 +20,7 @@
 // them.
 import * as React from "react";
 import { Condition, condIncomplete } from "../engine/orchestrator/model";
-import { DEFAULT_IDLE_MINUTES } from "./orchestratorRule";
+import { DEFAULT_IDLE_MINUTES, PRINTED_TEXT_ARIA_LABEL } from "./orchestratorRule";
 
 export interface CondParamsProps {
   /** The condition being edited. A bare kind renders nothing at all. */
@@ -167,6 +167,26 @@ export function CondParams(p: CondParamsProps): JSX.Element | null {
         </>
       );
     }
+
+    case "command-printed":
+      return (
+        <>
+          <span className="orch-plabel">text</span>
+          <input
+            className="orch-msg"
+            aria-label={PRINTED_TEXT_ARIA_LABEL}
+            key={`${editKey}-text`}
+            defaultValue={cond.text ?? ""}
+            // A substring, matched case-insensitively against everything the
+            // command printed (`outputContains`, model.ts) — so the placeholder
+            // shows the SHAPE (a word the script emits), not a pattern language
+            // this field does not have.
+            placeholder="a word the command prints, e.g. DEPLOYED"
+            onBlur={(ev) => onEdit({ text: ev.currentTarget.value })}
+          />
+          {mark}
+        </>
+      );
 
     default:
       // Every bare kind. Not a fallthrough this file has to keep up with: a new

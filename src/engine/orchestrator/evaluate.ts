@@ -8,7 +8,7 @@ import { BranchCiStatus } from "./branchCi";
 import { CondContext, evalCond, placeActivity } from "./conditions";
 import {
   Condition, Flow, FlowAction, FlowEdge, deadlineAt, edgeAction, findNode, gateAskEdge, hasDeadline, incomingEdges,
-  isPlace, isSettled, isSpendAction,
+  isPlace, isSettled, isSpendAction, retryPending, subflowDone,
 } from "./model";
 
 /** How many SPENDING edges (`launch`, `seed` or `run` — whatever `isSpendAction`
@@ -113,6 +113,31 @@ function gateAnswer(flow: Flow, gateNodeId: string): "approved" | "rejected" | u
   return gateAskEdge(flow, gateNodeId)?.gateAnswer;
 }
 
+/** Did the command this rule leaves print the rule's text? Two facts, from two
+ * places, and both are required:
+ *
+ * The command must have PERFORMED — the same `performed`-keyed search
+ * `commandSucceeded` makes, and for its reasons, but settled either way
+ * (`firedAt` OR `error`): a failed deploy's output is exactly what a rule like
+ * "printed ROLLBACK → page me" exists to read. Before the command has run there
+ * is no output to have printed anything, so this is `false` — waiting — never a
+ * verdict read off an older run: a Reset clears the performer's stamps, and this
+ * guard is what stops last cycle's journal line answering for this cycle.
+ *
+ * The verdict itself comes in on `printed`, keyed by THIS rule's edge id,
+ * computed host-side from the journal (`printedVerdicts`, journal.ts). An
+ * absent map or an absent key is `false`, for the reason `branch-ci-passed`
+ * gives about an absent `branchCi` entry: a fact nobody fetched is not a match.
+ *
+ * Source-kind guard first, as in `commandSucceeded`: a hand-edited rule of this
+ * kind wired off a place must not read a place's incoming edges as a performer. */
+function commandPrinted(flow: Flow, e: FlowEdge, printed: Record<string, boolean> | undefined): boolean {
+  if (findNode(flow, e.from)?.kind !== "command") return false;
+  const performer = incomingEdges(flow, e.from).find((x) => x.performed === true && isSettled(x));
+  if (performer === undefined) return false;
+  return printed?.[e.id] === true;
+}
+
 export interface EvalInput {
   flow: Flow;
   /** Every status the Deck built this pass, in any order. */
@@ -129,6 +154,19 @@ export interface EvalInput {
    * existing test — which is safe rather than merely convenient: an absent map reads
    * as `"unknown"`, and `"unknown"` is not met. */
   branchCi?: Record<string, BranchCiStatus>;
+  /** `command-printed` verdicts for this pass, keyed by the RULE's edge id (not
+   * the command's): did the command that rule leaves print the rule's text? Read
+   * by the host off the flow's journal once per pass (`printedVerdicts`,
+   * journal.ts) and handed in here, exactly as `branchCi` is, because the
+   * output lives in a file this module cannot open. Omitted by every caller with
+   * no such rule, and by every existing test — safe, not merely convenient: an
+   * absent map reads as "did not print", which is waiting. */
+  printed?: Record<string, boolean>;
+  /** Every flow the caller holds, for `subflow-done`: the child a `subflow`
+   * node started is another file, and its settledness is what that condition
+   * reads (`subflowDone`, model.ts). Omitted by every caller with no such rule —
+   * an absent list reads as "no child", which is waiting. */
+  flows?: readonly Flow[];
 }
 
 export interface FiredEdge {
@@ -234,13 +272,25 @@ function metOracle(i: EvalInput) {
     // `commandSucceeded`'s own doc comment. Intercepted before the place/status
     // lookup below, which a command node's incoming edges have no use for and
     // would otherwise report as an unhelpful "gone" or a silent never-fires.
+    // A failed rule waiting out its backoff is "not yet", whatever its condition
+    // says — first, so a junction reading this sibling sees the same answer the
+    // runner would act on. `false`, not `undefined`: nothing is unobservable,
+    // the rule is simply not due. Once the clock passes `retryAt` it is
+    // evaluated exactly as if it had never fired, and the condition must still
+    // hold — a retry is a second attempt at the same rule, not a replay.
+    if (e.retryAt !== undefined && i.nowMs < e.retryAt) return false;
     if (e.cond.kind === "command-succeeded") return commandSucceeded(i.flow, e.from);
+    // Same spot, same reason — a command node's fact, not a place's — with the
+    // verdict itself handed in by the host. See `commandPrinted`.
+    if (e.cond.kind === "command-printed") return commandPrinted(i.flow, e, i.printed);
     // Same spot, same reason: a sibling's stamp, not a place's status. Answered
     // for ANY source kind — a deadline can sit on a rule out of a place, a
     // command or a gate, and the fallback rule beside it must read it wherever
     // it is — so this comes before the place lookup that would call a gone card
     // "gone" instead of answering.
     if (e.cond.kind === "deadline-passed") return deadlinePassed(i.flow, e);
+    // The fifth flow-answered kind: the child's file, handed in on `flows`.
+    if (e.cond.kind === "subflow-done") return subflowDone(i.flow, e.from, i.flows ?? []);
     // Intercepted here, beside `command-succeeded` and before the place/status
     // lookup, for the same reason: a gate has no `runKey`, so falling through
     // would report the node as "gone" every pass instead of as waiting on you.
@@ -307,6 +357,8 @@ function metOracle(i: EvalInput) {
       case "place": return byKey.has(from.runKey);
       case "command": return incomingEdges(i.flow, from.id).some((x) => x.performed === true);
       case "gate": return gateAskEdge(i.flow, from.id) !== undefined;
+      // Live once the child exists: before that there is nothing to wait on.
+      case "subflow": return from.childFlowId !== undefined;
       default: return false;
     }
   };
@@ -406,7 +458,12 @@ export function evaluateFlow(i: EvalInput): EvalResult {
     // an arrival, and an expiry is precisely a sibling that did NOT arrive. A
     // junction waiting on "both PRs merged" where one ran out of time has not
     // been met by one PR merging — it has been told the other never will.
-    if (incoming.some((e) => e.error !== undefined || e.expiredAt !== undefined)) continue;
+    //
+    // A failure that is PENDING RETRY (`retryPending`) is neither: it is still in
+    // play and will be re-evaluated, so it is left to the `allMet` check below —
+    // where its "not due yet" reads as unmet and holds the junction, and its
+    // due retry performs again as the same edge it always was.
+    if (incoming.some((e) => (e.error !== undefined && !retryPending(e)) || e.expiredAt !== undefined)) continue;
 
     // Already-settled siblings count as satisfied: the junction closes over
     // time, not in one instant, and a flow that forgot its earlier arrivals

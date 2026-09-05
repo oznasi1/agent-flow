@@ -2,7 +2,7 @@ import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, JoinMode, LaunchDest, PlaceNode, PlannedNode } from "../engine/orchestrator/model";
+import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, isSpendAction, JoinMode, LaunchDest, PlaceNode, PlannedNode, retryPending, hasCeiling, SpendTally } from "../engine/orchestrator/model";
 import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
@@ -28,9 +28,17 @@ import {
   defaultCondFor,
   DEST_LABEL,
   endLabel,
+  addSubflowNode,
+  subflowName,
+  withNodeTemplate,
   INSPECTOR_NONE,
   isMigrationNotice,
   launchDestOf,
+  CEILING_ARIA_LABEL,
+  CEILING_PLACEHOLDER,
+  parseCeilingInput,
+  spendSummary,
+  withCeiling,
   modeValueOf,
   nextEdgeId,
   nextNodeId,
@@ -48,6 +56,17 @@ import {
   expiredText,
   parseDeadlineInput,
   withDeadline,
+  DEFAULT_RETRY_BACKOFF_MS,
+  RETRY_BACKOFF_ARIA_LABEL,
+  RETRY_COUNT_ARIA_LABEL,
+  RETRY_OK_ARIA_LABEL,
+  RETRY_OK_HINT,
+  failureText,
+  parseBackoffSeconds,
+  parseRetryCount,
+  retryText,
+  withRetry,
+  withRetryOk,
   isBareCond,
   JOIN_LABEL,
   NODE_KIND_LABEL,
@@ -441,6 +460,12 @@ export interface OrchestratorDrawerProps {
    * built-ins ship — and the free-text option below is what keeps the command
    * node reachable for a user who has configured none. */
   commands: FlowCommand[];
+  /** `command-printed` verdicts, keyed flow id → rule edge id — the host's own
+   * read of each flow's journal, and the same map the pass handed
+   * `evaluateFlow`. Without it the dry run would read every such rule as
+   * waiting while the engine fires it. Optional: a caller with no such rule
+   * (and every existing test) passes nothing, which reads as "did not print". */
+  printed?: Record<string, Record<string, boolean>>;
   /** Branch-CI verdicts the host has fetched, keyed `repo#branch` — the same map
    * `evaluateFlow` is handed. Without it a `branch-ci-passed` rule's own
    * observation line reads "not checked yet" forever, even while the host knows
@@ -448,6 +473,14 @@ export interface OrchestratorDrawerProps {
    * before the first post, and whenever PR facts are off (the host refuses to
    * serve a verdict it would not act on itself). */
   branchCi: Record<string, BranchCiStatus>;
+  /** What each flow has spent over its life, keyed by flow id — the host's own
+   * count off the journal (`spendTally`), because the webview cannot read a
+   * journal. Shown beside the ceiling the header lets a user set against it. A
+   * flow with no entry has spent nothing: the host omits flows with no journal
+   * rather than sending zeros for them. Optional, defaulting to that reading,
+   * so a caller without a tally (the card drawer's `flows` are not this prop)
+   * needs no second wire. */
+  spend?: Record<string, SpendTally>;
   /** Every saved template, from the same `deck:flows` post as `flows` itself
    * (`postFlows` in deckView.ts). Rendered on the Templates tab of the flow
    * switcher — never armed, disarmed or detached, because a template is not
@@ -568,7 +601,9 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // it when the target switches FROM an armed flow with the panel open TO a
   // template. A dry run is a verdict about being armed, and a template cannot
   // be armed, so it has nothing to verdict either way.
-  const dry = dryRun && flow && !editingTemplate ? previewFlow(flow, p.runs, Date.now(), p.branchCi) : [];
+  const dry = dryRun && flow && !editingTemplate
+    ? previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id], p.flows)
+    : [];
   const firing = dry.filter((v) => v.verdict === "fire").length;
   /** The Save-as-template dialog's own state: whether it is open, the name
    * typed so far, and one {mode, dest} choice per place node being demoted.
@@ -953,7 +988,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
    * node. Named by the two kinds it admits rather than as "not an agent node", the
    * same lesson `isAgentNode`'s own doc comment records: a `!==` filter is what let
    * a command node into a list that then read `.runKey` off it. */
-  const actionNodes = flow.nodes.filter((n) => n.kind === "notify" || n.kind === "command" || n.kind === "gate");
+  const actionNodes = flow.nodes.filter((n) => n.kind === "notify" || n.kind === "command" || n.kind === "gate" || n.kind === "subflow");
   /** How many rules cannot advance. Driven by the edges' own `error` — the half of
    * `isSettled` that means "tried and failed" rather than "ran". An armed flow with
    * one of these is not simply watching, and the footer must not say it is. */
@@ -1161,6 +1196,28 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
       nodes: [...flow.nodes, { id: nextNodeId(flow), kind: "gate", x: 320, y: 24, join: "any", question: "ok to continue?" }],
     });
 
+  /** One subflow node per ticked template, in one write — the same batching the
+   * command picker does. A template being EDITED is not offered to itself: a
+   * template that starts itself would never end (`instantiate` refuses it too). */
+  const addSubflows = (ids: string[]) => {
+    let next = flow;
+    for (const id of ids) next = addSubflowNode(next, id);
+    if (next !== flow) addAndSelect(next);
+  };
+  const subflowOptions = p.templates
+    .filter((t) => !(editingTemplate && p.openId?.kind === "template" && p.openId.id === t.id))
+    .map((t) => ({ value: t.id, label: t.name }));
+  const addSubflowPicker = (
+    <MultiCombo
+      trigger="+ Add subflow…"
+      ariaLabel="Add a subflow"
+      searchPlaceholder="Filter templates…"
+      options={subflowOptions}
+      emptyLabel="(no templates saved yet)"
+      onCommit={addSubflows}
+    />
+  );
+
   // Unlike every other node this drawer builds, a `planned` node ordinarily
   // cannot be assembled here: it names a ticket, and the webview has no task
   // connector to ask for one — it must not import `fs`/`os`/`path`/
@@ -1366,7 +1423,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   const nodeJoins = inspNode !== undefined && incomingEdges(flow, inspNode.id).length > 1;
   const nodeInsp =
     inspNode && (inspNode.kind === "command" || inspNode.kind === "notify"
-      || inspNode.kind === "gate" || nodeJoins) ? inspNode : undefined;
+      || inspNode.kind === "gate" || inspNode.kind === "subflow" || nodeJoins) ? inspNode : undefined;
   /** How the node inspector names the node it is about — the same `endLabel`
    * every other surface names it with. Also what its controls' aria-labels are
    * scoped by: "Command", bare, is the edge inspector's and an open list row's
@@ -1706,6 +1763,38 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
             onBlur={(ev) => p.onSave(withNodeNotifyMessage(flow, nodeInsp.id, ev.currentTarget.value))}
           />
         </div>
+      ) : nodeInsp.kind === "subflow" ? (
+        <>
+          <div className="orch-clause">
+            <span className="orch-kw">STARTS</span>
+            <select
+              className="orch-sel"
+              aria-label="Template"
+              value={nodeInsp.templateId}
+              onChange={(ev) => p.onSave(withNodeTemplate(flow, nodeInsp.id, ev.currentTarget.value))}
+            >
+              {/* The same not-on-disk option the command and mode pickers add: a
+                  select whose value matches nothing shows its FIRST option. */}
+              {!p.templates.some((t) => t.id === nodeInsp.templateId) && (
+                <option value={nodeInsp.templateId}>{subflowName(nodeInsp, p.templates)}</option>
+              )}
+              {subflowOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </div>
+          {nodeInsp.childFlowId !== undefined && (() => {
+            const childId = nodeInsp.childFlowId;
+            const child = p.flows.find((f) => f.id === childId);
+            return (
+              <div className="orch-clause" data-testid="orch-subflow-child">
+                <span className="orch-kw">STARTED</span>
+                <span>{child ? child.name : `${childId} (deleted)`}</span>
+                {child && (
+                  <button type="button" className="orch-mini" onClick={() => p.onOpen(childId)}>Open subflow</button>
+                )}
+              </div>
+            );
+          })()}
+        </>
       ) : nodeInsp.kind === "gate" ? (
         <>
           <div className="orch-clause">
@@ -1894,6 +1983,38 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 {nodeCount} {nodeCount === 1 ? "node" : "nodes"} · {flow.edges.length}{" "}
                 {flow.edges.length === 1 ? "rule" : "rules"}
               </span>
+              {/* The money line, and the one control that bounds it. Workflow-only,
+                  like Arm and the dry run beside it: a template spends nothing and
+                  has no journal to count. The tally is the HOST's (see the `spend`
+                  prop); the ceiling is written on the flow through the same
+                  `onSave` every other flow-level edit takes. `key={openKey}` for the
+                  reason the name input above gives: an uncontrolled field must reset
+                  when a different flow opens. */}
+              {!editingTemplate && (
+                <span
+                  className="row"
+                  data-testid="orch-spend"
+                  style={{ gap: 6, marginLeft: 10, fontSize: "var(--t-micro)", color: "var(--dim)" }}
+                >
+                  <span>· {spendSummary(p.spend?.[flow.id] ?? { sessions: 0, commands: 0 }, hasCeiling(flow) ? flow.spendCeiling : undefined)}</span>
+                  <span>· ceiling</span>
+                  <input
+                    className="orch-num"
+                    type="number"
+                    min={1}
+                    step={1}
+                    aria-label={CEILING_ARIA_LABEL}
+                    key={openKey}
+                    defaultValue={hasCeiling(flow) ? flow.spendCeiling : ""}
+                    placeholder={CEILING_PLACEHOLDER}
+                    onBlur={(ev) => {
+                      const parsed = parseCeilingInput(ev.currentTarget.value);
+                      if (parsed.ok) p.onSave(withCeiling(flow, parsed.ceiling));
+                      else ev.currentTarget.value = hasCeiling(flow) ? String(flow.spendCeiling) : "";
+                    }}
+                  />
+                </span>
+              )}
               <div className="sp" />
               {/* Every control in the `!editingTemplate` branch below is a
                   WORKFLOW verb — Save-as-template makes a NEW template from
@@ -2006,7 +2127,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                       // held by the cap, unobservable or blank alike — which is why it and
                       // `fired` need not add up to `edges`: a settled rule is in neither.
                       if (!dryRun) {
-                        const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi);
+                        const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id], p.flows);
                         send({
                           type: "flow:dryRun",
                           edges: flow.edges.length,
@@ -2218,6 +2339,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <button type="button" className="orch-mini" onClick={addGate}>+ Gate</button>
               <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
               {addCommandPicker}
+              {addSubflowPicker}
               {/* A place binds a LIVE running card's `runKey` into the graph —
                   see `attachAt`'s own comment for why that is the opposite of
                   what a template is for. Hidden rather than left to hit
@@ -2338,6 +2460,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           <button type="button" className="orch-mini" onClick={addGate}>+ Gate</button>
           <button type="button" className="orch-mini" onClick={addPlanned}>+ Add planned work</button>
           {addCommandPicker}
+          {addSubflowPicker}
         </div>
         <div
           ref={graphRef}
@@ -2391,7 +2514,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               <div
                 key={n.id}
                 data-testid={`orch-node-${n.id}`}
-                className={`orch-node${n.kind === "planned" ? " plan" : ""}${n.kind === "notify" ? " notify" : ""}${n.kind === "gate" ? " gate" : ""}${sel === n.id ? " sel" : ""}${wiring === n.id ? " src" : ""}`}
+                className={`orch-node${n.kind === "planned" ? " plan" : ""}${n.kind === "notify" ? " notify" : ""}${n.kind === "gate" ? " gate" : ""}${n.kind === "subflow" ? " subflow" : ""}${sel === n.id ? " sel" : ""}${wiring === n.id ? " src" : ""}`}
                 style={{ left: `${pos.x}px`, top: `${pos.y}px` }}
                 onPointerDown={(e) => startDrag(n.id, e)}
                 onPointerUp={() => wiring && finishWire(n.id)}
@@ -2406,7 +2529,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                       node the literal word "notify" — a canvas chip lying
                       about what it does — because it fell to the same default
                       a genuine notify node reads correctly. */}
-                  <span className="k">{endLabel(flow, n.id)}</span>
+                  <span className="k">{n.kind === "subflow" ? subflowName(n, p.templates) : endLabel(flow, n.id)}</span>
                 </div>
                 <div className="st">
                   {n.kind === "place" ? n.repo
@@ -2414,6 +2537,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                     : n.kind === "notify" ? n.message
                     : n.kind === "command" ? "runs a command"
                     : n.kind === "gate" ? gateBody(n, gateStateOf(n))
+                    : n.kind === "subflow" ? (n.childFlowId === undefined ? "starts a subflow" : "subflow started")
                     : ""}
                 </div>
                 {n.kind === "gate" && (() => {
@@ -2603,6 +2727,63 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               />
               <span className="orch-plabel">{DEADLINE_HINT}</span>
             </div>
+            {/* Opt-in RETRY, for the verbs that can fail in a way a second attempt
+                helps — the three that spend. Absent means what a failure has
+                always meant here: a full stop until Reset. A `run` gets the extra
+                tick: a launch that lost a worktree race is safe to try again, a
+                deploy that half-ran is not, and `retryPolicy` (model.ts) refuses
+                a command's retry without it. Same onBlur/revert idiom as WITHIN. */}
+            {derived !== undefined && isSpendAction(derived) && (
+              <div className="orch-clause" data-testid="orch-retry">
+                <span className="orch-kw">RETRY</span>
+                <input
+                  className="orch-num"
+                  type="number"
+                  min={1}
+                  step={1}
+                  aria-label={RETRY_COUNT_ARIA_LABEL}
+                  key={`${edge.id}-retry-max`}
+                  defaultValue={edge.retry?.max ?? ""}
+                  placeholder="none"
+                  onBlur={(ev) => {
+                    const parsed = parseRetryCount(ev.currentTarget.value);
+                    if (!parsed.ok) { ev.currentTarget.value = edge.retry?.max === undefined ? "" : String(edge.retry.max); return; }
+                    p.onSave(withRetry(flow, edge, parsed.max === undefined
+                      ? undefined
+                      : { max: parsed.max, backoffMs: edge.retry?.backoffMs ?? DEFAULT_RETRY_BACKOFF_MS }));
+                  }}
+                />
+                <span className="orch-plabel">times, every</span>
+                <input
+                  className="orch-num"
+                  type="number"
+                  min={0}
+                  aria-label={RETRY_BACKOFF_ARIA_LABEL}
+                  key={`${edge.id}-retry-backoff`}
+                  defaultValue={edge.retry ? Math.round(edge.retry.backoffMs / 1000) : ""}
+                  placeholder={String(DEFAULT_RETRY_BACKOFF_MS / 1000)}
+                  disabled={edge.retry === undefined}
+                  onBlur={(ev) => {
+                    if (edge.retry === undefined) return;
+                    const parsed = parseBackoffSeconds(ev.currentTarget.value);
+                    if (parsed.ok) p.onSave(withRetry(flow, edge, { max: edge.retry.max, backoffMs: parsed.backoffMs }));
+                    else ev.currentTarget.value = String(Math.round(edge.retry.backoffMs / 1000));
+                  }}
+                />
+                <span className="orch-plabel">s</span>
+                {derived === "run" && (
+                  <label className="orch-plabel" style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
+                    <input
+                      type="checkbox"
+                      aria-label={RETRY_OK_ARIA_LABEL}
+                      checked={edge.retryOk === true}
+                      onChange={(ev) => p.onSave(withRetryOk(flow, edge, ev.currentTarget.checked))}
+                    />
+                    {RETRY_OK_HINT}
+                  </label>
+                )}
+              </div>
+            )}
             {/* THEN is a STATEMENT, not a choice. The action is whatever the
                 node this rule points at implies (`edgeAction`), so a `<select>`
                 here could not decide anything: the pick was silently overridden
@@ -2810,7 +2991,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                     // gets the same Reset, but nothing ran and nothing broke, so
                     // it reads in the row's own dim voice instead of claiming a
                     // failure. See `isMigrationNotice`.
-                    <span className={isMigrationNotice(edge.error) ? undefined : "err"}>{edge.error}</span>
+                    <span className={isMigrationNotice(edge.error) ? undefined : "err"}>{failureText(edge)}</span>
                   ) : edge.expiredAt !== undefined ? (
                     // The third settled shape, in neither colour: not done —
                     // nothing ran — and not a failure — nothing broke. The row's
@@ -2819,6 +3000,16 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   ) : (
                     <span className="fired">{edge.firedNote ?? "fired"}</span>
                   )}
+                  <div className="sp" />
+                  <button type="button" className="orch-mini" onClick={() => p.onResetEdge(flow.id, edge.id)}>Reset</button>
+                </>
+              ) : retryPending(edge) ? (
+                // Failed, and will try again: the error keeps its red — it did
+                // fail — and the schedule sits beside it in the row's dim voice.
+                // Reset is offered because "stop retrying" is a thing to want.
+                <>
+                  <span className="err">{edge.error}</span>
+                  <span data-testid="orch-retry-note">{retryText(edge, Date.now())}</span>
                   <div className="sp" />
                   <button type="button" className="orch-mini" onClick={() => p.onResetEdge(flow.id, edge.id)}>Reset</button>
                 </>

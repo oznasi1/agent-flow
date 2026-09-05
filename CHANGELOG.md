@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **A spend ceiling per workflow.** The per-pass cap bounds one pass; nothing bounded a
+  workflow's whole life, and templates made twenty armed copies of one shape cheap. A
+  workflow's header now shows what it has spent — sessions opened, commands run — counted
+  off its journal, with an optional **ceiling** beside it. A pass whose spends would cross
+  the ceiling performs none of them, disarms the workflow, and raises a notification naming
+  the count; the journal records the stop as `armed` with `source: "ceiling"`. Nothing is
+  stored but the ceiling itself, so no existing workflow changes.
+
+### Added
+
+- **Subflow nodes.** A workflow can start a saved template as a child workflow: add a
+  **subflow** node from **+ Add subflow…**, and a rule reaching it starts the template on the
+  rule's source card, armed, named `<parent> › <template>`, with a pointer both ways. A later
+  rule on **the subflow finished** fires when every rule in the child has settled. Starting is
+  not a spend — the child asks its own consent — and the card keeps showing the parent. A
+  template that starts itself is refused; nesting stops three deep.
+
+- **A pass without the editor.** The extension now ships `dist/tick.js`: one orchestrator
+  pass from a shell, over the same flows, lock and journal the Deck uses, reading the
+  editor's own `settings.json`. It performs notify rules and already-consented run rules,
+  honours deadlines, the ceiling, retries and `neverAutoRun`, refreshes PR facts for the repos
+  armed flows watch, and refuses launch, seed and ask — leaving them pending and saying so.
+  `--dry-run` reports without touching anything. Schedule it with cron or launchd to keep a
+  flow watching overnight.
+
+- **Consent per command, behind a setting.** `agentFlow.commandConsent: "command"` keys a
+  workflow's shell approval to the resolved command text instead of the workflow: each new
+  text asks, and the ask offers **Run once**, **Run the next 5**, **Always for this command**,
+  or **Disarm**. A bounded approval counts down per run and asks again when spent; a different
+  command, or the same one with a different note, asks on its own. The default `flow` keeps
+  the once-per-workflow ask every existing workflow was armed under, and the new mode never
+  writes the old stamp. The journal's `consented` line gains `act-once` and `act-batch`.
+
+- **Opt-in retry on a rule that spends.** Off by default, so a failure is still the full stop
+  it always was. A launch, seed or run rule can carry a **RETRY** count and wait; a failed
+  attempt keeps its red error but is not settled, reads `retry 1 of 3 in 40s`, and is tried
+  again once the wait passes — the condition must still hold and the flow's consent already
+  covers it. A success says `after 2 retries`; the last failure says `gave up after 3
+  retries`. A command's retry is honoured only with an explicit **safe to re-run** tick on
+  that rule. Reset mid-retry stops it. The journal gains a `retrying` event.
+
+- **A rule can read what a command printed.** A new condition off a command node, **the
+  command printed…**, is met when the command's captured output contains a text — a plain
+  case-insensitive substring — so "deploy printed `ROLLBACK`, page me" is one rule. The host
+  answers it off the flow's journal once per pass and hands the verdict to the engine and
+  the drawer alike, so the dry run agrees with what fires. A command that ran and failed
+  counts too; a rule waits until the command has run, and again after a Reset.
+
 - **Deadlines on rules.** Every rule in a workflow has a **WITHIN** field — minutes, or blank
   for "forever". A rule whose condition has not arrived by then settles as *expired*: a third
   terminal state beside fired and errored, shown in the drawer's ordinary voice rather than in

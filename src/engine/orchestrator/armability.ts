@@ -90,6 +90,13 @@ const LABEL: Record<Condition["kind"], string> = {
   // Same reason and same absence from NEEDS_LIVE/NEEDS_PR as the three above:
   // answered off a sibling edge's `expiredAt`, never off a toggleable signal.
   "deadline-passed": "a deadline here passed",
+  // Answered from the command's journaled output, host-side — no toggle governs
+  // it, so absent from NEEDS_LIVE/NEEDS_PR like `command-succeeded`. The
+  // trailing ellipsis is the drawer's own mark for "carries a parameter"; the
+  // blank-text case is `condIncomplete`'s, reported as `unset-parameter`.
+  "command-printed": "the command printed…",
+  // Answered off the child flow's own file — no toggle governs it either.
+  "subflow-done": "the subflow finished",
 };
 
 export function unfirableRules(flow: Flow, sources: SourceState): UnfirableRule[] {

@@ -93,6 +93,12 @@ export function instantiate(
   if (!t.flow.nodes.some(isPlanned)) {
     throw new Error(`template ${JSON.stringify(t.name)} has no planned step: nothing to bind ${ticketKey} to`);
   }
+  // A template that starts itself would start itself again in the child, six
+  // seconds later, forever. `MAX_SUBFLOW_DEPTH` (model.ts) bounds the chain at
+  // spawn time regardless; this refuses the one shape that is never right.
+  if (t.flow.nodes.some((n) => n.kind === "subflow" && n.templateId === t.id)) {
+    throw new Error(`template ${JSON.stringify(t.name)} starts itself as a subflow — that would never end`);
+  }
 
   // Build the fresh flow incrementally so `nextNodeId`/`nextEdgeId` see what has
   // already been minted — they answer "unique within THIS flow".
@@ -224,7 +230,13 @@ export function canBindTicket(flow: Flow): boolean {
 export function normalizedTemplateFlow(flow: Flow, name: string, nodes: FlowNode[]): Flow {
   return {
     id: "", name, armed: false, createdAt: 0,
-    nodes,
+    // A subflow node's `childFlowId` is a host stamp naming a flow that exists
+    // on THIS machine's disk; a template must carry the shape, never that.
+    nodes: nodes.map((n) => {
+      if (n.kind !== "subflow") return n;
+      const { childFlowId: _drop, ...rest } = n;
+      return rest;
+    }),
     edges: flow.edges.map(stripHostStamps),
   };
 }

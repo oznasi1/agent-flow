@@ -2,7 +2,7 @@
 // Type-only: src/tasks/provider.ts imports Filter/Task/Size from here, so a
 // value import would be a runtime cycle. `import type` is erased at build time.
 import type { SerializedCaps, TaskConnector } from "./tasks/provider";
-import type { Flow } from "./engine/orchestrator/model";
+import type { Flow, SpendTally } from "./engine/orchestrator/model";
 import type { UsageTotals } from "./engine/usage";
 // A verdict enum, not a value module — `deck:flows` carries a map of these so the
 // drawer can say what a branch-CI rule is waiting on. Re-exported because the
@@ -975,10 +975,18 @@ export type OutboundMessage =
   // `templates` rides the same emptied-with-`flows` rule as `pendingResume` and
   // for the same reason: with the setting off there is nothing to attach, and
   // silence must not read as "not loaded yet".
+  // `printed` is every `command-printed` rule's verdict, keyed flow id → rule edge
+  // id, read by the host off each flow's journal (`printedVerdicts`) — the SAME
+  // map the pass handed `evaluateFlow`, for the reason `branchCi` is: the drawer's
+  // dry run and the card's stepper must agree with the engine about a rule the
+  // webview cannot answer for itself (the output is in a file). Optional on the
+  // wire; a missing map reads as "did not print", i.e. waiting.
   | {
       type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[];
       promptModes: FlowPromptMode[]; commands: FlowCommand[];
       branchCi: Record<string, BranchCiStatus>; templates: FlowTemplate[];
+      printed?: Record<string, Record<string, boolean>>;
+      spend?: Record<string, SpendTally>;
     }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }

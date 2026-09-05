@@ -9,6 +9,8 @@
 // and no real clock. `path` is the only import, exactly as in `store.ts` — this
 // module is host-side and never reachable from a webview entry point.
 import * as path from "path";
+import { Flow, findNode, incomingEdges, isSettled, outputContains } from "./model";
+import { FlowAction, isSpendAction, SpendTally } from "./model";
 import { VALID_FLOW_ID } from "./store";
 
 /** The only IO surface. `append` MUST open with `O_APPEND` so two windows writing
@@ -72,7 +74,17 @@ export type JournalEventInput =
    * `errored` — it ran nothing and nothing broke — and deliberately not read by
    * `findEdgeOutput`, which would otherwise hide the output of a command that
    * DID run before a Reset-then-expire. */
-  | { kind: "expired"; edge: string; from: string; to: string; since: number };
+  | { kind: "expired"; edge: string; from: string; to: string; since: number }
+  /** A rule failed and, because it opted into retry (`FlowEdge.retry`), was
+   * scheduled to try again rather than latched: `attempt` is how many times it
+   * has now failed, `max` how many retries it may take, `retryAt` when the next
+   * one is allowed. Always follows the `errored` line for the same failure —
+   * that one says what went wrong, this one says what happens next. */
+  | { kind: "retrying"; edge: string; attempt: number; max: number; retryAt: number }
+  /** A `subflow` node started a child flow. `child` is its id — the pointer a
+   * reader follows to the child's own journal; the parent's `fired` line for the
+   * same rule carries the receipt. */
+  | { kind: "spawned"; node: string; template: string; child: string };
 
 /** An event as it sits on disk, minus `sum` — which is a property of the LINE,
  * not of the event, and is consumed by `readJournal` rather than handed on. */
@@ -317,4 +329,57 @@ export function findEdgeOutput(events: JournalEvent[], edgeId: string): EdgeOutp
   const latest = forEdge[forEdge.length - 1];
   if (latest.output === undefined) return { ok: false, reason: "no-output" };
   return { ok: true, output: latest.output, kind: latest.kind, action: latest.action, at: latest.at };
+}
+
+/** Every `command-printed` rule's verdict for one flow, keyed by the RULE's edge
+ * id — what the host hands `evaluateFlow` on `EvalInput.printed` and ships to the
+ * webview on `deck:flows`. The host's half of that condition; `evaluate.ts`'s
+ * `commandPrinted` is the engine's, and it re-checks that the command has
+ * performed before it trusts a `true` here.
+ *
+ * For each pending rule of that kind out of a command node: find the command's
+ * performer (the incoming edge with `performed`, settled either way — a failure's
+ * output counts), take THAT edge's most recent `fired`/`errored` output through
+ * `findEdgeOutput` (most recent, never an older run's — its own doc comment says
+ * why), and match with `outputContains`. Anything missing along the way is
+ * `false`, which the engine reads as waiting. Settled rules and rules out of
+ * anything but a command node are skipped: nothing reads their verdict.
+ *
+ * Reads the journal the caller already parsed rather than reading a file, so a
+ * pass reads each flow's journal once whatever the number of such rules. */
+export function printedVerdicts(flow: Flow, events: JournalEvent[]): Record<string, boolean> {
+  const out: Record<string, boolean> = {};
+  for (const e of flow.edges) {
+    if (e.cond.kind !== "command-printed" || isSettled(e)) continue;
+    if (findNode(flow, e.from)?.kind !== "command") continue;
+    const performer = incomingEdges(flow, e.from).find((x) => x.performed === true && isSettled(x));
+    if (performer === undefined) {
+      out[e.id] = false;
+      continue;
+    }
+    const output = findEdgeOutput(events, performer.id);
+    out[e.id] = output.ok && outputContains(output.output, e.cond.text);
+  }
+  return out;
+}
+/** What a flow has spent over its life, read off its `fired` lines: every
+ * `launch` or `seed` opened a session, every `run` executed a command. Only
+ * `fired` counts — an `errored` launch opened nothing, and a `reset` undoes the
+ * rule's receipt but not the money — and only a spending action does, through
+ * `isSpendAction` so this and the consent gate cannot disagree about what spends.
+ *
+ * Derived rather than stored (see `Flow.spendCeiling`), which carries one honest
+ * caveat: the journal is capped (`JOURNAL_CAP_BYTES`) and a flow chatty enough to
+ * be trimmed loses its oldest lines — and with them the oldest spends. A ceiling
+ * on such a flow is a floor on how much it has spent, not an exact count. */
+export function spendTally(events: JournalEvent[]): SpendTally {
+  const t: SpendTally = { sessions: 0, commands: 0 };
+  for (const e of events) {
+    // `action` is a `string` on the wire (a newer build's verb must still parse);
+    // `isSpendAction` answers `false` for anything it does not know.
+    if (e.kind !== "fired" || !isSpendAction(e.action as FlowAction)) continue;
+    if (e.action === "run") t.commands++;
+    else t.sessions++;
+  }
+  return t;
 }

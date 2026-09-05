@@ -566,6 +566,10 @@ vi.mock("../../src/config", async (importActual) => {
       // test that never sets it gets the shipped default — an empty list, which
       // blocks nothing.
       neverAutoRun: real.neverAutoRun,
+      // Sourced from the real getConfig() for the same reason: a test steers the
+      // consent mode with setConfig({ commandConsent }), and every test that never
+      // sets it gets the shipped default — once per flow.
+      commandConsent: real.commandConsent,
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
@@ -12971,5 +12975,522 @@ describe("deadlines on an armed flow", () => {
     expect(e.liveSince).toBeUndefined();
     expect(e.expiredAt).toBeUndefined();
     expect(e.timeoutMinutes).toBe(10);
+  });
+});
+
+describe("a command-printed rule", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** place → command (already performed) → notify on "the command printed…". */
+  const printedFlow = (text = "DEPLOYED"): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "c", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh" },
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "it printed the word" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "c", cond: { kind: "pr-merged" }, firedAt: 5, firedNote: "ran", performed: true },
+      { id: "e2", from: "c", to: "n2", cond: { kind: "command-printed", text } },
+    ],
+  });
+  const ranWith = (output: string) =>
+    seedJournal("f1", { kind: "fired", edge: "e1", from: "n1", to: "c", action: "run", note: "ran", output }, 1_000);
+
+  it("fires when the journal shows the command printed the text", async () => {
+    ranWith("building…\nDEPLOYED to prod\n");
+    setConfig({ orchestrator: true });
+    h.flows = [printedFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    // The first pass holds a ready rule at the resume gate; Go is the next pass.
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[1].firedAt).toBeTypeOf("number");
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/printed the word/));
+  });
+
+  it("waits when the output lacks the text, and when nothing was journaled", async () => {
+    ranWith("rolled back\n");
+    setConfig({ orchestrator: true });
+    h.flows = [printedFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].edges[1].firedAt).toBeUndefined();
+    expect(h.writeFlow).not.toHaveBeenCalled();
+  });
+
+  it("posts the verdict per flow on deck:flows so the drawer agrees with the engine", async () => {
+    ranWith("DEPLOYED");
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...printedFlow(), armed: false }];
+    const { p } = await openPanel();
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { printed?: Record<string, Record<string, boolean>> };
+    expect(msg.printed).toEqual({ f1: { e2: true } });
+  });
+
+  it("posts nothing for a flow without such a rule — and reads no journal for it", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [{ ...mkFlow("f2", "plain"), armed: false }];
+    const { p } = await openPanel();
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { printed?: Record<string, unknown> };
+    expect(msg.printed).toEqual({});
+  });
+});
+
+describe("opt-in retry on an armed flow", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** A consented launch rule that opted into two retries, 30s apart. */
+  const retryFlow = (edgeOver: Partial<FlowEdge> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "planned", x: 0, y: 0, join: "any", ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, retry: { max: 2, backoffMs: 30_000 }, ...edgeOver }],
+  });
+
+  const warmed = async (flow: Flow) => {
+    setConfig({ orchestrator: true });
+    h.flows = [flow];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    return opened;
+  };
+
+  it("schedules a retry when a launch fails, journals errored then retrying, and does not try again before the backoff", async () => {
+    h.launchPlanned.mockResolvedValueOnce({ ok: false, message: "worktree exists" });
+    const { send } = await warmed(retryFlow());
+    await send({ type: "deck:refresh" });
+    const e = h.flows[0].edges[0];
+    expect(e.error).toMatch(/worktree exists/);
+    expect(e.attempts).toBe(1);
+    expect(e.retryAt).toBeTypeOf("number");
+    const kinds = journal().map((j) => j.kind);
+    expect(kinds.indexOf("retrying")).toBe(kinds.indexOf("errored") + 1);
+    expect(journal().find((j) => j.kind === "retrying")).toMatchObject({ edge: "e1", attempt: 1, max: 2 });
+    // Not due yet: nothing launches on the next pass.
+    h.launchPlanned.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("tries again once the backoff has elapsed, and a success clears the failure", async () => {
+    const { send } = await warmed(retryFlow({ error: "worktree exists", attempts: 1, retryAt: Date.now() - 1, performed: true }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    const e = h.flows[0].edges[0];
+    expect(e.firedAt).toBeTypeOf("number");
+    expect(e.error).toBeUndefined();
+    expect(e.retryAt).toBeUndefined();
+    expect(e.firedNote).toMatch(/after 1 retry/);
+    // No consent asked again: the flow's first spend was already approved.
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("latches for good once the retries are spent", async () => {
+    h.launchPlanned.mockResolvedValueOnce({ ok: false, message: "still no worktree" });
+    const { send } = await warmed(retryFlow({ error: "worktree exists", attempts: 2, retryAt: Date.now() - 1, performed: true }));
+    await send({ type: "deck:refresh" });
+    const e = h.flows[0].edges[0];
+    expect(e.attempts).toBe(3);
+    expect(e.retryAt).toBeUndefined();
+    expect(journal().some((j) => j.kind === "retrying")).toBe(false);
+  });
+
+  it("a rule that never opted in fails exactly as before — no retry stamps, no retrying line", async () => {
+    h.launchPlanned.mockResolvedValueOnce({ ok: false, message: "worktree exists" });
+    const { send } = await warmed(retryFlow({ retry: undefined }));
+    await send({ type: "deck:refresh" });
+    const e = h.flows[0].edges[0];
+    expect(e.error).toMatch(/worktree exists/);
+    expect(e.retryAt).toBeUndefined();
+    expect(journal().some((j) => j.kind === "retrying")).toBe(false);
+  });
+
+  it("flow:resetEdge clears attempts and retryAt and keeps the policy", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [retryFlow({ error: "x", attempts: 1, retryAt: 5, retryOk: true })];
+    const { send } = await openPanel();
+    await send({ type: "flow:resetEdge", id: "f1", edgeId: "e1" });
+    const e = (h.writeFlow.mock.calls.at(-1)![2] as Flow).edges[0];
+    expect(e.attempts).toBeUndefined();
+    expect(e.retryAt).toBeUndefined();
+    expect(e.retry).toEqual({ max: 2, backoffMs: 30_000 });
+    expect(e.retryOk).toBe(true);
+  });
+});
+
+describe("per-command consent (agentFlow.commandConsent: command)", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** A place watching aws-ops wired to a free-text command. `launchConfirmedAt` set
+   * so nothing here is about sessions; `commandConfirmedAt` set too — under
+   * per-command consent it must be IGNORED, which several cases below prove. */
+  const cmdFlow = (run = "deploy.sh staging", over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    commandConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "command", x: 0, y: 0, join: "any", run },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run" }],
+    ...over,
+  });
+
+  const warmed = async (flow: Flow) => {
+    setConfig({ orchestrator: true, commandConsent: "command" });
+    h.flows = [flow];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    h.exec.mockClear();
+    return opened;
+  };
+  const modal = () => (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)!;
+  const answer = (label: string) => (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(label);
+  /** Reset the rule so the same command is ready to run again on the next pass. */
+  const rearm = (f: Flow): Flow => ({ ...f, edges: f.edges.map((e) => ({ ...e, firedAt: undefined, firedNote: undefined, performed: undefined, error: undefined })) });
+
+  it("asks per command text — ignoring the flow-level stamp — with the four sizes of approval, and runs nothing that pass", async () => {
+    const { send } = await warmed(cmdFlow());
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    const call = modal();
+    expect(call[0]).toContain('"deploy.sh staging"');
+    expect(call[0]).toContain("exactly this command");
+    expect(call[1]).toMatchObject({ modal: true });
+    expect(call.slice(2)).toEqual(["Run once", "Run the next 5", "Always for this command", "Disarm"]);
+    expect(journal().filter((j) => j.kind === "consent-asked")).toHaveLength(1);
+  });
+
+  it("Run once covers exactly one run: the next pass runs, the pass after that asks again", async () => {
+    answer("Run once");
+    const { send } = await warmed(cmdFlow());
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConsents).toEqual({ "deploy.sh staging": { at: expect.any(Number), remaining: 1 } });
+    expect(journal().filter((j) => j.kind === "consented").at(-1)).toMatchObject({ answer: "act-once" });
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(h.flows[0].commandConsents!["deploy.sh staging"].remaining).toBe(0);
+    // Same command, ready again: it asks again.
+    h.flows = [rearm(h.flows[0])];
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(modal().slice(2)).toEqual(["Run once", "Run the next 5", "Always for this command", "Disarm"]);
+  });
+
+  it("Run the next 5 counts down one per run, failures included", async () => {
+    answer("Run the next 5");
+    const { send } = await warmed(cmdFlow());
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConsents!["deploy.sh staging"].remaining).toBe(5);
+    expect(journal().filter((j) => j.kind === "consented").at(-1)).toMatchObject({ answer: "act-batch" });
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConsents!["deploy.sh staging"].remaining).toBe(4);
+  });
+
+  it("Always for this command never asks again for that text, but a different text asks", async () => {
+    answer("Always for this command");
+    const { send } = await warmed(cmdFlow());
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConsents).toEqual({ "deploy.sh staging": { at: expect.any(Number) } });
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    h.flows = [rearm(h.flows[0])];
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(2);
+    // A second command node with different text, in the same flow, asks.
+    h.flows = [{
+      ...h.flows[0],
+      nodes: [...h.flows[0].nodes, { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh prod" }],
+      edges: [...h.flows[0].edges, { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "run" }],
+    }];
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(2);
+    expect(modal()[0]).toContain('"deploy.sh prod"');
+  });
+
+  it("Disarm disarms and writes no approval; dismissing writes nothing and journals the dismissal", async () => {
+    answer("Disarm");
+    const { send } = await warmed(cmdFlow());
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].armed).toBe(false);
+    expect(h.flows[0].commandConsents).toBeUndefined();
+    (window.showWarningMessage as ReturnType<typeof vi.fn>).mockResolvedValueOnce(undefined);
+    const again = await warmed(cmdFlow());
+    await again.send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConsents).toBeUndefined();
+    expect(h.flows[0].armed).toBe(true);
+    expect(journal().filter((j) => j.kind === "consented").at(-1)).toMatchObject({ answer: "dismissed" });
+  });
+
+  it("the flow-level stamp is never written by a per-command answer, so flipping the setting back finds no approval nobody gave", async () => {
+    answer("Always for this command");
+    const { send } = await warmed(cmdFlow("deploy.sh staging", { commandConfirmedAt: undefined }));
+    await send({ type: "deck:refresh" });
+    expect(h.flows[0].commandConfirmedAt).toBeUndefined();
+    expect(h.flows[0].commandConsents!["deploy.sh staging"]).toBeTruthy();
+  });
+
+  it("under the default mode nothing changes: the flow-level stamp still covers every command", async () => {
+    setConfig({ orchestrator: true, commandConsent: "flow" });
+    h.flows = [cmdFlow()];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const { send } = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.exec.mockClear();
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.flows[0].commandConsents).toBeUndefined();
+  });
+});
+
+describe("a flow's spend ceiling", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+
+  /** A place feeding planned work — the launch shape — already consented, so the
+   * only thing between a met rule and a launch is the ceiling. */
+  const launchFlow = (over: Partial<Flow> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    launchConfirmedAt: 500,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "n2", kind: "planned", x: 0, y: 0, join: "any", ticketKey: "PROJ-12", repos: ["aws-ops"], mode: "implementation", dest: "worktree" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch" }],
+    ...over,
+  });
+
+  const fired = (edge: string, action: string) =>
+    ({ kind: "fired", edge, from: "n1", to: "n2", action, note: "" }) as const;
+
+  /** Warm the resume gate with an unmet condition, then arm the met one. */
+  const warmed = async (flow: Flow) => {
+    setConfig({ orchestrator: true });
+    h.flows = [flow];
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    return opened;
+  };
+
+  it("disarms instead of launching when this pass would take the lifetime spend past the ceiling, and says so", async () => {
+    // Four sessions and one command already on the record; a ceiling of 5; one
+    // more launch wanted. 5 + 1 > 5.
+    for (let i = 0; i < 4; i++) seedJournal("f1", fired(`e${i}`, "launch"), 1_000 + i);
+    seedJournal("f1", fired("e9", "run"), 1_010);
+    const { send } = await warmed(launchFlow({ spendCeiling: 5 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+    const written = h.writeFlow.mock.calls.at(-1)![2] as Flow;
+    expect(written.armed).toBe(false);
+    expect(written.edges[0].firedAt).toBeUndefined();
+    expect(written.edges[0].error).toBeUndefined();
+    const msg = (window.showWarningMessage as ReturnType<typeof vi.fn>).mock.calls.at(-1)![0] as string;
+    expect(msg).toContain("Ship the migration");
+    expect(msg).toContain("5 of 5");
+    expect(msg).toContain("4 sessions");
+    expect(msg).toContain("1 command");
+    expect(journal().filter((e) => e.kind === "armed").at(-1)).toMatchObject({ armed: false, source: "ceiling" });
+    expect(trackSpy).toHaveBeenCalledWith(expect.objectContaining({ name: "flow_armed", armed: false, source: "ceiling" }));
+  });
+
+  it("launches while the spend would land AT or under the ceiling", async () => {
+    for (let i = 0; i < 4; i++) seedJournal("f1", fired(`e${i}`, "launch"), 1_000 + i);
+    const { send } = await warmed(launchFlow({ spendCeiling: 5 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+    expect((h.writeFlow.mock.calls.at(-1)![2] as Flow).armed).toBe(true);
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  it("counts only what actually FIRED — an errored launch and a reset spent nothing and un-spend nothing", async () => {
+    for (let i = 0; i < 4; i++) seedJournal("f1", fired(`e${i}`, "launch"), 1_000 + i);
+    seedJournal("f1", { kind: "errored", edge: "e8", from: "n1", to: "n2", action: "launch", error: "no worktree" }, 1_008);
+    seedJournal("f1", { kind: "reset", edge: "e0" }, 1_009);
+    const { send } = await warmed(launchFlow({ spendCeiling: 5 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+  });
+
+  it("ignores a ceiling that is not a positive number, as a hand-edited file can carry", async () => {
+    for (let i = 0; i < 9; i++) seedJournal("f1", fired(`e${i}`, "launch"), 1_000 + i);
+    const { send } = await warmed(launchFlow({ spendCeiling: 0 }));
+    await send({ type: "deck:refresh" });
+    expect(h.launchPlanned).toHaveBeenCalledTimes(1);
+  });
+
+  it("posts the flow's tally on deck:flows, off the journal — launches and seeds as sessions, runs as commands", async () => {
+    // One flow only: the journal fake here reflects `h.journalLines` back for
+    // every flow id alike, so a second flow would read the first one's lines.
+    seedJournal("f1", fired("e1", "launch"), 1_000);
+    seedJournal("f1", fired("e2", "seed"), 1_001);
+    seedJournal("f1", fired("e3", "run"), 1_002);
+    seedJournal("f1", fired("e4", "notify"), 1_003);
+    setConfig({ orchestrator: true });
+    h.flows = [launchFlow({ armed: false })];
+    const { p } = await openPanel();
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { spend?: Record<string, unknown> };
+    expect(msg.spend).toEqual({ f1: { sessions: 2, commands: 1 } });
+  });
+
+  it("posts an empty tally for a flow with no journal — nothing spent is no entry, not zeros", async () => {
+    setConfig({ orchestrator: true });
+    h.flows = [launchFlow({ armed: false })];
+    const { p } = await openPanel();
+    const msg = posts(p).filter((m) => m.type === "deck:flows").at(-1) as { spend?: Record<string, unknown> };
+    expect(msg.spend).toEqual({});
+  });
+});
+
+describe("a subflow node", () => {
+  const openPanel = async () => {
+    show();
+    await settled();
+    const p = lastPanel();
+    return { p, send: async (m: unknown) => { await p._fire(m); await settled(); } };
+  };
+  const shipIt = (id = "k1"): FlowTemplate => ({
+    schema: 1, id, name: "Ship it", params: {}, savedAt: 1_000,
+    flow: { id: "unused", name: "Ship it", armed: false, createdAt: 0, edges: [], nodes: [
+      { id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["aws-ops"], mode: "plan", dest: "worktree" },
+    ] },
+  });
+  /** place → subflow(k1) on pr-merged, then subflow → notify on subflow-done. */
+  const parentFlow = (over: Partial<Flow> = {}, subOver: Record<string, unknown> = {}): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+      { id: "s", kind: "subflow", x: 0, y: 0, join: "any", templateId: "k1", ...subOver } as FlowNode,
+      { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "the subflow finished" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" } },
+      { id: "e2", from: "s", to: "n2", cond: { kind: "subflow-done" } },
+    ],
+    ...over,
+  });
+  const warmed = async (flows: Flow[]) => {
+    setConfig({ orchestrator: true });
+    h.templates = [shipIt()];
+    h.flows = flows;
+    h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+    const opened = await openPanel();
+    await settle();
+    h.buildRunStatus.mockReturnValue(mergedStatus("PROJ-1", "aws-ops"));
+    h.writeFlow.mockClear();
+    return opened;
+  };
+
+  it("starts the template as an ARMED child bound to the source place's card, points the node at it, and journals both sides", async () => {
+    const { send } = await warmed([parentFlow()]);
+    await send({ type: "deck:refresh" });
+    const child = h.flows.find((f) => f.id !== "f1")!;
+    expect(child).toBeTruthy();
+    expect(child.armed).toBe(true);
+    expect(child.parentFlow).toBe("f1");
+    expect(child.parentNode).toBe("s");
+    expect(child.name).toBe("Ship the migration › Ship it");
+    expect(child.fromTemplate).toBe("k1");
+    expect(child.nodes.filter((n) => n.kind === "planned").every((n) => (n as { ticketKey: string }).ticketKey === "PROJ-1")).toBe(true);
+    // No consent inherited: the child asks before its own first spend.
+    expect(child.launchConfirmedAt).toBeUndefined();
+    const parent = h.flows.find((f) => f.id === "f1")!;
+    expect((parent.nodes[1] as { childFlowId?: string }).childFlowId).toBe(child.id);
+    expect(parent.edges[0].firedAt).toBeTypeOf("number");
+    expect(parent.edges[0].firedNote).toBe("started Ship it");
+    expect(journal().find((j) => j.kind === "fired")).toMatchObject({ action: "spawn", edge: "e1" });
+    expect(journal().find((j) => j.kind === "spawned")).toMatchObject({ node: "s", template: "k1", child: child.id });
+    expect(journal().find((j) => j.kind === "armed")).toMatchObject({ armed: true, source: "spawn", flow: child.id });
+    // Spawning is not a spend: no consent was asked and nothing was launched.
+    expect(window.showWarningMessage).not.toHaveBeenCalled();
+    expect(h.launchPlanned).not.toHaveBeenCalled();
+  });
+
+  it("fires the parent's subflow-done rule once the child has settled every rule", async () => {
+    const child: Flow = {
+      ...mkFlow("c1", "Ship the migration › Ship it"), armed: true, parentFlow: "f1", parentNode: "s",
+      nodes: [{ id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        { id: "n2", kind: "notify", x: 0, y: 0, join: "any", message: "m" }],
+      edges: [{ id: "k1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, firedAt: 5, firedNote: "told you" }],
+    };
+    const parent = parentFlow({ edges: [
+      { id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" }, firedAt: 4, firedNote: "started Ship it", performed: true },
+      { id: "e2", from: "s", to: "n2", cond: { kind: "subflow-done" } },
+    ] }, { childFlowId: "c1" });
+    const { send } = await warmed([parent, child]);
+    // The child is settled from the first look, so the resume gate holds the
+    // parent's ready rule until Go — the same gate every first-look fire meets.
+    await send({ type: "flow:resumeApprove", id: "f1" });
+    await send({ type: "deck:refresh" });
+    expect(h.flows.find((f) => f.id === "f1")!.edges[1].firedAt).toBeTypeOf("number");
+    expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/the subflow finished/));
+  });
+
+  it("refuses to nest past the depth limit, and a template that is gone, latching the rule with the reason", async () => {
+    const chain: Flow[] = [
+      { ...mkFlow("g1", "g1"), armed: false },
+      { ...mkFlow("g2", "g2"), armed: false, parentFlow: "g1" },
+      { ...mkFlow("g3", "g3"), armed: false, parentFlow: "g2" },
+    ];
+    const { send } = await warmed([parentFlow({ parentFlow: "g3" }), ...chain]);
+    await send({ type: "deck:refresh" });
+    const deep = h.flows.find((f) => f.id === "f1")!;
+    expect(deep.edges[0].error).toMatch(/subflows deep/);
+    expect(h.flows.filter((f) => f.parentFlow === "f1")).toHaveLength(0);
+
+    const again = await warmed([parentFlow({}, { templateId: "nope" })]);
+    await again.send({ type: "deck:refresh" });
+    expect(h.flows.find((f) => f.id === "f1")!.edges[0].error).toMatch(/no longer on disk/);
+  });
+
+  it("does not start a second child from a node that already started one", async () => {
+    const { send } = await warmed([parentFlow({ edges: [{ id: "e1", from: "n1", to: "s", cond: { kind: "pr-merged" } }] }, { childFlowId: "c-old" })]);
+    await send({ type: "deck:refresh" });
+    expect(h.flows.find((f) => f.id === "f1")!.edges[0].error).toMatch(/already started a subflow/);
+    expect(h.flows).toHaveLength(1);
   });
 });

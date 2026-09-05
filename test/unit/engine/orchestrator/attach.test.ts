@@ -357,3 +357,26 @@ describe("workflowState — an expired rule", () => {
     expect(s.steps[0]).toMatchObject({ state: "now", deadlineAt: 1_000 + 10 * 60_000 });
   });
 });
+
+describe("workflowState — a failure pending retry", () => {
+  it("is a current step carrying the error and the schedule, not a fail, and the workflow keeps advancing", () => {
+    const s = workflowState(withEdges([edge({ id: "e1", error: "no worktree", attempts: 1, retryAt: 5_000, retry: { max: 3, backoffMs: 1 } })]), [], 1000);
+    expect(s.steps[0]).toMatchObject({ state: "now", receipt: "no worktree", retryAt: 5_000 });
+    expect(s.status).toBe("advancing");
+    expect(s.done).toBe(0);
+  });
+
+  it("a terminal failure is still a fail that stops the workflow", () => {
+    const s = workflowState(withEdges([edge({ id: "e1", error: "gave up", attempts: 4, retry: { max: 3, backoffMs: 1 } })]), [], 1000);
+    expect(s.steps[0].state).toBe("fail");
+    expect(s.status).toBe("stopped");
+  });
+});
+
+describe("attachedWorkflows — subflow children", () => {
+  it("never offers a child a subflow started as a card's workflow, however it binds — the parent is the card's workflow", () => {
+    const parent = { ...flow("f1", [place("n1", "PROJ-142")]), armed: true };
+    const child = { ...flow("f2", [place("n1", "PROJ-142")]), parentFlow: "f1", parentNode: "s" };
+    expect(attachedWorkflows([child, parent], "PROJ-142", "PROJ-142").map((f) => f.id)).toEqual(["f1"]);
+  });
+});

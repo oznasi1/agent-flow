@@ -347,7 +347,9 @@ export type UsageEvent =
   | {
       name: "flow_armed"; armed: boolean; node_count: number; edge_count: number;
       unfirable_live: number; unfirable_pr_facts: number; unfirable_forge: number;
-      source: "toggle" | "resume-banner" | "auto-skip";
+      // `ceiling`: the pass disarmed the flow itself because its next spend would
+      // have taken it past `spendCeiling`. Not a gesture in any window.
+      source: "toggle" | "resume-banner" | "auto-skip" | "ceiling";
     }
   // One per edge this pass actually performed — never one per evaluation pass,
   // and never for a rule merely stamped as a sibling. `deferred` is a pre-flight
@@ -357,7 +359,7 @@ export type UsageEvent =
   // planned node carries all three. `"notify"` is reserved: a notify spends
   // nothing and is not performed through this seam, so nothing emits it today.
   | {
-      name: "flow_edge_fired"; edge_action: "launch" | "seed" | "notify" | "run"; ok: boolean;
+      name: "flow_edge_fired"; edge_action: "launch" | "seed" | "notify" | "run" | "spawn"; ok: boolean;
       deferred: boolean; dest?: "worktree" | "new-window" | "current-window";
       prompt_mode?: PromptModeProp; repo_count?: number;
     }
