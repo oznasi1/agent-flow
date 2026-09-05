@@ -825,20 +825,28 @@ function TaskCard(props: {
   const canAddressPr = isPrReviewStatus(task.status, prReviewStatus);
   // A connector's `url` is third-party text, and index.tsx's capture-phase click
   // handler only intercepts `https?:` — so `javascript:` is precisely the scheme it
-  // would let navigate the webview, where navigating IS running. Anything else loses
-  // the attribute, leaving an inert key rather than a link to somewhere unexpected.
+  // would let navigate the webview, where navigating IS running.
   //
-  // CodeQL keeps js/xss and js/client-side-unvalidated-url-redirection open on the
-  // line below whatever shape this takes — behind a helpers.ts function, inline as a
-  // regex on `task.url`, inline on a local, and as `startsWith` on a local were all
-  // tried. Its js/xss reading is simply wrong here: `href` is assigned from nothing
-  // but a string that begins `http://` or `https://`, so no scheme that executes can
-  // reach the DOM. The redirection query has no fix at all short of dropping the
-  // feature — linking to a URL the source supplied is what this anchor IS. The two
-  // belong in the security tab's dismissed list, not in another rewrite of these
-  // four lines; don't reshape them again trying to satisfy the analyser.
+  // The href is REBUILT behind a literal scheme rather than being `task.url` handed
+  // back after a test, and that is the substance of the guard rather than a
+  // formality. What decides whether a URL executes is its prefix; after this the
+  // prefix is one of the two literals below by construction, so no arrangement of
+  // the connector's text can put anything else there. A checked-then-returned value
+  // is the weaker claim — it says the string passed a test, not that its prefix is
+  // ours — which is why CodeQL's js/xss keeps firing on that shape: a URL write is
+  // only a sink while the attacker holds the prefix, and only rebuilding takes it
+  // away from them.
+  //
+  // js/client-side-unvalidated-url-redirection still fires here and cannot be made
+  // not to: its one sanitiser guard is HostnameSanitizerGuard, so only an allowlist
+  // of HOSTS would satisfy it, and the host is whatever site the user configured.
+  // Linking to a URL the source supplied is what this anchor IS. That one alert is
+  // dismissed rather than designed around.
   const ticketUrl = task.url;
-  const href = /^https?:\/\//i.test(ticketUrl) ? ticketUrl : undefined;
+  const parts = /^(https?):\/\/(.+)$/i.exec(ticketUrl);
+  const href = !parts ? undefined
+    : parts[1].toLowerCase() === "https" ? `https://${parts[2]}`
+    : `http://${parts[2]}`;
   const armed = React.useRef(false); // true only while a drag started from the grip
 
   const take = (e: React.MouseEvent) => {

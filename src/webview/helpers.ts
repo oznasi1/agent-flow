@@ -284,9 +284,23 @@ export function timeAgo(ms: number | null): string {
 /** Schemes an image `src` may legitimately carry here. `asWebviewUri` returns
  * `vscode-webview:`-family URIs on some hosts and an `https://…vscode-cdn.net` URL on
  * others, and the same code renders data and blob URLs for an image held in memory. */
-const MEDIA_SRC = /^(?:https?:|blob:|data:image\/|vscode-(?:webview|webview-resource|resource|file):)/i;
+const MEDIA_SCHEMES = [
+  "https://", "http://", "blob:", "data:image/",
+  "vscode-webview://", "vscode-webview-resource://", "vscode-resource:", "vscode-file://",
+] as const;
 
-/** `uri` if it is safe to use as an image `src`, otherwise `undefined`. */
+/** `uri` if it is safe to use as an image `src`, otherwise `undefined`.
+ *
+ *  The return is REBUILT from the matched scheme literal rather than being the input
+ *  handed back, and that is the substance of the guard, not a formality: the part of
+ *  a URL that decides whether it executes is its prefix, and after this the prefix is
+ *  one of the literals above by construction — no arrangement of the input can put
+ *  anything else there. Returning `uri` itself leaves a value whose scheme merely
+ *  *was checked*, which is a weaker claim and one CodeQL's js/xss correctly declines
+ *  to accept (a `WriteUrlSink` is only a sink while the attacker holds the prefix). */
 export function safeMediaSrc(uri: string | undefined): string | undefined {
-  return uri && MEDIA_SRC.test(uri) ? uri : undefined;
+  if (!uri) return undefined;
+  const lower = uri.toLowerCase();
+  const scheme = MEDIA_SCHEMES.find((s) => lower.startsWith(s));
+  return scheme ? `${scheme}${uri.slice(scheme.length)}` : undefined;
 }

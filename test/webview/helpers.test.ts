@@ -428,6 +428,20 @@ describe("safeMediaSrc", () => {
     }
   });
 
+  it("normalises the scheme's case, because the prefix it returns is the literal", () => {
+    // The return is rebuilt from the matched literal rather than being the input
+    // handed back, so an oddly-cased scheme comes out canonical. That is the point:
+    // after this the prefix is one of the allowed literals by construction.
+    expect(safeMediaSrc("HTTPS://host/a.png")).toBe("https://host/a.png");
+    expect(safeMediaSrc("VSCode-Webview://abc/a.png")).toBe("vscode-webview://abc/a.png");
+  });
+
+  it("keeps everything after the scheme byte for byte", () => {
+    // Only the prefix is replaced; the rest must survive untouched, including the
+    // case and any characters a filename brought with it.
+    expect(safeMediaSrc("https://Host/Path%20With+Odd~Chars.PNG")).toBe("https://Host/Path%20With+Odd~Chars.PNG");
+  });
+
   it("rejects a script-bearing or HTML data src", () => {
     expect(safeMediaSrc("javascript:alert(1)")).toBeUndefined();
     expect(safeMediaSrc("data:text/html,<script>alert(1)</script>")).toBeUndefined();

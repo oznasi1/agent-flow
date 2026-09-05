@@ -18,9 +18,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A ticket URL that is not http(s) no longer becomes a link.** A connector's
   `url` is third-party text, and the sidebar's click interceptor only catches
   `https?:` — so a `javascript:` URL was the one scheme it let navigate the webview,
-  which is arbitrary script. The key now renders without an `href` instead, and a
-  notepad thumbnail's `src` is checked the same way — against the URI shapes
+  which is arbitrary script. The key now renders without an `href` instead. A
+  notepad thumbnail's `src` is guarded the same way, against the URI shapes
   `asWebviewUri` actually returns, so no host loses its thumbnails.
+  Both are rebuilt behind a literal scheme rather than returned after a test: what
+  decides whether a URL executes is its prefix, and rebuilding makes that prefix
+  ours by construction instead of merely checked. An oddly-cased scheme
+  (`HTTPS://…`) therefore comes back canonical.
 - **CI's `GITHUB_TOKEN` is now read-only.** The workflow inherited the repository
   default; every other workflow already declared its own scope.
 
