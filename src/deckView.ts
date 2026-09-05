@@ -5,7 +5,7 @@ import * as path from "path";
 import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal } from "./engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal, analyticsShape, analyticsIdOf, retryPolicy, edgeAction } from "./engine/orchestrator/model";
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, findEdgeOutput, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
@@ -73,7 +73,7 @@ import { CardAgent, FlowPromptMode, InboundMessage, MergeMethod, OpenSession, Ou
 // card), unrelated to analytics — every later Deck telemetry emit goes through
 // `trackEvent`/`trackError` instead, never the bare names.
 import { track as trackEvent, trackError } from "./telemetry/telemetry";
-import { classifyFailure, DeckAction, Op, STOCK_REVIEW_MODES, toPromptModeProp, type TaskModeProp } from "./telemetry/events";
+import { classifyFailure, DeckAction, Op, STOCK_REVIEW_MODES, toFlowActionProp, toPromptModeProp, type TaskModeProp } from "./telemetry/events";
 import { modeProp } from "./telemetry/settingsSnapshot";
 
 export const POLL_MS = 6000;
@@ -323,6 +323,46 @@ const DECK_MESSAGE_OPS: Partial<Record<string, Op>> = {
 
 /** The Deck: a full-window board of every task launched via Agent Flow Deck, opened as a
  * singleton editor-area panel. Reuses the Jira client, runs store, and status engine. */
+/** The workflow-shape counts, spelled as the event catalog spells them. Built here
+ * rather than in `analyticsShape` so the engine module stays free of the wire
+ * format: `model.ts` answers what a workflow is made of, and this decides what of
+ * that we are willing to say. Spread into an event LITERAL at each call site —
+ * `track`'s `NoExcess` generic re-checks the merged result, so a property this
+ * helper grew that the catalog does not declare still fails to compile. */
+function analyticsProps(flow: Flow): {
+  rules_with_deadline: number;
+  rules_with_retry: number;
+  rules_with_output_condition: number;
+  subflow_node_count: number;
+} {
+  const shape = analyticsShape(flow);
+  return {
+    rules_with_deadline: shape.withDeadline,
+    rules_with_retry: shape.withRetry,
+    rules_with_output_condition: shape.withOutputCondition,
+    subflow_node_count: shape.subflowNodes,
+  };
+}
+
+/** `retries_used` for a rule about to be reported as fired, or nothing at all for
+ * a rule that carries no retry it could take.
+ *
+ * The distinction is deliberate and load-bearing for the analysis: an ABSENT
+ * property means "retries are not configured here", which is what every rule in
+ * every flow written before 0.68.0 has, while a present `0` means "a retry was
+ * configured and the first attempt worked". Collapsing the two would make the
+ * feature look adopted everywhere it is not.
+ *
+ * `e.attempts` counts FAILURES (runner.ts), and `e` here is the pre-act copy, so
+ * its value is exactly how many attempts this rule already burned before the one
+ * being reported. `retryPolicy` — not `e.retry` — decides whether a retry exists,
+ * so a RETRY typed onto a rule that could never take one (a notify, or a `run`
+ * without its explicit `retryOk` tick) reports nothing rather than a phantom. */
+function retryProps(e: FlowEdge, action: FlowAction | undefined): { retries_used?: number } {
+  if (retryPolicy(e, action) === undefined) return {};
+  return { retries_used: typeof e.attempts === "number" && e.attempts > 0 ? e.attempts : 0 };
+}
+
 export class DeckPanel {
   private static current: DeckPanel | undefined;
   private readonly panel: vscode.WebviewPanel;
@@ -889,7 +929,7 @@ export class DeckPanel {
           if (current) {
             const stamped = applyClocks(current, clocks, nowMs);
             if (stamped !== current) {
-              writeFlow(this.flowIo, this.flowsDir, stamped);
+              const written = writeFlow(this.flowIo, this.flowsDir, stamped);
               for (const e of stamped.edges) {
                 // Only what THIS pass stamped: an edge another window expired a
                 // pass ago carries an older `expiredAt` and its own line already.
@@ -897,6 +937,26 @@ export class DeckPanel {
                 this.journal(flow.id, {
                   kind: "expired", edge: e.id, from: e.from, to: e.to, since: e.liveSince ?? nowMs,
                 }, nowMs);
+                // Beside the journal line, and for the same rules: one event per
+                // rule THIS pass expired, never one per pass and never for a rule
+                // some other window expired first.
+                //
+                // `waited_ms` is measured from `liveSince` — when the rule
+                // genuinely began waiting — not from the flow's creation, and the
+                // clock it counts is the one that PAUSES while the flow is
+                // disarmed and restarts on re-arm. So a rule with a 60-minute
+                // deadline can honestly report waiting 60 minutes across three
+                // days of wall time, and the gap between `within_min` and
+                // `waited_ms` is the measure of how much of a workflow's life is
+                // spent switched off. Guarded to a non-negative number: a
+                // hand-edited `liveSince` in the future would otherwise send a
+                // negative duration.
+                trackEvent({
+                  name: "flow_rule_expired", flow_uid: analyticsIdOf(written),
+                  edge_action: toFlowActionProp(edgeAction(stamped, e)),
+                  within_min: typeof e.timeoutMinutes === "number" ? e.timeoutMinutes : 0,
+                  waited_ms: Math.max(0, nowMs - (e.liveSince ?? nowMs)),
+                });
               }
             }
           }
@@ -938,7 +998,7 @@ export class DeckPanel {
         // The write is based on `fresh`, not on the `flow` this pass evaluated:
         // writing the stale copy would erase the other window's stamp on the edge
         // we just decided not to claim, un-latching it so it fires all over again.
-        const fresh = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+        let fresh = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
         // Gone from the store between the two reads (another window deleted it).
         // Writing would resurrect a file the user removed. Stated explicitly rather
         // than left to `fresh?.edges ?? []` — that would land in the same place (no
@@ -946,6 +1006,20 @@ export class DeckPanel {
         // written) but only by accident, and the plausible convenience spelling,
         // `fresh ?? flow`, silently recreates the deleted flow.
         if (!fresh) continue;
+        // Give this flow its reporting id before anything in the pass reports on
+        // it. Lazily, on the first pass that sees a flow without one, rather than
+        // as a migration over the whole store: a flow nobody runs is a flow
+        // nothing needs to say anything about, and rewriting every file on disk at
+        // upgrade time to add an analytics field would be exactly the kind of
+        // uninvited write this store is careful never to make. Costs one extra
+        // write, once, per flow — and only for flows written before this build.
+        if (!fresh.analyticsId) fresh = writeFlow(this.flowIo, this.flowsDir, fresh);
+        const flowUid = analyticsIdOf(fresh);
+        // A child's own rules report the depth they ran at, so a funnel can ask
+        // whether nested workflows behave like top-level ones. Computed once per
+        // pass rather than per rule: it cannot change mid-pass, and `subflowDepth`
+        // walks the whole store to answer.
+        const flowDepth = fresh.parentFlow === undefined ? undefined : subflowDepth(fresh, flows);
         const freshById = new Map(fresh.edges.map((e) => [e.id, e]));
         const unclaimed = result.fired
           .filter((f) => {
@@ -1039,9 +1113,16 @@ export class DeckPanel {
             this.resumeCleared.delete(flow.id);
             this.journal(flow.id, { kind: "armed", armed: false, source: "ceiling" }, nowMs);
             trackEvent({
-              name: "flow_armed", armed: false,
+              name: "flow_armed", armed: false, flow_uid: flowUid,
               node_count: fresh.nodes.length, edge_count: fresh.edges.length,
               unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+              // The one disarm where the ceiling numbers are the whole story:
+              // `spend_total` here is what the flow had spent when it stopped, and
+              // the ceiling it stopped against is `fresh.spendCeiling` — sent only
+              // as `has_ceiling`, because the ceiling itself is a number the user
+              // chose and the tally already says how far they got.
+              has_ceiling: true, spend_total: spendTotal(tally),
+              ...analyticsProps(fresh),
               source: "ceiling",
             });
             this.log(`deck: flow ${flow.id} disarmed — ${spendTotal(tally)} spent against a ceiling of ${fresh.spendCeiling}, and this pass wanted ${wanted} more`);
@@ -1170,9 +1251,11 @@ export class DeckPanel {
               // is the only place that fact exists. Nothing here computes an
               // armability split, so the three counts are zero.
               trackEvent({
-                name: "flow_armed", armed: false,
+                name: "flow_armed", armed: false, flow_uid: flowUid,
                 node_count: fresh.nodes.length, edge_count: fresh.edges.length,
                 unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+                has_ceiling: hasCeiling(fresh), spend_total: spendTotal(this.spendTallyOf(fresh.id)),
+                ...analyticsProps(fresh),
                 source: "auto-skip",
               });
             }
@@ -1215,12 +1298,16 @@ export class DeckPanel {
                 ? launched.dest
                 : undefined;
             trackEvent({
-              name: "flow_edge_fired", edge_action: "launch", ok: edgeOk, deferred: done.kind === "defer",
+              name: "flow_edge_fired", edge_action: "launch", ok: edgeOk, flow_uid: flowUid,
+              deferred: done.kind === "defer",
               ...(dest ? { dest } : {}), prompt_mode: toPromptModeProp(launched.mode), repo_count: launched.repos.length,
+              ...retryProps(f.edge, f.action), ...(flowDepth === undefined ? {} : { depth: flowDepth }),
             });
           } else {
             trackEvent({
-              name: "flow_edge_fired", edge_action: f.action, ok: edgeOk, deferred: done.kind === "defer",
+              name: "flow_edge_fired", edge_action: f.action, ok: edgeOk, flow_uid: flowUid,
+              deferred: done.kind === "defer",
+              ...retryProps(f.edge, f.action), ...(flowDepth === undefined ? {} : { depth: flowDepth }),
             });
           }
           // Renewed AFTER the act, against the real clock rather than this pass's
@@ -1352,11 +1439,44 @@ export class DeckPanel {
                 kind: "retrying", edge: e.id, attempt: e.attempts ?? 1, max: e.retry?.max ?? 0, retryAt: e.retryAt,
               }, nowMs);
             }
+            // One event per retry DECISION, both ways round: a failure with a
+            // `retryAt` is an attempt scheduled, and a failure without one — on a
+            // rule that HAS a policy — is the give-up. `retryPolicy` is what
+            // separates the give-up from an ordinary latched failure on a rule
+            // that never had a retry at all; without that guard every failure in
+            // every workflow would report as one, and retries are off by default,
+            // so the whole adoption read would be wrong from the first day.
+            //
+            // `backoffMs` is not sent: the wait is a number the user typed, and
+            // `attempt`/`max` already say everything the funnel asks.
+            const policy = retryPolicy(e, f.action);
+            if (policy !== undefined) {
+              trackEvent({
+                name: "flow_rule_retried", flow_uid: flowUid,
+                edge_action: toFlowActionProp(f.action),
+                attempt: typeof e.attempts === "number" && e.attempts > 0 ? e.attempts : 1,
+                max: policy.max,
+                gave_up: e.retryAt === undefined,
+              });
+            }
           } else if (e.firedAt !== undefined) {
             this.journal(flow.id, {
               kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "",
               ...(output === undefined ? {} : { output }),
             }, nowMs);
+            // "The subflow finished" arriving is the other half of a spawn, and
+            // the only signal that says a child ran to the end rather than being
+            // abandoned armed on the board. Read off the rule's own condition
+            // rather than hooked into `evaluate.ts`, which is a pure module and
+            // stays that way. `depth` is the PARENT's — the child that just
+            // finished was one deeper, and its own rules already reported
+            // themselves at that depth.
+            if (e.cond?.kind === "subflow-done") {
+              trackEvent({
+                name: "flow_subflow", flow_uid: flowUid, event: "finished",
+                depth: flowDepth ?? 0,
+              });
+            }
           }
         }
         for (const p of promotions) {
@@ -1371,7 +1491,15 @@ export class DeckPanel {
         // state — "settled" is every edge stamped or errored — so this is derived
         // here rather than read off a field.
         if (!wasSettled && next.edges.length > 0 && next.edges.every(isSettled)) {
-          trackEvent({ name: "flow_settled", node_count: next.nodes.length, edge_count: next.edges.length });
+          trackEvent({
+            name: "flow_settled", flow_uid: flowUid,
+            node_count: next.nodes.length, edge_count: next.edges.length,
+            // Off `next`, the copy just written — the same one the settled test
+            // above read — so the split describes the flow that actually settled.
+            // An edge is settled three ways and only one of them is a success.
+            expired_count: next.edges.filter((e) => e.expiredAt !== undefined).length,
+            errored_count: next.edges.filter((e) => e.error !== undefined && e.retryAt === undefined).length,
+          });
         }
         // `next`, not `fresh`: the message should describe what was actually just
         // written — same reasoning as building `next` from `atWrite` above — and
@@ -1639,6 +1767,20 @@ export class DeckPanel {
       { kind: "consented", answer: answer === ACT ? "act" : answer === DISARM ? "disarm" : "dismissed" },
       Date.now(),
     );
+    // Emitted on all three answers for the same reason the journal line is: a
+    // dismissed question writes nothing, and a funnel that saw only the approvals
+    // could not tell a user who said no from a window that was closed before the
+    // modal was ever read.
+    //
+    // `ACT` maps to `"always"`, not `"once"`: in the default `flow` mode this one
+    // click approves every command this workflow will ever have, which is the
+    // whole reason the per-command mode exists. Reporting it as `"once"` would
+    // make the two modes look like they were answering the same question.
+    trackEvent({
+      name: "flow_consent_answered", flow_uid: analyticsIdOf(latest), mode: "flow",
+      action: target.action,
+      answer: answer === ACT ? "always" : answer === DISARM ? "disarm" : "dismissed",
+    });
   }
 
   /** The per-command ask — `agentFlow.commandConsent: "command"`. Names the
@@ -1671,6 +1813,24 @@ export class DeckPanel {
       },
       now,
     );
+    // The four-way answer is the entire product question behind
+    // `agentFlow.commandConsent`, and `disarm` is the single most useful value in
+    // this catalog for "where do people drop": someone who reads what a workflow
+    // is about to run and switches it off is telling us the workflow was
+    // mis-wired, and no other event we send says that.
+    //
+    // `CONSENT_BATCH` itself is not sent — the bound is a constant of ours, not a
+    // fact about the user — and neither is the command text, which is
+    // user-authored shell and can carry hostnames, paths or tokens.
+    trackEvent({
+      name: "flow_consent_answered", flow_uid: analyticsIdOf(latest), mode: "command", action: "run",
+      answer:
+        answer === ONCE ? "once"
+        : answer === BATCH ? "batch"
+        : answer === ALWAYS ? "always"
+        : answer === DISARM ? "disarm"
+        : "dismissed",
+    });
   }
 
   /** The configured PromptMode for an id, or a `done` refusal naming what will not
@@ -1967,7 +2127,14 @@ export class DeckPanel {
       return { kind: "done", outcome: { ok: false, error: `the template this subflow starts (${sub.templateId}) is no longer on disk.` } };
     }
     const flows = readFlows(this.flowIo, this.flowsDir);
-    if (subflowDepth(flow, flows) >= MAX_SUBFLOW_DEPTH) {
+    const depth = subflowDepth(flow, flows);
+    if (depth >= MAX_SUBFLOW_DEPTH) {
+      // Reported under the PARENT's id, so a refusal and the workflow it was
+      // refused in are one row. The two refusals worth an event are the two the
+      // MODEL makes — the depth stop here and the self-start below; the others
+      // (a missing template, a source that is not a place) are wiring mistakes a
+      // user sees and fixes in the drawer, not facts about the feature.
+      trackEvent({ name: "flow_subflow", flow_uid: analyticsIdOf(flow), event: "refused", depth, refusal: "depth" });
       return { kind: "done", outcome: { ok: false, error: `this workflow is already ${MAX_SUBFLOW_DEPTH} subflows deep — not nesting another.` } };
     }
     const cfg = getConfig();
@@ -1986,10 +2153,24 @@ export class DeckPanel {
         modes: cfg.promptModes.map((m) => m.id),
       });
     } catch (e) {
+      // `instantiate` refuses a template that starts ITSELF — it would start
+      // itself again in the child six seconds later, forever — among other
+      // reasons. Which one it was is re-derived from the same predicate
+      // `instantiate` uses rather than read out of the message: an error string
+      // is copy, and copy gets rewritten.
+      if (t.flow.nodes.some((n) => n.kind === "subflow" && n.templateId === t.id)) {
+        trackEvent({ name: "flow_subflow", flow_uid: analyticsIdOf(flow), event: "refused", depth, refusal: "self" });
+      }
       return { kind: "done", outcome: { ok: false, error: (e as Error).message } };
     }
     child = { ...child, name: `${flow.name} › ${t.name}`, armed: true, parentFlow: flow.id, parentNode: sub.id };
     writeFlow(this.flowIo, this.flowsDir, child);
+    // The child's depth, which is one past the parent's — the number the
+    // `MAX_SUBFLOW_DEPTH` stop is measured against, so "how close do real
+    // workflows get to the wall?" is answerable from spawns and refusals
+    // together. The fire itself is also a `flow_edge_fired` with
+    // `edge_action: "spawn"`; this is what adds the nesting to it.
+    trackEvent({ name: "flow_subflow", flow_uid: analyticsIdOf(flow), event: "spawned", depth: depth + 1 });
     this.journal(child.id, { kind: "armed", armed: true, source: "spawn" }, now);
     return {
       kind: "done",
@@ -4443,7 +4624,10 @@ export class DeckPanel {
               return rest;
             })
           : flow.edges;
-        writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed, edges });
+        // The RETURN value, not the flow passed in: `writeFlow` mints the
+        // reporting id when the flow has none, and the event below must send the
+        // id that is now on disk rather than the empty one this copy came with.
+        const written = writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: m.armed, edges });
         // `source: "toggle"` matches the `flow_armed` telemetry this handler
         // already emits below, so the two records of one gesture agree. The
         // pass's own auto-skip records its disarm as its own `skipped` events
@@ -4513,9 +4697,15 @@ export class DeckPanel {
           this.resumeCleared.delete(m.id);
         }
         trackEvent({
-          name: "flow_armed", armed: m.armed,
+          name: "flow_armed", armed: m.armed, flow_uid: analyticsIdOf(written),
           node_count: flow.nodes.length, edge_count: flow.edges.length,
           unfirable_live: unfirable.live, unfirable_pr_facts: unfirable.pr, unfirable_forge: unfirable.forge,
+          // Sent on a disarm as well as an arm, deliberately: a workflow's spend
+          // at the moment its owner switched it off is the more interesting half
+          // of the pair, and reading headroom needs both numbers whether or not a
+          // ceiling was ever set.
+          has_ceiling: hasCeiling(flow), spend_total: spendTotal(this.spendTallyOf(flow.id)),
+          ...analyticsProps(flow),
           source: "toggle",
         });
         this.postFlows();
@@ -4706,7 +4896,7 @@ export class DeckPanel {
         if (!flow) return;
         this.pendingResume.delete(m.id);
         this.resumeCleared.add(m.id);
-        writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: false });
+        const written = writeFlow(this.flowIo, this.flowsDir, { ...flow, armed: false });
         // `source: "resume-banner"` matches the `flow_armed` telemetry below, so
         // the two records of one gesture agree — the same rule the `flow:arm`
         // site follows. A disarm from the banner switches the flow off exactly as
@@ -4720,9 +4910,11 @@ export class DeckPanel {
         // split: nothing computes one on a disarm.
         trackEvent({ name: "flow_action", action: "resume_disarm" });
         trackEvent({
-          name: "flow_armed", armed: false,
+          name: "flow_armed", armed: false, flow_uid: analyticsIdOf(written),
           node_count: flow.nodes.length, edge_count: flow.edges.length,
           unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+          has_ceiling: hasCeiling(flow), spend_total: spendTotal(this.spendTallyOf(flow.id)),
+          ...analyticsProps(flow),
           source: "resume-banner",
         });
         this.postFlows();

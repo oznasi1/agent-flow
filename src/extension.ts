@@ -13,6 +13,7 @@ import { getConfig, isVSCodeHost } from "./config";
 import { maybeRunSetup, runSetup } from "./setup";
 import { showDoctor, defaultDeps } from "./doctorView";
 import { disposeTelemetry, initTelemetry, track } from "./telemetry/telemetry";
+import { agentFlowDir } from "./engine/paths";
 import { settingsSnapshot } from "./telemetry/settingsSnapshot";
 import { maybeShowTelemetryNotice } from "./telemetry/notice";
 import { maybeShowModesNotice } from "./modesNotice";
@@ -82,7 +83,12 @@ export function activate(context: vscode.ExtensionContext): void {
   // best-effort block further down for why: an uncaught throw disposes every
   // registration that follows it.
   try {
-    initTelemetry(context, log);
+    // The third argument is where the headless identity file goes — the same
+    // `~/.agentflow` the flows, runs and journals already live in, which is the
+    // one directory both this process and a cron-scheduled `dist/tick.js` can
+    // agree on. Passed explicitly (see `initTelemetry`) so that nothing but a
+    // real activation ever writes outside the editor's own storage.
+    initTelemetry(context, log, agentFlowDir());
   } catch (e) {
     log(`telemetry: init failed (extension still active): ${e instanceof Error ? e.message : String(e)}`);
   }

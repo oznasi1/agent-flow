@@ -1,4 +1,6 @@
 import * as vscode from "vscode";
+import * as fs from "fs";
+import * as path from "path";
 import { randomUUID } from "crypto";
 import { getConfig } from "../config";
 import { createIdentity, Identity } from "./identity";
@@ -41,7 +43,14 @@ function settingEnabled(): boolean {
   }
 }
 
-export function initTelemetry(context: vscode.ExtensionContext, log: (m: string) => void): void {
+/** `agentFlowDir` is where the headless identity file is left — `~/.agentflow`
+ * in the product, supplied by `activate()`. OMITTING it writes nothing at all,
+ * and that is the deliberate default: this is the one side effect in this module
+ * that touches a path outside the editor's own storage, and a function that
+ * wrote to the real home directory unless asked not to would do exactly that
+ * from every test that ever calls init. Opt in, explicitly, from the one caller
+ * that means it. */
+export function initTelemetry(context: vscode.ExtensionContext, log: (m: string) => void, agentFlowDir?: string): void {
   if (state) return;
   const identity = createIdentity(context.globalState);
   const commonProperties = {
@@ -90,6 +99,46 @@ export function initTelemetry(context: vscode.ExtensionContext, log: (m: string)
   ];
 
   state = { logger, sender, identity, log, disposables };
+  if (agentFlowDir !== undefined) writeHeadlessIdentity(agentFlowDir, identity.distinctId, log);
+}
+
+/** Leave `distinct_id` where `dist/tick.js` can find it.
+ *
+ * A headless pass has no `vscode.env.machineId` to read and deliberately mints
+ * nothing of its own — a tick that invented an id would report as a brand-new
+ * user on every cron run, and the reach numbers would be fiction. So the
+ * extension writes the id it already sends, once, beside the flows both
+ * processes share.
+ *
+ * Written ONLY while telemetry is consented, which is why an install that has
+ * opted out never grows this file at all: with it absent, `sendHeadless`
+ * refuses. A user who turns telemetry back on gets the file at the next window's
+ * activation — a lag measured in "the next time you open your editor", and the
+ * conservative direction to err in.
+ *
+ * Best-effort in every failure mode. This runs inside `activate()`, and no
+ * failure to write an analytics convenience may take the extension down with it
+ * — a read-only home directory is a working editor, not a broken one. */
+export function writeHeadlessIdentity(dir: string, distinctId: string, log: (m: string) => void): void {
+  if (!settingEnabled()) return;
+  try {
+    const file = path.join(dir, "telemetry.json");
+    // Only the id, and only when it is not already the id on disk: this runs on
+    // every activation, and rewriting an unchanged file every window open is
+    // pointless disk churn.
+    const wanted = JSON.stringify({ distinctId }, null, 2) + "\n";
+    let current: string | undefined;
+    try {
+      current = fs.readFileSync(file, "utf8");
+    } catch {
+      // Absent, which is the case this function exists for.
+    }
+    if (current === wanted) return;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, wanted);
+  } catch (e) {
+    log(`telemetry: could not write the headless identity file: ${e instanceof Error ? e.message : String(e)}`);
+  }
 }
 
 /** Every key across the whole event catalog, distributed over the union so

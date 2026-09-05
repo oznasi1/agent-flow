@@ -49,6 +49,7 @@ export const REMOTE_CONTROL_MODES = ["off", "on", "ask"] as const;
 export const AGENT_SURFACES = ["extension", "terminal"] as const;
 export const AGENT_PROVIDERS = ["claude-code", "copilot", "cursor", "codex", "ask"] as const;
 export const DEFAULT_FILTER_VALUES = ["unassigned", "mysprint", "mine", "sprint", "backlog"] as const;
+export const COMMAND_CONSENT_MODES = ["flow", "command"] as const;
 
 const DEFAULT_ENVIRONMENT_LIST = DEFAULT_ENVIRONMENTS.join(",");
 
@@ -126,6 +127,11 @@ export function settingsSnapshot(cfg: AgentFlowConfig): SettingsSnapshot {
     merge_writes: cfg.mergeWrites,
     merge_method: enumOrInvalid(cfg.mergeMethod, MERGE_METHODS),
     orchestrator: cfg.orchestrator,
+    // Which shell-consent gate this install runs. The per-workflow default and
+    // the per-command mode ask genuinely different questions, and
+    // `flow_consent_answered` carries the mode per ask — but only this says how
+    // many installs ever moved off the default, which is the adoption half.
+    command_consent: enumOrInvalid(cfg.commandConsent, COMMAND_CONSENT_MODES),
     child_worktrees: cfg.childWorktrees,
     stamp_label_on_write: cfg.stampLabelOnWrite,
     track_open_windows: cfg.trackOpenWindows,

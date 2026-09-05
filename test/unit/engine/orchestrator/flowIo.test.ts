@@ -42,8 +42,15 @@ describe("nodeFlowIo", () => {
   it("round-trips a flow through the real filesystem", () => {
     const io = nodeFlowIo();
     const flow = { ...emptyFlow("f1", "Ship it", 1_000), armed: false };
-    writeFlow(io, dir, flow);
-    expect(readFlows(io, dir)).toEqual([flow]);
+    // `writeFlow` mints `analyticsId` for a flow that has none, so what comes
+    // back is the flow PLUS that field — which is why the round-trip is asserted
+    // against the return value rather than against the input. Compared as a whole
+    // object, not `toMatchObject`, so a write that dropped or rewrote any other
+    // field still fails here.
+    const written = writeFlow(io, dir, flow);
+    expect(readFlows(io, dir)).toEqual([written]);
+    expect(written).toEqual({ ...flow, analyticsId: written.analyticsId });
+    expect(written.analyticsId).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it("creates the directory on first write", () => {

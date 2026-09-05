@@ -428,6 +428,77 @@ export interface Flow {
    * Workflows list, armable, resettable and deletable on its own. */
   parentFlow?: string;
   parentNode?: string;
+  /** A random UUID minted for THIS workflow the first time anything wants to
+   * report on it, and the only workflow identifier telemetry ever sends
+   * (`flow_uid`).
+   *
+   * It exists because `Flow.id` cannot be sent and never will be: `newFlowId`
+   * mints it from a clock plus a short salt, so it is neither random nor ours —
+   * not even fingerprinted, since a hash of a low-entropy, time-ordered value is
+   * reversible by anyone who can guess the minute. This field is the opposite by
+   * construction: `randomUUID()`, derived from nothing about the user, the
+   * machine or the workflow, and meaningful only as "these events are the same
+   * workflow".
+   *
+   * Stored HERE, in the flows file, rather than in `globalState`, because the
+   * flows file is the one store all three readers share: both Deck windows and
+   * `dist/tick.js`, which has no editor state to read. A funnel that lost its
+   * thread the moment a workflow ran overnight under cron would answer none of
+   * the questions this field exists for.
+   *
+   * Optional, and absent on every flow written before it existed — which is why
+   * `analyticsIdFor` mints lazily rather than a migration writing one into every
+   * file on disk. NEVER carried into a template or a duplicate: a template
+   * attached to twenty cards is twenty workflows, and twenty workflows sharing
+   * one id would collapse exactly the funnel this is for (see
+   * `normalizedTemplateFlow` in templates.ts and the `duplicate_template`
+   * gesture). */
+  analyticsId?: string;
+}
+
+/** What a workflow is BUILT from, counted for telemetry: how many of its rules
+ * carry each of the features 0.68.0 added, and how many of its nodes are
+ * subflows.
+ *
+ * Counts only, and that is the whole point — a deadline's minutes are a
+ * duration and safe, but an output condition's needle, a subflow's template id
+ * and a command's text are user-authored strings that must never leave the
+ * machine. Answering "is this feature used at all?" needs a number, not a value.
+ *
+ * `withRetry` asks `retryPolicy`, not `e.retry`, so a retry that could never be
+ * taken — on an action that does not spend, or a `run` missing its explicit
+ * `retryOk` tick — is not counted as adoption. A user who typed a RETRY into a
+ * notify rule has not adopted retries; they have configured something inert, and
+ * reporting it as uptake would be a lie the feature's own reader does not tell. */
+export interface AnalyticsShape {
+  withDeadline: number;
+  withRetry: number;
+  withOutputCondition: number;
+  subflowNodes: number;
+}
+
+/** The id to report this flow under, or `""` for a flow that has never been
+ * written by this build.
+ *
+ * Empty rather than a freshly minted value, deliberately: a mint here would hand
+ * back a different id every time it was asked, which is worse than no id at all
+ * — every event would look like its own workflow. `writeFlow` is the one place
+ * that mints, because minting means persisting.
+ *
+ * Lives here beside the field rather than in `store.ts` because it reads a Flow
+ * and touches no IO — and because a caller should not have to reach through the
+ * persistence module to ask a question about an object it already holds. */
+export function analyticsIdOf(flow: Flow | undefined): string {
+  return typeof flow?.analyticsId === "string" ? flow.analyticsId : "";
+}
+
+export function analyticsShape(flow: Flow): AnalyticsShape {
+  return {
+    withDeadline: flow.edges.filter(hasDeadline).length,
+    withRetry: flow.edges.filter((e) => retryPolicy(e, edgeAction(flow, e)) !== undefined).length,
+    withOutputCondition: flow.edges.filter((e) => e.cond?.kind === "command-printed").length,
+    subflowNodes: flow.nodes.filter((n) => n.kind === "subflow").length,
+  };
 }
 
 /** One per-command approval — see `Flow.commandConsents`. */
