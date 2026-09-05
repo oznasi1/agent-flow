@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import * as os from "os";
 import * as path from "path";
 import {
-  FlowIo, defaultFlowsDir, readFlows, writeFlow, removeFlow, analyticsIdOf,
+  FlowIo, defaultFlowsDir, readFlows, writeFlow, removeFlow,
   defaultTemplatesDir, readTemplates, writeTemplate, removeTemplate,
 } from "../../../../src/engine/orchestrator/store";
-import { Flow, emptyFlow } from "../../../../src/engine/orchestrator/model";
+import { Flow, emptyFlow, analyticsIdOf } from "../../../../src/engine/orchestrator/model";
 import { FlowTemplate } from "../../../../src/engine/orchestrator/templates";
 
 /** An in-memory FlowIo. `files` is the whole store; `removed` records deletions. */
@@ -69,7 +69,7 @@ describe("analyticsId — the only workflow identifier telemetry may send", () =
     // remember: templates go through writeTemplate, which is not this path.
     const { io, files } = fakeIo();
     const t: FlowTemplate = {
-      id: "t1", name: "Ship", savedAt: 5, schema: 1,
+      id: "t1", name: "Ship", savedAt: 5, schema: 1, params: {},
       flow: { id: "", name: "Ship", armed: false, createdAt: 0, nodes: [], edges: [] },
     };
     writeTemplate(io, "/store/templates", t);

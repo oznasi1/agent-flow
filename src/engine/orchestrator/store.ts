@@ -215,14 +215,6 @@ export function writeFlow(io: FlowIo, dir: string, flow: Flow): Flow {
   return normalised;
 }
 
-/** The id to report this flow under, or `""` for a flow that has never been
- * written by this build. Empty rather than a freshly minted value on purpose: a
- * mint here would be a different id every time it was asked for, which is worse
- * than no id at all — it would look like a new workflow per event. Every emit
- * site reads through this, so "no id yet" is one shape everywhere. */
-export function analyticsIdOf(flow: Flow | undefined): string {
-  return typeof flow?.analyticsId === "string" ? flow.analyticsId : "";
-}
 
 /** Every flow in the store, newest first. Malformed files are skipped, not fatal;
  * a malformed NODE or EDGE inside an otherwise good flow is dropped on its own,

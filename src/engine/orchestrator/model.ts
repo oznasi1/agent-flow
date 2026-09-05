@@ -477,6 +477,21 @@ export interface AnalyticsShape {
   subflowNodes: number;
 }
 
+/** The id to report this flow under, or `""` for a flow that has never been
+ * written by this build.
+ *
+ * Empty rather than a freshly minted value, deliberately: a mint here would hand
+ * back a different id every time it was asked, which is worse than no id at all
+ * — every event would look like its own workflow. `writeFlow` is the one place
+ * that mints, because minting means persisting.
+ *
+ * Lives here beside the field rather than in `store.ts` because it reads a Flow
+ * and touches no IO — and because a caller should not have to reach through the
+ * persistence module to ask a question about an object it already holds. */
+export function analyticsIdOf(flow: Flow | undefined): string {
+  return typeof flow?.analyticsId === "string" ? flow.analyticsId : "";
+}
+
 export function analyticsShape(flow: Flow): AnalyticsShape {
   return {
     withDeadline: flow.edges.filter(hasDeadline).length,
