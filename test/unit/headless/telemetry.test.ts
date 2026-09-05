@@ -128,7 +128,7 @@ describe("sendHeadless", () => {
     const { calls, impl } = fakeFetch();
     await sendHeadless(TICK, { raw: {}, log, identity: { distinctId: "m1" }, fetchImpl: impl });
     const props = (calls[0].body as { batch: { properties: Record<string, unknown> }[] }).batch[0].properties;
-    expect(props.app_name).toBe("agent-flow-tick");
+    expect(props.app_name).toBe("agentflow-tick");
     expect(props.app_host).toBe("cli");
     expect(props.env_type).toBe("production");
     expect(props.session_id).toBeUndefined();

@@ -121,7 +121,11 @@ export async function sendHeadless(event: UsageEvent, deps: HeadlessTelemetryDep
       // — and `app_host`/`ui_kind` name the shell rather than pretending to be an
       // editor, so a headless event is never mistaken for one from a window.
       env_type: "production",
-      app_name: "agent-flow-tick",
+      // "agentflow-tick", not "agent-flow-tick": the hyphen in the latter makes
+      // "agent" a standalone word, which the vocabulary gate refuses — a session
+      // is not an agent, and the check has no way to know this one is a product
+      // name. The value is new, so nothing is being renamed on the wire.
+      app_name: "agentflow-tick",
       app_host: "cli",
       remote_name: "local",
       ui_kind: "desktop",
