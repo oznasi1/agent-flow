@@ -68,7 +68,7 @@ it are unaffected.
 |---|---|---|
 | `armed` | `armed`, `source` | The flow was switched on or off. |
 | `consent-asked` | `action`, `target` | A pass needed first-spend approval, so it performed nothing and asked. |
-| `consented` | `answer` | You answered that question: `act`, `disarm`, or `dismissed`. |
+| `consented` | `answer` | You answered that question: `act`, `disarm`, or `dismissed` — and, under per-command consent, `act-once` or `act-batch` for a bounded approval. |
 | `fired` | `edge`, `from`, `to`, `action`, `note`, `output?` | A rule fired. |
 | `errored` | `edge`, `from`, `to`, `action`, `error`, `output?` | A rule ran or was refused, and was latched with an error. |
 | `deferred` | `edge`, `reason` | Nothing was decided; the next pass will try again. |

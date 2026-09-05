@@ -460,6 +460,13 @@ export interface AgentFlowConfig {
    * default and empty for every existing install; see `neverAutoRun.ts` for the
    * matcher and why this outranks `Flow.commandConfirmedAt`. */
   neverAutoRun: string[];
+  /** `agentFlow.commandConsent` — how a workflow asks before running shell.
+   * `"flow"` (the default, and every existing install) is the released
+   * behaviour: one approval per workflow, stamped as `Flow.commandConfirmedAt`.
+   * `"command"` keys the approval to the resolved command text
+   * (`Flow.commandConsents`), with "run once / the next 5 / always" on the ask.
+   * See `engine/orchestrator/consent.ts`. */
+  commandConsent: "flow" | "command";
   /** Show the Deck header's "Tokens on board" total. Off by default: the figure
    * costs a board-wide transcript sweep, and the per-run breakdown in the detail
    * drawer is read lazily instead, so a default install parses nothing until a
@@ -790,6 +797,10 @@ export function getConfig(): AgentFlowConfig {
     environments: readEnvironments(c),
     commands: readCommands(c),
     neverAutoRun: readNeverAutoRun(c),
+    // Anything but the exact opt-in string is the released behaviour — a
+    // hand-typed `"per-command"` must not silently become the new mode, and
+    // must not break the old one either.
+    commandConsent: c.get<string>("commandConsent") === "command" ? "command" : "flow",
     // `?? false` rather than `|| false`: an explicit `false` and an unset value
     // must both read false, and neither may be silently coerced by a truthiness
     // check the way the string settings above are.

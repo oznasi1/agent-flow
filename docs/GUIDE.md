@@ -232,7 +232,10 @@ ticket, the repos, and the prompt mode it would use — and only then runs unatt
 its first command asks again, separately: approving a flow's launches only approves opening
 sessions, never running a shell command on your machine, so a flow you already
 confirmed for a launch still asks the first time one of its rules would run a command — and
-then, like a launch, runs unattended after that. At most three of these — launches, seeds and
+then, like a launch, runs unattended after that. If that is too coarse — a template attached
+to many cards asks once each and then spends freely — `agentFlow.commandConsent: "command"`
+asks per distinct command text instead, and lets you approve one run, the next five, or
+always. At most three of these — launches, seeds and
 commands together — happen in a single pass, with the rest picked up on the next one. A
 launch, seed or command that fails stamps its rule as errored and stops it there until you
 **Reset** it; a pre-flight read that fails instead — Jira unreachable, say — is retried on the

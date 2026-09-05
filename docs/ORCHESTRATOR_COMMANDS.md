@@ -161,6 +161,30 @@ after the output channel itself has scrolled past it or the window has
 closed. The rule's own receipt carries the exit code and a sentence, not the
 output.
 
+## Consent per command
+
+The two consent gates are still two timestamps per flow, and that is
+proportionate for a flow drawn once by hand. It is not for a template: a shape
+attached to twenty cards is twenty flows, each asking once about its first
+`deploy.sh` and then running every command it has — including ones added to it
+later — unattended from then on. The denylist bounds what can never run; it
+says nothing about the far larger set of commands that are fine once and
+surprising the twentieth time.
+
+`agentFlow.commandConsent: "command"` keys the approval to the **resolved
+command text** instead — the string the modal shows, and the same one
+`agentFlow.neverAutoRun` matches against. Each new text asks, and the ask
+offers the approval's size: **Run once**, **Run the next 5**, **Always for this
+command**, or **Disarm**. A bounded approval counts down one per run, failures
+included (the command ran), and asks again when spent. A different command —
+or the same command with a different note spliced in, which is a different text
+— asks on its own. The answer lands in the flow's `commandConsents` record,
+never in `commandConfirmedAt`, so switching the setting back finds exactly the
+flow-wide approvals you actually gave and none you did not.
+
+The default, `"flow"`, is the released behaviour byte for byte. Sessions
+(launch and seed) are unchanged either way — their gate was never the problem.
+
 ## The latch
 
 A rule that ran successfully is stamped fired. A rule that failed is stamped
@@ -554,7 +578,7 @@ there, which closes the picker and opens the drawer's Templates view instead.
 | Flows lock TTL                 | 300 s          | Held across a whole pass; a stale lock is reaped, never stolen.             |
 | Max output                     | 1 MiB          | Beyond it the process is torn down and the rule latches errored.            |
 | Kill signal                    | SIGKILL        | A script that traps TERM would otherwise run past its own deadline.        |
-| Consent prompts                | 2 per flow     | One for sessions, one for shell — asked once each, then remembered.  |
+| Consent prompts                | 2 per flow     | One for sessions, one for shell — asked once each, then remembered. With `agentFlow.commandConsent: command`, shell asks once per distinct command text instead, sized once / next 5 / always. |
 | Telemetry about commands       | count only     | Never an id, a label, or the command text: a `run` string carries hostnames and sometimes tokens. |
 
 ## Proven in a real editor

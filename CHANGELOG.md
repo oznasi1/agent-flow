@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Consent per command, behind a setting.** `agentFlow.commandConsent: "command"` keys a
+  workflow's shell approval to the resolved command text instead of the workflow: each new
+  text asks, and the ask offers **Run once**, **Run the next 5**, **Always for this command**,
+  or **Disarm**. A bounded approval counts down per run and asks again when spent; a different
+  command, or the same one with a different note, asks on its own. The default `flow` keeps
+  the once-per-workflow ask every existing workflow was armed under, and the new mode never
+  writes the old stamp. The journal's `consented` line gains `act-once` and `act-batch`.
+
 - **Opt-in retry on a rule that spends.** Off by default, so a failure is still the full stop
   it always was. A launch, seed or run rule can carry a **RETRY** count and wait; a failed
   attempt keeps its red error but is not settled, reads `retry 1 of 3 in 40s`, and is tried

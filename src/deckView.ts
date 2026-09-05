@@ -21,6 +21,7 @@ import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
 import { COMMAND_KILLED_EXIT_CODE, CommandRunner, chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "./engine/orchestrator/command";
 import { blockedBy } from "./engine/orchestrator/neverAutoRun";
+import { CONSENT_BATCH, consentCovers, consumeConsent, grantConsent } from "./engine/orchestrator/consent";
 import { buildRunStatus } from "./engine/status";
 import { UsageReader } from "./engine/usageFs";
 import type { UsageTotals } from "./engine/usage";
@@ -1119,6 +1120,9 @@ export class DeckPanel {
         const outputs = new Map<string, string>();
         const promotions: { nodeId: string; runKey: string; repo: string }[] = [];
         const receipts: { level: "success" | "error"; message: string }[] = [];
+        // Resolved texts of the `run` rules this pass performed under per-command
+        // consent, each to be counted against its bounded approval at write time.
+        const consumed: string[] = [];
         // The junction targets of rules that could not even be DECIDED this pass.
         const deferredTargets = new Set<string>();
         // A mid-pass disarm is ONE thing that happened to this flow, not one per
@@ -1178,6 +1182,15 @@ export class DeckPanel {
             continue;
           }
           const done = await this.performEdge(fresh, f.edge, runs, f.action);
+          // A bounded per-command approval is spent by the RUN, whatever its exit:
+          // a command that ran and failed still ran. Recorded here, where the act's
+          // own result says it was a `done` rather than a pre-flight `defer` that
+          // ran nothing, and applied to `next` below in the same write as the
+          // stamps. The text comes from the same resolution the gate approved.
+          if (f.action === "run" && done.kind === "done" && getConfig().commandConsent === "command") {
+            const spent = this.spendTarget(fresh, f.edge, f.action);
+            if (spent?.action === "run") consumed.push(spent.text);
+          }
           // One per edge this pass actually PERFORMED — never per evaluation, and
           // never for a rule merely stamped as a sibling, which is what keeps this
           // to at most MAX_LAUNCHES_PER_PASS events per six seconds. Emitted here,
@@ -1304,6 +1317,9 @@ export class DeckPanel {
         // line above: a promotion settles the rules that pointed at the node as
         // planned work, and those stamps belong to this pass, not to a later read.
         for (const p of promotions) next = promoteToPlace(next, p.nodeId, p.runKey, p.repo, nowMs);
+        // Count each run against its bounded per-command approval — on `atWrite`'s
+        // copy of the record, like everything else this write carries.
+        for (const text of consumed) next = consumeConsent(next, text);
         writeFlow(this.flowIo, this.flowsDir, next);
         // AFTER the write, never before. A crash in between loses a line rather
         // than inventing an event the flow file has no stamp for — the same
@@ -1498,7 +1514,14 @@ export class DeckPanel {
    * through it, so a fourth action cannot be added as "already confirmed" by
    * whichever of the three someone forgot. */
   private confirmedAt(flow: Flow, target: SpendTarget): number | undefined {
-    return target.action === "run" ? flow.commandConfirmedAt : flow.launchConfirmedAt;
+    if (target.action !== "run") return flow.launchConfirmedAt;
+    // Under `agentFlow.commandConsent: "command"` the flow-level stamp is not
+    // consulted at all: consent is per resolved text (consent.ts), so a flow
+    // approved once for `deploy.sh staging` still asks before `deploy.sh prod`,
+    // and asks again once a bounded approval is spent. The default `"flow"` mode
+    // is the released behaviour, byte for byte.
+    if (getConfig().commandConsent === "command") return consentCovers(flow, target.text)?.at;
+    return flow.commandConfirmedAt;
   }
 
   /** The first spend in this pass that the user has not yet approved FOR ITS OWN
@@ -1531,6 +1554,15 @@ export class DeckPanel {
    * never consent to run `deploy.sh`. */
   private async askFirstSpend(flow: Flow, target: SpendTarget): Promise<void> {
     const cfg = getConfig();
+    // The per-command ask is its own modal, not a variant of the per-flow one: it
+    // says what the approval covers (this text, not the flow), and it offers a
+    // SIZE for the approval. The answer lands in `commandConsents` (consent.ts),
+    // never in `commandConfirmedAt`, so flipping the setting back later does not
+    // find a flow-wide approval nobody gave.
+    if (target.action === "run" && cfg.commandConsent === "command") {
+      await this.askCommandConsent(flow, target);
+      return;
+    }
     const ACT = target.action === "launch" ? "Launch" : target.action === "run" ? "Run" : "Seed";
     const DISARM = "Disarm";
     // What the agent will actually be told is material to this consent, so a note
@@ -1600,6 +1632,38 @@ export class DeckPanel {
       latest.id,
       { kind: "consented", answer: answer === ACT ? "act" : answer === DISARM ? "disarm" : "dismissed" },
       Date.now(),
+    );
+  }
+
+  /** The per-command ask — `agentFlow.commandConsent: "command"`. Names the
+   * resolved text (the thing being approved) and offers the approval's size: one
+   * run, the next `CONSENT_BATCH`, or every run of exactly this text. Approving
+   * one text says nothing about another: a different command, or the same one
+   * with a different note spliced in, asks again. Same re-read discipline and the
+   * same journal line as the per-flow ask, with the answer's size in `answer`. */
+  private async askCommandConsent(flow: Flow, target: SpendTarget & { action: "run" }): Promise<void> {
+    const ONCE = "Run once";
+    const BATCH = `Run the next ${CONSENT_BATCH}`;
+    const ALWAYS = "Always for this command";
+    const DISARM = "Disarm";
+    const message =
+      `${flow.name} is ready to run "${commandPreview(target.text)}" on this machine, unattended. ` +
+      `Approving covers exactly this command; a different one will ask again.`;
+    const answer = await vscode.window.showWarningMessage(message, { modal: true }, ONCE, BATCH, ALWAYS, DISARM);
+    const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+    if (!latest) return;
+    const now = Date.now();
+    if (answer === ONCE) writeFlow(this.flowIo, this.flowsDir, grantConsent(latest, target.text, now, 1));
+    else if (answer === BATCH) writeFlow(this.flowIo, this.flowsDir, grantConsent(latest, target.text, now, CONSENT_BATCH));
+    else if (answer === ALWAYS) writeFlow(this.flowIo, this.flowsDir, grantConsent(latest, target.text, now));
+    else if (answer === DISARM) writeFlow(this.flowIo, this.flowsDir, { ...latest, armed: false });
+    this.journal(
+      latest.id,
+      {
+        kind: "consented",
+        answer: answer === ONCE ? "act-once" : answer === BATCH ? "act-batch" : answer === ALWAYS ? "act" : answer === DISARM ? "disarm" : "dismissed",
+      },
+      now,
     );
   }
 
