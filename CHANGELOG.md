@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.68.0] — 2026-09-05
+
 ### Added
 
 - **A spend ceiling per workflow.** The per-pass cap bounds one pass; nothing bounded a
