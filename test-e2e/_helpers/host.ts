@@ -125,3 +125,107 @@ export async function openTasksView(page: Page): Promise<void> {
 export function tasksFrame(page: Page): FrameLocator {
   return page.frameLocator("iframe.webview").last().frameLocator("#active-frame");
 }
+
+/** How long `closeHost` waits for a graceful `app.close()` before it gives up
+ *  on the Electron process. Well under every file's own hook timeout, so a hung
+ *  close is reported HERE, with evidence, rather than as a bare
+ *  `"afterEach" hook timeout` two minutes later. */
+export const CLOSE_DEADLINE_MS = 30_000;
+
+/** Close a per-test host, and when Electron does not quit, say WHY before
+ *  killing it.
+ *
+ *  `electronApplication.close()` can hang rather than reject when a second
+ *  window is still mid-shutdown — seen in CI's shard 4 on `take-task` and
+ *  `take-prompts`, where the test body had already passed. A bare hang leaves
+ *  nothing to read: Playwright's screenshot shows the renderer, and whatever
+ *  holds the quit lives in the main process or the extension host. So on a
+ *  hang this reads the sandbox's own VS Code logs — `main.log` (the lifecycle's
+ *  vetoes and window closes), the extension host log, and our extension's
+ *  output channel — prints their tails to the job log, SIGKILLs the pid, and
+ *  throws with the same text so the failure carries its evidence. A clean
+ *  close prints nothing and throws nothing. */
+export async function closeHost(app: ElectronApplication | undefined, sb: Pick<Sandbox, "userDataDir"> | undefined): Promise<void> {
+  if (!app) return;
+  // Read the pid BEFORE closing: once the app is gone, `process()` throws.
+  let pid: number | undefined;
+  try {
+    pid = app.process().pid;
+  } catch {
+    pid = undefined;
+  }
+  let closed = false;
+  await Promise.race([
+    app.close().then(() => { closed = true; }, () => { closed = true; }),
+    new Promise<void>((resolve) => setTimeout(resolve, CLOSE_DEADLINE_MS)),
+  ]);
+  if (closed) return;
+  const lines: string[] = [`closeHost: app.close() did not return within ${CLOSE_DEADLINE_MS}ms (pid ${pid ?? "?"})`];
+  try {
+    for (const w of app.windows()) {
+      const dialogs = await w.locator(".monaco-dialog-box").count().catch(() => -1);
+      const notes = await w.locator(".notification-list-item-message").allTextContents().catch(() => []);
+      lines.push(`  window ${w.url().slice(0, 80)}: dialogs=${dialogs} notifications=${JSON.stringify(notes)}`);
+    }
+  } catch (e) {
+    lines.push(`  windows: unreadable — ${String(e)}`);
+  }
+  if (sb) lines.push(...hostLogTails(sb.userDataDir));
+  try {
+    lines.push(...execFileSync("ps", ["-o", "pid,ppid,etime,command", "-ax"], { encoding: "utf8" }).split("\n")
+      .filter((l) => /code|electron|claude|cat$/i.test(l)).slice(0, 15).map((l) => `  ps ${l.slice(0, 150)}`));
+  } catch {
+    /* no ps — Windows, or a locked-down runner */
+  }
+  const report = lines.join("\n");
+  console.log(report);
+  if (pid !== undefined) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+  throw new Error(report);
+}
+
+/** The last lines of every VS Code log that can say why a quit stalled:
+ *  `main.log` (lifecycle vetoes, window close, "will quit"), each window's
+ *  `exthost.log` (extension activation and deactivation), and every output
+ *  channel file named for this extension. Logs live under
+ *  `<userDataDir>/logs/<timestamp>/…`; a missing directory reads as one line
+ *  saying so, never as a throw — this runs while a failure is being reported. */
+export function hostLogTails(userDataDir: string, tail = 40): string[] {
+  const out: string[] = [];
+  const logsRoot = path.join(userDataDir, "logs");
+  const files: string[] = [];
+  const walk = (dir: string, depth: number) => {
+    if (depth > 6) return;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const p = path.join(dir, e.name);
+      if (e.isDirectory()) walk(p, depth + 1);
+      else if (/^(main|exthost|sharedprocess|ptyhost)\.log$/.test(e.name) || /Agent Flow Deck\.log$/.test(e.name)) files.push(p);
+    }
+  };
+  walk(logsRoot, 0);
+  if (files.length === 0) return [`  no VS Code logs under ${logsRoot}`];
+  for (const f of files.sort()) {
+    let text: string;
+    try {
+      text = fs.readFileSync(f, "utf8");
+    } catch {
+      continue;
+    }
+    const rel = path.relative(userDataDir, f);
+    const last = text.split("\n").filter((l) => l.trim() !== "").slice(-tail);
+    out.push(`  --- ${rel} (last ${last.length} lines)`);
+    for (const l of last) out.push(`  ${l.slice(0, 220)}`);
+  }
+  return out;
+}
