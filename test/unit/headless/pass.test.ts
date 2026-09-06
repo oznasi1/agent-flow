@@ -5,6 +5,7 @@ import { FlowIo, writeFlow } from "../../../src/engine/orchestrator/store";
 import { LockIo, lockPath } from "../../../src/engine/orchestrator/lock";
 import { JournalIo, appendEvent, readJournal } from "../../../src/engine/orchestrator/journal";
 import { Flow, FlowEdge, FlowNode, emptyFlow } from "../../../src/engine/orchestrator/model";
+import { suggestionFor } from "../../../src/engine/orchestrator/suggestions";
 import { PrEntryMap, PrFacts, RepoGit, Run, RunStatus } from "../../../src/types";
 
 const NOW = 1_800_000_000_000;
@@ -318,5 +319,30 @@ describe("runHeadlessPass — a subflow", () => {
     const r = await runHeadlessPass(w.deps());
     expect(r.flows[0].needsEditor).toEqual(["e1 (n1 → s, spawn)"]);
     expect(w.files[path.join(DIR, "f1.json")]).toBe(before);
+  });
+});
+
+describe("runHeadlessPass — an errored line carries the next step", () => {
+  const cmdFlow = (over: Partial<Flow> = {}) =>
+    armed([place("n1", "PROJ-1"), command("n2", "deploy.sh staging")], [edge("e1", "n1", "n2")], over);
+
+  it("appends ' — <step>' to a failure whose shape has one, so the scheduled tick's log says what to do", async () => {
+    const w = world([cmdFlow({ commandConfirmedAt: 5 })]);
+    const r = await runHeadlessPass(w.deps({ settings: { commands: [], neverAutoRun: ["deploy*"], commandConsent: "flow" } }));
+    const error = w.flowsNow().edges[0].error!;
+    const step = suggestionFor(error);
+    expect(step).toBeDefined();
+    expect(r.flows[0].errored).toEqual([`e1 (n1 → n2, run): ${error} — ${step}`]);
+    // The journal keeps the bare error: the step is for the reader, not the record.
+    expect(w.events()[0]).toMatchObject({ kind: "errored", error });
+  });
+
+  it("leaves a failure of unknown shape exactly as it was", async () => {
+    const w = world([cmdFlow({ commandConfirmedAt: 5 })]);
+    w.runner.mockResolvedValueOnce({ code: 1, stdout: "", stderr: "boom" });
+    const r = await runHeadlessPass(w.deps());
+    const error = w.flowsNow().edges[0].error!;
+    expect(suggestionFor(error)).toBeUndefined();
+    expect(r.flows[0].errored).toEqual([`e1 (n1 → n2, run): ${error}`]);
   });
 });

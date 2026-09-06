@@ -4,6 +4,7 @@ import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, isSpendAction, JoinMode, LaunchDest, PlaceNode, PlannedNode, retryPending, hasCeiling, hasTokenCeiling, SpendTally } from "../engine/orchestrator/model";
 import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
+import { suggestionFor } from "../engine/orchestrator/suggestions";
 import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
 import { AgentState, BranchCiStatus, FlowCommand, FlowPromptMode, PendingResume, RunStatus } from "../types";
@@ -532,6 +533,16 @@ export interface OrchestratorDrawerProps {
    * as a new draft's do; Save then sends `flow:writeTemplate` WITH the id,
    * which is the update-in-place branch that message has carried unused. */
   onEditTemplate: (id: string) => void;
+}
+
+/** The one next step for a failed rule, rendered after the failure and before
+ * Reset — in the row's dim voice, never red: red is for the failure itself, and
+ * this is what to do about it. Nothing at all when `suggestionFor` does not know
+ * the shape, so an unfamiliar error never gets a filler sentence. */
+function FixStep(p: { error: string | undefined; className?: string }): React.ReactElement | null {
+  const step = suggestionFor(p.error);
+  if (step === undefined) return null;
+  return <span className={p.className ? `orch-fix ${p.className}` : "orch-fix"} data-testid="orch-fix">{step}</span>;
 }
 
 export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | null {
@@ -1837,7 +1848,15 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
           </div>
           {(() => {
             const note = gateRoutingNote(flow, nodeInsp);
-            return note ? <div className="orch-clause" data-testid="orch-gate-routing">{note}</div> : null;
+            // The step sits BESIDE the note rather than inside it: `gateRoutingNote`
+            // is pinned word-for-word by its own tests, and the node's status line
+            // reuses it, where a second sentence would crowd the card.
+            return note ? (
+              <>
+                <div className="orch-clause" data-testid="orch-gate-routing">{note}</div>
+                <FixStep error={gateAskEdge(flow, nodeInsp.id)?.routed?.error} className="orch-clause" />
+              </>
+            ) : null;
           })()}
           {(() => {
             const st = gateStateOf(nodeInsp);
@@ -3040,7 +3059,10 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                     // gets the same Reset, but nothing ran and nothing broke, so
                     // it reads in the row's own dim voice instead of claiming a
                     // failure. See `isMigrationNotice`.
-                    <span className={isMigrationNotice(edge.error) ? undefined : "err"}>{failureText(edge)}</span>
+                    <>
+                      <span className={isMigrationNotice(edge.error) ? undefined : "err"}>{failureText(edge)}</span>
+                      <FixStep error={edge.error} />
+                    </>
                   ) : edge.expiredAt !== undefined ? (
                     // The third settled shape, in neither colour: not done —
                     // nothing ran — and not a failure — nothing broke. The row's
@@ -3059,6 +3081,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 <>
                   <span className="err">{edge.error}</span>
                   <span data-testid="orch-retry-note">{retryText(edge, Date.now())}</span>
+                  <FixStep error={edge.error} />
                   <div className="sp" />
                   <button type="button" className="orch-mini" onClick={() => p.onResetEdge(flow.id, edge.id)}>Reset</button>
                 </>

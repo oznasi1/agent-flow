@@ -12,7 +12,8 @@ import { TEMPLATE_SCHEMA, type FlowTemplate } from "../../src/engine/orchestrato
 // injected (see `FlowIo`), so importing it here costs no temp directory.
 import { readFlows, writeFlow } from "../../src/engine/orchestrator/store";
 import { STARTERS } from "../../src/engine/orchestrator/starters";
-import { edgeAction } from "../../src/engine/orchestrator/model";
+import { ACTION_MISMATCH_PREFIX, edgeAction } from "../../src/engine/orchestrator/model";
+import { suggestionFor } from "../../src/engine/orchestrator/suggestions";
 import { branchCiKey } from "../../src/engine/orchestrator/branchCi";
 import {
   ACTION_LABEL,
@@ -5399,5 +5400,84 @@ describe("a subflow node on the canvas", () => {
     expect(values).toEqual(["subflow-done", "deadline-passed"]);
     fireEvent.click(screen.getByTestId("orch-edge-e1"));
     expect(screen.getByTestId("orch-then").textContent).toContain("start");
+  });
+});
+
+describe("a failed rule says how to fix it", () => {
+  // A launch that git refused — a shape `suggestionFor` knows.
+  const KNOWN = "Couldn't create a git worktree in agent-flow — not launching PROJ-12 in your main checkout. The Agent Flow Deck output channel has the reason.";
+  const failedFlow = (error: string, over: Partial<FlowEdge> = {}) => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "n2", kind: "planned", x: 320, y: 24, join: "any", ticketKey: "PROJ-12", repos: ["agent-flow"], mode: "quick", dest: "worktree" },
+    ],
+    edges: [{ id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "launch", error, performed: true, ...over }],
+  });
+
+  it("renders the next step after a settled error, in the row's dim voice, before Reset", async () => {
+    render(<OrchestratorDrawer {...props({ flows: [failedFlow(KNOWN)] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    await waitFor(() => expect(screen.getByTestId("orch-fix")).toBeTruthy());
+    const fix = screen.getByTestId("orch-fix");
+    expect(fix.textContent).toBe(suggestionFor(KNOWN));
+    expect(fix.classList.contains("err")).toBe(false);
+    // The failure keeps its red, and only the failure: the step is not inside it.
+    const insp = screen.getByTestId("orch-inspector");
+    expect(insp.querySelector(".orch-obs .err")!.textContent).toBe(KNOWN);
+    // Order: error, step, then Reset.
+    const obs = insp.querySelector(".orch-obs")!;
+    const kids = Array.from(obs.children);
+    const iFix = kids.indexOf(fix);
+    const iReset = kids.findIndex((k) => k.textContent === "Reset");
+    expect(iFix).toBeGreaterThan(kids.findIndex((k) => k.classList.contains("err")));
+    expect(iReset).toBeGreaterThan(iFix);
+  });
+
+  it("renders nothing for an error whose shape it does not know", async () => {
+    render(<OrchestratorDrawer {...props({ flows: [failedFlow("Couldn't launch PROJ-12: no worktree")] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    await waitFor(() => expect(screen.getByTestId("orch-inspector").textContent).toContain("no worktree"));
+    expect(screen.queryByTestId("orch-fix")).toBeNull();
+    expect(screen.getByRole("button", { name: /reset/i })).toBeTruthy();
+  });
+
+  it("shows the step beside a failure that is still pending retry", async () => {
+    const f = failedFlow(KNOWN, { retry: { max: 3, backoffMs: 60_000 }, attempts: 1, retryAt: Date.now() + 40_000 });
+    render(<OrchestratorDrawer {...props({ flows: [f] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    await waitFor(() => expect(screen.getByTestId("orch-retry-note")).toBeTruthy());
+    expect(screen.getByTestId("orch-fix").textContent).toBe(suggestionFor(KNOWN));
+    expect(screen.getByTestId("orch-fix").classList.contains("err")).toBe(false);
+  });
+
+  it("shows the step for the store's own action-mismatch notice too", async () => {
+    const notice = `${ACTION_MISMATCH_PREFIX}: it was saved as "seed" but where it points now means "launch". Reset the rule to accept that, or point it somewhere else.`;
+    render(<OrchestratorDrawer {...props({ flows: [failedFlow(notice, { performed: undefined })] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e1"));
+    await waitFor(() => expect(screen.getByTestId("orch-fix").textContent).toBe(suggestionFor(notice)));
+  });
+
+  it("puts the step beside a routed gate's delivery error in the inspector, leaving the routing note's own words alone", async () => {
+    const err = "agent-flow has no pull request yet to ask on";
+    const failed = flow({
+      armed: true,
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+        { id: "g", kind: "gate", x: 320, y: 24, join: "any", question: "deploy to prod?", askWho: "alice" } as Flow["nodes"][number],
+      ],
+      edges: [{ id: "ask1", from: "n1", to: "g", cond: { kind: "pr-merged" }, firedAt: 5, performed: true, routed: { at: 5, login: "alice", error: err } }],
+    });
+    render(<OrchestratorDrawer {...props({ flows: [failed] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    await waitFor(() => expect(screen.getByTestId("orch-gate-routing")).toBeTruthy());
+    expect(screen.getByTestId("orch-gate-routing").textContent).toBe(`could not ask @alice on the pull request — ${err}`);
+    expect(screen.getByTestId("orch-fix").textContent).toBe(suggestionFor(err));
+    // A delivered question has nothing to fix.
+    cleanup();
+    const delivered = { ...failed, edges: [{ ...failed.edges[0], routed: { at: 5, login: "alice", url: "https://gh/c/1" } }] };
+    render(<OrchestratorDrawer {...props({ flows: [delivered] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    await waitFor(() => expect(screen.getByTestId("orch-gate-routing").textContent).toContain("asked @alice"));
+    expect(screen.queryByTestId("orch-fix")).toBeNull();
   });
 });

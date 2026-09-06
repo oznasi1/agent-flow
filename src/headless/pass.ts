@@ -26,6 +26,7 @@ import { appendEvent, JournalEventInput, JournalIo, needsOutputVerdicts, printed
 import { acquire, LOCK_TTL_MS, LockIo, release, renew } from "../engine/orchestrator/lock";
 import { chainSourcePlace, CommandRunner, resolveCommand, runCommand } from "../engine/orchestrator/command";
 import { blockedBy } from "../engine/orchestrator/neverAutoRun";
+import { suggestionFor } from "../engine/orchestrator/suggestions";
 import { consentCovers, consumeConsent } from "../engine/orchestrator/consent";
 import { gateAnswerFrom, GateComment, gateSourcePlace, routedGatesAwaitingAnswer } from "../engine/orchestrator/gateRouting";
 import { FlowCommand, RunStatus } from "../types";
@@ -321,7 +322,11 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           const result = results.get(f.edge.id);
           const action = f.action ?? "unknown";
           if (e.error !== undefined) {
-            report.errored.push(`${ruleName(next, e, f.action)}: ${e.error}`);
+            // The step travels with the line, not the record: the journal keeps
+            // the bare error, and whoever reads the tick's log hours later gets
+            // the same next step the drawer shows. Nothing for an unknown shape.
+            const step = suggestionFor(e.error);
+            report.errored.push(`${ruleName(next, e, f.action)}: ${e.error}${step === undefined ? "" : ` — ${step}`}`);
             journal(flow.id, { kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error, ...(output === undefined ? {} : { output }), ...(result === undefined ? {} : { result }) }, d.nowMs);
             if (e.retryAt !== undefined) {
               journal(flow.id, { kind: "retrying", edge: e.id, attempt: e.attempts ?? 1, max: e.retry?.max ?? 0, retryAt: e.retryAt }, d.nowMs);
