@@ -78,7 +78,13 @@ test("the takeTask palette command takes a task without the card", async ({}, te
   // clicks the activity-bar item (see its own doc comment), so the pool webview
   // is never mounted in this test and the take can only have come from the
   // palette.
-  await runCommand(page, "Take Task…");
+  // `thenTitle`: the command REPLACES the palette with its own input box in the
+  // same `.quick-input-widget`, so the helper's default "palette hidden" wait
+  // races the box appearing — the widget is never observed hidden when the box
+  // lands within one poll, and the wait times out on a command that ran
+  // perfectly (CI shard 4's recurring failure). The box's title is the positive
+  // acceptance signal instead, exactly as for `Run Setup` and `Doctor`.
+  await runCommand(page, "Take Task…", { thenTitle: "Take a Fixture task" });
 
   // The command's own input box asks for the key (extension.ts:124-128), titled
   // from the connector's label and hinting its example key.
