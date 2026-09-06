@@ -14,6 +14,12 @@ permissions:
 jobs:
   build-and-test:
     runs-on: ubuntu-latest
+    # Without this the job inherits the runner's 6-hour ceiling, and a hung
+    # worker — vitest's testTimeout bounds a test body, not collection, a hook,
+    # or a worker held open by a live handle — burns all six of those hours
+    # before the checks page says anything. A green run is ~2m20s; the bound is
+    # generous on purpose, to catch a hang rather than police normal variance.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
