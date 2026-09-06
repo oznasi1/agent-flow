@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **The README shows what the extension does today.** Its screenshots were taken
+  before the Workflows and Templates buttons, the tool mark on every card, the
+  review queue's play button, Merge from a card and the Action required column's
+  new meaning shipped. All four are re-shot from the current build, the Deck's
+  now shows the review queue and a card carrying a workflow, and a fifth —
+  `media/workflow.png` — shows a card's drawer stopped at a gate with Approve and
+  Reject. The text gains a **What you can do** list up front, a **Workflows**
+  section, and names Codex, Agile Accelerator and Bitbucket where it only named
+  Claude Code, Jira and GitHub before. No behaviour changes.
+
 ## [0.69.0] — 2026-09-06
 
 ### Added
