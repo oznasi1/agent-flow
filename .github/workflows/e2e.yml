@@ -24,6 +24,12 @@ on:
 jobs:
   shard:
     runs-on: ubuntu-latest
+    # A hung Electron host is this lane's characteristic failure — a window
+    # nothing awaited leaves app.close() waiting forever — and an unbounded job
+    # would hold a runner for six hours to say so. The slowest green shard was
+    # 11m26s, and shard 4 has been seen at 31m under load, so the bound sits
+    # well clear of both.
+    timeout-minutes: 45
     permissions:
       contents: read
     strategy:
@@ -76,6 +82,8 @@ jobs:
     needs: shard
     if: always()
     runs-on: ubuntu-latest
+    # Merge, report and comment only; minutes, not tens of minutes.
+    timeout-minutes: 15
     permissions:
       contents: read
       pull-requests: write
