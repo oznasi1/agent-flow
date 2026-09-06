@@ -140,6 +140,9 @@ export const window = {
   createTerminal: vi.fn((_opts?: { name?: string; cwd?: string }) => makeTerminal()),
   showTextDocument: vi.fn(async (_doc: unknown, _opts?: unknown): Promise<any> => undefined),
   showOpenDialog: vi.fn(async (_opts?: unknown): Promise<any[] | undefined> => undefined),
+  // Same shape as `showOpenDialog` above: resolves to the chosen Uri, or to
+  // undefined when the dialog is cancelled (the default).
+  showSaveDialog: vi.fn(async (_opts?: unknown): Promise<any | undefined> => undefined),
   onDidChangeWindowState: vi.fn((_cb: (e: unknown) => void) => ({ dispose: vi.fn() })),
   state: { focused: true, active: true },
 };
@@ -251,6 +254,14 @@ export const env = {
 export const workspace = {
   workspaceFile: undefined as { scheme: string; fsPath: string } | undefined,
   workspaceFolders: undefined as { uri: { fsPath: string } }[] | undefined,
+  // `workspace.fs` — the editor's own filesystem, which reaches a remote
+  // workspace where Node's `fs` would not. Bytes in, bytes out, like the real
+  // one: `readFile` resolves to a Uint8Array (empty by default), `writeFile`
+  // takes the Uri and the bytes.
+  fs: {
+    readFile: vi.fn(async (_uri: unknown): Promise<Uint8Array> => new Uint8Array()),
+    writeFile: vi.fn(async (_uri: unknown, _bytes: Uint8Array): Promise<void> => undefined),
+  },
   getConfiguration: vi.fn((_section?: string) => makeConfig()),
   openTextDocument: vi.fn(async (_opts?: unknown): Promise<any> => ({})),
   registerTextDocumentContentProvider: vi.fn((_scheme: string, _provider: unknown) => ({ dispose: vi.fn() })),
@@ -324,6 +335,7 @@ export function resetVscodeMocks(): void {
   window.createWebviewPanel.mockReset().mockImplementation(() => makeWebviewPanel());
   window.showTextDocument.mockReset().mockResolvedValue(undefined);
   window.showOpenDialog.mockReset().mockResolvedValue(undefined);
+  window.showSaveDialog.mockReset().mockResolvedValue(undefined);
   window.onDidChangeWindowState.mockReset().mockImplementation(() => ({ dispose: vi.fn() }));
   window.state.focused = true;
 
@@ -349,6 +361,8 @@ export function resetVscodeMocks(): void {
 
   workspace.workspaceFile = undefined;
   workspace.workspaceFolders = undefined;
+  workspace.fs.readFile.mockReset().mockResolvedValue(new Uint8Array());
+  workspace.fs.writeFile.mockReset().mockResolvedValue(undefined);
   workspace.getConfiguration.mockReset().mockImplementation((_section?: string) => makeConfig());
   workspace.openTextDocument.mockReset().mockResolvedValue({});
   workspace.registerTextDocumentContentProvider.mockReset().mockImplementation(() => ({ dispose: vi.fn() }));

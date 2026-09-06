@@ -774,6 +774,19 @@ export type InboundMessage =
   // id is only a count nobody asks for any more, never a broken workflow.
   | { type: "flow:deleteTemplate"; templateId: string }
   | { type: "flow:duplicateTemplate"; templateId: string }
+  // Write the template named `templateId` to a file of the user's choosing —
+  // the same envelope the store keeps under ~/.agentflow/templates, so a file
+  // can be read back by `flow:importTemplate` on another machine. A built-in
+  // starter exports like any other: it is a valid envelope. The host owns the
+  // save dialog and the write; nothing about the path crosses back.
+  | { type: "flow:exportTemplate"; templateId: string }
+  // Read a template file the user picks and save it as a NEW template here,
+  // with a fresh id. What it clears on the way in — every planned step's
+  // repos and prompt mode, every command's `cwdRepo`, every host stamp and
+  // both consents — is `importedTemplate`'s rule (templates.ts): a shape
+  // cannot know this machine's checkouts or prompt modes, and consent never
+  // travels. Carries nothing: the dialog is the host's.
+  | { type: "flow:importTemplate" }
   // The Marketplace (separate webview panel)
   | { type: "mkt:ready" }
   | { type: "mkt:refresh" }

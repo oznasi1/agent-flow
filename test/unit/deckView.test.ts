@@ -6357,6 +6357,177 @@ describe("orchestrator flows", () => {
     });
   });
 
+  describe("flow:exportTemplate / flow:importTemplate — a template leaving the machine that drew it", () => {
+    const flowActions = () => trackSpy.mock.calls.flat().filter((e: any) => e.name === "flow_action").map((e: any) => e.action);
+    const decode = (bytes: Uint8Array) => Buffer.from(bytes).toString("utf8");
+    /** A file as another machine would write it: bound repos and mode, a stamp. */
+    const foreignFile = (over: Record<string, unknown> = {}) => JSON.stringify({
+      schema: 1, id: "k1", name: "Their ship it", params: {}, savedAt: 7,
+      flow: {
+        id: "", name: "Their ship it", armed: false, createdAt: 0, launchConfirmedAt: 5,
+        nodes: [{ id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: ["their-repo"], mode: "their-mode", dest: "worktree" }],
+        edges: [],
+      },
+      ...over,
+    });
+
+    it("export: a cancelled save dialog writes nothing and reports nothing", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:exportTemplate", templateId: "k1" });
+      expect(window.showSaveDialog).toHaveBeenCalledTimes(1);
+      expect(workspace.fs.writeFile).not.toHaveBeenCalled();
+      expect(window.showInformationMessage).not.toHaveBeenCalled();
+      expect(flowActions()).not.toContain("export_template");
+    });
+
+    it("export: writes the normalized envelope to the chosen file, confirms with the path, and counts the gesture", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      window.showSaveDialog.mockResolvedValue({ fsPath: "/tmp/out/ship-it.agentflow-template.json", scheme: "file" });
+      const { send } = await openPanel();
+      await send({ type: "flow:exportTemplate", templateId: "k1" });
+      expect(workspace.fs.writeFile).toHaveBeenCalledTimes(1);
+      const [uri, bytes] = workspace.fs.writeFile.mock.calls[0] as [{ fsPath: string }, Uint8Array];
+      expect(uri.fsPath).toBe("/tmp/out/ship-it.agentflow-template.json");
+      const text = decode(bytes);
+      expect(text.endsWith("\n")).toBe(true);
+      expect(JSON.parse(text)).toMatchObject({ schema: 1, id: "k1", name: "Ship it", params: {}, savedAt: 1_000 });
+      // The store's inner flow id ("unused" in the fixture) is normalized away.
+      expect(JSON.parse(text).flow).toMatchObject({ id: "", armed: false, createdAt: 0 });
+      expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringContaining("/tmp/out/ship-it.agentflow-template.json"));
+      expect(flowActions()).toEqual(["export_template"]);
+    });
+
+    it("export: offers a slugged default filename in the workspace folder", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      workspace.workspaceFolders = [{ uri: { fsPath: "/work/repo" } }];
+      const { send } = await openPanel();
+      await send({ type: "flow:exportTemplate", templateId: "k1" });
+      const opts = window.showSaveDialog.mock.calls[0][0] as { defaultUri: { fsPath: string }; saveLabel: string };
+      expect(opts.defaultUri.fsPath).toBe("/work/repo/ship-it.agentflow-template.json");
+      expect(opts.saveLabel).toBe("Export");
+    });
+
+    it("export: a built-in starter exports like any other template", async () => {
+      setConfig({ orchestrator: true });
+      window.showSaveDialog.mockResolvedValue({ fsPath: "/tmp/out/x.json", scheme: "file" });
+      const { send } = await openPanel();
+      await send({ type: "flow:exportTemplate", templateId: "builtin-ship-it" });
+      expect(workspace.fs.writeFile).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(decode(workspace.fs.writeFile.mock.calls[0][1] as Uint8Array)).id).toBe("builtin-ship-it");
+    });
+
+    it("export: a failed write is an error toast naming the reason, and no gesture is counted", async () => {
+      setConfig({ orchestrator: true });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      window.showSaveDialog.mockResolvedValue({ fsPath: "/tmp/out/x.json", scheme: "file" });
+      workspace.fs.writeFile.mockRejectedValue(new Error("EACCES: permission denied"));
+      const { send } = await openPanel();
+      await send({ type: "flow:exportTemplate", templateId: "k1" });
+      expect(window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("EACCES"));
+      expect(window.showInformationMessage).not.toHaveBeenCalled();
+      expect(flowActions()).toEqual([]);
+    });
+
+    it("export: an id the host does not hold opens no dialog", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:exportTemplate", templateId: "nope" });
+      expect(window.showSaveDialog).not.toHaveBeenCalled();
+    });
+
+    it("import: a cancelled open dialog writes nothing", async () => {
+      setConfig({ orchestrator: true });
+      const { send } = await openPanel();
+      await send({ type: "flow:importTemplate" });
+      expect(window.showOpenDialog).toHaveBeenCalledTimes(1);
+      const opts = window.showOpenDialog.mock.calls[0][0] as { canSelectMany: boolean; openLabel: string };
+      expect(opts).toMatchObject({ canSelectMany: false, openLabel: "Import" });
+      expect(workspace.fs.readFile).not.toHaveBeenCalled();
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+
+    it("import: writes a re-minted, unbound template through the store, re-posts flows, confirms, and counts the gesture", async () => {
+      setConfig({ orchestrator: true });
+      window.showOpenDialog.mockResolvedValue([{ fsPath: "/tmp/in/their.agentflow-template.json", scheme: "file" }]);
+      workspace.fs.readFile.mockResolvedValue(Buffer.from(foreignFile()));
+      const { p, send } = await openPanel();
+      const before = posts(p).filter((m) => m.type === "deck:flows").length;
+      await send({ type: "flow:importTemplate" });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      const written = h.writeTemplate.mock.calls[0][2] as FlowTemplate;
+      expect(written.id).not.toBe("k1");
+      expect(written.id).toMatch(/^f/);
+      expect(written.name).toBe("Their ship it");
+      expect(written.flow.nodes[0]).toMatchObject({ kind: "planned", repos: [], mode: "" });
+      expect(written.flow).not.toHaveProperty("launchConfirmedAt");
+      expect(posts(p).filter((m) => m.type === "deck:flows").length).toBeGreaterThan(before);
+      expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/Their ship it.*repos.*prompt mode/s));
+      expect(flowActions()).toEqual(["import_template"]);
+    });
+
+    it("import: re-mints past an id already on disk rather than overwriting it", async () => {
+      setConfig({ orchestrator: true });
+      // `newFlowId` is deterministic under this suite's mock (see flow:create's
+      // own collision tests); seed its first answer as taken.
+      h.templates = [mkTemplate("fTEST-1", "taken")];
+      window.showOpenDialog.mockResolvedValue([{ fsPath: "/tmp/in/x.json", scheme: "file" }]);
+      workspace.fs.readFile.mockResolvedValue(Buffer.from(foreignFile()));
+      const { send } = await openPanel();
+      await send({ type: "flow:importTemplate" });
+      expect(h.writeTemplate).toHaveBeenCalledTimes(1);
+      expect((h.writeTemplate.mock.calls[0][2] as FlowTemplate).id).not.toBe("fTEST-1");
+      expect(h.templates.find((t) => t.id === "fTEST-1")?.name).toBe("taken");
+    });
+
+    it("import: a file that is not JSON is an error toast saying so, and nothing is written", async () => {
+      setConfig({ orchestrator: true });
+      window.showOpenDialog.mockResolvedValue([{ fsPath: "/tmp/in/notes.json", scheme: "file" }]);
+      workspace.fs.readFile.mockResolvedValue(Buffer.from("{ not json"));
+      const { send } = await openPanel();
+      await send({ type: "flow:importTemplate" });
+      expect(window.showErrorMessage).toHaveBeenCalledWith(expect.stringMatching(/notes\.json.*not JSON/));
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      expect(flowActions()).toEqual([]);
+    });
+
+    it("import: a refused template is an error toast carrying the reason, and nothing is written", async () => {
+      setConfig({ orchestrator: true });
+      window.showOpenDialog.mockResolvedValue([{ fsPath: "/tmp/in/future.json", scheme: "file" }]);
+      workspace.fs.readFile.mockResolvedValue(Buffer.from(foreignFile({ schema: 7 })));
+      const { send } = await openPanel();
+      await send({ type: "flow:importTemplate" });
+      expect(window.showErrorMessage).toHaveBeenCalledWith(expect.stringMatching(/schema 7.*newer than this build/));
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+      expect(flowActions()).toEqual([]);
+    });
+
+    it("import: an unreadable file is an error toast naming the reason", async () => {
+      setConfig({ orchestrator: true });
+      window.showOpenDialog.mockResolvedValue([{ fsPath: "/tmp/in/gone.json", scheme: "file" }]);
+      workspace.fs.readFile.mockRejectedValue(new Error("ENOENT: no such file"));
+      const { send } = await openPanel();
+      await send({ type: "flow:importTemplate" });
+      expect(window.showErrorMessage).toHaveBeenCalledWith(expect.stringContaining("ENOENT"));
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+
+    it("both do nothing with the orchestrator setting off — no dialog, no read, no write", async () => {
+      setConfig({ orchestrator: false });
+      h.templates = [mkTemplate("k1", "Ship it")];
+      const { send } = await openPanel();
+      await send({ type: "flow:exportTemplate", templateId: "k1" });
+      await send({ type: "flow:importTemplate" });
+      expect(window.showSaveDialog).not.toHaveBeenCalled();
+      expect(window.showOpenDialog).not.toHaveBeenCalled();
+      expect(workspace.fs.writeFile).not.toHaveBeenCalled();
+      expect(h.writeTemplate).not.toHaveBeenCalled();
+    });
+  });
+
   it("deck:flows carries templates alongside flows", async () => {
     setConfig({ orchestrator: true });
     h.templates = [mkTemplate("k1", "Ship it")];
