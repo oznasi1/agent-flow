@@ -69,15 +69,27 @@ export type CommandNode = NodeBase & {
 export type GateNode = NodeBase & {
   kind: "gate";
   question: string;
-  /** Who should answer, as a forge login (`alice`, not `@alice` — either is
+  /** Who should answer, as forge logins (`alice`, not `@alice` — either is
    * accepted). Set, the ask also posts the question as a comment on the card's
    * pull request mentioning them, and each pass reads that thread for their
    * `approve` / `reject` (see `gateRouting.ts`). Absent — every gate written
    * before this field, and the default — means the gate is answered here, on the
    * node, by whoever is at the Deck. The local Approve/Reject still work on a
    * routed gate: routing adds a place the answer can come FROM, never takes one
-   * away. Node configuration, so it travels into templates like `question`. */
+   * away. Node configuration, so it travels into templates like `question`.
+   *
+   * May name SEVERAL people, separated by commas or whitespace (`alice, bob`),
+   * each with an optional `@`; `gateLogins` (gateRouting.ts) is the one parser.
+   * The field keeps its released name and its string shape, so a flow file
+   * written with one login reads exactly as it did. */
   askWho?: string;
+  /** How many of the people in `askWho` must answer. `"any"` — the first answer
+   * from any of them decides, which is what one login always did; `"all"` —
+   * every one of them must approve, and a single reject from any of them rejects
+   * at once. Absent means `"any"`: every gate written before this field, and
+   * the only value the drawer stores for it. Node configuration, so it travels
+   * into templates like `question`. */
+  askMode?: "any" | "all";
 };
 
 /** A workflow inside a workflow: a node that, when a rule reaches it, STARTS a
@@ -360,8 +372,19 @@ export interface FlowEdge {
    * it; read by the answer poll, which only reads threads for a delivered ask.
    * Cleared by Reset like every host stamp (`stripHostStamps`), so re-asking
    * re-posts. Absent on every edge from before this field, and on every gate
-   * with no `askWho`. */
+   * with no `askWho`. `login` is who was asked — the gate's logins as parsed
+   * (`gateLogins`), joined by `, ` when there are several — so a one-login gate
+   * stamps exactly the string it always did. */
   routed?: { at: number; login: string; url?: string; error?: string };
+  /** Host stamp beside `routed`: each named person's FIRST answer on the thread,
+   * keyed by lowercase login. For an `"all"` gate this is the partial state — two
+   * of three have approved — that `gateVerdict` reads; for an `"any"` gate it is
+   * the record of who said what. Written by the poll as replies arrive, merged
+   * (a login already recorded is never overwritten: first answer per person
+   * wins), and cleared by Reset with every other stamp, so re-asking starts the
+   * count over. Absent on every edge from before this field, which reads as
+   * "nobody has answered yet". */
+  routedAnswers?: Record<string, { answer: "approved" | "rejected"; at: number; url?: string }>;
   /** Extra, once-off text for the agent this rule starts — appended to the prompt
    * mode's template, or substituted at `{note}` if the template has one. For
    * `launch` and `seed` only; a `notify` rule's words live on its notify node.
@@ -739,6 +762,7 @@ export function stripHostStamps(e: FlowEdge): FlowEdge {
   delete kept.action;
   delete kept.gateAnswer;
   delete kept.routed;
+  delete kept.routedAnswers;
   delete kept.liveSince;
   delete kept.expiredAt;
   delete kept.attempts;
