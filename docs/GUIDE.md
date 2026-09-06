@@ -165,7 +165,8 @@ the setting, and cards fall back to the git + Jira backbone.
 An **Orchestrator** drawer (off by default, `agentFlow.orchestrator`) lets you wire the
 sessions already on the board into a *flow*: drag a card in, connect two nodes, and put a
 condition on the connection — a merged PR, failing CI, a session that ended its turn, a
-clean tree, a Jira status, **the command succeeded**, **the command printed** a given text, or CI passing on a
+clean tree, a Jira status, **the command succeeded**, **the command printed** a given text, **the command
+reported** a field of the JSON object it printed last as a given value, or CI passing on a
 named branch of a named repo. That last one has no picker yet: you get it only by hand-editing the flow file,
 not through the drawer or the list. The drawer resizes by dragging its edge or pressing
 **Expand**, and switching to **List** gives the same flow a keyboard path — build, wire,
@@ -216,7 +217,10 @@ question; the node shows **Approve** and **Reject**; and a later rule fires on
 once and latches, so Reset on the rule that asked is what poses the question
 again. There is no notification: the gate node itself is the signal — it sits in
 the drawer with its question, an amber state dot, and the two buttons, for as
-long as it is unanswered. A **subflow** node starts a saved template as a child
+long as it is unanswered. Name someone in the node's **Ask on PR** field and the
+question is also posted on the card's pull request mentioning them; their
+`approve` or `reject` reply there answers it (see
+[Routing a gate](ORCHESTRATOR_COMMANDS.md#routing-a-gate-to-someone)). A **subflow** node starts a saved template as a child
 workflow bound to the same card, armed and named after both; a later rule on **the subflow
 finished** waits for every rule in it to settle. The card keeps showing the parent. A **dry run** reports waiting gates in words: a rule
 waiting on a gate reads "waiting for your answer" there. Nothing outside
@@ -237,15 +241,17 @@ back. Before it ever launches or seeds for the first time, a flow asks once — 
 ticket, the repos, and the prompt mode it would use — and only then runs unattended. Running
 its first command asks again, separately: approving a flow's launches only approves opening
 sessions, never running a shell command on your machine, so a flow you already
-confirmed for a launch still asks the first time one of its rules would run a command — and
-then, like a launch, runs unattended after that. If that is too coarse — a template attached
-to many cards asks once each and then spends freely — `agentFlow.commandConsent: "command"`
-asks per distinct command text instead, and lets you approve one run, the next five, or
-always. At most three of these — launches, seeds and
+confirmed for a launch still asks before one of its rules would run a command — and asks
+per distinct command text, letting you approve one run, the next five, or always for that
+text. A different command, or the same one with a different note, asks on its own.
+`agentFlow.commandConsent: "flow"` asks once per flow instead and then runs every command
+the flow holds unattended, which is what every release before 0.69 did. At most three of
+these — launches, seeds and
 commands together — happen in a single pass, with the rest picked up on the next one. A flow
 can also carry a **spend ceiling** — a lifetime cap on sessions opened plus commands run,
-counted off its journal and shown in its header — and a pass that would cross it performs
-nothing and disarms the flow with a notification saying so. A
+counted off its journal and shown in its header — and a **token ceiling** in the `eq` unit a
+card prints, read off its runs' transcripts; a pass that would cross the first, or wants to
+spend at or past the second, performs nothing and disarms the flow with a notification saying so. A
 launch, seed or command that fails stamps its rule as errored and stops it there until you
 **Reset** it; a pre-flight read that fails instead — Jira unreachable, say — is retried on the
 next pass rather than latched as a failure. Two VS Code windows with the Deck open cannot fire

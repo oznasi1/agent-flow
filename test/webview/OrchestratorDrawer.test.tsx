@@ -1515,8 +1515,8 @@ describe("the inspector", () => {
     const values = Array.from(
       screen.getByLabelText("Condition").querySelectorAll("option"),
     ).map((o) => (o as HTMLOptionElement).value);
-    // Both command-shaped kinds, and nothing place- or gate-shaped.
-    expect(values).toEqual(["command-succeeded", "command-printed"]);
+    // The three command-shaped kinds, and nothing place- or gate-shaped.
+    expect(values).toEqual(["command-succeeded", "command-printed", "command-result"]);
   });
 
   // A `<select>` whose `value` matches none of its options has `selectedIndex`
@@ -5104,6 +5104,97 @@ describe("a command-printed rule in the inspector", () => {
   });
 });
 
+describe("a routed gate in the drawer", () => {
+  const routedFlow = (ask: Partial<FlowEdge> = {}, gate: Record<string, unknown> = { askWho: "alice" }): Flow => flow({
+    armed: true,
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "g", kind: "gate", x: 320, y: 24, join: "any", question: "deploy to prod?", ...gate } as Flow["nodes"][number],
+    ],
+    edges: [{ id: "ask1", from: "n1", to: "g", cond: { kind: "pr-merged" }, ...ask }],
+  });
+
+  it("offers an Ask-on-PR field in the inspector that writes the login and clears on blank", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [routedFlow({}, {})] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    const box = screen.getByLabelText("Ask on the pull request") as HTMLInputElement;
+    expect(box.value).toBe("");
+    fireEvent.change(box, { target: { value: "@alice" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).nodes[1]).toMatchObject({ kind: "gate", askWho: "alice" });
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    expect("askWho" in (onSave.mock.calls.at(-1)![0] as Flow).nodes[1]).toBe(false);
+  });
+
+  it("says on the node and in the inspector where the question went — including that it could not be posted", () => {
+    const failed = routedFlow({ firedAt: 5, performed: true, routed: { at: 5, login: "alice", error: "agent-flow has no pull request yet to ask on" } });
+    render(<OrchestratorDrawer {...props({ flows: [failed] })} />);
+    expect(screen.getByTestId("orch-node-g").textContent).toContain("could not ask @alice on the pull request — agent-flow has no pull request yet to ask on");
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    expect(screen.getByTestId("orch-gate-routing").textContent).toContain("could not ask @alice");
+    // The local buttons are still the way through.
+    const node = within(screen.getByTestId("orch-node-g"));
+    expect(node.getByRole("button", { name: /Approve deploy to prod\?/ })).toBeTruthy();
+  });
+
+  it("reads 'asked @alice' once delivered, and shows nothing routing-related on a local gate", () => {
+    const delivered = routedFlow({ firedAt: 5, performed: true, routed: { at: 5, login: "alice", url: "https://gh/c/1" } });
+    const r = render(<OrchestratorDrawer {...props({ flows: [delivered] })} />);
+    expect(screen.getByTestId("orch-node-g").textContent).toContain("asked @alice on the pull request");
+    r.unmount();
+    render(<OrchestratorDrawer {...props({ flows: [routedFlow({ firedAt: 5, performed: true }, {})] })} />);
+    expect(screen.getByTestId("orch-node-g").textContent).not.toContain("pull request");
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    expect(screen.queryByTestId("orch-gate-routing")).toBeNull();
+  });
+});
+
+describe("a command-result rule in the inspector", () => {
+  const commandFlow = (): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "c", kind: "command", x: 320, y: 24, join: "any", run: "deploy.sh" },
+      { id: "n2", kind: "notify", x: 620, y: 24, join: "any", message: "done" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "c", cond: { kind: "pr-merged" } },
+      { id: "e2", from: "c", to: "n2", cond: { kind: "command-result", field: "", value: "" } },
+    ],
+  });
+
+  it("offers a field and a value, marks the blank field, and writes each on blur", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [commandFlow()] })} />);
+    fireEvent.click(screen.getByTestId("orch-edge-e2"));
+    expect(screen.getByTestId("orch-inspector").textContent).toContain("no field set");
+    const field = screen.getByLabelText("Reported field");
+    fireEvent.change(field, { target: { value: "env" } });
+    fireEvent.blur(field);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[1].cond).toEqual({ kind: "command-result", field: "env", value: "" });
+    const value = screen.getByLabelText("Reported value");
+    fireEvent.change(value, { target: { value: "staging" } });
+    fireEvent.blur(value);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).edges[1].cond).toMatchObject({ kind: "command-result", value: "staging" });
+  });
+
+  it("the dry run reads the host's verdict for it, on the same channel as printed", async () => {
+    const f = commandFlow();
+    f.edges[0] = { ...f.edges[0], firedAt: 5, firedNote: "ran", performed: true };
+    f.edges[1] = { ...f.edges[1], cond: { kind: "command-result", field: "env", value: "staging" } };
+    const r1 = render(<OrchestratorDrawer {...props({ flows: [f], printed: { f1: { e2: true } } })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    await waitFor(() => expect(screen.getByTestId("orch-dryrun-e2")).toBeTruthy());
+    expect(screen.getByTestId("orch-dryrun-e2").textContent).toContain("would fire");
+    r1.unmount();
+    render(<OrchestratorDrawer {...props({ flows: [f] })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    await waitFor(() => expect(screen.getByTestId("orch-dryrun-e2")).toBeTruthy());
+    expect(screen.getByTestId("orch-dryrun-e2").textContent).toContain("waiting for deploy.sh to report env = “staging”");
+  });
+});
+
 describe("opt-in retry in the inspector", () => {
   const open = (f: Flow, over: Partial<React.ComponentProps<typeof OrchestratorDrawer>> = {}) => {
     const onSave = vi.fn();
@@ -5219,7 +5310,36 @@ describe("a flow's spend ceiling in the header", () => {
   it("offers no ceiling while editing a template — a template spends nothing", () => {
     render(<OrchestratorDrawer {...props({ flows: [], templates: [template()], openId: { kind: "template", id: "t1" } as OrchTarget })} />);
     expect(screen.queryByLabelText("Spend ceiling")).toBeNull();
+    expect(screen.queryByLabelText("Token ceiling")).toBeNull();
     expect(screen.queryByTestId("orch-spend")).toBeNull();
+  });
+
+  it("offers a token ceiling field beside the count, taking the card's suffixes and writing eq on blur", () => {
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [wired()] })} />);
+    const box = screen.getByLabelText("Token ceiling") as HTMLInputElement;
+    expect(box.placeholder).toBe("none");
+    fireEvent.change(box, { target: { value: "1.5M" } });
+    fireEvent.blur(box);
+    expect((onSave.mock.calls.at(-1)![0] as Flow).tokenCeiling).toBe(1_500_000);
+    expect("spendCeiling" in (onSave.mock.calls.at(-1)![0] as Flow)).toBe(false);
+  });
+
+  it("shows the host's eq figure against the token ceiling, reverts junk, and clears on blank", () => {
+    const f = wired();
+    f.tokenCeiling = 2_000_000;
+    const onSave = vi.fn();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [f], spend: { f1: { sessions: 1, commands: 0, eq: 1_234_000 } } })} />);
+    expect(screen.getByTestId("orch-spend").textContent).toContain("1.2M of 2.0M eq");
+    const box = screen.getByLabelText("Token ceiling") as HTMLInputElement;
+    expect(box.value).toBe("2000000");
+    fireEvent.change(box, { target: { value: "a lot" } });
+    fireEvent.blur(box);
+    expect(onSave).not.toHaveBeenCalled();
+    expect(box.value).toBe("2000000");
+    fireEvent.change(box, { target: { value: "" } });
+    fireEvent.blur(box);
+    expect("tokenCeiling" in (onSave.mock.calls.at(-1)![0] as Flow)).toBe(false);
   });
 });
 

@@ -1515,19 +1515,20 @@ describe("package.json ships no organization-specific defaults", () => {
 });
 
 describe("getConfig — commandConsent", () => {
-  // Ships inert: an install that has never heard of the setting keeps the
-  // once-per-flow ask every existing workflow was armed under.
-  it("defaults to flow", () => {
-    expect(getConfig().commandConsent).toBe("flow");
-    expect(manifestSettings<{ default?: unknown }>(pkg)["agentFlow.commandConsent"].default).toBe("flow");
+  // Per-command consent is the default since 0.69: an install that has never
+  // heard of the setting asks once per distinct command text. The once-per-flow
+  // ask is still one setting away, and `consentNotice.ts` offers it on upgrade.
+  it("defaults to command", () => {
+    expect(getConfig().commandConsent).toBe("command");
+    expect(manifestSettings<{ default?: unknown }>(pkg)["agentFlow.commandConsent"].default).toBe("command");
   });
 
-  it("reads the exact opt-in and nothing else", () => {
-    setConfig({ commandConsent: "command" });
+  it("reads the exact opt-out and nothing else — a typo lands in the safer mode", () => {
+    setConfig({ commandConsent: "flow" });
+    expect(getConfig().commandConsent).toBe("flow");
+    setConfig({ commandConsent: "per-flow" });
     expect(getConfig().commandConsent).toBe("command");
-    setConfig({ commandConsent: "per-command" });
-    expect(getConfig().commandConsent).toBe("flow");
     setConfig({ commandConsent: 1 });
-    expect(getConfig().commandConsent).toBe("flow");
+    expect(getConfig().commandConsent).toBe("command");
   });
 });

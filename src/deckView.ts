@@ -5,10 +5,10 @@ import * as path from "path";
 import { DEFAULT_COMMANDS, getConfig, providerLabel, resolvedProvider, type AgentFlowConfig, type AgentProvider } from "./config";
 import { TaskAuthError, TaskConnector } from "./tasks/provider";
 import { readRuns, defaultRunsDir, removeRun, writeRun } from "./engine/runs";
-import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal, analyticsShape, analyticsIdOf, retryPolicy, edgeAction } from "./engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH, PlaceNode, PlannedNode, SubflowNode, bindSubflow, emptyFlow, findNode, isCommand, isPerformedAction, isPlace, isPlanned, isSettled, isSpendAction, stripHostStamps, subflowDepth, SpendTally, hasCeiling, overCeiling, spendTotal, analyticsShape, analyticsIdOf, retryPolicy, edgeAction, atTokenCeiling, flowRunKeys, hasTokenCeiling, parseResult } from "./engine/orchestrator/model";
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
-import { appendEvent, truncateOutput, findEdgeOutput, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
+import { appendEvent, truncateOutput, findEdgeOutput, needsOutputVerdicts, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
 import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, normalizedTemplateFlow, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
 import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
@@ -22,9 +22,10 @@ import { chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "
 import { shellCommandRunner } from "./engine/orchestrator/shellRunner";
 import { blockedBy } from "./engine/orchestrator/neverAutoRun";
 import { CONSENT_BATCH, consentCovers, consumeConsent, grantConsent } from "./engine/orchestrator/consent";
+import { GATE_POLL_MS, gateAnswerFrom, gateSourcePlace, isRouted, routedGateQuestion, routedGatesAwaitingAnswer } from "./engine/orchestrator/gateRouting";
 import { buildRunStatus } from "./engine/status";
 import { UsageReader } from "./engine/usageFs";
-import type { UsageTotals } from "./engine/usage";
+import { formatEq, weightedEq, type UsageTotals } from "./engine/usage";
 import { readLiveWindows, defaultWindowsDir, currentWindow } from "./engine/presence";
 // The destination question, shared with Take in the sidebar so **Review with agent**
 // asks it in the same words with the same pickers.
@@ -521,6 +522,18 @@ export class DeckPanel {
    * persisted, and deliberately not a lock: it is about this panel's own re-entrancy,
    * which no file can express. */
   private advanceInFlight = false;
+  /** Routed gate asks this pass fired and must post on the PR once the lock is
+   * released: a forge call under the lock would hold every other window for up
+   * to ten seconds per gate. Drained by `advanceArmedFlows`. */
+  private pendingDeliveries: { flowId: string; edgeId: string }[] = [];
+  /** When each routed gate's thread was last read, by edge id — the throttle
+   * behind `GATE_POLL_MS`. In memory: a poll is not a fact about the flow. */
+  private routedCheckedAt = new Map<string, number>();
+  /** Routed gates the pass under the lock found asked, delivered and unanswered
+   * — read off the SAME `readFlows` the pass evaluates, so polling costs no read
+   * of its own (a second read per pass would also shift every test that
+   * sequences `readFlows` returns). Drained after the lock is released. */
+  private pendingPolls: { flowId: string; flowName: string; edgeId: string; nodeId: string; question: string; login: string; since: number }[] = [];
   /** Flow ids whose first post-start evaluation found rules already met, and which
    * are waiting for the user to approve or disarm. Per panel, deliberately not
    * persisted: the gate exists to protect the moment you come back, and asking on
@@ -733,11 +746,18 @@ export class DeckPanel {
     // yet", which is the truth for a flow with no journal. Read here, per post,
     // rather than cached: the tally must agree with what the pass just wrote,
     // and `postFlows` runs after it.
+    // A flow with a TOKEN ceiling also gets its `eq` figure, read off the same
+    // transcripts the card reads — only such flows, because a read costs a
+    // stat per transcript and this runs on every post. `runs` is read once, and
+    // only when some flow needs it.
     const spend: Record<string, SpendTally> = {};
     if (enabled) {
+      const tokenRuns = flows.some(hasTokenCeiling) ? readRuns(defaultRunsDir()) : undefined;
       for (const f of flows) {
         const t = this.spendTallyOf(f.id);
-        if (spendTotal(t) > 0) spend[f.id] = t;
+        const eq = tokenRuns ? this.tokenSpendOf(f, tokenRuns) : undefined;
+        if (eq !== undefined) t.eq = eq;
+        if (spendTotal(t) > 0 || eq !== undefined) spend[f.id] = t;
       }
     }
     this.post({
@@ -751,11 +771,127 @@ export class DeckPanel {
    * "empty" by contract, and the one thing it does throw on (an id failing
    * `VALID_FLOW_ID`) cannot come from a flow `readFlows` handed back, since the
    * store checks the same regex. Zeros for a flow with nothing recorded. */
+  /** Where a routed gate's question goes: the pull request of the place the gate
+   * hangs off, in the checkout the card holds. A reason instead when there is
+   * nowhere to post — a gate wired to no place, a place whose run is not on the
+   * board, or a repo with no PR yet. */
+  private gatePr(flow: Flow, gateNodeId: string, runs: RunStatus[]): { repoPath: string; number: number } | { error: string } {
+    const place = gateSourcePlace(flow, gateNodeId);
+    if (!place) return { error: "the gate is not wired to a place, so there is no pull request to ask on" };
+    const status = runs.find((s) => s.run.key === place.runKey);
+    if (!status) return { error: `${place.runKey} is not on the board, so its pull request cannot be found` };
+    const repoPath = status.run.repos?.find((r) => r.name === place.repo)?.path;
+    const facts = status.prs[place.repo]?.facts;
+    if (!repoPath) return { error: `${place.repo} is not a checkout of ${place.runKey}` };
+    if (!facts) return { error: `${place.repo} has no pull request yet to ask on` };
+    return { repoPath, number: facts.number };
+  }
+
+  /** Post a routed gate's question on its PR and stamp the performer edge with
+   * the outcome (`FlowEdge.routed`). Every refusal is STAMPED, never silent: a
+   * gate routed to a person who never sees it is worse than one that blocks
+   * visibly, so the drawer shows the error on the node and the local
+   * Approve/Reject stay the way through. Fresh read before the write, like every
+   * other stamp this file makes; a gate answered or Reset while the forge call
+   * was in flight is left alone. */
+  private async deliverRoutedAsk(flowId: string, edgeId: string, runs: RunStatus[]): Promise<void> {
+    const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flowId);
+    const edge = flow?.edges.find((e) => e.id === edgeId);
+    const gate = flow && edge ? findNode(flow, edge.to) : undefined;
+    if (!flow || !edge || !gate || gate.kind !== "gate" || !isRouted(gate)) return;
+    if (edge.performed !== true || edge.firedAt === undefined || edge.gateAnswer !== undefined || edge.routed !== undefined) return;
+    const login = gate.askWho!.trim().replace(/^@/, "");
+    const at = Date.now();
+    let routed: NonNullable<FlowEdge["routed"]>;
+    const pr = this.gatePr(flow, gate.id, runs);
+    if ("error" in pr) routed = { at, login, error: pr.error };
+    else if (!this.forge.gates) routed = { at, login, error: `${this.forge.label} cannot carry a gate question — ask on the node instead` };
+    else {
+      const posted = await this.forge.gates.post(pr.repoPath, pr.number, routedGateQuestion(flow.name, gate.question, login));
+      routed = posted.ok ? { at, login, ...(posted.url ? { url: posted.url } : {}) } : { at, login, error: posted.message };
+    }
+    const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flowId);
+    const current = latest?.edges.find((e) => e.id === edgeId);
+    if (!latest || !current || current.performed !== true || current.firedAt === undefined || current.gateAnswer !== undefined) return;
+    writeFlow(this.flowIo, this.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === edgeId ? { ...e, routed } : e)) });
+    this.journal(flowId, { kind: "routed", edge: edgeId, login, ...(routed.url ? { url: routed.url } : {}), ...(routed.error ? { error: routed.error } : {}) }, at);
+    if (routed.error) {
+      this.log(`deck: flow ${flowId} could not route ${edgeId}'s question to @${login} — ${routed.error}`);
+      void vscode.window.showWarningMessage(`${flow.name}: the question for @${login} could not be posted (${routed.error}). Answer it on the node.`);
+    } else this.log(`deck: flow ${flowId} asked @${login} on the PR for ${edgeId}`);
+  }
+
+  /** Read each noted routed gate's thread — at most once per `GATE_POLL_MS` per
+   * gate — and stamp the first answer from the named login as `gateAnswer`,
+   * exactly as `flow:answerGate` would. FIRST ANSWER WINS: a gate answered on
+   * the node while the thread was being read keeps the node's answer, which is
+   * what the fresh read before the write is for. An unreadable thread is
+   * skipped, never read as "no answer". The PR is resolved off the flow as the
+   * pass read it (`polls` carries what it needs), so a miss here costs no read. */
+  private async pollRoutedGates(polls: typeof this.pendingPolls, runs: RunStatus[], nowMs: number): Promise<void> {
+    if (!this.forge.gates || polls.length === 0) return;
+    for (const poll of polls) {
+      const key = `${poll.flowId}/${poll.edgeId}`;
+      const last = this.routedCheckedAt.get(key) ?? 0;
+      if (nowMs - last < GATE_POLL_MS) continue;
+      this.routedCheckedAt.set(key, nowMs);
+      // The place is found off a fresh read of the flow only once the thread
+      // is worth reading — the same flow the pass just evaluated.
+      const flow = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === poll.flowId);
+      if (!flow) continue;
+      const pr = this.gatePr(flow, poll.nodeId, runs);
+      if ("error" in pr) continue;
+      let replies;
+      try {
+        replies = await this.forge.gates.replies(pr.repoPath, pr.number, poll.since);
+      } catch {
+        replies = null;
+      }
+      if (!replies) continue;
+      const hit = gateAnswerFrom(replies, poll.login, poll.since);
+      if (!hit) continue;
+      const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === poll.flowId);
+      const current = latest?.edges.find((e) => e.id === poll.edgeId);
+      if (!latest || !current || current.performed !== true || current.firedAt === undefined || current.gateAnswer !== undefined) continue;
+      writeFlow(this.flowIo, this.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === poll.edgeId ? { ...e, gateAnswer: hit.answer } : e)) });
+      this.journal(poll.flowId, { kind: "answered", edge: poll.edgeId, answer: hit.answer, by: poll.login }, Date.now());
+      this.log(`deck: flow ${poll.flowId} — @${poll.login} ${hit.answer} "${poll.question}" on the PR`);
+      void vscode.window.showInformationMessage(`${poll.flowName}: @${poll.login} ${hit.answer} "${poll.question}" on the pull request.`);
+    }
+  }
+
   private spendTallyOf(flowId: string): SpendTally {
     try {
       return spendTally(readJournal(this.journalIo, this.flowsDir, flowId));
     } catch {
       return { sessions: 0, commands: 0 };
+    }
+  }
+
+  /** What this flow's runs have spent in effort-weighted token equivalents — the
+   * `eq` the card prints — summed over `flowRunKeys`, off the same `UsageReader`
+   * the board sweep uses (so a transcript already parsed costs a `stat`). Only
+   * asked for a flow carrying a token ceiling. `undefined` when nothing could be
+   * read or the flow has no places: "not measured", which `atTokenCeiling` never
+   * treats as reached — an unreadable transcript is not evidence of spend. */
+  private tokenSpendOf(flow: Flow, runs: Run[]): number | undefined {
+    if (!hasTokenCeiling(flow)) return undefined;
+    const keys = flowRunKeys(flow);
+    if (keys.length === 0) return undefined;
+    try {
+      const root = claudeProjectsRoot();
+      let eq = 0;
+      let read = false;
+      for (const key of keys) {
+        const run = runs.find((r) => r.key === key);
+        if (!run) continue;
+        eq += weightedEq(this.usage.readRun(root, (run.repos ?? []).map((r) => r.path)));
+        read = true;
+      }
+      return read ? eq : undefined;
+    } catch (e) {
+      this.log(`deck: flow ${flow.id} token spend unreadable — ${e instanceof Error ? e.message : String(e)}`);
+      return undefined;
     }
   }
 
@@ -769,7 +905,7 @@ export class DeckPanel {
    * for the reason `branchCiWanted` gives: this can run on a hand-edited flow. */
   private printedFor(flow: Flow): Record<string, boolean> | undefined {
     const edges = Array.isArray(flow.edges) ? flow.edges : [];
-    if (!edges.some((e) => e && e.cond?.kind === "command-printed" && !isSettled(e))) return undefined;
+    if (!needsOutputVerdicts(flow)) return undefined;
     try {
       return printedVerdicts(flow, readJournal(this.journalIo, this.flowsDir, flow.id));
     } catch {
@@ -837,6 +973,12 @@ export class DeckPanel {
       // `flow:resetEdge`, `flow:resumeDisarm`): it re-reads immediately before writing,
       // and it touches only flow-level fields, never an edge stamp.
       for (const ask of asks) await this.askFirstSpend(ask.flow, ask.target);
+      // Routed gate questions, posted with the lock released for the same reason —
+      // and the threads of the ones already posted, read for an answer. An answer
+      // found here is stamped now and opens its rule on the NEXT pass, six seconds
+      // on: the same one-pass latency `command-succeeded` has after its command.
+      for (const d of this.pendingDeliveries.splice(0)) await this.deliverRoutedAsk(d.flowId, d.edgeId, runs);
+      await this.pollRoutedGates(this.pendingPolls.splice(0), runs, nowMs);
     } finally {
       this.advanceInFlight = false;
     }
@@ -885,6 +1027,16 @@ export class DeckPanel {
      * an unstamped success is what makes the NEXT pass repeat it. */
     let lostLock = false;
     const flows = readFlows(this.flowIo, this.flowsDir);
+    // Routed gates awaiting an answer, noted off this read for the poll that
+    // runs once the lock is released (see `pendingPolls`).
+    if (this.forge.gates) {
+      for (const f of flows) {
+        if (!f.armed) continue;
+        for (const { node, edge } of routedGatesAwaitingAnswer(f)) {
+          this.pendingPolls.push({ flowId: f.id, flowName: f.name, edgeId: edge.id, nodeId: node.id, question: node.question, login: edge.routed!.login, since: edge.routed!.at });
+        }
+      }
+    }
     // Read ONCE for the whole pass, before any flow is evaluated: two flows waiting
     // on the same branch must be answered by the same verdict, and a fetch per node
     // would be a forge call per rule.
@@ -1137,6 +1289,37 @@ export class DeckPanel {
             continue;
           }
         }
+        // The TOKEN ceiling, beside the count: the same stop, measured in what the
+        // work cost rather than in how many times it started. Read off the card's
+        // transcripts (`tokenSpendOf`) only for a flow that set one, and only when
+        // this pass wants to spend. AT the ceiling stops — see `atTokenCeiling`.
+        if (wanted > 0 && hasTokenCeiling(fresh)) {
+          const eq = this.tokenSpendOf(fresh, runs.map((s) => s.run));
+          if (atTokenCeiling(fresh, { sessions: 0, commands: 0, eq })) {
+            const atStop = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flow.id);
+            if (atStop) writeFlow(this.flowIo, this.flowsDir, { ...atStop, armed: false });
+            this.pendingResume.delete(flow.id);
+            this.resumeCleared.delete(flow.id);
+            this.journal(flow.id, { kind: "armed", armed: false, source: "token-ceiling" }, nowMs);
+            trackEvent({
+              name: "flow_armed", armed: false, flow_uid: flowUid,
+              node_count: fresh.nodes.length, edge_count: fresh.edges.length,
+              unfirable_live: 0, unfirable_pr_facts: 0, unfirable_forge: 0,
+              // The count tally rides along as it does for the count ceiling; the
+              // token figure and the token ceiling are the user's own numbers and
+              // stay on the machine, as `spendCeiling` itself does.
+              has_ceiling: hasCeiling(fresh), spend_total: spendTotal(this.spendTallyOf(fresh.id)),
+              ...analyticsProps(fresh),
+              source: "token-ceiling",
+            });
+            this.log(`deck: flow ${flow.id} disarmed — ${eq} eq spent against a token ceiling of ${fresh.tokenCeiling}, and this pass wanted ${wanted} more`);
+            void vscode.window.showWarningMessage(
+              `${fresh.name} was disarmed at its token ceiling: ${formatEq(eq ?? 0)} eq of ${formatEq(fresh.tokenCeiling!)} eq spent across its runs, ` +
+                `and this pass would have started ${wanted} more. Raise the ceiling or re-arm to continue.`,
+            );
+            continue;
+          }
+        }
 
         // A flow asks ONCE before it ever spends anything, then runs unattended: a
         // mis-wired flow should cost one prompt, not a string of paid sessions. A
@@ -1193,6 +1376,9 @@ export class DeckPanel {
         // what `applyFired` stamps onto the edge, and an edge receipt is one
         // sentence. The output is for the journal alone.
         const outputs = new Map<string, string>();
+        // The JSON object a command reported on its last line, per edge — see
+        // `parseResult`. Journaled beside `output`, and read by `command-result`.
+        const results = new Map<string, Record<string, unknown>>();
         const promotions: { nodeId: string; runKey: string; repo: string }[] = [];
         const spawns: { nodeId: string; childFlowId: string; template: string }[] = [];
         const receipts: { level: "success" | "error"; message: string }[] = [];
@@ -1340,6 +1526,11 @@ export class DeckPanel {
           }
           outcomes.set(f.edge.id, done.outcome);
           if (done.output !== undefined && done.output.length > 0) {
+            // The report is parsed off the FULL output, before the head/tail cut
+            // below — a chatty command's last line is exactly what truncation
+            // would otherwise throw away.
+            const result = parseResult(done.output);
+            if (result) results.set(f.edge.id, result);
             outputs.set(f.edge.id, truncateOutput(done.output));
           }
           if (done.promote) promotions.push(done.promote);
@@ -1424,11 +1615,13 @@ export class DeckPanel {
           const e = next.edges.find((x) => x.id === f.edge.id);
           if (!e) continue;
           const output = outputs.get(f.edge.id);
+          const result = results.get(f.edge.id);
           const action = f.action ?? "unknown";
           if (e.error !== undefined) {
             this.journal(flow.id, {
               kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error,
               ...(output === undefined ? {} : { output }),
+              ...(result === undefined ? {} : { result }),
             }, nowMs);
             // The failure was scheduled to try again rather than latched
             // (`failedStamp`, runner.ts). Its own line, after the error's: the
@@ -1463,6 +1656,7 @@ export class DeckPanel {
             this.journal(flow.id, {
               kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "",
               ...(output === undefined ? {} : { output }),
+              ...(result === undefined ? {} : { result }),
             }, nowMs);
             // "The subflow finished" arriving is the other half of a spawn, and
             // the only signal that says a child ran to the end rather than being
@@ -1514,6 +1708,15 @@ export class DeckPanel {
         // from whatever the user actually is doing.
         for (const line of notifyLines(next, stamping)) {
           void vscode.window.showInformationMessage(line);
+        }
+        // A routed gate's ask, just stamped as asked: its question also travels
+        // to the person named on the node, after the lock is released.
+        for (const f of stamping) {
+          const e = next.edges.find((x) => x.id === f.edge.id);
+          const target = e ? findNode(next, e.to) : undefined;
+          if (e && f.perform && e.performed && e.firedAt !== undefined && target?.kind === "gate" && isRouted(target)) {
+            this.pendingDeliveries.push({ flowId: flow.id, edgeId: e.id });
+          }
         }
         for (const r of receipts) {
           // A successful launch or seed already announces itself by opening a

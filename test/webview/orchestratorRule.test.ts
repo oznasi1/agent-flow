@@ -15,6 +15,9 @@ import {
   subflowName,
   withNodeTemplate,
   COND_LABEL,
+  isBareCond,
+  gateRoutingNote,
+  withNodeGateAskWho,
   condOffered,
   condOptionLabel,
   CWD_REPO_DEFAULT,
@@ -45,7 +48,9 @@ import {
   retryLabel,
   failureText,
   withCeiling,
+  withTokenCeiling,
   parseCeilingInput,
+  parseEqInput,
   spendSummary,
   withNodeCwdRepo,
   withNodeJoin,
@@ -322,15 +327,15 @@ describe("gate nodes in the pickers", () => {
     expect(off).toContain("pr-merged");
     expect(off).toContain("ci-passed");
     expect(off).not.toContain("command-succeeded");
-    // Minus the two gate kinds, the two command-shaped kinds and the subflow kind.
-    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 5);
+    // Minus the two gate kinds, the three command-shaped kinds and the subflow kind.
+    expect(off).toHaveLength(Object.keys(COND_LABEL).length - 6);
   });
 
   it("still offers the command-shaped conditions off a command, and no gate condition", () => {
-    // Two now, not one: `command-printed` joined `command-succeeded` as the second
-    // kind answered off a command node. The pin is still that no gate (or
-    // place-shaped) kind leaks in here.
-    expect(offeredConds(gateFlow(), "c")).toEqual(["command-succeeded", "command-printed"]);
+    // Three now: `command-printed` and `command-result` joined `command-succeeded`
+    // as the kinds answered off a command node. The pin is still that no gate
+    // (or place-shaped) kind leaks in here.
+    expect(offeredConds(gateFlow(), "c")).toEqual(["command-succeeded", "command-printed", "command-result"]);
   });
 
   it("seeds a new wire out of a gate with gate-approved", () => {
@@ -433,6 +438,71 @@ describe("deadlines in the rule module", () => {
   });
 });
 
+describe("a routed gate in the rule module", () => {
+  const gateFlow = (gate: Record<string, unknown> = {}, ask: Partial<Flow["edges"][number]> = {}): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "g", kind: "gate", x: 320, y: 0, join: "any", question: "deploy to prod?", ...gate } as Flow["nodes"][number],
+    ],
+    edges: [{ id: "ask1", from: "n1", to: "g", cond: { kind: "pr-merged" }, ...ask }],
+  });
+
+  it("withNodeGateAskWho stores a bare login, drops the sigil, and DELETES the field for a blank", () => {
+    const set = withNodeGateAskWho(gateFlow(), "g", " @Alice ");
+    expect(set.nodes[1]).toMatchObject({ kind: "gate", askWho: "Alice" });
+    const cleared = withNodeGateAskWho(set, "g", "   ");
+    expect("askWho" in cleared.nodes[1]).toBe(false);
+    // A non-gate node is untouched.
+    expect(withNodeGateAskWho(gateFlow(), "n1", "alice").nodes[0]).toEqual(gateFlow().nodes[0]);
+  });
+
+  it("gateRoutingNote says where the question went, in every state, and nothing for a local gate", () => {
+    const g = (f: Flow) => f.nodes[1] as Parameters<typeof gateRoutingNote>[1];
+    expect(gateRoutingNote(gateFlow(), g(gateFlow()))).toBeUndefined();
+    const local = gateFlow({ askWho: "alice" });
+    expect(gateRoutingNote(local, g(local))).toBe("will ask @alice on the pull request");
+    const asked = gateFlow({ askWho: "alice" }, { firedAt: 5, performed: true });
+    expect(gateRoutingNote(asked, g(asked))).toBe("asking @alice on the pull request…");
+    const delivered = gateFlow({ askWho: "alice" }, { firedAt: 5, performed: true, routed: { at: 5, login: "alice" } });
+    expect(gateRoutingNote(delivered, g(delivered))).toBe("asked @alice on the pull request");
+    const failed = gateFlow({ askWho: "alice" }, { firedAt: 5, performed: true, routed: { at: 5, login: "alice", error: "no PR" } });
+    expect(gateRoutingNote(failed, g(failed))).toBe("could not ask @alice on the pull request — no PR");
+    const answered = gateFlow({ askWho: "alice" }, { firedAt: 5, performed: true, routed: { at: 5, login: "alice" }, gateAnswer: "approved" });
+    expect(gateRoutingNote(answered, g(answered))).toBe("@alice answered on the pull request");
+  });
+});
+
+describe("command-result in the rule module", () => {
+  const commandFlow = (): Flow => flow({
+    nodes: [
+      { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+      { id: "c", kind: "command", x: 320, y: 0, join: "any", run: "deploy.sh" },
+      { id: "n2", kind: "notify", x: 640, y: 0, join: "any", message: "done" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "c", cond: { kind: "pr-merged" } },
+      { id: "e2", from: "c", to: "n2", cond: { kind: "command-result", field: "env", value: "staging" } },
+    ],
+  });
+
+  it("is labelled with the parameter mark, offered off a command node only, seeded blank, and described with its field", () => {
+    expect(COND_LABEL["command-result"]).toBe("the command reported…");
+    expect(offeredConds(commandFlow(), "c")).toContain("command-result");
+    expect(offeredConds(commandFlow(), "n1")).not.toContain("command-result");
+    expect(isBareCond("command-result")).toBe(false);
+    expect(seedCond("command-result")).toEqual({ kind: "command-result", field: "", value: "" });
+    expect(condOptionLabel({ kind: "command-result", field: "env", value: "staging" })).toBe("the command reported env = “staging”");
+  });
+
+  it("has no place-shaped observation, and its fallback names the command and the field", () => {
+    const f = commandFlow();
+    expect(observationOf(f, f.edges[1], [], {})).toBeNull();
+    expect(observationFallback(f, f.edges[1])).toBe("waiting for deploy.sh to report env = “staging”");
+    const off = { ...f, edges: [{ ...f.edges[1], from: "n1" }] };
+    expect(observationFallback(off, off.edges[0])).toBe("this rule reads a command's report, but it does not come from one");
+  });
+});
+
 describe("command-printed in the rule module", () => {
   const commandFlow = (): Flow => flow({
     nodes: [
@@ -513,6 +583,31 @@ describe("a flow's spend ceiling in the rule module", () => {
     expect(parseCeilingInput("0")).toEqual({ ok: false });
     expect(parseCeilingInput("2.5")).toEqual({ ok: false });
     expect(parseCeilingInput("lots")).toEqual({ ok: false });
+  });
+
+  it("withTokenCeiling writes an eq figure on the flow and DELETES the field for none", () => {
+    const set = withTokenCeiling(wired(), 1_500_000);
+    expect(set.tokenCeiling).toBe(1_500_000);
+    expect("tokenCeiling" in withTokenCeiling(set, undefined)).toBe(false);
+  });
+
+  it("parseEqInput takes the card's own suffixes, rounds to a whole eq, and refuses the rest", () => {
+    expect(parseEqInput("")).toEqual({ ok: true, ceiling: undefined });
+    expect(parseEqInput("250000")).toEqual({ ok: true, ceiling: 250_000 });
+    expect(parseEqInput("800k")).toEqual({ ok: true, ceiling: 800_000 });
+    expect(parseEqInput(" 1.5M ")).toEqual({ ok: true, ceiling: 1_500_000 });
+    expect(parseEqInput("2m")).toEqual({ ok: true, ceiling: 2_000_000 });
+    expect(parseEqInput("0")).toEqual({ ok: false });
+    expect(parseEqInput("0.0001k")).toEqual({ ok: false });
+    expect(parseEqInput("-5")).toEqual({ ok: false });
+    expect(parseEqInput("lots")).toEqual({ ok: false });
+    expect(parseEqInput("1.5G")).toEqual({ ok: false });
+  });
+
+  it("appends the eq figure against a token ceiling, and a dash while it is unmeasured", () => {
+    expect(spendSummary({ sessions: 1, commands: 0, eq: 1_234_000 }, undefined, 2_000_000)).toBe("1 session spent · 1.2M of 2.0M eq");
+    expect(spendSummary({ sessions: 1, commands: 0 }, 5, 800_000)).toBe("1 session spent · 1 of 5 · — of 800k eq");
+    expect(spendSummary({ sessions: 0, commands: 0, eq: 5 }, undefined, undefined)).toBe("nothing spent yet");
   });
 
   it("sums up what a flow has spent, in the vocabulary — sessions, not the other word", () => {

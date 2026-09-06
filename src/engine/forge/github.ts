@@ -11,6 +11,7 @@ import type { Runner } from "../pr/provider";
 import { resolveBin } from "../pr/which";
 import { GhReviewProvider } from "../review/provider";
 import { parseGhAccounts } from "./accounts";
+import { ghGateChannel } from "./gateChannels";
 import type { Forge } from "./types";
 
 /** The only host this forge speaks for. A GitHub Enterprise host in the same gh
@@ -22,7 +23,7 @@ export function makeGithubForge(run: Runner = execRunner): Forge {
     id: "github",
     label: "GitHub",
     cli: { name: "gh", installUrl: "https://cli.github.com" },
-    caps: { changesRequested: true, reviewSearch: true, accounts: true },
+    caps: { changesRequested: true, reviewSearch: true, accounts: true, gateRouting: true },
     probe: () => probeGh(run),
     async accounts() {
       try {
@@ -70,6 +71,7 @@ export function makeGithubForge(run: Runner = execRunner): Forge {
     },
     prs: new GhProvider(run),
     reviews: new GhReviewProvider(run),
+    gates: ghGateChannel(run),
     async branchCi(repoPath, branch) {
       try {
         const out = await run(resolveBin("gh") ?? "gh", BRANCH_CI_ARGS(branch), {

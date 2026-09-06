@@ -2,7 +2,7 @@ import * as React from "react";
 import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
-import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, isSpendAction, JoinMode, LaunchDest, PlaceNode, PlannedNode, retryPending, hasCeiling, SpendTally } from "../engine/orchestrator/model";
+import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, isSpendAction, JoinMode, LaunchDest, PlaceNode, PlannedNode, retryPending, hasCeiling, hasTokenCeiling, SpendTally } from "../engine/orchestrator/model";
 import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
 import { CondParams, RepoOptions } from "./CondParams";
@@ -37,8 +37,11 @@ import {
   CEILING_ARIA_LABEL,
   CEILING_PLACEHOLDER,
   parseCeilingInput,
+  parseEqInput,
   spendSummary,
+  TOKEN_CEILING_ARIA_LABEL,
   withCeiling,
+  withTokenCeiling,
   modeValueOf,
   nextEdgeId,
   nextNodeId,
@@ -86,6 +89,9 @@ import {
   withNodeCommandRun,
   withNodeCwdRepo,
   withNodeGateQuestion,
+  withNodeGateAskWho,
+  gateRoutingNote,
+  GATE_ASK_WHO_ARIA_LABEL,
   withNodeJoin,
   withNodeNotifyMessage,
   withNote,
@@ -1548,8 +1554,13 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   /** The question, prefixed by the verdict once there is one. The question stays
    * visible in every state on purpose: a node that showed only "approved" would
    * make you select it to find out what you had approved. */
-  const gateBody = (n: GateNode, st: ReturnType<typeof gateStateOf>): string =>
-    st?.answer ? `${st.answer} — ${n.question}` : n.question;
+  const gateBody = (n: GateNode, st: ReturnType<typeof gateStateOf>): string => {
+    const base = st?.answer ? `${st.answer} — ${n.question}` : n.question;
+    // A routed gate says who else holds the question, so a node that looks
+    // stuck reads as "waiting on @alice", not on you.
+    const note = gateRoutingNote(flow, n);
+    return note ? `${base} · ${note}` : base;
+  };
 
   /** Rejected is `--dim`, NOT `--c-danger`. Red on a card means something is
    * broken; a rejection is a decision you made. `--c-attn` is the same amber
@@ -1807,6 +1818,27 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               onBlur={(ev) => p.onSave(withNodeGateQuestion(flow, nodeInsp.id, ev.currentTarget.value))}
             />
           </div>
+          {/* Who else may answer: a forge login. Set, the ask also posts the
+              question on the card's pull request mentioning them, and their
+              `approve` / `reject` there answers the gate (gateRouting.ts). The
+              note below says where the question actually went — an error here
+              is the honest half of routing: a gate nobody sees must not look
+              routed. */}
+          <div className="orch-clause">
+            <span className="orch-kw">ASK ON PR</span>
+            <input
+              className="orch-msg"
+              aria-label={GATE_ASK_WHO_ARIA_LABEL}
+              key={`${nodeInsp.id}-who`}
+              defaultValue={nodeInsp.askWho ?? ""}
+              placeholder="a forge login, e.g. alice — blank asks here only"
+              onBlur={(ev) => p.onSave(withNodeGateAskWho(flow, nodeInsp.id, ev.currentTarget.value))}
+            />
+          </div>
+          {(() => {
+            const note = gateRoutingNote(flow, nodeInsp);
+            return note ? <div className="orch-clause" data-testid="orch-gate-routing">{note}</div> : null;
+          })()}
           {(() => {
             const st = gateStateOf(nodeInsp);
             if (!st?.answer || !st.edgeId) return null;
@@ -1996,7 +2028,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                   data-testid="orch-spend"
                   style={{ gap: 6, marginLeft: 10, fontSize: "var(--t-micro)", color: "var(--dim)" }}
                 >
-                  <span>· {spendSummary(p.spend?.[flow.id] ?? { sessions: 0, commands: 0 }, hasCeiling(flow) ? flow.spendCeiling : undefined)}</span>
+                  <span>· {spendSummary(p.spend?.[flow.id] ?? { sessions: 0, commands: 0 }, hasCeiling(flow) ? flow.spendCeiling : undefined, hasTokenCeiling(flow) ? flow.tokenCeiling : undefined)}</span>
                   <span>· ceiling</span>
                   <input
                     className="orch-num"
@@ -2011,6 +2043,23 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                       const parsed = parseCeilingInput(ev.currentTarget.value);
                       if (parsed.ok) p.onSave(withCeiling(flow, parsed.ceiling));
                       else ev.currentTarget.value = hasCeiling(flow) ? String(flow.spendCeiling) : "";
+                    }}
+                  />
+                  {/* The second ceiling, in the card's `eq` unit — see
+                      `Flow.tokenCeiling`. Free text rather than a number input so
+                      it takes the suffixes the card prints (`800k`, `1.5M`). */}
+                  <span>· token ceiling</span>
+                  <input
+                    className="orch-num"
+                    type="text"
+                    aria-label={TOKEN_CEILING_ARIA_LABEL}
+                    key={`${openKey}-eq`}
+                    defaultValue={hasTokenCeiling(flow) ? String(flow.tokenCeiling) : ""}
+                    placeholder={CEILING_PLACEHOLDER}
+                    onBlur={(ev) => {
+                      const parsed = parseEqInput(ev.currentTarget.value);
+                      if (parsed.ok) p.onSave(withTokenCeiling(flow, parsed.ceiling));
+                      else ev.currentTarget.value = hasTokenCeiling(flow) ? String(flow.tokenCeiling) : "";
                     }}
                   />
                 </span>

@@ -20,7 +20,7 @@
 // them.
 import * as React from "react";
 import { Condition, condIncomplete } from "../engine/orchestrator/model";
-import { DEFAULT_IDLE_MINUTES, PRINTED_TEXT_ARIA_LABEL } from "./orchestratorRule";
+import { DEFAULT_IDLE_MINUTES, PRINTED_TEXT_ARIA_LABEL, RESULT_FIELD_ARIA_LABEL, RESULT_VALUE_ARIA_LABEL } from "./orchestratorRule";
 
 export interface CondParamsProps {
   /** The condition being edited. A bare kind renders nothing at all. */
@@ -183,6 +183,34 @@ export function CondParams(p: CondParamsProps): JSX.Element | null {
             // this field does not have.
             placeholder="a word the command prints, e.g. DEPLOYED"
             onBlur={(ev) => onEdit({ text: ev.currentTarget.value })}
+          />
+          {mark}
+        </>
+      );
+
+    case "command-result":
+      return (
+        <>
+          <span className="orch-plabel">field</span>
+          <input
+            className="orch-msg"
+            aria-label={RESULT_FIELD_ARIA_LABEL}
+            key={`${editKey}-field`}
+            defaultValue={cond.field ?? ""}
+            // A key of the one JSON object the command prints as its LAST line
+            // (`parseResult`, model.ts). The placeholder shows the shape.
+            placeholder="a key of the JSON the command prints last, e.g. env"
+            onBlur={(ev) => onEdit({ field: ev.currentTarget.value })}
+          />
+          <span className="orch-plabel">is</span>
+          <input
+            className="orch-msg"
+            aria-label={RESULT_VALUE_ARIA_LABEL}
+            key={`${editKey}-value`}
+            defaultValue={cond.value ?? ""}
+            // Exact text: `1.4.2` matches the string and the number alike.
+            placeholder="the value, e.g. staging"
+            onBlur={(ev) => onEdit({ value: ev.currentTarget.value })}
           />
           {mark}
         </>

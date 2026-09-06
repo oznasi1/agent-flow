@@ -60,13 +60,16 @@ first four steps can end the pass without a command ever running.
    ceiling** bounds what it may spend over its whole life — sessions opened
    plus commands run — counted off its own journal. A pass whose spends would
    take that total past the ceiling performs none of them, disarms the flow,
-   and says so in a notification. See [The ceiling](#the-ceiling).
-5. **Ask for consent, once per kind of spend.** Two separate gates: one
-   covers launching and seeding sessions, the other covers running
-   shell. Consent to open a session is **not** consent to execute a command,
-   so a flow you approved before commands existed is asked again. The modal
-   names the actual command text. The pass that asks performs nothing —
-   approval only lets the *next* pass act.
+   and says so in a notification. A second, optional **token ceiling** does
+   the same in the card's `eq` unit, read off the runs' transcripts. See
+   [The ceiling](#the-ceiling).
+5. **Ask for consent.** Two separate gates: one covers launching and seeding
+   sessions, asked once per flow; the other covers running shell, asked once
+   per **distinct command text** by default (`agentFlow.commandConsent`, see
+   [Consent per command](#consent-per-command)). Consent to open a session is
+   **not** consent to execute a command, so a flow you approved before commands
+   existed is asked again. The modal names the actual command text. The pass
+   that asks performs nothing — approval only lets the *next* pass act.
 6. **Run it.** Resolve the command (a named entry from settings, or the free
    text on the node), substitute `{note}`, decide the working directory, then
    hand it to the shell with a hard 120-second deadline.
@@ -125,13 +128,14 @@ literal — a `.` means a dot, not "any character" — and matching ignores case
 
 It is empty by default, so nothing changes until you add a pattern.
 
-Why this exists and not a finer consent: the two approvals a flow stores
-(`launchConfirmedAt`, `commandConfirmedAt`) are per flow and permanent. Approve
-one `deploy.sh` and every command node in that flow runs unattended from then
-on, **including ones added afterwards** — and a note added later can extend the
-command it lands in. An approval given once cannot know what it will authorise
-later. This list can, because it is checked against the text that is actually
-about to run, every time.
+Why this exists beside consent: an approval is given about the text as it read
+when you were asked. Under `agentFlow.commandConsent: flow` that approval is per
+flow and permanent — approve one `deploy.sh` and every command node in that flow
+runs unattended from then on, **including ones added afterwards**. Under the
+default per-command mode a changed note is a changed text and asks again, but
+"Always for this command" is still a standing approval for a string you read
+once. Neither can know what it will authorise later. This list can, because it
+is checked against the text that is actually about to run, every time.
 
 The check happens in two places: the rule never reaches the consent modal (you
 are not asked to approve something that cannot happen), and it is refused again
@@ -242,9 +246,9 @@ reads them. Workspace-level settings are not: a tick has no workspace.
 - **`notify`** fires: the rule is stamped with its receipt and the line the Deck
   would have toasted is printed instead. Nobody is notified beyond your log —
   a cron job's stdout is the notification.
-- **`run`** fires **only when the flow already consented** — `commandConfirmedAt`
-  under the default consent mode, a covering per-command record under
-  `agentFlow.commandConsent: command` (a bounded approval is counted down). The
+- **`run`** fires **only when the flow already consented** — a covering
+  per-command record under the default `agentFlow.commandConsent: command` (a
+  bounded approval is counted down), or `commandConfirmedAt` under `flow`. The
   tick never asks and never invents an approval; an unconsented command is left
   pending and named in the report. `agentFlow.neverAutoRun` is honoured before
   consent is even consulted, and the command runs through the same runner, with
@@ -256,7 +260,7 @@ reads them. Workspace-level settings are not: a tick has no workspace.
   too, so an `"all"` junction is never half-stamped.
 
 Deadlines tick, the spend ceiling disarms, retries are scheduled and honoured,
-and `the command printed…` is answered from the journal — every rule the engine
+and `the command printed…` and `the command reported…` are answered from the journal — every rule the engine
 knows behaves the same, because it is the same engine.
 
 **What is different, and stated.**
@@ -276,29 +280,88 @@ knows behaves the same, because it is the same engine.
 notify`, `would run "…" in <repo>`, what needs an editor or consent — and
 writes nothing, runs nothing, and takes no lock.
 
+### Scheduling the tick
+
+The exit codes were designed for a timer: `2` means another pass held the lock
+and the next slot will do, `3` means the tick could not start (no settings
+file, or `agentFlow.orchestrator` off) and will keep saying so until you fix
+the file. Nothing in the tick sets that timer up, so the extension does:
+
+**Agent Flow: Schedule the Orchestrator Tick…** (Command Palette) asks for an
+interval — every 2, 5, 15 or 30 minutes — shows exactly what it will write and
+run, and then installs it with the platform's own scheduler. It finds a `node`
+on your PATH or in the usual Homebrew places and, failing that, runs the
+editor's own executable as Node (`ELECTRON_RUN_AS_NODE=1`). It passes
+`--settings` naming *this* editor's `settings.json`, so a machine with both
+Code and Cursor schedules the right one. The tick's stdout and stderr go to
+`~/.agentflow/tick.log`, beside the flows and journals it writes. Run the
+command again to change the interval or to **Remove the schedule**.
+
+| Platform | What is written | How it is loaded |
+|----------|-----------------|------------------|
+| macOS    | `~/Library/LaunchAgents/com.agentflow.tick.plist` — `StartInterval`, `RunAtLoad`, a `PATH` wide enough to find `gh`/`glab` | `launchctl bootstrap gui/<uid> <plist>` (after a `bootout` of any earlier copy) |
+| Linux    | `~/.config/systemd/user/agentflow-tick.service` + `.timer` (`XDG_CONFIG_HOME` honoured); the service lists `SuccessExitStatus=2 3` so a skipped pass is not a failed unit | `systemctl --user daemon-reload && systemctl --user enable --now agentflow-tick.timer` |
+| Windows  | `%USERPROFILE%\.agentflow\tick.cmd` | `schtasks /Create /SC MINUTE /MO <n> /TN AgentFlowTick /TR <cmd>` |
+
+**The path moves on every update.** The recipe names `dist/tick.js` by its
+versioned extension directory, and the editor deletes the old directory after an
+update — so a schedule left alone stops running, silently. Every activation
+checks the installed recipe against the current path and, when they differ,
+offers **Update the schedule** once per stale path, keeping the interval you
+chose. Dismiss it and you are not asked again until the next update moves the
+file.
+
+The recipe is data (`src/engine/orchestrator/schedule.ts`), so anyone who
+would rather write their own has the same facts. A cron line for a machine with
+no systemd:
+
+```cron
+*/5 * * * * PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin /usr/local/bin/node ~/.vscode/extensions/oznasi1.agent-flow-<version>/dist/tick.js --settings ~/.config/Code/User/settings.json >> ~/.agentflow/tick.log 2>&1
+```
+
+Whatever drives it, the pass is the same one the Deck runs: it performs
+`notify` rules and already-consented commands, leaves launches, seeds and gates
+for an editor, and takes the same lock — so a Deck left open and a scheduled
+tick never both act on one rule.
+
 ## Consent per command
 
-The two consent gates are still two timestamps per flow, and that is
-proportionate for a flow drawn once by hand. It is not for a template: a shape
-attached to twenty cards is twenty flows, each asking once about its first
-`deploy.sh` and then running every command it has — including ones added to it
-later — unattended from then on. The denylist bounds what can never run; it
-says nothing about the far larger set of commands that are fine once and
-surprising the twentieth time.
+The session gate is one timestamp per flow, and that is proportionate: a
+launch names its ticket and repos, and the next one looks the same. The shell
+gate used to be one timestamp too, and that was not proportionate for a
+template: a shape attached to twenty cards is twenty flows, each asking once
+about its first `deploy.sh` and then running every command it has — including
+ones added to it later — unattended from then on. The denylist bounds what can
+never run; it says nothing about the far larger set of commands that are fine
+once and surprising the twentieth time.
 
-`agentFlow.commandConsent: "command"` keys the approval to the **resolved
-command text** instead — the string the modal shows, and the same one
-`agentFlow.neverAutoRun` matches against. Each new text asks, and the ask
-offers the approval's size: **Run once**, **Run the next 5**, **Always for this
-command**, or **Disarm**. A bounded approval counts down one per run, failures
-included (the command ran), and asks again when spent. A different command —
-or the same command with a different note spliced in, which is a different text
-— asks on its own. The answer lands in the flow's `commandConsents` record,
-never in `commandConfirmedAt`, so switching the setting back finds exactly the
-flow-wide approvals you actually gave and none you did not.
+So the shell gate is **per command** by default (`agentFlow.commandConsent:
+"command"`): the approval is keyed to the **resolved command text** — the
+string the modal shows, and the same one `agentFlow.neverAutoRun` matches
+against. Each new text asks, and the ask offers the approval's size: **Run
+once**, **Run the next 5**, **Always for this command**, or **Disarm**. A
+bounded approval counts down one per run, failures included (the command ran),
+and asks again when spent. A different command — or the same command with a
+different note spliced in, which is a different text — asks on its own. The
+answer lands in the flow's `commandConsents` record, never in
+`commandConfirmedAt`.
 
-The default, `"flow"`, is the released behaviour byte for byte. Sessions
-(launch and seed) are unchanged either way — their gate was never the problem.
+`agentFlow.commandConsent: "flow"` is the behaviour every install had before
+0.69: one approval per flow, then every command it holds runs unattended. It
+is still there, and it reads exactly the `commandConfirmedAt` stamps it always
+did — switching back finds the flow-wide approvals you actually gave and none
+you did not. Switching *to* per-command has the opposite effect, and it is the
+one thing the upgrade changes for an existing user: a flow whose commands you
+approved under `flow` asks again, once per command text, because the per-flow
+stamp is not consulted. The first activation after the upgrade says so, once,
+to anyone with the orchestrator on who has not set the mode themselves, and
+offers **Ask once per workflow** as a one-click return. Two things make the
+switch safe now that did not exist when the concern was first raised: the
+denylist outranks every approval, and [the ceiling](#the-ceiling) caps what any
+one flow can do before it disarms itself.
+
+Sessions (launch and seed) are unchanged either way — their gate was never the
+problem.
 
 ## The latch
 
@@ -348,6 +411,42 @@ the ceiling, or re-arm, to continue.
 One honest caveat: the journal is capped at 1 MB and trims its oldest lines.
 A flow chatty enough to be trimmed has lost its oldest spends, so on such a
 flow the count is a floor, not an exact total.
+
+### A ceiling in tokens, not events
+
+Sessions opened and commands run are the units you worry about at 2am, but a
+poor proxy for cost: a session that loops for six hours and one that answers in
+a minute both count as one. The second field in the header — **token ceiling**
+— is denominated in what the work actually cost: the effort-weighted **token
+equivalent** (`eq`) a Deck card already prints, computed by `engine/usage.ts`
+from the same Claude Code transcripts, and summed over the runs this flow's
+places belong to. Type it the way the card shows it — `800k`, `1.5M`, or a
+plain number.
+
+It is a second reader of a number already computed, not new machinery, and it
+keeps a few honest edges:
+
+- **It is the runs' figure, not the flow's.** A transcript does not say which
+  session a workflow started and which you opened by hand, so the tally is
+  everything spent in those runs, including your own sessions there. Reset
+  un-spends none of it; neither does deleting the flow.
+- **At the ceiling stops.** A new session's cost cannot be known in advance, so
+  there is no "would land under" arithmetic as there is for the count: a pass
+  that wants to spend while the figure is at or past the ceiling performs
+  nothing, disarms the flow, and says so — journaled as `armed` with
+  `source: "token-ceiling"`. A session already running keeps spending; the
+  ceiling stops the flow from starting the next one.
+- **Not measured is not zero.** A transcript that cannot be read is no evidence
+  of spend, so such a flow is not stopped by its token ceiling — the count
+  ceiling still is, and the header shows `—` where the figure would be.
+- **Only a flow that sets one is read.** The figure costs a `stat` per
+  transcript on every pass, so the header shows `eq` only once a token ceiling
+  is on the flow. To pick a sensible number, read the card: its footer prints
+  the run's `eq` today.
+
+Keep both: the count answers "how many times did this start something", the
+token figure answers "what has this cost". The headless tick enforces both
+from the same transcripts.
 
 ## Retry, if you ask for it
 
@@ -413,6 +512,101 @@ dry run and the card's stepper say what the engine says. Three consequences:
 
 A blank text is a rule that can never fire, reported as such in the inspector
 and at arm time, like a blank status.
+
+## A command that reports a value
+
+`the command printed…` asks whether a word appeared. That covers the common
+case — a smoke test printing `OK` — and stops exactly where a typed result
+begins: nothing downstream can read *which* environment a deploy landed in,
+only whether the word appeared. `the command reported…` is the narrow answer.
+
+A command may print **one JSON object as its last line**:
+
+```sh
+deploy.sh … && echo '{"env":"staging","version":"1.4.2"}'
+```
+
+The host parses that line at capture — off the **full** output, before the
+journal's head/tail cut, so a chatty script's report is never the part that
+gets elided — and stores it on the `fired`/`errored` line as `result`. A rule
+out of the command node with a **field** and a **value** is met when the
+report carries that field as that value: `env` is `staging` promotes, `env`
+is `prod` pages you. It rides the same journal read and the same verdict
+channel `printed…` uses, so everything said above holds — a failed command's
+report counts, Reset resets the reading, no journal means no match.
+
+What it deliberately is not:
+
+- **Not a pattern, not a path.** One object, one line, one top-level field,
+  compared as text and case-sensitively: `"1.4.2"` and `1.4.2` are the same
+  fact, `"Prod"` is not `"prod"`. A nested object or an array never matches.
+- **Not the last line unless it is an object.** A script whose last line is
+  ordinary text — or `[1,2]`, or a number — reported nothing, and the rule
+  waits. Broken JSON reads the same way: never an error.
+- **Not a change to the output rules.** The 1 MiB output ceiling, the failure
+  on overflow, and the journal's truncation are exactly where they were; a
+  command torn down at the ceiling reports nothing.
+
+A blank field is a rule that can never fire, reported like a blank text. A
+blank value is not: a script may well report `"warnings": ""`.
+
+This is the first time a rule has carried anything but strings and stamps, and
+it is the kind of addition that wants to grow. It is kept this small on
+purpose.
+
+## Routing a gate to someone
+
+A gate closed the "a flow can only tell you, never ask you" gap — for the
+person at the machine that asked. A gate can also name **who should answer**:
+set **Ask on PR** on the node to a forge login (`alice`), and when the ask
+fires the host also posts the question as a comment on the card's pull request
+mentioning them:
+
+> @alice — **Ship it** is waiting on you: deploy to prod?
+> Reply `approve` or `reject` here to answer. (Agent Flow Deck)
+
+Each pass then reads that thread — once a minute per gate, never every six
+seconds — and the first reply *from that login* whose first word is `approve`
+(or `approved`, `lgtm`, `yes`) or `reject` (`rejected`, `no`) answers the gate
+exactly as the node's own buttons do: stamped on the rule that asked,
+journaled as `answered` with `by: alice`, and the downstream rule fires on the
+next pass — the same one-pass latency `the command succeeded` has. The
+Deck reads the thread while it is open; the [headless tick](#a-pass-without-the-editor)
+reads it too, so an answer given from a phone at 2am opens the rule on the next
+scheduled pass with no editor anywhere. A tick never *poses* a gate — that
+still needs an editor — it only reads answers to one the Deck already posted.
+
+The answer path has to be real or the routing is worse than no routing, so:
+
+- **Where it posts is derived, not guessed.** The pull request of the place the
+  gate hangs off — walking back through a command chain if that is what asked
+  it — in the checkout the card holds, through the forge's own CLI (`gh api`,
+  `glab api`). No URL parsing; the CLI resolves the project from the checkout.
+- **A refusal is stamped, never silent.** No place behind the gate, a card not
+  on the board, a repo with no PR yet, a forge that cannot carry a comment
+  (Bitbucket today — see [FORGES.md](FORGES.md)), or a failed post: each is
+  written on the asking rule as `routed.error`, shown on the node and in the
+  inspector as *could not ask @alice on the pull request — …*, journaled as
+  `routed` with the error, and raised as a warning. The local **Approve** and
+  **Reject** are still there in every case. A gate routed to a person who
+  never sees it must look exactly like what it is.
+- **Only the named login answers.** The thread is readable by whoever can read
+  the PR; the gate said who may answer it. Replies before the ask, replies from
+  anyone else, and replies that do not begin with an answer word are ignored —
+  `I would not approve this yet` approves nothing.
+- **First answer wins.** An answer given on the node while the thread was being
+  read stands; the thread never overrides it, and neither overrides the other.
+  Changing your mind is Reset, which re-poses the question — and re-posts it.
+- **An unreadable thread is not silence.** A failed read is skipped and tried
+  again next minute; it never reads as "nobody answered".
+
+What it deliberately is not: no reviewer lists, no quorum, no
+first-response-wins across several people. One login, one thread, one answer.
+The question is visible to everyone who can read the PR — do not route a gate
+whose question should not be.
+
+`askWho` is node configuration, so it travels into templates like the question
+does; every instance of the template asks the same person.
 
 ## Deadlines
 
@@ -725,8 +919,9 @@ there, which closes the picker and opens the drawer's Templates view instead.
 | Flows lock TTL                 | 300 s          | Held across a whole pass; a stale lock is reaped, never stolen.             |
 | Max output                     | 1 MiB          | Beyond it the process is torn down and the rule latches errored.            |
 | Kill signal                    | SIGKILL        | A script that traps TERM would otherwise run past its own deadline.        |
-| Consent prompts                | 2 per flow     | One for sessions, one for shell — asked once each, then remembered. With `agentFlow.commandConsent: command`, shell asks once per distinct command text instead, sized once / next 5 / always. |
+| Consent prompts                | 1 per flow for sessions, 1 per distinct command text for shell | Sessions ask once and are remembered; shell asks per resolved text, sized once / next 5 / always. `agentFlow.commandConsent: flow` makes shell ask once per flow instead, as every release before 0.69 did. |
 | Spend ceiling                  | none by default | Optional lifetime bound per flow on sessions + commands, counted off the journal; the pass that would cross it disarms the flow instead. |
+| Token ceiling                  | none by default | Optional bound per flow in effort-weighted token equivalents (`eq`), read off the runs' transcripts; a pass that wants to spend at or past it disarms the flow instead. |
 | Telemetry about commands       | count only     | Never an id, a label, or the command text: a `run` string carries hostnames and sometimes tokens. |
 
 ## Proven in a real editor

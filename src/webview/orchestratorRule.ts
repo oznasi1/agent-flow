@@ -25,6 +25,8 @@ import {
   Flow,
   FlowAction,
   FlowEdge,
+  gateAskEdge,
+  GateNode,
   hasDeadline,
   JoinMode,
   LaunchDest,
@@ -35,6 +37,7 @@ import {
   spendTotal,
 } from "../engine/orchestrator/model";
 import { hasNote } from "../engine/prompt";
+import { formatEq } from "../engine/usage";
 import { BranchCiStatus, FlowCommand, FlowPromptMode, RunStatus } from "../types";
 
 /** The drawer's own wording for a condition. `describeCond` says what a place
@@ -76,6 +79,9 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
   // `condOptionLabel` for a rule that has one. Command-shaped, offered beside
   // `command-succeeded` and nowhere else — see `offeredConds`.
   "command-printed": "the command printed…",
+  // Trailing ellipsis: carries a field and a value. The third command-shaped
+  // kind, and the first to read a VALUE off a command (see `Condition`).
+  "command-result": "the command reported…",
   // Bare; offered off a subflow node only (see `offeredConds`). "finished" and
   // not "done": a child that STOPPED on a failure is not finished, and this
   // condition stays unmet for it.
@@ -84,6 +90,10 @@ export const COND_LABEL: Record<Condition["kind"], string> = {
 
 /** The aria-label of a `command-printed` rule's text field (`CondParams.tsx`). */
 export const PRINTED_TEXT_ARIA_LABEL = "Printed text";
+
+/** The aria-labels of a `command-result` rule's two fields (`CondParams.tsx`). */
+export const RESULT_FIELD_ARIA_LABEL = "Reported field";
+export const RESULT_VALUE_ARIA_LABEL = "Reported value";
 
 /** The aria-label both presentations' deadline `<input>` shares — see
  * `withDeadline` for what the field means. Centralised for the same reason
@@ -271,6 +281,7 @@ const PARAMETERISED_CONDS: Record<Exclude<Condition["kind"], CondKind>, true> = 
   "ticket-status-is": true,
   "branch-ci-passed": true,
   "command-printed": true,
+  "command-result": true,
 };
 
 /** Can `{ kind }` alone be a complete `Condition`? A type guard, not a bare
@@ -332,14 +343,15 @@ export const OFFERED_CONDS: Condition["kind"][] = Object.keys(COND_LABEL) as Con
  * of planned work and break the chain this phase exists to support. */
 export function offeredConds(flow: Flow, fromId: string): Condition["kind"][] {
   const kind = flow.nodes.find((n) => n.id === fromId)?.kind;
-  // Both command-shaped kinds, and only these: one reads the exit, the other the
-  // output, and neither can be answered off anything but a command node.
-  if (kind === "command") return ["command-succeeded", "command-printed"];
+  // The three command-shaped kinds, and only these: one reads the exit, one the
+  // output, one a value the output reported — none can be answered off anything
+  // but a command node.
+  if (kind === "command") return ["command-succeeded", "command-printed", "command-result"];
   // A subflow's one fact, plus the deadline fallback every source may carry.
   if (kind === "subflow") return ["subflow-done", "deadline-passed"];
   if (kind === "gate") return ["gate-approved", "gate-rejected"];
   return OFFERED_CONDS.filter(
-    (k) => k !== "command-succeeded" && k !== "command-printed" && k !== "gate-approved" && k !== "gate-rejected" && k !== "subflow-done",
+    (k) => k !== "command-succeeded" && k !== "command-printed" && k !== "command-result" && k !== "gate-approved" && k !== "gate-rejected" && k !== "subflow-done",
   );
 }
 
@@ -369,6 +381,7 @@ export function condOptionLabel(cond: Condition): string {
     case "ticket-status-is": return `ticket status is ${cond.status}`;
     case "branch-ci-passed": return `CI passed on ${cond.repo}#${cond.branch}`;
     case "command-printed": return `the command printed “${cond.text}”`;
+    case "command-result": return `the command reported ${cond.field} = “${cond.value}”`;
     default: return COND_LABEL[cond.kind];
   }
 }
@@ -718,7 +731,8 @@ export function observationOf(
   // answered host-side and handed to the engine; `describeCond`'s arm throws.
   if (
     e.cond.kind === "command-succeeded" || e.cond.kind === "gate-approved" || e.cond.kind === "gate-rejected" ||
-    e.cond.kind === "deadline-passed" || e.cond.kind === "command-printed" || e.cond.kind === "subflow-done"
+    e.cond.kind === "deadline-passed" || e.cond.kind === "command-printed" || e.cond.kind === "command-result" ||
+    e.cond.kind === "subflow-done"
   ) {
     return null;
   }
@@ -764,6 +778,12 @@ export function observationFallback(flow: Flow, e: FlowEdge): string {
     return from && from.kind === "command"
       ? `waiting for ${commandLabel(from)} to print “${e.cond.text}”`
       : "this rule reads a command's output, but it does not come from one";
+  }
+  if (e.cond.kind === "command-result") {
+    const from = flow.nodes.find((n) => n.id === e.from);
+    return from && from.kind === "command"
+      ? `waiting for ${commandLabel(from)} to report ${e.cond.field} = “${e.cond.value}”`
+      : "this rule reads a command's report, but it does not come from one";
   }
   if (e.cond.kind !== "command-succeeded") return "this card is not on the board right now";
   const from = flow.nodes.find((n) => n.id === e.from);
@@ -833,6 +853,8 @@ export function seedCond(kind: Condition["kind"], repo?: string): Condition {
   // Blank, like a status: there is no text every command prints, and a guess
   // would be a rule that looks configured and waits on the wrong word.
   if (kind === "command-printed") return { kind, text: "" };
+  // Blank field AND value: there is no key every script reports.
+  if (kind === "command-result") return { kind, field: "", value: "" };
   return { kind, repo: repo ?? "", branch: "" };
 }
 
@@ -960,13 +982,45 @@ export function parseCeilingInput(raw: string): { ok: true; ceiling: number | un
  * its life, and — when a ceiling is set — where that stands against it. Reads
  * "session", the vocabulary's word for one run of a coding tool (a Deck card),
  * never the other word. "nothing spent yet" rather than "0 sessions · 0
- * commands": a flow that has never acted should read as quiet, not as a tally. */
-export function spendSummary(t: SpendTally, ceiling: number | undefined): string {
+ * commands": a flow that has never acted should read as quiet, not as a tally.
+ * With a token ceiling the line gains the `eq` figure against it, in the card's
+ * own compact unit (`formatEq`); "—" while the host has not measured it. */
+export function spendSummary(t: SpendTally, ceiling: number | undefined, tokenCeiling?: number): string {
   const parts: string[] = [];
   if (t.sessions > 0) parts.push(`${t.sessions} ${t.sessions === 1 ? "session" : "sessions"}`);
   if (t.commands > 0) parts.push(`${t.commands} ${t.commands === 1 ? "command" : "commands"}`);
   const spent = parts.length === 0 ? "nothing spent yet" : `${parts.join(" · ")} spent`;
-  return ceiling === undefined ? spent : `${spent} · ${spendTotal(t)} of ${ceiling}`;
+  const counted = ceiling === undefined ? spent : `${spent} · ${spendTotal(t)} of ${ceiling}`;
+  if (tokenCeiling === undefined) return counted;
+  return `${counted} · ${t.eq === undefined ? "—" : formatEq(t.eq)} of ${formatEq(tokenCeiling)} eq`;
+}
+
+/** The aria-label of the flow header's token ceiling `<input>`. */
+export const TOKEN_CEILING_ARIA_LABEL = "Token ceiling";
+
+/** Write a flow's token ceiling (in `eq`), or DELETE it for `undefined` — the
+ * same shape as `withCeiling`, for the same reason: never store a blank. */
+export function withTokenCeiling(flow: Flow, ceiling: number | undefined): Flow {
+  if (ceiling === undefined) {
+    const { tokenCeiling: _drop, ...rest } = flow;
+    return rest;
+  }
+  return { ...flow, tokenCeiling: ceiling };
+}
+
+/** What the token ceiling field's text means, on blur. Blank removes it; a
+ * positive number, with an optional `k` or `M` suffix as the card prints them
+ * (`800k`, `1.5M`, `250000`), is a ceiling in `eq`, rounded to a whole unit;
+ * anything else is refused so the control reverts. Case-insensitive on the
+ * suffix — `1.5m` is what a person types. */
+export function parseEqInput(raw: string): { ok: true; ceiling: number | undefined } | { ok: false } {
+  const text = raw.trim();
+  if (text === "") return { ok: true, ceiling: undefined };
+  const m = /^(\d+(?:\.\d+)?)\s*([kKmM])?$/.exec(text);
+  if (!m) return { ok: false };
+  const scale = m[2] === undefined ? 1 : m[2].toLowerCase() === "k" ? 1_000 : 1_000_000;
+  const n = Math.round(Number(m[1]) * scale);
+  return Number.isFinite(n) && n > 0 ? { ok: true, ceiling: n } : { ok: false };
 }
 
 /** Write a rule's once-off note. Unlike `withMode`, there is exactly ONE home
@@ -1119,6 +1173,40 @@ export function withNodeNotifyMessage(flow: Flow, nodeId: string, message: strin
  * builder that rewrites one field and leaves the rest of the flow alone. */
 export function withNodeGateQuestion(flow: Flow, id: string, question: string): Flow {
   return { ...flow, nodes: flow.nodes.map((n) => (n.id === id && n.kind === "gate" ? { ...n, question } : n)) };
+}
+
+/** The aria-label of a gate's "ask on the PR as" field. */
+export const GATE_ASK_WHO_ARIA_LABEL = "Ask on the pull request";
+
+/** Write who a gate is routed to (`GateNode.askWho`), or DELETE the field for a
+ * blank — never store `""`, because absent is a meaning (a local gate). A
+ * leading `@` is dropped: a login is stored bare and shown with the sigil. */
+export function withNodeGateAskWho(flow: Flow, id: string, who: string): Flow {
+  const login = who.trim().replace(/^@/, "");
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) => {
+      if (n.id !== id || n.kind !== "gate") return n;
+      if (login === "") {
+        const { askWho: _drop, ...rest } = n;
+        return rest;
+      }
+      return { ...n, askWho: login };
+    }),
+  };
+}
+
+/** One line about where a routed gate's question went, for the node and the
+ * inspector: asked on the PR, could not be posted (and why), or — before the
+ * ask has fired — who it will go to. `undefined` for a local gate. */
+export function gateRoutingNote(flow: Flow, node: GateNode): string | undefined {
+  if (typeof node.askWho !== "string" || node.askWho.trim() === "") return undefined;
+  const who = `@${node.askWho.trim().replace(/^@/, "")}`;
+  const ask = gateAskEdge(flow, node.id);
+  if (!ask) return `will ask ${who} on the pull request`;
+  if (!ask.routed) return `asking ${who} on the pull request…`;
+  if (ask.routed.error) return `could not ask ${who} on the pull request — ${ask.routed.error}`;
+  return ask.gateAnswer ? `${who} answered on the pull request` : `asked ${who} on the pull request`;
 }
 
 /** Which repo's checkout a command node runs in. `""` CLEARS the field rather

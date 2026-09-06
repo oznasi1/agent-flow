@@ -18,15 +18,16 @@
 //
 // Pure over injected IO, like every engine module, so the whole pass is testable
 // from fixtures; `main.ts` wires the real filesystem, shell and forge.
-import { CommandNode, Flow, FlowAction, FlowEdge, findNode, hasCeiling, isPlace, isSettled, isSpendAction, overCeiling, spendTotal } from "../engine/orchestrator/model";
+import { CommandNode, Flow, FlowAction, FlowEdge, atTokenCeiling, findNode, flowRunKeys, hasCeiling, hasTokenCeiling, isPlace, isSettled, isSpendAction, overCeiling, parseResult, spendTotal } from "../engine/orchestrator/model";
 import { FlowIo, readFlows, writeFlow } from "../engine/orchestrator/store";
 import { evaluateDeadlines, evaluateFlow } from "../engine/orchestrator/evaluate";
 import { ActOutcome, applyClocks, applyFired, notifyLines } from "../engine/orchestrator/runner";
-import { appendEvent, JournalEventInput, JournalIo, printedVerdicts, readJournal, spendTally, truncateOutput } from "../engine/orchestrator/journal";
+import { appendEvent, JournalEventInput, JournalIo, needsOutputVerdicts, printedVerdicts, readJournal, spendTally, truncateOutput } from "../engine/orchestrator/journal";
 import { acquire, LOCK_TTL_MS, LockIo, release, renew } from "../engine/orchestrator/lock";
 import { chainSourcePlace, CommandRunner, resolveCommand, runCommand } from "../engine/orchestrator/command";
 import { blockedBy } from "../engine/orchestrator/neverAutoRun";
 import { consentCovers, consumeConsent } from "../engine/orchestrator/consent";
+import { gateAnswerFrom, GateComment, gateSourcePlace, routedGatesAwaitingAnswer } from "../engine/orchestrator/gateRouting";
 import { FlowCommand, RunStatus } from "../types";
 
 export interface PassSettings {
@@ -53,6 +54,18 @@ export interface PassDeps {
   /** Evaluate and report, write nothing, run nothing. */
   dryRun: boolean;
   token: string;
+  /** Effort-weighted token equivalents spent across these runs, for a flow with
+   * a `tokenCeiling` — `undefined` when nothing could be read, which the pass
+   * treats as "not measured" rather than as zero (see `atTokenCeiling`).
+   * Optional: a caller with no reader (every existing test) has no token
+   * ceilings to enforce. */
+  tokenSpend?: (runKeys: string[]) => number | undefined;
+  /** The replies on a pull request since `sinceMs`, for a routed gate awaiting
+   * its answer — the forge's `gates.replies`. A tick never POSES a gate (that
+   * needs an editor), but an answer that arrived on the PR to a question the
+   * Deck already posted is exactly what an unattended pass exists to act on.
+   * `null` is "could not read", skipped. Optional: no reader, no polling. */
+  gateReplies?: (repoPath: string, number: number, sinceMs: number) => Promise<GateComment[] | null>;
 }
 
 export interface FlowReport {
@@ -71,8 +84,11 @@ export interface FlowReport {
   /** Met `run` rules this pass could not perform because the flow has not
    * consented to them. */
   needsConsent: string[];
-  /** Set when the pass disarmed the flow at its spend ceiling. */
+  /** Set when the pass disarmed the flow at its spend ceiling — the count, or
+   * the token figure, whichever it hit. */
   disarmedAtCeiling?: string;
+  /** Routed gates this pass found answered on their pull request. */
+  answered: string[];
 }
 
 export interface PassReport {
@@ -101,15 +117,40 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
     const flows = readFlows(d.flowIo, d.flowsDir);
     for (const flow of flows) {
       if (!flow.armed || lostLock) continue;
-      const report: FlowReport = { id: flow.id, name: flow.name, fired: [], notified: [], errored: [], expired: [], needsEditor: [], needsConsent: [] };
+      const report: FlowReport = { id: flow.id, name: flow.name, fired: [], notified: [], errored: [], expired: [], needsEditor: [], needsConsent: [], answered: [] };
       reports.push(report);
       try {
-        const printed = flow.edges.some((e) => e.cond?.kind === "command-printed" && !isSettled(e))
-          ? printedVerdicts(flow, readJournal(d.journalIo, d.flowsDir, flow.id))
+        // Answers that arrived on a pull request, stamped before evaluation so the
+        // rule they open fires in this pass — the same order the Deck keeps.
+        // First answer wins, as on the node; a thread that cannot be read is
+        // skipped, never read as silence.
+        if (d.gateReplies) {
+          for (const { node, edge } of routedGatesAwaitingAnswer(flow)) {
+            const place = gateSourcePlace(flow, node.id);
+            const status = place ? d.statuses.find((s) => s.run.key === place.runKey) : undefined;
+            const repoPath = place ? status?.run.repos?.find((r) => r.name === place.repo)?.path : undefined;
+            const facts = place ? status?.prs[place.repo]?.facts : undefined;
+            if (!place || !repoPath || !facts) continue;
+            const replies = await d.gateReplies(repoPath, facts.number, edge.routed!.at);
+            const hit = replies ? gateAnswerFrom(replies, edge.routed!.login, edge.routed!.at) : undefined;
+            if (!hit) continue;
+            report.answered.push(`${ruleName(flow, edge, "ask")}: @${edge.routed!.login} ${hit.answer}`);
+            if (d.dryRun) continue;
+            const latest = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
+            const current = latest?.edges.find((e) => e.id === edge.id);
+            if (!latest || !current || current.gateAnswer !== undefined) continue;
+            writeFlow(d.flowIo, d.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === edge.id ? { ...e, gateAnswer: hit.answer } : e)) });
+            journal(flow.id, { kind: "answered", edge: edge.id, answer: hit.answer, by: edge.routed!.login }, d.nowMs);
+          }
+        }
+        // Re-read: an answer just stamped must be what this pass evaluates.
+        const flowNow = d.gateReplies ? (readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id) ?? flow) : flow;
+        const printed = needsOutputVerdicts(flowNow)
+          ? printedVerdicts(flowNow, readJournal(d.journalIo, d.flowsDir, flow.id))
           : undefined;
 
         // Clocks first, as in the Deck: bookkeeping about waiting, not a spend.
-        const clocks = evaluateDeadlines({ flow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
+        const clocks = evaluateDeadlines({ flow: flowNow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
         if (clocks.wentLive.length > 0 || clocks.expired.length > 0) {
           const current = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
           if (current) {
@@ -125,7 +166,7 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           }
         }
 
-        const result = evaluateFlow({ flow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
+        const result = evaluateFlow({ flow: flowNow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
         if (result.fired.length === 0) continue;
 
         const fresh = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
@@ -159,9 +200,24 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
             continue;
           }
         }
+        // The token ceiling, read off the transcripts the Deck's card reads —
+        // same rule as the Deck: at or past it, a pass that wants to spend stops.
+        if (wanted > 0 && hasTokenCeiling(fresh) && d.tokenSpend) {
+          const eq = d.tokenSpend(flowRunKeys(fresh));
+          if (atTokenCeiling(fresh, { sessions: 0, commands: 0, eq })) {
+            report.disarmedAtCeiling = `${eq} eq of ${fresh.tokenCeiling} eq spent, and this pass wanted ${wanted}`;
+            if (!d.dryRun) {
+              const atStop = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
+              if (atStop) writeFlow(d.flowIo, d.flowsDir, { ...atStop, armed: false });
+              journal(flow.id, { kind: "armed", armed: false, source: "token-ceiling" }, d.nowMs);
+            }
+            continue;
+          }
+        }
 
         const outcomes = new Map<string, ActOutcome>();
         const outputs = new Map<string, string>();
+        const results = new Map<string, Record<string, unknown>>();
         const consumed: string[] = [];
         // Targets whose acting edge this pass could not or would not perform. Their
         // siblings are left pending too — stamping them around an unperformed
@@ -235,7 +291,12 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
             lostLock = true;
           }
           if (d.settings.commandConsent === "command") consumed.push(resolved.text);
-          if (outcome.output && outcome.output.length > 0) outputs.set(f.edge.id, truncateOutput(outcome.output));
+          if (outcome.output && outcome.output.length > 0) {
+            // Parsed off the full output before truncation — same as the Deck.
+            const result = parseResult(outcome.output);
+            if (result) results.set(f.edge.id, result);
+            outputs.set(f.edge.id, truncateOutput(outcome.output));
+          }
           outcomes.set(f.edge.id, outcome.ok
             ? { ok: true, note: `ran ${outcome.label} in ${where.repo}` }
             : { ok: false, error: outcome.message });
@@ -257,16 +318,17 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           const e = next.edges.find((x) => x.id === f.edge.id);
           if (!e) continue;
           const output = outputs.get(f.edge.id);
+          const result = results.get(f.edge.id);
           const action = f.action ?? "unknown";
           if (e.error !== undefined) {
             report.errored.push(`${ruleName(next, e, f.action)}: ${e.error}`);
-            journal(flow.id, { kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error, ...(output === undefined ? {} : { output }) }, d.nowMs);
+            journal(flow.id, { kind: "errored", edge: e.id, from: e.from, to: e.to, action, error: e.error, ...(output === undefined ? {} : { output }), ...(result === undefined ? {} : { result }) }, d.nowMs);
             if (e.retryAt !== undefined) {
               journal(flow.id, { kind: "retrying", edge: e.id, attempt: e.attempts ?? 1, max: e.retry?.max ?? 0, retryAt: e.retryAt }, d.nowMs);
             }
           } else if (e.firedAt !== undefined) {
             report.fired.push(`${ruleName(next, e, f.action)}: ${e.firedNote ?? "fired"}`);
-            journal(flow.id, { kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "", ...(output === undefined ? {} : { output }) }, d.nowMs);
+            journal(flow.id, { kind: "fired", edge: e.id, from: e.from, to: e.to, action, note: e.firedNote ?? "", ...(output === undefined ? {} : { output }), ...(result === undefined ? {} : { result }) }, d.nowMs);
           }
         }
         for (const line of notifyLines(next, stamping)) report.notified.push(line);

@@ -7,8 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.69.0] — 2026-09-06
+
 ### Added
 
+- **Something that actually runs the tick.** `dist/tick.js` exits 2 when another
+  pass holds the lock and 3 when it cannot start — a well-behaved thing to put on
+  a timer, and nothing put it on one. **Agent Flow: Schedule the Orchestrator
+  Tick…** now does: pick every 2, 5, 15 or 30 minutes, see exactly what will be
+  written and run, and it installs a launchd agent, a systemd user timer, or a
+  Task Scheduler task — finding `node` (or running the editor's own runtime as
+  Node), naming this editor's `settings.json`, and logging to
+  `~/.agentflow/tick.log`. Because the recipe names `tick.js` by its versioned
+  path, every activation checks it and offers to re-point a schedule an update
+  left behind. Run the command again to change the interval or remove it. The
+  docs carry the recipes for anyone who would rather write their own.
+- **A ceiling denominated in spend, not in events.** The spend ceiling counts
+  sessions opened and commands run — the units you worry about at 2am, and a poor
+  proxy for cost: a six-hour session and a one-minute one both count as one. A
+  flow's header now has a second field, **token ceiling**, in the effort-weighted
+  `eq` a Deck card already prints (`800k`, `1.5M`), read off the same transcripts
+  and summed over the runs the flow's places belong to. A pass that wants to spend
+  while the figure is at or past it performs nothing and disarms the flow,
+  journaled as `armed` with `source: "token-ceiling"`; the headless tick enforces
+  it too. A transcript that cannot be read is "not measured", never zero. Both
+  ceilings coexist: they answer different questions.
+- **Gates with someone else's name on them.** A gate node's new **Ask on PR**
+  field names a forge login. When the ask fires, the question is also posted as a
+  comment on the card's pull request mentioning them, and each pass — the Deck's,
+  and the headless tick's — reads that thread once a minute for their `approve` or
+  `reject`, which answers the gate exactly as the node's buttons do and is
+  journaled with who answered. GitHub and GitLab carry it through their CLIs;
+  Bitbucket does not, and says so. Every refusal — no PR, a card off the board, a
+  forge that cannot post, a failed call — is stamped on the asking rule and shown
+  on the node, and the local Approve and Reject stay. One login, one thread, first
+  answer wins; the question is visible to whoever can read the PR.
+- **A command that returns a value, not a substring.** `the command printed…`
+  can say whether the word `prod` appeared, not which environment a deploy landed
+  in. A command may now print one JSON object as its last line; the host parses it
+  at capture — off the full output, before the journal truncates it — and stores
+  it on the `fired`/`errored` line as `result`. The new **the command reported…**
+  condition compares one field to a value, exactly and as text, on the same
+  verdict channel `printed…` uses. One object, one line, one top-level field,
+  equality — deliberately narrow, because it is the first thing a rule has carried
+  besides strings and stamps. The 1 MiB output ceiling and the failure on
+  overflow are untouched.
 - **Analytics for everything 0.68.0 shipped.** Deadlines, retries, per-command
   consent, subflows and the headless tick went out with no telemetry at all, so
   none of them could be judged. Five new anonymous events answer whether each is
@@ -39,6 +82,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `~/.agentflow/telemetry.json`, which the extension writes only while telemetry
   is enabled, it sends nothing at all. All of it is off when
   `agentFlow.telemetry.enabled` is off. See [docs/TELEMETRY.md](docs/TELEMETRY.md).
+
+### Changed
+
+- **Per-command consent is the default.** A workflow now asks before each distinct
+  shell command text it runs — Run once, Run the next 5, Always for this command,
+  or Disarm — instead of once per workflow. `agentFlow.commandConsent` was shipped
+  inert at `flow` so existing workflows survived that upgrade; templates and
+  subflows since made one drawn shape many live flows, each spending freely on a
+  single approval, while the denylist and the spend ceiling now bound what any of
+  them can do. A workflow whose commands you approved under `flow` asks again, once
+  per command text. The first activation after upgrading says so, once, to anyone
+  with the orchestrator on who has not set the mode themselves, and offers **Ask
+  once per workflow** as a one-click return; `agentFlow.commandConsent: "flow"`
+  is unchanged and still reads the approvals it always did. Only the exact string
+  `flow` opts back, so a typo lands in the safer mode.
 
 ## [0.68.1] — 2026-09-06
 

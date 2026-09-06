@@ -103,6 +103,16 @@ describe("runHeadlessPass — run", () => {
     expect(w.events()[0]).toMatchObject({ kind: "fired", action: "run", output: "DEPLOYED\n" });
   });
 
+  it("journals the JSON object a command reports on its last line as `result`, parsed before truncation", async () => {
+    const w = world([cmdFlow({ commandConfirmedAt: 5 })]);
+    const chatter = "x".repeat(20_000);
+    w.runner.mockResolvedValueOnce({ code: 0, stdout: `${chatter}\n{"env":"staging","version":"1.4.2"}\n`, stderr: "" });
+    await runHeadlessPass(w.deps());
+    const fired = w.events().find((e) => e.kind === "fired") as { output?: string; result?: unknown };
+    expect(fired.result).toEqual({ env: "staging", version: "1.4.2" });
+    expect(fired.output).toContain("bytes elided");
+  });
+
   it("leaves an UNCONSENTED command pending, says so, and never asks or invents an approval", async () => {
     const w = world([cmdFlow()]);
     const r = await runHeadlessPass(w.deps());
@@ -172,6 +182,49 @@ describe("runHeadlessPass — what needs an editor", () => {
   });
 });
 
+describe("runHeadlessPass — a routed gate's answer", () => {
+  const gateNode = (): FlowNode => ({ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?", askWho: "alice" });
+  const routed = () => armed(
+    [place("n1", "PROJ-1"), gateNode(), notify("n2", "prod it is")],
+    [
+      edge("ask1", "n1", "g", { firedAt: 5, performed: true, routed: { at: 1_000, login: "alice" } }),
+      edge("e2", "g", "n2", { cond: { kind: "gate-approved" } }),
+    ],
+  );
+  const replies = (login: string, body: string) => [{ login, body, at: 2_000 }];
+
+  it("stamps the named login's reply from the PR, journals who answered, and fires the rule it opens in the same pass", async () => {
+    const w = world([routed()]);
+    const gateReplies = vi.fn(async () => replies("alice", "approve"));
+    const r = await runHeadlessPass(w.deps({ gateReplies }));
+    expect(gateReplies).toHaveBeenCalledWith("/r/aws-ops", 1, 1_000);
+    expect(w.flowsNow().edges[0].gateAnswer).toBe("approved");
+    expect(w.events().find((e) => e.kind === "answered")).toMatchObject({ edge: "ask1", answer: "approved", by: "alice" });
+    expect(r.flows[0].answered).toEqual(["ask1 (n1 → g, ask): @alice approved"]);
+    expect(r.flows[0].notified).toEqual(["Ship the migration: prod it is"]);
+  });
+
+  it("ignores another login, an unreadable thread, and a reply before the ask; polls nothing without a reader", async () => {
+    for (const reader of [async () => replies("bob", "approve"), async () => null, async () => [{ login: "alice", body: "approve", at: 500 }]]) {
+      const w = world([routed()]);
+      const r = await runHeadlessPass(w.deps({ gateReplies: reader }));
+      expect(w.flowsNow().edges[0].gateAnswer).toBeUndefined();
+      expect(r.flows[0].answered).toEqual([]);
+    }
+    const w = world([routed()]);
+    await runHeadlessPass(w.deps());
+    expect(w.flowsNow().edges[0].gateAnswer).toBeUndefined();
+  });
+
+  it("a dry run reports the answer it found and writes nothing", async () => {
+    const w = world([routed()]);
+    const before = { ...w.files };
+    const r = await runHeadlessPass(w.deps({ gateReplies: async () => replies("alice", "reject"), dryRun: true }));
+    expect(r.flows[0].answered).toEqual(["ask1 (n1 → g, ask): @alice rejected"]);
+    expect(w.files).toEqual(before);
+  });
+});
+
 describe("runHeadlessPass — the ceiling, the lock, and a dry run", () => {
   const cmdFlow = (over: Partial<Flow> = {}) =>
     armed([place("n1", "PROJ-1"), command("n2", "deploy.sh")], [edge("e1", "n1", "n2")], { commandConfirmedAt: 5, ...over });
@@ -184,6 +237,30 @@ describe("runHeadlessPass — the ceiling, the lock, and a dry run", () => {
     expect(r.flows[0].disarmedAtCeiling).toBe("1 of 1 spent, and this pass wanted 1");
     expect(w.flowsNow().armed).toBe(false);
     expect(w.events().at(-1)).toMatchObject({ kind: "armed", armed: false, source: "ceiling" });
+  });
+
+  it("disarms at the TOKEN ceiling when the runs' eq has reached it, reads only the flow's runs, and journals its own source", async () => {
+    const w = world([cmdFlow({ tokenCeiling: 500_000 })]);
+    const tokenSpend = vi.fn((_keys: string[]) => 500_000);
+    const r = await runHeadlessPass(w.deps({ tokenSpend }));
+    expect(tokenSpend).toHaveBeenCalledWith(["PROJ-1"]);
+    expect(w.runner).not.toHaveBeenCalled();
+    expect(r.flows[0].disarmedAtCeiling).toBe("500000 eq of 500000 eq spent, and this pass wanted 1");
+    expect(w.flowsNow().armed).toBe(false);
+    expect(w.events().at(-1)).toMatchObject({ kind: "armed", armed: false, source: "token-ceiling" });
+  });
+
+  it("runs while the token spend is under the ceiling, and when nothing could be measured", async () => {
+    const under = world([cmdFlow({ tokenCeiling: 500_000 })]);
+    await runHeadlessPass(under.deps({ tokenSpend: () => 499_999 }));
+    expect(under.runner).toHaveBeenCalledTimes(1);
+    const unread = world([cmdFlow({ tokenCeiling: 1 })]);
+    await runHeadlessPass(unread.deps({ tokenSpend: () => undefined }));
+    expect(unread.runner).toHaveBeenCalledTimes(1);
+    // No reader at all — every existing caller — enforces no token ceiling.
+    const none = world([cmdFlow({ tokenCeiling: 1 })]);
+    await runHeadlessPass(none.deps());
+    expect(none.runner).toHaveBeenCalledTimes(1);
   });
 
   it("does nothing at all when another process holds the lock", async () => {

@@ -5,6 +5,7 @@ import { execRunner } from "../pr/provider";
 import type { Runner } from "../pr/provider";
 import { resolveBin } from "../pr/which";
 import { GlabReviewProvider } from "../review/glab/provider";
+import { glabGateChannel } from "./gateChannels";
 import type { Forge } from "./types";
 
 export function makeGitlabForge(run: Runner = execRunner): Forge {
@@ -15,7 +16,7 @@ export function makeGitlabForge(run: Runner = execRunner): Forge {
     // GitLab exposes no reviewer "changes requested" state we can read back.
     // `armability.ts` uses this to name the `changes-requested` rule as unfirable
     // rather than letting a flow wait on it forever.
-    caps: { changesRequested: false, reviewSearch: true, accounts: false },
+    caps: { changesRequested: false, reviewSearch: true, accounts: false, gateRouting: true },
     probe: () => probeGlab(run),
     // glab stores one token per host in its config and has no `auth switch`.
     // Both members answer from here rather than spawning: there is nothing to
@@ -29,6 +30,7 @@ export function makeGitlabForge(run: Runner = execRunner): Forge {
     },
     prs: new GlabProvider(run),
     reviews: new GlabReviewProvider(run),
+    gates: glabGateChannel(run),
     async branchCi(repoPath, branch) {
       try {
         const out = await run(resolveBin("glab") ?? "glab", GLAB_BRANCH_CI_ARGS(branch), {

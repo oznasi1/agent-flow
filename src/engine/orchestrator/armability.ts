@@ -95,6 +95,8 @@ const LABEL: Record<Condition["kind"], string> = {
   // trailing ellipsis is the drawer's own mark for "carries a parameter"; the
   // blank-text case is `condIncomplete`'s, reported as `unset-parameter`.
   "command-printed": "the command printed…",
+  // Same channel as `command-printed`; the blank-field case is `condIncomplete`'s.
+  "command-result": "the command reported…",
   // Answered off the child flow's own file — no toggle governs it either.
   "subflow-done": "the subflow finished",
 };

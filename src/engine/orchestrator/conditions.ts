@@ -207,6 +207,12 @@ export function evalCond(cond: Condition, c: CondContext): boolean {
         "evalCond cannot answer command-printed: it is decided in evaluate.ts from a " +
           "host-supplied verdict, never from one place's CondContext.",
       );
+    case "command-result":
+      // The same channel as `command-printed`, for the same reason.
+      throw new Error(
+        "evalCond cannot answer command-result: it is decided in evaluate.ts from a " +
+          "host-supplied verdict, never from one place's CondContext.",
+      );
     case "subflow-done":
       // Answered from another FLOW's file (`subflowDone`, model.ts), handed to
       // `evaluate.ts` on `EvalInput.flows`. Same reasoning as the arms above.
@@ -395,6 +401,11 @@ export function describeCond(cond: Condition, c: CondContext): string {
       // output, not anything a place's `RunStatus` holds.
       throw new Error(
         "describeCond cannot describe command-printed: there is no place-shaped " +
+          "observation for it. observationOf (orchestratorRule.ts) must refuse this kind.",
+      );
+    case "command-result":
+      throw new Error(
+        "describeCond cannot describe command-result: there is no place-shaped " +
           "observation for it. observationOf (orchestratorRule.ts) must refuse this kind.",
       );
     case "subflow-done":

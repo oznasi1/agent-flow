@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, gateAskEdge,
-  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy, hasCeiling, overCeiling, spendTotal, isPerformedAction, isSubflow, subflowDone, bindSubflow, subflowDepth, MAX_SUBFLOW_DEPTH, SubflowNode, analyticsShape,
+  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy, hasCeiling, overCeiling, spendTotal, isPerformedAction, isSubflow, subflowDone, bindSubflow, subflowDepth, MAX_SUBFLOW_DEPTH, SubflowNode, analyticsShape, hasTokenCeiling, atTokenCeiling, flowRunKeys, parseResult, resultMatches,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -239,10 +239,12 @@ describe("stripHostStamps", () => {
     action: "run", mode: "plan", note: "my own words",
     firedAt: 1756200000000, firedNote: "ran · exit 0", performed: true,
     gateAnswer: "approved", error: "exit 1",
+    routed: { at: 1, login: "alice", url: "https://gh/c/1" },
   };
 
   it("drops every host-owned stamp", () => {
     const out = stripHostStamps(stamped);
+    expect(out.routed).toBeUndefined();
     expect(out.firedAt).toBeUndefined();
     expect(out.firedNote).toBeUndefined();
     expect(out.performed).toBeUndefined();
@@ -394,6 +396,45 @@ describe("command-printed", () => {
   });
 });
 
+describe("command-result", () => {
+  it("parseResult reads one JSON object off the LAST non-blank line, and nothing else", () => {
+    expect(parseResult('building…\ndone\n{"env":"staging","version":"1.4.2"}\n\n')).toEqual({ env: "staging", version: "1.4.2" });
+    expect(parseResult('{"a":1}')).toEqual({ a: 1 });
+    // Not last: ordinary text after the object means the object was not the report.
+    expect(parseResult('{"env":"prod"}\nall done')).toBeUndefined();
+    // Not an object: arrays, scalars, null, and broken JSON all read as "reported nothing".
+    expect(parseResult("[1,2]")).toBeUndefined();
+    expect(parseResult("42")).toBeUndefined();
+    expect(parseResult("null")).toBeUndefined();
+    expect(parseResult('{"env": staging}')).toBeUndefined();
+    expect(parseResult("")).toBeUndefined();
+    expect(parseResult("DEPLOYED")).toBeUndefined();
+  });
+
+  it("resultMatches compares one field as text, exactly, over JSON primitives only", () => {
+    const r = { env: "staging", version: 1.4, ok: true, gone: null, nested: { a: 1 }, list: [1] };
+    expect(resultMatches(r, "env", "staging")).toBe(true);
+    expect(resultMatches(r, "env", "Staging")).toBe(false);
+    expect(resultMatches(r, " env ", " staging ")).toBe(true);
+    expect(resultMatches(r, "version", "1.4")).toBe(true);
+    expect(resultMatches(r, "ok", "true")).toBe(true);
+    expect(resultMatches(r, "gone", "null")).toBe(true);
+    expect(resultMatches(r, "nested", '{"a":1}')).toBe(false);
+    expect(resultMatches(r, "list", "1")).toBe(false);
+    expect(resultMatches(r, "missing", "")).toBe(false);
+    expect(resultMatches(r, "", "staging")).toBe(false);
+    expect(resultMatches(undefined, "env", "staging")).toBe(false);
+    // An inherited property is not a reported field.
+    expect(resultMatches(r, "toString", String(r.toString))).toBe(false);
+  });
+
+  it("condIncomplete reports a blank field only — a blank value is a real thing a script can report", () => {
+    expect(condIncomplete({ kind: "command-result", field: "", value: "x" })).toBe("no field set");
+    expect(condIncomplete({ kind: "command-result", field: "env", value: "" })).toBeUndefined();
+    expect(condIncomplete({ kind: "command-result" } as unknown as Condition)).toBe("no field set");
+  });
+});
+
 describe("opt-in retry", () => {
   const failed = (over: Partial<FlowEdge> = {}) => edge("e1", "a", "z", { error: "boom", ...over });
 
@@ -456,6 +497,41 @@ describe("a flow's spend ceiling", () => {
 
   it("spendTotal adds sessions and commands — one ceiling covers both kinds of spend", () => {
     expect(spendTotal({ sessions: 3, commands: 2 })).toBe(5);
+  });
+});
+
+describe("a flow's token ceiling", () => {
+  const f = (tokenCeiling?: number): Flow => ({ ...emptyFlow("f1", "f", 0), ...(tokenCeiling === undefined ? {} : { tokenCeiling }) });
+
+  it("hasTokenCeiling is true only for a positive finite number, like hasCeiling", () => {
+    expect(hasTokenCeiling(f())).toBe(false);
+    expect(hasTokenCeiling(f(0))).toBe(false);
+    expect(hasTokenCeiling(f(Number.POSITIVE_INFINITY))).toBe(false);
+    expect(hasTokenCeiling({ ...f(), tokenCeiling: "1M" as unknown as number })).toBe(false);
+    expect(hasTokenCeiling(f(1_000_000))).toBe(true);
+  });
+
+  it("atTokenCeiling is reached AT the ceiling, never by an unmeasured tally, and never without a ceiling", () => {
+    expect(atTokenCeiling(f(1_000), { sessions: 0, commands: 0, eq: 999 })).toBe(false);
+    expect(atTokenCeiling(f(1_000), { sessions: 0, commands: 0, eq: 1_000 })).toBe(true);
+    expect(atTokenCeiling(f(1_000), { sessions: 0, commands: 0, eq: 5_000 })).toBe(true);
+    // Not measured is not zero: an unreadable transcript is no evidence either way.
+    expect(atTokenCeiling(f(1_000), { sessions: 9, commands: 9 })).toBe(false);
+    expect(atTokenCeiling(f(), { sessions: 0, commands: 0, eq: 5_000 })).toBe(false);
+  });
+
+  it("flowRunKeys names each place's run once, in node order, and skips planned work", () => {
+    const flow: Flow = {
+      ...emptyFlow("f1", "f", 0),
+      nodes: [
+        { id: "a", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r1" },
+        { id: "b", kind: "planned", x: 0, y: 0, join: "any", ticketKey: "PROJ-2", repos: ["r1"], mode: "plan", dest: "worktree" },
+        { id: "c", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "r2" },
+        { id: "d", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-3", repo: "r1" },
+      ],
+    };
+    expect(flowRunKeys(flow)).toEqual(["PROJ-1", "PROJ-3"]);
+    expect(flowRunKeys(emptyFlow("f2", "f", 0))).toEqual([]);
   });
 });
 

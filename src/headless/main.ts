@@ -17,6 +17,8 @@ import { defaultRunsDir, readRuns } from "../engine/runs";
 import { defaultSessionsDir, readOpenSessionsProbe } from "../engine/sessions";
 import { claudeProjectsRoot } from "../engine/paths";
 import { readSessionActivity } from "../engine/transcript";
+import { UsageReader } from "../engine/usageFs";
+import { weightedEq } from "../engine/usage";
 import { defaultPrFactsDir, readPrEntries, writePrEntry } from "../engine/pr/store";
 import { prEligible } from "../engine/git";
 import { discoverRepos } from "../engine/repos";
@@ -74,11 +76,30 @@ export function reportLines(r: PassReport, dryRun: boolean): string[] {
     for (const x of f.expired) lines.push(`expired: ${x}`);
     for (const x of f.needsEditor) lines.push(`needs an editor, left pending: ${x}`);
     for (const x of f.needsConsent) lines.push(`needs consent in the editor, left pending: ${x}`);
+    for (const x of f.answered ?? []) lines.push(`answered on the pull request: ${x}`);
     if (f.disarmedAtCeiling) lines.push(`disarmed at its ceiling: ${f.disarmedAtCeiling}`);
     if (lines.length === 0) lines.push("nothing to do");
     out.push(head, ...lines.map((l) => `  ${l}`));
   }
   return out;
+}
+
+/** The token tally for a flow's runs, off the same transcripts the Deck's card
+ * reads. A fresh `UsageReader` per tick — there is no next sweep to cache for —
+ * and `undefined` when a read throws, which the pass reads as "not measured". */
+export function tokenSpendReader(runs: { key: string; repos: { path: string }[] }[], projectsRoot: string, reader = new UsageReader()) {
+  return (runKeys: string[]): number | undefined => {
+    try {
+      let eq = 0;
+      for (const key of runKeys) {
+        const run = runs.find((r) => r.key === key);
+        if (run) eq += weightedEq(reader.readRun(projectsRoot, (run.repos ?? []).map((r) => r.path)));
+      }
+      return eq;
+    } catch {
+      return undefined;
+    }
+  };
 }
 
 /** The pass, summarised for telemetry — one event, whatever the flow count,
@@ -141,9 +162,9 @@ export async function main(argv: string[], print: (l: string) => void = console.
   const runs = readRuns(defaultRunsDir());
   const flows = readFlows(nodeFlowIo(), flowsDir);
   const prFacts = reader.get<boolean>("prFacts") ?? true;
+  const forge = resolveForge(String(reader.get<string>("forge") ?? "github"), log);
   if (args.fetch && prFacts && !args.dryRun) {
     const ttl = reader.get<number>("prFactsTtlSeconds");
-    const forge = resolveForge(String(reader.get<string>("forge") ?? "github"), log);
     const n = await refreshWatchedPrs({
       runs, flows, nowMs,
       ttlMs: Math.max(30, typeof ttl === "number" && Number.isFinite(ttl) ? ttl : 120) * 1000,
@@ -177,6 +198,10 @@ export async function main(argv: string[], print: (l: string) => void = console.
     nowMs, now: () => Date.now(), log,
     dryRun: args.dryRun,
     token: `tick-${process.pid}-${newFlowId(nowMs)}`,
+    tokenSpend: tokenSpendReader(runs, projectsRoot),
+    // Answers to routed gates are read from the same forge the PR facts come
+    // from, fetch or no fetch: reading a thread is not refreshing PR facts.
+    ...(forge.gates ? { gateReplies: (repoPath: string, number: number, sinceMs: number) => forge.gates!.replies(repoPath, number, sinceMs) } : {}),
   });
   for (const l of reportLines(report, args.dryRun)) print(l);
   // Nothing at all when another process held the lock: no pass ran, so there is

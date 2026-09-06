@@ -70,9 +70,11 @@ export function readNeverAutoRun(c: SettingsReader): string[] {
     .filter((v) => v !== "");
 }
 
-/** Read `agentFlow.commandConsent`: anything but the exact opt-in string is the
- * released once-per-flow behaviour — a hand-typed `"per-command"` must not
- * silently become the new mode, and must not break the old one either. */
+/** Read `agentFlow.commandConsent`: per-command consent is the default, and only
+ * the exact string `"flow"` opts back into the once-per-flow ask. Anything else —
+ * absent, a hand-typed `"per-command"`, a number — reads as the default, so a
+ * typo can never widen an approval: the safer mode is the one a misspelling
+ * lands in. */
 export function readCommandConsent(c: SettingsReader): "flow" | "command" {
-  return c.get<string>("commandConsent") === "command" ? "command" : "flow";
+  return c.get<string>("commandConsent") === "flow" ? "flow" : "command";
 }

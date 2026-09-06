@@ -66,7 +66,19 @@ export type CommandNode = NodeBase & {
  * is, which is why it keeps an out port and why the two conditions below read
  * off its incoming edge. It is the only node whose state a PERSON, rather than
  * the world, decides. */
-export type GateNode = NodeBase & { kind: "gate"; question: string };
+export type GateNode = NodeBase & {
+  kind: "gate";
+  question: string;
+  /** Who should answer, as a forge login (`alice`, not `@alice` — either is
+   * accepted). Set, the ask also posts the question as a comment on the card's
+   * pull request mentioning them, and each pass reads that thread for their
+   * `approve` / `reject` (see `gateRouting.ts`). Absent — every gate written
+   * before this field, and the default — means the gate is answered here, on the
+   * node, by whoever is at the Deck. The local Approve/Reject still work on a
+   * routed gate: routing adds a place the answer can come FROM, never takes one
+   * away. Node configuration, so it travels into templates like `question`. */
+  askWho?: string;
+};
 
 /** A workflow inside a workflow: a node that, when a rule reaches it, STARTS a
  * saved template as a child flow bound to the same card, and that a LATER rule
@@ -183,7 +195,60 @@ export type Condition =
    * command's own rule has performed (see `evaluate.ts`'s `commandPrinted`) —
    * ran and succeeded OR ran and failed, since a failure's output is often
    * exactly the text worth acting on. */
-  | { kind: "command-printed"; text: string };
+  | { kind: "command-printed"; text: string }
+  /** Did the command this rule points past REPORT `field` as `value`? The
+   * first condition to read a VALUE off a command rather than a bit or a
+   * substring: `command-printed` can say whether the word "prod" appeared,
+   * not which environment a deploy landed in. A command may print one JSON
+   * object as its LAST line — `{"env":"staging","version":"1.4.2"}` — which the
+   * host parses at capture (`parseResult`), stores on the journal line as
+   * `result`, and answers this rule from (`printedVerdicts`, journal.ts) on the
+   * same `EvalInput.printed` channel the substring rule uses. Compared as text,
+   * exactly and case-sensitively, so `"1.4.2"` and `1.4.2` are the same fact
+   * and `"Prod"` is not `"prod"`. The narrow version, deliberately: one object,
+   * one line, one field, equality — the first new data model a rule has ever
+   * carried, and the kind of addition that wants to grow. */
+  | { kind: "command-result"; field: string; value: string };
+
+/** The one JSON object a command may report on its LAST non-blank line, or
+ * `undefined` when there is none — anything but a plain object (an array, a
+ * number, `null`, a parse error) reads as "reported nothing", never as an
+ * error: a script that prints ordinary text last has simply not reported. The
+ * ONE place the shape is defined, so the two capture sites and every reader
+ * agree. Parsed from the FULL output at capture, before truncation, so a chatty
+ * command's report is never lost to the journal's head/tail cut. */
+export function parseResult(output: string): Record<string, unknown> | undefined {
+  const lines = output.split("\n");
+  let last = "";
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].trim() !== "") {
+      last = lines[i].trim();
+      break;
+    }
+  }
+  if (!last.startsWith("{") || !last.endsWith("}")) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(last);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Does a reported object carry `field` as `value`? Text equality over the
+ * primitives JSON can carry — a string as itself, a number or boolean as its
+ * text, `null` as "null" — so the field a person types in the inspector matches
+ * what they see in the output. A nested object or array never matches: there
+ * is no one text for it, and guessing one (JSON? whitespace-sensitive?) would
+ * make a rule that works on one script and not the next. Blank `field` matches
+ * nothing, for the reason `outputContains` gives about blank text. */
+export function resultMatches(result: Record<string, unknown> | undefined, field: string, value: string): boolean {
+  const key = field.trim();
+  if (key === "" || result === undefined || !Object.hasOwn(result, key)) return false;
+  const v = result[key];
+  if (v !== null && typeof v === "object") return false;
+  return String(v) === value.trim();
+}
 
 /** Does a command's captured output carry `text`? Case-insensitive substring —
  * not a regex, not a glob. A deploy script's "DEPLOYED" and a human's "deployed"
@@ -288,6 +353,15 @@ export interface FlowEdge {
    * Optional, and absent on every flow written before this build: absent means
    * "not answered", which is what keeps an old file reading unchanged. */
   gateAnswer?: "approved" | "rejected";
+  /** Host stamp on a routed gate's PERFORMER edge: the question was posted on
+   * the pull request (`at`, and the comment's `url` when the forge gave one), or
+   * could not be (`error` — no PR on the place, a forge that cannot carry it, or
+   * the call failing). Written after the ask fires, by the host that performed
+   * it; read by the answer poll, which only reads threads for a delivered ask.
+   * Cleared by Reset like every host stamp (`stripHostStamps`), so re-asking
+   * re-posts. Absent on every edge from before this field, and on every gate
+   * with no `askWho`. */
+  routed?: { at: number; login: string; url?: string; error?: string };
   /** Extra, once-off text for the agent this rule starts — appended to the prompt
    * mode's template, or substituted at `{note}` if the template has one. For
    * `launch` and `seed` only; a `notify` rule's words live on its notify node.
@@ -419,6 +493,21 @@ export interface Flow {
    * reads as "no ceiling" — what every flow had. Anything but a positive finite
    * number reads the same way (`hasCeiling`). */
   spendCeiling?: number;
+  /** The second ceiling, denominated in what the work actually costs rather than
+   * in events: effort-weighted token equivalents (`weightedEq`, engine/usage.ts
+   * — the `eq` figure a Deck card already prints), summed across the runs this
+   * flow's places belong to (`flowRunKeys`). `spendCeiling` counts a
+   * six-hour session and a one-minute one as one each; this does not. Kept as
+   * well as the count — they answer different questions.
+   *
+   * Measured host-side off the same transcripts the card reads (`UsageReader`),
+   * never stored: the figure is cumulative for the run, so it counts what you
+   * spent by hand in that run too, and Reset un-spends none of it. A pass that
+   * wants to spend while the figure is AT or past this stops before spending —
+   * a new session's cost is unknowable in advance, so there is no "would land
+   * under" arithmetic as there is for the count. Absent, or anything but a
+   * positive finite number, means no token ceiling (`hasTokenCeiling`). */
+  tokenCeiling?: number;
 
   commandConsents?: Record<string, CommandConsent>;
   /** Set on a flow a `subflow` node started: the flow and node it was started
@@ -516,6 +605,11 @@ export interface CommandConsent {
 export interface SpendTally {
   sessions: number;
   commands: number;
+  /** Effort-weighted token equivalents spent by the runs this flow's places
+   * belong to — the `eq` unit, see `Flow.tokenCeiling`. Present only when the
+   * host read it, which it does for a flow carrying a token ceiling; absent
+   * reads as "not measured", never as zero. */
+  eq?: number;
 }
 
 export function spendTotal(t: SpendTally): number {
@@ -537,6 +631,26 @@ export function hasCeiling(f: Flow): boolean {
  * performer that never ran. */
 export function overCeiling(f: Flow, tally: SpendTally, wanted: number): boolean {
   return hasCeiling(f) && spendTotal(tally) + wanted > f.spendCeiling!;
+}
+
+/** Does this flow have a token ceiling? Same tolerance as `hasCeiling`. */
+export function hasTokenCeiling(f: Flow): boolean {
+  return typeof f.tokenCeiling === "number" && Number.isFinite(f.tokenCeiling) && f.tokenCeiling > 0;
+}
+
+/** Has this flow's token spend reached its ceiling? AT the ceiling counts — the
+ * next spend would take it past by an amount nobody can know in advance — and a
+ * tally with no `eq` (not measured) never does: an unreadable transcript is not
+ * evidence of spend, and the count ceiling still stands. */
+export function atTokenCeiling(f: Flow, tally: SpendTally): boolean {
+  return hasTokenCeiling(f) && typeof tally.eq === "number" && tally.eq >= f.tokenCeiling!;
+}
+
+/** The runs this flow's places belong to, each once, in node order — what the
+ * token tally is summed over. A planned node has no run yet and contributes
+ * nothing until it is promoted to a place. */
+export function flowRunKeys(f: Flow): string[] {
+  return Array.from(new Set(f.nodes.filter(isPlace).map((n) => n.runKey)));
 }
 
 export function emptyFlow(id: string, name: string, nowMs: number): Flow {
@@ -624,6 +738,7 @@ export function stripHostStamps(e: FlowEdge): FlowEdge {
   delete kept.error;
   delete kept.action;
   delete kept.gateAnswer;
+  delete kept.routed;
   delete kept.liveSince;
   delete kept.expiredAt;
   delete kept.attempts;
@@ -846,6 +961,10 @@ export function condIncomplete(cond: Condition): string | undefined {
       // engine would evaluate forever and never satisfy — the same shape as a
       // blank status, and reported the same way.
       return blank(cond.text) ? "no text set" : undefined;
+    case "command-result":
+      // A blank FIELD can never match (`resultMatches`). A blank VALUE can: a
+      // script may well report `"warnings": ""`, so it is a rule that works.
+      return blank(cond.field) ? "no field set" : undefined;
     default:
       return undefined;
   }

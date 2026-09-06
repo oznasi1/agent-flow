@@ -242,6 +242,7 @@ describe("compatibility surface (frozen)", () => {
       "agentFlow.openDeck",
       "agentFlow.openMarketplace",
       "agentFlow.refresh",
+      "agentFlow.scheduleTick",
       "agentFlow.setup",
       "agentFlow.signIn",
       "agentFlow.signOut",

@@ -449,11 +449,12 @@ export interface AgentFlowConfig {
    * matcher and why this outranks `Flow.commandConfirmedAt`. */
   neverAutoRun: string[];
   /** `agentFlow.commandConsent` — how a workflow asks before running shell.
-   * `"flow"` (the default, and every existing install) is the released
-   * behaviour: one approval per workflow, stamped as `Flow.commandConfirmedAt`.
-   * `"command"` keys the approval to the resolved command text
-   * (`Flow.commandConsents`), with "run once / the next 5 / always" on the ask.
-   * See `engine/orchestrator/consent.ts`. */
+   * `"command"` (the default since 0.69) keys the approval to the resolved
+   * command text (`Flow.commandConsents`), with "run once / the next 5 / always"
+   * on the ask. `"flow"` is the behaviour every install had before: one approval
+   * per workflow, stamped as `Flow.commandConfirmedAt`. An upgrade is told once
+   * (`consentNotice.ts`) and offered the old mode. See
+   * `engine/orchestrator/consent.ts`. */
   commandConsent: "flow" | "command";
   /** Show the Deck header's "Tokens on board" total. Off by default: the figure
    * costs a board-wide transcript sweep, and the per-run breakdown in the detail

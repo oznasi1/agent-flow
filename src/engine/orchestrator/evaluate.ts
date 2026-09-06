@@ -154,8 +154,9 @@ export interface EvalInput {
    * existing test — which is safe rather than merely convenient: an absent map reads
    * as `"unknown"`, and `"unknown"` is not met. */
   branchCi?: Record<string, BranchCiStatus>;
-  /** `command-printed` verdicts for this pass, keyed by the RULE's edge id (not
-   * the command's): did the command that rule leaves print the rule's text? Read
+  /** `command-printed` and `command-result` verdicts for this pass, keyed by
+   * the RULE's edge id (not the command's): did the command that rule leaves
+   * print the rule's text — or report the rule's field as its value? Read
    * by the host off the flow's journal once per pass (`printedVerdicts`,
    * journal.ts) and handed in here, exactly as `branchCi` is, because the
    * output lives in a file this module cannot open. Omitted by every caller with
@@ -282,7 +283,7 @@ function metOracle(i: EvalInput) {
     if (e.cond.kind === "command-succeeded") return commandSucceeded(i.flow, e.from);
     // Same spot, same reason — a command node's fact, not a place's — with the
     // verdict itself handed in by the host. See `commandPrinted`.
-    if (e.cond.kind === "command-printed") return commandPrinted(i.flow, e, i.printed);
+    if (e.cond.kind === "command-printed" || e.cond.kind === "command-result") return commandPrinted(i.flow, e, i.printed);
     // Same spot, same reason: a sibling's stamp, not a place's status. Answered
     // for ANY source kind — a deadline can sit on a rule out of a place, a
     // command or a gate, and the fallback rule beside it must read it wherever

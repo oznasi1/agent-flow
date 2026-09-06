@@ -66,16 +66,17 @@ it are unaffected.
 
 | `kind` | Extra fields | Meaning |
 |---|---|---|
-| `armed` | `armed`, `source` | The flow was switched on or off. `source` is `toggle`, `resume-banner`, `auto-skip`, `ceiling`, or `spawn` (a child a subflow node started) — the last when the pass disarmed the flow itself at its spend ceiling. |
+| `armed` | `armed`, `source` | The flow was switched on or off. `source` is `toggle`, `resume-banner`, `auto-skip`, `ceiling` (the pass disarmed the flow itself at its spend ceiling), `token-ceiling` (the same, at its token ceiling), or `spawn` (a child a subflow node started). |
 | `consent-asked` | `action`, `target` | A pass needed first-spend approval, so it performed nothing and asked. |
 | `consented` | `answer` | You answered that question: `act`, `disarm`, or `dismissed` — and, under per-command consent, `act-once` or `act-batch` for a bounded approval. |
-| `fired` | `edge`, `from`, `to`, `action`, `note`, `output?` | A rule fired. |
-| `errored` | `edge`, `from`, `to`, `action`, `error`, `output?` | A rule ran or was refused, and was latched with an error. |
+| `fired` | `edge`, `from`, `to`, `action`, `note`, `output?`, `result?` | A rule fired. `result` is the one JSON object a command printed as its last line, parsed from the full output before `output` was truncated — what `the command reported…` reads. Absent when nothing was reported. |
+| `errored` | `edge`, `from`, `to`, `action`, `error`, `output?`, `result?` | A rule ran or was refused, and was latched with an error. `result` as above — a failed command can still report. |
 | `deferred` | `edge`, `reason` | Nothing was decided; the next pass will try again. |
 | `skipped` | `edge`, `reason` | `disarmed-mid-pass` (switched off while a pass was in flight) or `lock-lost` (another window took over). |
 | `promoted` | `node`, `runKey`, `repo` | Planned work became a real place on the board. |
 | `reset` | `edge` | A rule's receipt was cleared so it can fire again. |
-| `answered` | `edge`, `answer` | You approved or rejected a gate, on the rule that asked. |
+| `answered` | `edge`, `answer`, `by?` | A gate was approved or rejected, on the rule that asked — by you on the node, or, with `by`, by the named login replying on the pull request. |
+| `routed` | `edge`, `login`, `url?`, `error?` | A routed gate's question was posted on the pull request for `login` (`url` when the forge gave one) — or, with `error`, could not be, and the gate stays a local one. |
 | `expired` | `edge`, `from`, `to`, `since` | A rule's deadline passed with its condition unmet; `since` is when its clock started. It ran nothing — see [Deadlines](ORCHESTRATOR_COMMANDS.md#deadlines). |
 | `retrying` | `edge`, `attempt`, `max`, `retryAt` | A failed rule that opted into retry was scheduled to try again rather than latched — always right after its `errored` line. See [Retry](ORCHESTRATOR_COMMANDS.md#retry-if-you-ask-for-it). |
 | `spawned` | `node`, `template`, `child` | A `subflow` node started a child workflow; `child` is the flow whose own journal continues the story. The child's journal opens with `armed`, `source: spawn`. |

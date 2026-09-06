@@ -134,6 +134,11 @@ const untitledTabs = (page: Page): Locator => page.locator(".tabs-container .tab
 function boot(extra: Record<string, unknown> = {}): Sandbox {
   return makeSandbox({
     "agentFlow.orchestrator": true,
+    // The once-per-flow shell consent these tests drive ("Run" / "Disarm" on a
+    // single modal). It stopped being the default in 0.69 — the default asks per
+    // command text with Run once / Run the next 5 / Always — so it is pinned
+    // here rather than assumed; the mode itself is unchanged.
+    "agentFlow.commandConsent": "flow",
     "window.dialogStyle": "custom",
     ...extra,
   });

@@ -152,7 +152,7 @@ export type RepoSource = "preselected" | "destination" | "quickpick";
 export type Outcome = "launched" | "cancelled" | "failed";
 export type CommandId =
   | "refresh" | "setup" | "doctor" | "signIn" | "signOut"
-  | "takeTask" | "openDeck" | "openMarketplace";
+  | "takeTask" | "openDeck" | "openMarketplace" | "scheduleTick";
 
 /** Property names permitted to hold a value that is not an enum member.
  * `flow_id` is a random UUID; `flow_uid` is a random UUID too (see `Flow.analyticsId`
@@ -383,8 +383,10 @@ export type UsageEvent =
       rules_with_deadline: number; rules_with_retry: number; rules_with_output_condition: number;
       subflow_node_count: number;
       // `ceiling`: the pass disarmed the flow itself because its next spend would
-      // have taken it past `spendCeiling`. Not a gesture in any window.
-      source: "toggle" | "resume-banner" | "auto-skip" | "ceiling";
+      // have taken it past `spendCeiling`. `token-ceiling`: the same, because the
+      // flow's token spend had reached `tokenCeiling`. Neither is a gesture in
+      // any window.
+      source: "toggle" | "resume-banner" | "auto-skip" | "ceiling" | "token-ceiling";
     }
   // One per edge this pass actually performed — never one per evaluation pass,
   // and never for a rule merely stamped as a sibling. `deferred` is a pre-flight

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseArgs, reportLines, tickEvent, USAGE } from "../../../src/headless/main";
+import { parseArgs, reportLines, tickEvent, tokenSpendReader, USAGE } from "../../../src/headless/main";
 import { FlowReport } from "../../../src/headless/pass";
 
 describe("parseArgs", () => {
@@ -21,7 +21,7 @@ describe("reportLines", () => {
     expect(reportLines({ lock: "held", flows: [] }, false)).toEqual(["no armed flows"]);
     const lines = reportLines({ lock: "held", flows: [{
       id: "f1", name: "Ship it", fired: ["e2: ran deploy in aws-ops"], notified: ["Ship it: landed"], errored: [],
-      expired: ["e9"], needsEditor: ["e3 (n1 → n2, launch)"], needsConsent: [], disarmedAtCeiling: undefined,
+      expired: ["e9"], needsEditor: ["e3 (n1 → n2, launch)"], needsConsent: [], answered: ["ask1 (n1 → g, ask): @alice approved"], disarmedAtCeiling: undefined,
     }] }, false);
     expect(lines).toEqual([
       "Ship it (f1)",
@@ -29,8 +29,9 @@ describe("reportLines", () => {
       "  fired: e2: ran deploy in aws-ops",
       "  expired: e9",
       "  needs an editor, left pending: e3 (n1 → n2, launch)",
+      "  answered on the pull request: ask1 (n1 → g, ask): @alice approved",
     ]);
-    expect(reportLines({ lock: "held", flows: [{ id: "f1", name: "n", fired: [], notified: [], errored: [], expired: [], needsEditor: [], needsConsent: [] }] }, false))
+    expect(reportLines({ lock: "held", flows: [{ id: "f1", name: "n", fired: [], notified: [], errored: [], expired: [], needsEditor: [], needsConsent: [], answered: [] }] }, false))
       .toEqual(["n (f1)", "  nothing to do"]);
   });
 
@@ -41,10 +42,29 @@ describe("reportLines", () => {
   });
 });
 
+describe("tokenSpendReader", () => {
+  const runs = [
+    { key: "PROJ-1", repos: [{ path: "/r/a" }, { path: "/r/b" }] },
+    { key: "PROJ-2", repos: [{ path: "/r/c" }] },
+  ];
+
+  it("sums weighted eq over the named runs' repos, skipping a run it does not know", () => {
+    const readRun = (_root: string, cwds: string[]) => ({ input: cwds.length, output: 0, cacheWrite: 0, cacheRead: 0 });
+    const read = tokenSpendReader(runs, "/projects", { readRun } as never);
+    expect(read(["PROJ-1", "PROJ-2", "PROJ-9"])).toBe(3);
+    expect(read([])).toBe(0);
+  });
+
+  it("answers undefined — not measured — when the reader throws", () => {
+    const read = tokenSpendReader(runs, "/projects", { readRun: () => { throw new Error("EACCES"); } } as never);
+    expect(read(["PROJ-1"])).toBeUndefined();
+  });
+});
+
 describe("tickEvent", () => {
   const flow = (over: Partial<FlowReport> = {}): FlowReport => ({
     id: "f1", name: "Ship it", fired: [], notified: [], errored: [], expired: [],
-    needsEditor: [], needsConsent: [], ...over,
+    needsEditor: [], needsConsent: [], answered: [], ...over,
   });
 
   it("sums every count across the pass's flows", () => {
