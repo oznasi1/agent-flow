@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A failed rule says how to fix it.** A rule that failed stamped its error on
+  the edge and offered Reset — honest, but silent about what to do next, and now
+  that passes run unattended on a schedule the person reading the error reads
+  it hours later, out of context. Each failure shape the engine produces has
+  one sensible next step, and the drawer now shows it beside the error, before
+  Reset, in the row's quiet voice: free the branch git named, check the repo
+  out, give the command step a working directory, open the pull request first.
+  The scheduled tick appends the same step to its `errored:` lines, and a
+  routed gate's delivery error gets one in the gate's inspector. The step is
+  derived from the message's shape — no new diagnosis — and an unfamiliar
+  message shows none rather than a filler sentence. See **When a rule fails**
+  in `docs/ORCHESTRATOR_COMMANDS.md`.
+
 ## [0.69.1] — 2026-09-06
 
 ### Changed

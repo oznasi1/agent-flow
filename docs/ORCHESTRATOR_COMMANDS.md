@@ -382,6 +382,20 @@ Every armed flow also keeps an append-only record of what it did — see
 > nothing was stamped — and the next pass will run it again. This is the
 > same gap the launch path has.
 
+### When a rule fails
+
+The error on a failed rule carries a next step. Beside the red sentence — in
+the drawer, and on the same line in the scheduled tick's log — sits one quiet
+sentence saying what to do about it: free the branch git named and Reset,
+check the repo out, give the command step a working directory, open the pull
+request first. The step is derived from the **shape** of the message, not from
+any new diagnosis: each failure the engine can produce has one sensible next
+step, and the table in `src/engine/orchestrator/suggestions.ts` maps the
+message to it. A message whose shape the table does not know — a command's
+ordinary non-zero exit, a forge's own words when a post failed — shows no
+step at all, rather than a filler sentence. The same step appears beside a
+routed gate's delivery error in the gate's inspector.
+
 ## The ceiling
 
 `MAX_LAUNCHES_PER_PASS` is 3, and it bounds one pass of one flow. Nothing
