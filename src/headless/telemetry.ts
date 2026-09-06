@@ -91,6 +91,9 @@ export interface HeadlessTelemetryDeps {
   /** Overridden by the test; the real file otherwise. */
   identity?: HeadlessIdentity | undefined;
   fetchImpl?: typeof fetch;
+  /** Delay before the sender's single retry. Defaults to the shipped one; the
+   * test sets it to 0 so a deliberate network failure costs no wall time. */
+  retryDelayMs?: number;
 }
 
 /** Send one usage event and wait for it to leave, or do nothing at all.
@@ -115,6 +118,7 @@ export async function sendHeadless(event: UsageEvent, deps: HeadlessTelemetryDep
     // process that lives for one pass.
     isConsented: () => true,
     ...(deps.fetchImpl ? { fetchImpl: deps.fetchImpl } : {}),
+    ...(deps.retryDelayMs === undefined ? {} : { retryDelayMs: deps.retryDelayMs }),
     commonProperties: {
       // No `session_id`: there is no editor session. `env_type` is always
       // production out here — a tick is only ever run from a built `dist/tick.js`

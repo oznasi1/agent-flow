@@ -289,8 +289,17 @@ describe("the headless identity handoff", () => {
   it("never throws into activate() when the write fails", () => {
     // A read-only home directory is a working editor, not a broken one: no
     // failure to write an analytics convenience may take the extension down.
+    //
+    // The unwritable path is a FILE used as a parent directory, which gives a
+    // deterministic ENOTDIR on every platform. An earlier version of this test
+    // used a system path (`/proc/...`) whose behaviour differs between macOS and
+    // Linux — a test that depends on what the host OS keeps in its root is a
+    // test that passes locally and does something else on CI.
+    const dir = tmp();
+    const notADir = path.join(dir, "blocker");
+    fs.writeFileSync(notADir, "x");
     const messages: string[] = [];
-    expect(() => writeHeadlessIdentity("/proc/nope/nope", "m", (m) => messages.push(m))).not.toThrow();
+    expect(() => writeHeadlessIdentity(path.join(notADir, "under"), "m", (m) => messages.push(m))).not.toThrow();
     expect(messages.join(" ")).toContain("headless identity");
   });
 });

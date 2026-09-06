@@ -137,9 +137,14 @@ describe("sendHeadless", () => {
 
   it("never throws when the network fails, and never blocks the caller", async () => {
     // The tick's job is the pass. Reporting on it is the part allowed to fail.
+    //
+    // `retryDelayMs: 0` — the sender takes one retry on a failure, and at the
+    // shipped 2s delay this single test was the slowest in the file by a factor
+    // of forty. The retry's TIMING is posthog.test.ts's business; what this
+    // asserts is that a failure reaches the caller as a resolved promise.
     const impl = (async () => { throw new Error("no network"); }) as unknown as typeof fetch;
     await expect(
-      sendHeadless(TICK, { raw: {}, log, identity: { distinctId: "m1" }, fetchImpl: impl }),
+      sendHeadless(TICK, { raw: {}, log, identity: { distinctId: "m1" }, fetchImpl: impl, retryDelayMs: 0 }),
     ).resolves.toBeUndefined();
   });
 });
