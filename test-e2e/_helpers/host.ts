@@ -103,6 +103,13 @@ export async function launchHost(
       return env;
     })(),
   });
+  // Every `app.close()` on a per-test host goes through `closeHost`: on Linux,
+  // Electron's quit can stall after every window and extension host has already
+  // gone (see `closeHost`), and a bare close then hangs the file's hook. Patched
+  // here, once, rather than in forty files' afterEach — the raw close is kept
+  // so the helper cannot recurse into itself.
+  const rawClose = app.close.bind(app);
+  (app as { close: () => Promise<void> }).close = () => closeHost(app, sb, rawClose);
   const page = await app.firstWindow();
   // The workbench is alive when the activity bar exists.
   await page.locator(".activitybar").waitFor({ timeout: 60_000 });
@@ -128,24 +135,36 @@ export function tasksFrame(page: Page): FrameLocator {
 
 /** How long `closeHost` waits for a graceful `app.close()` before it gives up
  *  on the Electron process. Well under every file's own hook timeout, so a hung
- *  close is reported HERE, with evidence, rather than as a bare
+ *  close is settled HERE, with evidence, rather than as a bare
  *  `"afterEach" hook timeout` two minutes later. */
 export const CLOSE_DEADLINE_MS = 30_000;
 
-/** Close a per-test host, and when Electron does not quit, say WHY before
- *  killing it.
+/** Close a per-test host, and when Electron does not quit, decide honestly
+ *  whose fault that is before killing it.
  *
- *  `electronApplication.close()` can hang rather than reject when a second
- *  window is still mid-shutdown — seen in CI's shard 4 on `take-task` and
- *  `take-prompts`, where the test body had already passed. A bare hang leaves
- *  nothing to read: Playwright's screenshot shows the renderer, and whatever
- *  holds the quit lives in the main process or the extension host. So on a
- *  hang this reads the sandbox's own VS Code logs — `main.log` (the lifecycle's
- *  vetoes and window closes), the extension host log, and our extension's
- *  output channel — prints their tails to the job log, SIGKILLs the pid, and
- *  throws with the same text so the failure carries its evidence. A clean
- *  close prints nothing and throws nothing. */
-export async function closeHost(app: ElectronApplication | undefined, sb: Pick<Sandbox, "userDataDir"> | undefined): Promise<void> {
+ *  Seen in CI's shard 4 (Linux) on `take-task` and `take-prompts`, with the
+ *  test body already green: `electronApplication.close()` hangs after a test
+ *  opened a second window and closed the app soon after it appeared. The
+ *  sandbox's own logs say what happened — `main.log` records every extension
+ *  host, the new window's included, exiting with code 0 within a second, and
+ *  `ps` then shows only the Electron main process, its zygotes and one
+ *  `<defunct>` child: a renderer torn down mid-initialisation and reaped as a
+ *  zombie that Chromium's shutdown keeps waiting on. On macOS the same
+ *  sequence quits in under a second. That is Electron's, not this extension's.
+ *
+ *  So on a hang this reads the logs and asks one question: did every
+ *  extension host that started also exit? If yes, the product finished its
+ *  shutdown and only Electron stalled — the pid is killed, the evidence goes
+ *  to the job log as a warning, and the close resolves. If any host is still
+ *  alive, something of ours may be holding the quit, and the close FAILS with
+ *  the same evidence. A clean close prints nothing. `close` is the raw
+ *  Playwright close, handed in by `launchHost` because it patches `app.close`
+ *  to be this function. */
+export async function closeHost(
+  app: ElectronApplication | undefined,
+  sb: Pick<Sandbox, "userDataDir"> | undefined,
+  close: () => Promise<void>,
+): Promise<void> {
   if (!app) return;
   // Read the pid BEFORE closing: once the app is gone, `process()` throws.
   let pid: number | undefined;
@@ -156,7 +175,7 @@ export async function closeHost(app: ElectronApplication | undefined, sb: Pick<S
   }
   let closed = false;
   await Promise.race([
-    app.close().then(() => { closed = true; }, () => { closed = true; }),
+    close().then(() => { closed = true; }, () => { closed = true; }),
     new Promise<void>((resolve) => setTimeout(resolve, CLOSE_DEADLINE_MS)),
   ]);
   if (closed) return;
@@ -170,6 +189,7 @@ export async function closeHost(app: ElectronApplication | undefined, sb: Pick<S
   } catch (e) {
     lines.push(`  windows: unreadable — ${String(e)}`);
   }
+  const hosts = sb ? extensionHostsExited(sb.userDataDir) : undefined;
   if (sb) lines.push(...hostLogTails(sb.userDataDir));
   try {
     lines.push(...execFileSync("ps", ["-o", "pid,ppid,etime,command", "-ax"], { encoding: "utf8" }).split("\n")
@@ -177,8 +197,6 @@ export async function closeHost(app: ElectronApplication | undefined, sb: Pick<S
   } catch {
     /* no ps — Windows, or a locked-down runner */
   }
-  const report = lines.join("\n");
-  console.log(report);
   if (pid !== undefined) {
     try {
       process.kill(pid, "SIGKILL");
@@ -186,18 +204,51 @@ export async function closeHost(app: ElectronApplication | undefined, sb: Pick<S
       /* already gone */
     }
   }
+  if (hosts && hosts.started.length > 0 && hosts.alive.length === 0) {
+    lines.push(`  every extension host exited (${hosts.started.join(", ")}) — Electron's quit stalled on its own; killed pid ${pid ?? "?"} and carried on`);
+    console.warn(lines.join("\n"));
+    return;
+  }
+  lines.push(hosts
+    ? `  extension hosts still alive: ${hosts.alive.join(", ") || "(none started)"} — the product may be holding the quit`
+    : "  no sandbox logs to classify the hang by");
+  const report = lines.join("\n");
+  console.log(report);
   throw new Error(report);
 }
 
-/** The last lines of every VS Code log that can say why a quit stalled:
- *  `main.log` (lifecycle vetoes, window close, "will quit"), each window's
- *  `exthost.log` (extension activation and deactivation), and every output
- *  channel file named for this extension. Logs live under
- *  `<userDataDir>/logs/<timestamp>/…`; a missing directory reads as one line
- *  saying so, never as a throw — this runs while a failure is being reported. */
-export function hostLogTails(userDataDir: string, tail = 40): string[] {
-  const out: string[] = [];
-  const logsRoot = path.join(userDataDir, "logs");
+/** Which extension hosts the sandbox's VS Code started, and which of them
+ *  never logged an exit. Read whole, not tailed: `exthost.log` says
+ *  "Extension host with pid N started" per window and `main.log` says
+ *  "Extension host with pid N exited" once each is gone — the difference is
+ *  the list of hosts still up. `undefined` when there are no logs at all. */
+export function extensionHostsExited(userDataDir: string): { started: number[]; alive: number[] } | undefined {
+  const files = vscodeLogFiles(userDataDir);
+  if (files.length === 0) return undefined;
+  const started = new Set<number>();
+  const exited = new Set<number>();
+  for (const f of files) {
+    let text: string;
+    try {
+      text = fs.readFileSync(f, "utf8");
+    } catch {
+      continue;
+    }
+    if (path.basename(f) === "exthost.log") {
+      for (const m of text.matchAll(/Extension host with pid (\d+) started/g)) started.add(Number(m[1]));
+    } else if (path.basename(f) === "main.log") {
+      for (const m of text.matchAll(/Extension host with pid (\d+) exited/g)) exited.add(Number(m[1]));
+    }
+  }
+  const startedList = [...started].sort((a, b) => a - b);
+  return { started: startedList, alive: startedList.filter((p) => !exited.has(p)) };
+}
+
+/** Every VS Code log that can say why a quit stalled, under
+ *  `<userDataDir>/logs/<timestamp>/…`: `main.log` (lifecycle, window and
+ *  extension-host exits), each window's `exthost.log`, the shared and pty
+ *  hosts', and every output channel file named for this extension. */
+function vscodeLogFiles(userDataDir: string): string[] {
   const files: string[] = [];
   const walk = (dir: string, depth: number) => {
     if (depth > 6) return;
@@ -213,18 +264,26 @@ export function hostLogTails(userDataDir: string, tail = 40): string[] {
       else if (/^(main|exthost|sharedprocess|ptyhost)\.log$/.test(e.name) || /Agent Flow Deck\.log$/.test(e.name)) files.push(p);
     }
   };
-  walk(logsRoot, 0);
-  if (files.length === 0) return [`  no VS Code logs under ${logsRoot}`];
-  for (const f of files.sort()) {
+  walk(path.join(userDataDir, "logs"), 0);
+  return files.sort();
+}
+
+/** The last lines of each of those logs, for the job log. A missing directory
+ *  reads as one line saying so, never as a throw — this runs while a failure
+ *  is being reported. */
+export function hostLogTails(userDataDir: string, tail = 40): string[] {
+  const files = vscodeLogFiles(userDataDir);
+  if (files.length === 0) return [`  no VS Code logs under ${path.join(userDataDir, "logs")}`];
+  const out: string[] = [];
+  for (const f of files) {
     let text: string;
     try {
       text = fs.readFileSync(f, "utf8");
     } catch {
       continue;
     }
-    const rel = path.relative(userDataDir, f);
     const last = text.split("\n").filter((l) => l.trim() !== "").slice(-tail);
-    out.push(`  --- ${rel} (last ${last.length} lines)`);
+    out.push(`  --- ${path.relative(userDataDir, f)} (last ${last.length} lines)`);
     for (const l of last) out.push(`  ${l.slice(0, 220)}`);
   }
   return out;

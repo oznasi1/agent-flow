@@ -3,7 +3,7 @@ import type { ElectronApplication } from "@playwright/test";
 import * as fs from "fs";
 import * as path from "path";
 import { makeSandbox, FIXTURE_TASK, type Sandbox } from "./_helpers/sandbox";
-import { closeHost, launchHost, openTasksView, tasksFrame } from "./_helpers/host";
+import { launchHost, openTasksView, tasksFrame } from "./_helpers/host";
 import { runCommand } from "./_helpers/palette";
 import { shot } from "./_helpers/shot";
 
@@ -11,17 +11,7 @@ let sb: Sandbox;
 let app: ElectronApplication | undefined;
 
 test.beforeEach(() => { sb = makeSandbox(); });
-// `closeHost`, not a bare `app.close()`: the second window a take opens has
-// hung the close in CI (shard 4) with the test already green, and a bare hang
-// reports nothing. The helper reads the sandbox's VS Code logs before killing it.
-test.afterEach(async () => {
-  try {
-    await closeHost(app, sb);
-  } finally {
-    app = undefined;
-    sb.dispose();
-  }
-});
+test.afterEach(async () => { await app?.close(); app = undefined; sb.dispose(); });
 
 test("taking a task opens a real window and lands the brief + plan handshake on disk", async ({}, testInfo) => {
   test.setTimeout(180_000);

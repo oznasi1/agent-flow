@@ -4,7 +4,7 @@ import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import { makeSandbox, FIXTURE_TASK, type Sandbox } from "./_helpers/sandbox";
-import { closeHost, launchHost, openTasksView, tasksFrame } from "./_helpers/host";
+import { launchHost, openTasksView, tasksFrame } from "./_helpers/host";
 import { shot } from "./_helpers/shot";
 
 /** The three questions a Take can ask — prompt mode, worktree, destination — and the
@@ -18,15 +18,11 @@ import { shot } from "./_helpers/shot";
 let sb: Sandbox | undefined;
 let app: ElectronApplication | undefined;
 
-// `closeHost`, not a bare `app.close()` — see take-task.e2e.ts's afterEach.
 test.afterEach(async () => {
-  try {
-    await closeHost(app, sb);
-  } finally {
-    app = undefined;
-    sb?.dispose();
-    sb = undefined;
-  }
+  await app?.close();
+  app = undefined;
+  sb?.dispose();
+  sb = undefined;
 });
 
 const git = (cwd: string, args: string[]): string => execFileSync("git", args, { cwd, encoding: "utf8" });
