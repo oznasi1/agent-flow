@@ -88,8 +88,14 @@ export function previewFlow(
   printed?: Record<string, boolean>,
   /** Every flow, for `subflow-done` — see `EvalInput.flows`. */
   flows?: readonly Flow[],
+  /** The per-pass cap the next pass will apply — `agentFlow.launchesPerPass` as
+   * the host read it and carried it on `deck:flows` (`EvalInput.maxLaunches`).
+   * Absent reads as `MAX_LAUNCHES_PER_PASS`, so a caller that names none gets
+   * the verdicts it always did. The second, uncapped pass below is unaffected:
+   * "held by the cap" is defined against THIS cap, whatever it is. */
+  maxLaunches?: number,
 ): RulePreview[] {
-  const i = { flow: { ...flow, armed: true }, statuses, nowMs, branchCi, printed, flows };
+  const i = { flow: { ...flow, armed: true }, statuses, nowMs, branchCi, printed, flows, maxLaunches };
   const capped = evaluateFlow(i);
   const uncapped = evaluateFlow({ ...i, maxLaunches: Number.POSITIVE_INFINITY });
 

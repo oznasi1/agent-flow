@@ -64,6 +64,15 @@ describe("previewFlow — the cap", () => {
     const deferred = rows.filter((r) => r.verdict === "defer").map((r) => r.edgeId);
     expect(deferred).toEqual([`e${MAX_LAUNCHES_PER_PASS}`, `e${MAX_LAUNCHES_PER_PASS + 1}`]);
   });
+
+  it("holds back against the cap it is handed — agentFlow.launchesPerPass as the host carried it", () => {
+    const { flow, statuses } = manyLaunches(3);
+    const rows = previewFlow(flow, statuses, NOW, undefined, undefined, undefined, 1);
+    expect(rows.map((r) => r.verdict)).toEqual(["fire", "defer", "defer"]);
+    // No cap handed in reads as the shipped one, exactly as before the setting.
+    expect(previewFlow(flow, statuses, NOW, undefined, undefined, undefined, undefined).map((r) => r.verdict))
+      .toEqual(["fire", "fire", "fire"]);
+  });
 });
 
 describe("previewFlow — a source that cannot be observed", () => {

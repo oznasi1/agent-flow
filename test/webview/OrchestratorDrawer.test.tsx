@@ -4021,6 +4021,34 @@ describe("the dry run", () => {
     expect(second).toContain("would close the join");
     expect(second).not.toContain("would fire");
   });
+
+  it("defers against the cap the host carried on deck:flows, and names that number", () => {
+    // Two met launches from two places. Under the shipped cap of 3 both fire; with
+    // `agentFlow.launchesPerPass` at 1 the pass will hold the second, and the dry
+    // run must say so with the configured number, not a hard-coded three.
+    const two = flow({
+      nodes: [
+        { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "agent-flow" },
+        { id: "n2", kind: "place", x: 24, y: 140, join: "any", runKey: "PROJ-2", repo: "other" },
+        { id: "n3", kind: "planned", x: 320, y: 24, join: "any", ticketKey: "PROJ-9",
+          repos: ["agent-flow"], mode: "quick", dest: "worktree" },
+        { id: "n4", kind: "planned", x: 320, y: 140, join: "any", ticketKey: "PROJ-10",
+          repos: ["other"], mode: "quick", dest: "worktree" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" },
+        { id: "e2", from: "n2", to: "n4", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" },
+      ],
+    });
+    const runs = [merged(), merged("PROJ-2", "other")];
+    render(<OrchestratorDrawer {...props({ flows: [two], runs, launchesPerPass: 1 })} />);
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    expect(screen.getByTestId("orch-dryrun-e1").textContent).toContain("would fire");
+    const second = screen.getByTestId("orch-dryrun-e2").textContent ?? "";
+    expect(second).toContain("deferred");
+    expect(second).toContain("1 is this pass's cap");
+    expect(second).not.toContain("3 is this pass's cap");
+  });
 });
 
 describe("the dry run and a blank condition", () => {

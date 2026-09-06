@@ -649,6 +649,11 @@ export function DeckApp(): JSX.Element {
    * read — threaded wherever `branchCi` is, for the same reason: every reader of
    * a workflow's state must answer that rule the way the engine does. */
   const [printed, setPrinted] = React.useState<Record<string, Record<string, boolean>>>({});
+  /** `agentFlow.launchesPerPass` as the host read it — the per-pass cap the
+   * drawer's dry run defers against and names. `undefined` until a post carries
+   * it (or forever, from an older host), which the drawer reads as the shipped
+   * cap; see the `deck:flows` member's own comment in types.ts. */
+  const [launchesPerPass, setLaunchesPerPass] = React.useState<number | undefined>(undefined);
   /** Reusable workflow shapes, for the card drawer's attach picker. Rides
    * `deck:flows` alongside `flows` itself — see that message's own comment in
    * types.ts for why: with the orchestrator off there is nothing to attach,
@@ -899,6 +904,7 @@ export function DeckApp(): JSX.Element {
         setBranchCi(m.branchCi ?? {});
         setSpend(m.spend ?? {});
         setPrinted(m.printed ?? {});
+        setLaunchesPerPass(m.launchesPerPass);
       }
     };
     window.addEventListener("message", handler);
@@ -1453,6 +1459,7 @@ export function DeckApp(): JSX.Element {
           branchCi={branchCi}
           printed={printed}
           spend={spend}
+          launchesPerPass={launchesPerPass}
           templates={templates}
           draftTemplate={draftTemplate}
           view={orchView}
