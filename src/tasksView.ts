@@ -759,7 +759,16 @@ export class TasksViewProvider implements vscode.WebviewViewProvider {
           break;
         }
         case "openExternal": {
-          await vscode.env.openExternal(vscode.Uri.parse(m.url));
+          const u = vscode.Uri.parse(m.url);
+          // Mirrors deckView's and marketplaceView's own openExternal guard. What
+          // arrives here is third-party text — a connector's ticket `url`, an href
+          // inside a description Markdown rendered — and `openExternal` hands the
+          // scheme straight to the OS, where `vscode://<publisher>.<ext>/…` reaches
+          // another extension's UriHandler. The webview's own anchors are rebuilt
+          // behind a literal http(s) prefix, but a button that posts a URL it never
+          // rebuilt is not covered by that, so the last word belongs to the host.
+          if (u.scheme !== "https" && u.scheme !== "http") break;
+          await vscode.env.openExternal(u);
           break;
         }
         case "fetch": {

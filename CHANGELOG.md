@@ -22,6 +22,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   message shows none rather than a filler sentence. See **When a rule fails**
   in `docs/ORCHESTRATOR_COMMANDS.md`.
 
+### Fixed
+
+- **The sidebar's "open externally" no longer hands an arbitrary scheme to the
+  OS.** The Deck and the Marketplace already refused anything but `http`/`https`
+  there; the Tasks sidebar did not, so a `vscode://<publisher>.<ext>/…` link
+  inside a ticket description could reach another extension's URI handler when
+  clicked. The ticket-key anchor itself was never a way in — it is rebuilt behind
+  a literal scheme — but a link Markdown rendered was, and the last word now
+  belongs to the host for every path.
+
 ## [0.69.1] — 2026-09-06
 
 ### Changed
