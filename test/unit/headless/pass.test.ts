@@ -376,3 +376,65 @@ describe("runHeadlessPass — the per-pass cap", () => {
     expect(w.flowsNow().edges.map((e) => e.firedAt)).toEqual([NOW, NOW]);
   });
 });
+
+describe("runHeadlessPass — a gate routed to several people", () => {
+  const gateNode = (askMode?: "any" | "all"): FlowNode =>
+    ({ id: "g", kind: "gate", x: 0, y: 0, join: "any", question: "deploy to prod?", askWho: "alice, bob", ...(askMode ? { askMode } : {}) });
+  const routed = (askMode: "any" | "all" | undefined, askOver: Partial<FlowEdge> = {}) => armed(
+    [place("n1", "PROJ-1"), gateNode(askMode), notify("n2", "prod it is")],
+    [
+      edge("ask1", "n1", "g", { firedAt: 5, performed: true, routed: { at: 1_000, login: "alice, bob" }, ...askOver }),
+      edge("e2", "g", "n2", { cond: { kind: "gate-approved" } }),
+    ],
+  );
+  const reply = (login: string, body: string, at: number) => ({ login, body, at });
+
+  it("an `all` gate with one approval stays unanswered but stamps the partial answer", async () => {
+    const w = world([routed("all")]);
+    const r = await runHeadlessPass(w.deps({ gateReplies: async () => [reply("alice", "approve", 2_000)] }));
+    expect(w.flowsNow().edges[0].gateAnswer).toBeUndefined();
+    expect(w.flowsNow().edges[0].routedAnswers).toEqual({ alice: { answer: "approved", at: 2_000 } });
+    expect(r.flows[0].answered).toEqual([]);
+    expect(r.flows[0].notified).toEqual([]);
+    expect(w.events().find((e) => e.kind === "answered")).toBeUndefined();
+  });
+
+  it("the second approval answers an `all` gate, journaling both names, and fires the rule it opens", async () => {
+    const w = world([routed("all", { routedAnswers: { alice: { answer: "approved", at: 2_000 } } })]);
+    const r = await runHeadlessPass(w.deps({ gateReplies: async () => [reply("alice", "approve", 2_000), reply("Bob", "lgtm", 3_000)] }));
+    expect(w.flowsNow().edges[0].gateAnswer).toBe("approved");
+    expect(w.flowsNow().edges[0].routedAnswers).toEqual({ alice: { answer: "approved", at: 2_000 }, bob: { answer: "approved", at: 3_000 } });
+    expect(w.events().find((e) => e.kind === "answered")).toMatchObject({ edge: "ask1", answer: "approved", by: "alice, bob" });
+    expect(r.flows[0].answered).toEqual(["ask1 (n1 → g, ask): @alice, @bob approved"]);
+    expect(r.flows[0].notified).toEqual(["Ship the migration: prod it is"]);
+  });
+
+  it("one reject vetoes an `all` gate at once, even with an approval already in", async () => {
+    const w = world([routed("all")]);
+    const r = await runHeadlessPass(w.deps({ gateReplies: async () => [reply("alice", "approve", 2_000), reply("bob", "reject", 3_000)] }));
+    expect(w.flowsNow().edges[0].gateAnswer).toBe("rejected");
+    expect(w.events().find((e) => e.kind === "answered")).toMatchObject({ answer: "rejected", by: "bob" });
+    expect(r.flows[0].answered).toEqual(["ask1 (n1 → g, ask): @bob rejected"]);
+    expect(r.flows[0].notified).toEqual([]);
+  });
+
+  it("an `any` gate (the default) is answered by whichever named person speaks first — here the second-named", async () => {
+    const w = world([routed(undefined)]);
+    const r = await runHeadlessPass(w.deps({ gateReplies: async () => [reply("carol", "approve", 1_500), reply("bob", "approve", 2_000), reply("alice", "reject", 3_000)] }));
+    expect(w.flowsNow().edges[0].gateAnswer).toBe("approved");
+    expect(w.events().find((e) => e.kind === "answered")).toMatchObject({ answer: "approved", by: "bob" });
+    expect(r.flows[0].answered).toEqual(["ask1 (n1 → g, ask): @bob approved"]);
+  });
+
+  it("a partial answer is not written twice, and a dry run writes nothing", async () => {
+    const w = world([routed("all", { routedAnswers: { alice: { answer: "approved", at: 2_000 } } })]);
+    const before = { ...w.files };
+    await runHeadlessPass(w.deps({ gateReplies: async () => [reply("alice", "approve", 2_000)] }));
+    expect(w.files[path.join(DIR, "f1.json")]).toBe(before[path.join(DIR, "f1.json")]);
+    const dry = world([routed("all")]);
+    const snapshot = { ...dry.files };
+    const r = await runHeadlessPass(dry.deps({ gateReplies: async () => [reply("alice", "approve", 2_000)], dryRun: true }));
+    expect(dry.files).toEqual(snapshot);
+    expect(r.flows[0].answered).toEqual([]);
+  });
+});
