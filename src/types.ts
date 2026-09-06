@@ -981,12 +981,19 @@ export type OutboundMessage =
   // dry run and the card's stepper must agree with the engine about a rule the
   // webview cannot answer for itself (the output is in a file). Optional on the
   // wire; a missing map reads as "did not print", i.e. waiting.
+  // `launchesPerPass` is `agentFlow.launchesPerPass` as the host read it — the
+  // per-pass cap `evaluateFlow` applies — so the drawer's dry run defers the
+  // same rules the next pass will, and says the cap's real number rather than a
+  // hard-coded three. Configuration, like `promptModes`, sent for the same
+  // reason. Optional on the wire: a host that omits it (an older one, or a test)
+  // reads as `MAX_LAUNCHES_PER_PASS`, which is what every webview assumed before.
   | {
       type: "deck:flows"; flows: Flow[]; enabled: boolean; pendingResume: PendingResume[];
       promptModes: FlowPromptMode[]; commands: FlowCommand[];
       branchCi: Record<string, BranchCiStatus>; templates: FlowTemplate[];
       printed?: Record<string, Record<string, boolean>>;
       spend?: Record<string, SpendTally>;
+      launchesPerPass?: number;
     }
   // The Marketplace
   | { type: "mkt:assets"; view: ClaudeAssetsView }

@@ -577,6 +577,10 @@ vi.mock("../../src/config", async (importActual) => {
       // consent mode with setConfig({ commandConsent }), and every test that never
       // sets it gets the shipped default — once per flow.
       commandConsent: real.commandConsent,
+      // Sourced from the real getConfig() for the same reason: a test steers the
+      // per-pass cap with setConfig({ launchesPerPass }), and every test that never
+      // sets it gets the shipped default — three spends per flow per pass.
+      launchesPerPass: real.launchesPerPass,
       // Sourced from the real getConfig() (itself driven by the globally-mocked
       // vscode module) rather than hardcoded here, so a test's setConfig({
       // reviewRequestModes / reviewRequestMode }) actually reaches launchReviewFor.
@@ -5701,6 +5705,19 @@ describe("orchestrator flows", () => {
     expect(msg.commands).toEqual([]);
   });
 
+  it("posts agentFlow.launchesPerPass on deck:flows — the shipped 3 by default, the configured cap when set", async () => {
+    setConfig({ orchestrator: true });
+    const first = await openPanel();
+    const dflt = posts(first.p).find((m) => m.type === "deck:flows") as { launchesPerPass?: number };
+    expect(dflt.launchesPerPass).toBe(3);
+    // Read at post time, like every other setting on this message: the drawer's
+    // dry run must defer exactly the rules the next pass will.
+    setConfig({ launchesPerPass: 1 });
+    await first.send({ type: "deck:refresh" });
+    const configured = posts(first.p).filter((m) => m.type === "deck:flows").at(-1) as { launchesPerPass?: number };
+    expect(configured.launchesPerPass).toBe(1);
+  });
+
   it("flow:create writes a new disarmed flow with a store-safe id", async () => {
     setConfig({ orchestrator: true });
     const { send } = await openPanel();
@@ -9138,6 +9155,39 @@ describe("a met run rule acts", () => {
     });
     expect(posts(p).some((m) => m.type === "toast" && m.level === "success" && /deploy\.sh staging/.test(m.message ?? ""))).toBe(true);
     expect(window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it("honours agentFlow.launchesPerPass: with a cap of 1, two met commands run one per pass", async () => {
+    const two = cmdFlow({
+      nodes: [
+        { id: "n1", kind: "place", x: 0, y: 0, join: "any", runKey: "PROJ-1", repo: "aws-ops" },
+        { id: "n2", kind: "command", x: 0, y: 0, join: "any", run: "deploy.sh staging" },
+        { id: "n3", kind: "command", x: 0, y: 0, join: "any", run: "smoke.sh staging" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "pr-merged" }, action: "run" },
+        { id: "e2", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "run" },
+      ],
+    });
+    const { send } = await warmed([two]);
+    setConfig({ launchesPerPass: 1 });
+    await send({ type: "deck:refresh" });
+    // One spend this pass; the second rule is held — as met as it was, not
+    // settled — for the next pass to find.
+    expect(h.exec).toHaveBeenCalledTimes(1);
+    expect(ran()[0]).toBe("deploy.sh staging");
+    let w = lastWrite();
+    expect(w.edges[0].firedAt).toBeTypeOf("number");
+    expect(w.edges[1].firedAt).toBeUndefined();
+    expect(w.edges[1].error).toBeUndefined();
+
+    // The next pass reads the store as the last one left it and spends the other.
+    h.flows = [w];
+    await send({ type: "deck:refresh" });
+    expect(h.exec).toHaveBeenCalledTimes(2);
+    expect(ran()[0]).toBe("smoke.sh staging");
+    w = lastWrite();
+    expect(w.edges.map((e) => typeof e.firedAt)).toEqual(["number", "number"]);
   });
 
   it("journals a run rule's command output, which the flow file has never carried", async () => {

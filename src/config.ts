@@ -461,8 +461,13 @@ export interface AgentFlowConfig {
    * Per flow per pass, so N armed flows may spend N× it every six seconds — the
    * flow's spend ceiling is the lifetime bound. Defaults to
    * `MAX_LAUNCHES_PER_PASS` (3), the cap every release before it had; the
-   * headless tick reads the same setting. See `readLaunchesPerPass`. */
-  launchesPerPass: number;
+   * headless tick reads the same setting. See `readLaunchesPerPass`.
+   *
+   * Optional in the TYPE, always set by `getConfig()`: `evaluateFlow` reads a
+   * missing value as the same default, and a required field here would force
+   * every test that builds a whole config literal to name a setting it does not
+   * exercise — the existing suite passes unmodified, as a new setting must. */
+  launchesPerPass?: number;
   /** Show the Deck header's "Tokens on board" total. Off by default: the figure
    * costs a board-wide transcript sweep, and the per-run breakdown in the detail
    * drawer is read lazily instead, so a default install parses nothing until a

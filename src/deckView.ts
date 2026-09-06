@@ -760,9 +760,12 @@ export class DeckPanel {
         if (spendTotal(t) > 0 || eq !== undefined) spend[f.id] = t;
       }
     }
+    // The per-pass cap, so the drawer's dry run holds back exactly the rules
+    // the next pass will — the webview cannot read the setting itself.
     this.post({
       type: "deck:flows", flows, enabled, pendingResume, promptModes,
       commands: cfg.commands, branchCi, templates, printed, spend,
+      launchesPerPass: cfg.launchesPerPass,
     });
   }
 
@@ -1113,7 +1116,10 @@ export class DeckPanel {
             }
           }
         }
-        const result = evaluateFlow({ flow, statuses: runs, nowMs, branchCi, printed, flows });
+        // The per-pass cap is `agentFlow.launchesPerPass`, read at pass time so
+        // a change to the setting takes effect on the next pass, not the next
+        // window — see `readLaunchesPerPass` for what a bad value reads as.
+        const result = evaluateFlow({ flow, statuses: runs, nowMs, branchCi, printed, flows, maxLaunches: getConfig().launchesPerPass });
         if (result.fired.length === 0) {
           // Nothing ready means nothing to approve: clear the gate so a rule
           // that becomes met later in this session fires without ceremony.
@@ -1244,10 +1250,10 @@ export class DeckPanel {
         });
 
         // The CEILING, before the consent gate: there is no point asking leave to
-        // spend what the flow may not spend. `MAX_LAUNCHES_PER_PASS` bounds one
-        // pass and nothing accumulates across passes — a template instantiated
-        // twenty times is twenty flows each entitled to three spends every six
-        // seconds, forever. `spendCeiling` is the lifetime bound, measured against
+        // spend what the flow may not spend. `agentFlow.launchesPerPass` (default
+        // `MAX_LAUNCHES_PER_PASS`, 3) bounds one pass and nothing accumulates
+        // across passes — a template instantiated twenty times is twenty flows
+        // each entitled to that many spends every six seconds, forever. `spendCeiling` is the lifetime bound, measured against
         // the journal's own record of what fired (`spendTally`), so it needs no
         // counter on the flow and no migration. A pass whose spends would take the
         // total PAST the ceiling performs NONE of them and disarms the flow,
@@ -1460,7 +1466,7 @@ export class DeckPanel {
           }
           // One per edge this pass actually PERFORMED — never per evaluation, and
           // never for a rule merely stamped as a sibling, which is what keeps this
-          // to at most MAX_LAUNCHES_PER_PASS events per six seconds. Emitted here,
+          // to at most `agentFlow.launchesPerPass` events per six seconds. Emitted here,
           // where the act's own result is in hand: a `defer` never reaches
           // `outcomes` at all, and reading it off the write below would lose it.
           //
