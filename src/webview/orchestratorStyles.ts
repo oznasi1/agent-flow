@@ -472,6 +472,9 @@ export const ORCH_CSS = `
      Reset. That is a real failure, which is the whole and only licence red has in
      this codebase — the same licence .orch-edge.bad spends above. */
   .orch-obs .err { color: var(--c-danger); }
+  /* What to do about the failure, beside it: the row's own quiet voice, not
+     red — red is spent on the failure, and this is the way out of it. */
+  .orch-fix { color: var(--dim); }
 
   /* The drawer's ONE filled control, and the phase that earns it: Arm is the
      consent point for everything a flow does. Nothing else here may be filled. */
