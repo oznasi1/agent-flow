@@ -9,7 +9,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { readCommandConsent, readCommands, readNeverAutoRun } from "../configReaders";
+import { readCommandConsent, readCommands, readLaunchesPerPass, readNeverAutoRun } from "../configReaders";
 import { defaultFlowsDir, readFlows } from "../engine/orchestrator/store";
 import { newFlowId, nodeFlowIo, nodeJournalIo, nodeLockIo } from "../engine/orchestrator/flowIo";
 import { shellCommandRunner } from "../engine/orchestrator/shellRunner";
@@ -187,7 +187,10 @@ export async function main(argv: string[], print: (l: string) => void = console.
   const report = await runHeadlessPass({
     flowIo: nodeFlowIo(), lockIo: nodeLockIo(log), journalIo: nodeJournalIo(), flowsDir,
     statuses,
-    settings: { commands: readCommands(reader), neverAutoRun: readNeverAutoRun(reader), commandConsent: readCommandConsent(reader) },
+    settings: {
+      commands: readCommands(reader), neverAutoRun: readNeverAutoRun(reader), commandConsent: readCommandConsent(reader),
+      launchesPerPass: readLaunchesPerPass(reader),
+    },
     run: shellCommandRunner,
     discoverRepo: (name) => {
       if (typeof reposRoot !== "string" || reposRoot.trim() === "") return undefined;

@@ -346,3 +346,33 @@ describe("runHeadlessPass — an errored line carries the next step", () => {
     expect(r.flows[0].errored).toEqual([`e1 (n1 → n2, run): ${error}`]);
   });
 });
+
+describe("runHeadlessPass — the per-pass cap", () => {
+  /** Two met, consented commands off one place — two spends this pass wants. */
+  const twoCommands = () => armed(
+    [place("n1", "PROJ-1"), command("n2", "deploy.sh staging"), command("n3", "smoke.sh staging")],
+    [edge("e1", "n1", "n2"), edge("e2", "n1", "n3")],
+    { commandConfirmedAt: 5 },
+  );
+
+  it("honours agentFlow.launchesPerPass: with a cap of 1, runs one of two met commands and leaves the other for a later pass", async () => {
+    const w = world([twoCommands()]);
+    const r = await runHeadlessPass(w.deps({ settings: { commands: [], neverAutoRun: [], commandConsent: "flow", launchesPerPass: 1 } }));
+    expect(w.runner).toHaveBeenCalledTimes(1);
+    expect(w.runner).toHaveBeenCalledWith("deploy.sh staging", expect.anything());
+    expect(r.flows[0].fired).toHaveLength(1);
+    // Held, not settled: the second rule is exactly as met as it was, so the
+    // next pass finds it.
+    const edges = w.flowsNow().edges;
+    expect(edges[0].firedAt).toBe(NOW);
+    expect(edges[1].firedAt).toBeUndefined();
+    expect(edges[1].error).toBeUndefined();
+  });
+
+  it("runs both when the setting is absent — the shipped cap of 3 is what every existing tick had", async () => {
+    const w = world([twoCommands()]);
+    await runHeadlessPass(w.deps({ settings: { commands: [], neverAutoRun: [], commandConsent: "flow" } }));
+    expect(w.runner).toHaveBeenCalledTimes(2);
+    expect(w.flowsNow().edges.map((e) => e.firedAt)).toEqual([NOW, NOW]);
+  });
+});
