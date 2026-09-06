@@ -326,6 +326,26 @@ export function makeSandbox(settingsOverride: Record<string, unknown> = {}): San
 
   return {
     root, home, userDataDir, extensionsDir, fixtureDir, reposRoot, repoPath,
-    dispose: () => fs.rmSync(root, { recursive: true, force: true }),
+    dispose: () => disposeSandbox(root),
   };
+}
+
+/** Remove the sandbox, tolerating an editor that is still letting go of it.
+ *
+ *  `app.close()` resolves when Electron's main process exits, but its children
+ *  — the extension host, the pty host, a renderer — can still be writing into
+ *  the sandbox for a moment after that (logs, workspace storage, an
+ *  extension's own cache). A plain `rmSync` then walks a directory something
+ *  is still creating files in and fails with `ENOTEMPTY`, reported against the
+ *  test that had already passed — CI's recurring `seed-panel` red. Node's own
+ *  retry covers precisely this class (`ENOTEMPTY`, `EBUSY`, `EPERM`), so the
+ *  removal is retried for a few seconds; a directory that is STILL held after
+ *  that is left behind with a warning, because cleanup of a temp dir on an
+ *  ephemeral runner must never be what fails a green test. */
+export function disposeSandbox(root: string): void {
+  try {
+    fs.rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 250 });
+  } catch (e) {
+    console.warn(`sandbox: could not remove ${root} — ${e instanceof Error ? e.message : String(e)}; left behind`);
+  }
 }

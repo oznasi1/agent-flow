@@ -7,7 +7,8 @@ import { afterEach, describe, expect, it } from "vitest";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { extensionHostsExited, hostLogTails } from "../../test-e2e/_helpers/host";
+import { spawn } from "child_process";
+import { extensionHostsExited, hostLogTails, killTree } from "../../test-e2e/_helpers/host";
 
 const dirs: string[] = [];
 afterEach(() => { for (const d of dirs.splice(0)) fs.rmSync(d, { recursive: true, force: true }); });
@@ -57,5 +58,29 @@ describe("hostLogTails", () => {
 
   it("says so, rather than throwing, when there is nothing to tail", () => {
     expect(hostLogTails("/nonexistent/user-data")[0]).toContain("no VS Code logs under");
+  });
+});
+
+describe("killTree", () => {
+  const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+
+  it("kills a process and the child it spawned, and waits for both to be gone", async () => {
+    // A shell that spawns a grandchild `sleep` and waits on it — killing only the
+    // shell would leave the sleep running, reparented to init.
+    const sh = spawn("sh", ["-c", "sleep 30 & echo $!; wait"], { stdio: ["ignore", "pipe", "ignore"] });
+    const childPid = await new Promise<number>((resolve) => sh.stdout.once("data", (d) => resolve(Number(String(d).trim()))));
+    expect(alive(sh.pid!)).toBe(true);
+    expect(alive(childPid)).toBe(true);
+    const started = Date.now();
+    await killTree(sh.pid!);
+    // Both gone, and promptly — the wait yields so Node can reap its own child
+    // rather than spinning the whole deadline on a zombie.
+    expect(alive(childPid)).toBe(false);
+    expect(alive(sh.pid!)).toBe(false);
+    expect(Date.now() - started).toBeLessThan(3_000);
+  });
+
+  it("is quiet about a pid that is already gone", async () => {
+    await expect(killTree(2 ** 22 - 7)).resolves.toBeUndefined();
   });
 });

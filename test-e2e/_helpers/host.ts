@@ -197,13 +197,7 @@ export async function closeHost(
   } catch {
     /* no ps — Windows, or a locked-down runner */
   }
-  if (pid !== undefined) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already gone */
-    }
-  }
+  if (pid !== undefined) await killTree(pid);
   if (hosts && hosts.started.length > 0 && hosts.alive.length === 0) {
     lines.push(`  every extension host exited (${hosts.started.join(", ")}) — Electron's quit stalled on its own; killed pid ${pid ?? "?"} and carried on`);
     console.warn(lines.join("\n"));
@@ -215,6 +209,48 @@ export async function closeHost(
   const report = lines.join("\n");
   console.log(report);
   throw new Error(report);
+}
+
+/** SIGKILL a process and every descendant it still has, children first, then
+ *  wait briefly for them to be gone. Killing the main process alone reparents
+ *  its zygotes and renderers to init, where they linger and keep writing into
+ *  the sandbox `dispose` is about to remove. Descendants are read off one `ps`
+ *  pass; a platform without `ps` (Windows) falls back to the main pid alone. */
+export async function killTree(pid: number): Promise<void> {
+  const victims = [pid];
+  try {
+    const rows = execFileSync("ps", ["-eo", "pid=,ppid="], { encoding: "utf8" })
+      .split("\n").map((l) => l.trim().split(/\s+/).map(Number)).filter((r) => r.length === 2 && !Number.isNaN(r[0]));
+    const queue = [pid];
+    while (queue.length > 0) {
+      const parent = queue.shift()!;
+      for (const [child, ppid] of rows) {
+        if (ppid === parent && !victims.includes(child)) {
+          victims.push(child);
+          queue.push(child);
+        }
+      }
+    }
+  } catch {
+    /* no ps — kill the main pid alone */
+  }
+  for (const v of [...victims].reverse()) {
+    try {
+      process.kill(v, "SIGKILL");
+    } catch {
+      /* already gone */
+    }
+  }
+  // Wait for them to be gone — ASYNCHRONOUSLY. `kill(pid, 0)` keeps succeeding
+  // on a zombie, and a killed child of THIS process stays a zombie until the
+  // event loop turns and Node reaps it; a synchronous spin here would wait the
+  // whole deadline on a corpse. Yielding lets the reap happen. ESRCH (or EPERM,
+  // a reused pid) means gone.
+  const gone = (v: number) => { try { process.kill(v, 0); return false; } catch { return true; } };
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline && !victims.every(gone)) {
+    await new Promise((r) => setTimeout(r, 100));
+  }
 }
 
 /** Which extension hosts the sandbox's VS Code started, and which of them
