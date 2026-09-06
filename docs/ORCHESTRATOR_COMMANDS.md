@@ -237,9 +237,9 @@ it opens. Exit `0` after a pass, `2` when a Deck or another tick held the lock,
 same `settings.json` the editor would — Code, Code Insiders or Cursor, found by
 platform, or the file `--settings` names (`AGENT_FLOW_SETTINGS` works too).
 `agentFlow.orchestrator` must be on in that file; `agentFlow.commands`,
-`agentFlow.neverAutoRun`, `agentFlow.commandConsent`, `agentFlow.forge`,
-`agentFlow.prFacts` and `agentFlow.reposRoot` are read exactly as the editor
-reads them. Workspace-level settings are not: a tick has no workspace.
+`agentFlow.neverAutoRun`, `agentFlow.commandConsent`, `agentFlow.launchesPerPass`,
+`agentFlow.forge`, `agentFlow.prFacts` and `agentFlow.reposRoot` are read
+exactly as the editor reads them. Workspace-level settings are not: a tick has no workspace.
 
 **What it performs, and what it refuses.**
 
@@ -398,11 +398,19 @@ routed gate's delivery error in the gate's inspector.
 
 ## The ceiling
 
-`MAX_LAUNCHES_PER_PASS` is 3, and it bounds one pass of one flow. Nothing
+The per-pass cap is the setting **`agentFlow.launchesPerPass`**, default `3`
+(the code's `MAX_LAUNCHES_PER_PASS`, which is what every release before the
+setting had). It bounds one pass of one flow: the sessions, seeds and commands
+that pass may start, a notify never counted. A met rule the cap holds back is
+not lost — it is left as met as it was and fires on a later pass. Nothing
 accumulates across passes, and evaluation runs once per flow — so a poll
-across *N* armed flows can spend 3*N*, every six seconds, for as long as the
-conditions keep holding. Templates make *N* large cheaply: one shape attached
-to twenty cards is twenty flows, each entitled to that.
+across *N* armed flows can spend *N* times the cap, every six seconds, for as
+long as the conditions keep holding. Templates make *N* large cheaply: one
+shape attached to twenty cards is twenty flows, each entitled to that. The
+scheduled tick reads the same setting from the same `settings.json`. Anything
+below `1`, a fraction, or a non-number reads as the default: a hand-edited
+value can neither lift the cap nor zero it. The drawer's dry run defers
+against the configured number and names it.
 
 A flow's **spend ceiling** is the lifetime bound. Set it in the flow header,
 beside the line that says what the flow has spent so far. It counts
@@ -929,6 +937,7 @@ there, which closes the picker and opens the drawer's Templates view instead.
 | What                          | Value          | Why that value                                                             |
 |-------------------------------|----------------|------------------------------------------------------------------------------|
 | Poll interval                  | 6 s            | The Deck's own refresh; evaluation is free once the statuses exist.         |
+| Launches per pass              | 3 per flow, `agentFlow.launchesPerPass` | Sessions, seeds and commands one pass of one flow may start; a notify is free. Per flow, so *N* armed flows may spend *N*× it; the spend ceiling is the lifetime bound. Below 1 or non-integer reads as 3. |
 | Command timeout                | 120 s          | Well under the lock TTL, so a command cannot outlive the lock protecting it. |
 | Flows lock TTL                 | 300 s          | Held across a whole pass; a stale lock is reaped, never stolen.             |
 | Max output                     | 1 MiB          | Beyond it the process is torn down and the rule latches errored.            |

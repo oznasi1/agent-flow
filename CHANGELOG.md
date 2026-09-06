@@ -21,6 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   derived from the message's shape — no new diagnosis — and an unfamiliar
   message shows none rather than a filler sentence. See **When a rule fails**
   in `docs/ORCHESTRATOR_COMMANDS.md`.
+- **The per-pass launch cap is a setting.** `agentFlow.launchesPerPass` bounds
+  how many sessions, seeds and commands one pass of one workflow may start —
+  three, until now, and hard-coded. Three windows every six seconds is one
+  thing with the Deck in front of you and another from a scheduled tick at
+  2am, so the number is yours: the Deck's pass and `dist/tick.js` both read
+  it, the drawer's dry run defers against it and names it, and a met rule the
+  cap holds back fires on a later pass rather than being lost. It is per
+  workflow per pass — a template on twenty cards may spend twenty times it —
+  and the workflow's spend ceiling stays the lifetime bound. Default `3`, so
+  nothing changes until you set it; anything below `1`, a fraction, or a
+  non-number reads as `3`.
 
 ## [0.69.1] — 2026-09-06
 
