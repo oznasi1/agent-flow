@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.69.0] — 2026-09-06
+
 ### Added
 
 - **Something that actually runs the tick.** `dist/tick.js` exits 2 when another
