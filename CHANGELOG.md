@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.69.1] — 2026-09-06
+
 ### Changed
 
 - **The README shows what the extension does today.** Its screenshots were taken
