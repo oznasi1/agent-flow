@@ -29,6 +29,7 @@ import {
 } from "../../src/config";
 import { env, setConfig, setDefaultConfig } from "../_mocks/vscode";
 import { manifestSettings } from "../_helpers/manifest";
+import { MAX_LAUNCHES_PER_PASS } from "../../src/engine/orchestrator/evaluate";
 import pkg from "../../package.json";
 
 describe("expandHome", () => {
@@ -496,6 +497,29 @@ describe("getConfig — neverAutoRun", () => {
   it("reads an empty list when the setting is not an array", () => {
     setConfig({ neverAutoRun: "*rm -rf*" });
     expect(getConfig().neverAutoRun).toEqual([]);
+  });
+});
+
+describe("getConfig — launchesPerPass", () => {
+  // The guarantee that lets this ship to existing installs: a user who has never
+  // heard of the setting keeps the cap every release before it had.
+  it("defaults to the shipped per-pass cap, so the setting ships inert", () => {
+    expect(getConfig().launchesPerPass).toBe(MAX_LAUNCHES_PER_PASS);
+    expect(getConfig().launchesPerPass).toBe(3);
+  });
+
+  it("reads a positive integer as written", () => {
+    setConfig({ launchesPerPass: 1 });
+    expect(getConfig().launchesPerPass).toBe(1);
+  });
+
+  it("reads zero, a fraction or a string as the shipped cap — the safer value", () => {
+    setConfig({ launchesPerPass: 0 });
+    expect(getConfig().launchesPerPass).toBe(MAX_LAUNCHES_PER_PASS);
+    setConfig({ launchesPerPass: 2.5 });
+    expect(getConfig().launchesPerPass).toBe(MAX_LAUNCHES_PER_PASS);
+    setConfig({ launchesPerPass: "4" });
+    expect(getConfig().launchesPerPass).toBe(MAX_LAUNCHES_PER_PASS);
   });
 });
 
@@ -1264,6 +1288,17 @@ describe("forge", () => {
   it("ships an empty manifest default for neverAutoRun", () => {
     const props = manifestSettings<{ default?: unknown }>(pkg);
     expect(props["agentFlow.neverAutoRun"].default).toEqual([]);
+  });
+
+  // The manifest default is a separate promise from the code default (nothing in
+  // getConfig() reads package.json), and both must be the cap every install had
+  // before the setting existed — and the schema must refuse the one value the
+  // reader refuses too, so the settings UI and the reader agree on what is legal.
+  it("ships a manifest default equal to the code's per-pass cap for launchesPerPass, with a minimum of 1", () => {
+    const props = manifestSettings<{ type?: string; default?: unknown; minimum?: number }>(pkg);
+    expect(props["agentFlow.launchesPerPass"].type).toBe("integer");
+    expect(props["agentFlow.launchesPerPass"].default).toBe(MAX_LAUNCHES_PER_PASS);
+    expect(props["agentFlow.launchesPerPass"].minimum).toBe(1);
   });
 
   it("ships a manifest default of github, so an existing install is unaffected", () => {

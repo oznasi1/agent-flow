@@ -674,6 +674,12 @@
             "default": false,
             "markdownDescription": "Show the **Orchestrator** on the Deck: a drawer where you wire the sessions already on your board into a flow and put a condition on each connection. Off by default — an armed flow eventually starts sessions on a timer, so nothing about it appears until you turn it on."
           },
+          "agentFlow.launchesPerPass": {
+            "type": "integer",
+            "default": 3,
+            "minimum": 1,
+            "markdownDescription": "How many **sessions, seeds and commands** one pass of one Orchestrator workflow may start. A pass runs every six seconds while the Deck is open; a rule that is met once the cap is spent is held for a later pass, not lost, and a notify is never counted. The cap is **per workflow, per pass**: `N` armed workflows may each spend it, so a template attached to twenty cards can start twenty times this many every pass. The workflow's own **spend ceiling** is the lifetime bound. The scheduled tick (`dist/tick.js`) reads this setting too. Anything below `1`, a fraction, or a non-number reads as the default `3`."
+          },
           "agentFlow.neverAutoRun": {
             "type": "array",
             "default": [],
