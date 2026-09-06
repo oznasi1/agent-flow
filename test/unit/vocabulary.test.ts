@@ -283,6 +283,10 @@ const FLOW_LEGITIMATE: { location: string; text: string; why: string }[] = [
     why: "message type sent to the host, a wire value" },
   { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:deleteTemplate",
     why: "message type sent to the host, a wire value" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:exportTemplate",
+    why: "message type sent to the host, a wire value — the Templates view's per-row Export" },
+  { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:importTemplate",
+    why: "message type sent to the host, a wire value — the Templates view's Import… button" },
   { location: "src/webview/OrchestratorDrawer.tsx", text: "flow:writeTemplate",
     why: "message type sent to the host, a wire value — Task 13's canvas Save control while editing a template" },
   // src/webview/OrchestratorDrawer.tsx: the flow-graph canvas's own
