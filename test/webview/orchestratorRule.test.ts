@@ -18,6 +18,7 @@ import {
   isBareCond,
   gateRoutingNote,
   withNodeGateAskWho,
+  withNodeGateAskMode,
   condOffered,
   condOptionLabel,
   CWD_REPO_DEFAULT,
@@ -478,6 +479,44 @@ describe("a routed gate in the rule module", () => {
     expect(gateRoutingNote(failed, g(failed))).toBe("could not ask @alice on the pull request — no PR");
     const answered = gateFlow({ askWho: "alice" }, { firedAt: 5, performed: true, routed: { at: 5, login: "alice" }, gateAnswer: "approved" });
     expect(gateRoutingNote(answered, g(answered))).toBe("@alice answered on the pull request");
+  });
+
+  it("withNodeGateAskWho normalises several names to `a, b`, dropping each sigil and blank", () => {
+    expect(withNodeGateAskWho(gateFlow(), "g", " @alice,bob  @Carol , ").nodes[1]).toMatchObject({ askWho: "alice, bob, Carol" });
+    expect("askWho" in withNodeGateAskWho(gateFlow(), "g", " @ , ").nodes[1]).toBe(false);
+  });
+
+  it("withNodeGateAskMode stores `all` and DELETES the field for `any` — absent is the meaning", () => {
+    const all = withNodeGateAskMode(gateFlow({ askWho: "alice, bob" }), "g", "all");
+    expect(all.nodes[1]).toMatchObject({ kind: "gate", askMode: "all" });
+    const any = withNodeGateAskMode(all, "g", "any");
+    expect("askMode" in any.nodes[1]).toBe(false);
+    expect(withNodeGateAskMode(gateFlow(), "n1", "all").nodes[0]).toEqual(gateFlow().nodes[0]);
+  });
+
+  it("gateRoutingNote names everyone, tallies an `all` gate, and says who decided", () => {
+    const g = (f: Flow) => f.nodes[1] as Parameters<typeof gateRoutingNote>[1];
+    const two = { askWho: "alice, @bob" };
+    const local = gateFlow(two);
+    expect(gateRoutingNote(local, g(local))).toBe("will ask @alice, @bob on the pull request");
+    const asked = gateFlow(two, { firedAt: 5, performed: true });
+    expect(gateRoutingNote(asked, g(asked))).toBe("asking @alice, @bob on the pull request…");
+    const stamp = { firedAt: 5, performed: true as const, routed: { at: 5, login: "alice, bob" } };
+    const any = gateFlow(two, stamp);
+    expect(gateRoutingNote(any, g(any))).toBe("asked @alice, @bob on the pull request · waiting on either");
+    const all0 = gateFlow({ ...two, askMode: "all" }, stamp);
+    expect(gateRoutingNote(all0, g(all0))).toBe("asked @alice, @bob on the pull request · 0 of 2 approved");
+    const all1 = gateFlow({ ...two, askMode: "all" }, { ...stamp, routedAnswers: { bob: { answer: "approved", at: 6 } } });
+    expect(gateRoutingNote(all1, g(all1))).toBe("asked @alice, @bob on the pull request · 1 of 2 approved");
+    const failed = gateFlow(two, { ...stamp, routed: { at: 5, login: "alice, bob", error: "no PR" } });
+    expect(gateRoutingNote(failed, g(failed))).toBe("could not ask @alice, @bob on the pull request — no PR");
+    const vetoed = gateFlow({ ...two, askMode: "all" }, { ...stamp, gateAnswer: "rejected", routedAnswers: { alice: { answer: "approved", at: 6 }, bob: { answer: "rejected", at: 7 } } });
+    expect(gateRoutingNote(vetoed, g(vetoed))).toBe("@bob answered on the pull request");
+    const both = gateFlow({ ...two, askMode: "all" }, { ...stamp, gateAnswer: "approved", routedAnswers: { alice: { answer: "approved", at: 6 }, bob: { answer: "approved", at: 7 } } });
+    expect(gateRoutingNote(both, g(both))).toBe("@alice, @bob answered on the pull request");
+    // Answered on the node before anyone replied: no one on the thread to name.
+    const onNode = gateFlow(two, { ...stamp, gateAnswer: "approved" });
+    expect(gateRoutingNote(onNode, g(onNode))).toBe("@alice, @bob answered on the pull request");
   });
 });
 
