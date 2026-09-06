@@ -131,6 +131,22 @@ export type FlowActionKind =
   | "attach" | "detach" | "save_template" | "write_template" | "rename_template" | "delete_template"
   | "duplicate_template";
 
+/** The six actions a rule can perform, as the orchestrator's own `FlowAction`
+ * spells them, plus `"none"` for a rule that carries no action at all.
+ *
+ * Collapsed through `toFlowActionProp` for the same reason prompt modes are:
+ * a flow file is hand-editable and `store.ts` only SHAPE-checks it (`validEdge`),
+ * never value-checks `action`, so a typo or a hand-typed action reaches the
+ * event as an arbitrary string. `"none"` is the honest answer for both "this
+ * rule has no action" and "this rule's action is not one we ship" — neither is
+ * a value worth inventing a member for, and neither may be sent raw. */
+export const FLOW_ACTIONS = ["launch", "seed", "notify", "run", "ask", "spawn"] as const;
+export type FlowActionProp = (typeof FLOW_ACTIONS)[number] | "none";
+
+export function toFlowActionProp(action: string | undefined): FlowActionProp {
+  return (FLOW_ACTIONS as readonly string[]).includes(action ?? "") ? (action as FlowActionProp) : "none";
+}
+
 export type WorkspaceModeProp = "multiroot" | "per-window";
 export type RepoSource = "preselected" | "destination" | "quickpick";
 export type Outcome = "launched" | "cancelled" | "failed";
@@ -139,10 +155,12 @@ export type CommandId =
   | "takeTask" | "openDeck" | "openMarketplace";
 
 /** Property names permitted to hold a value that is not an enum member.
- * `flow_id` is a random UUID; `error_class` is an Error's constructor name;
+ * `flow_id` is a random UUID; `flow_uid` is a random UUID too (see `Flow.analyticsId`
+ * in engine/orchestrator/model.ts) — NOT the orchestrator's own flow id, which is
+ * clock-derived and never sent in any form; `error_class` is an Error's constructor name;
  * `stack_digest` is our own bundled stack with paths stripped (see stackDigest()).
  * `*_fp` properties are matched by suffix and must be 16-char hex. */
-export const OPEN_STRING_PROPS = ["flow_id", "error_class", "stack_digest"] as const;
+export const OPEN_STRING_PROPS = ["flow_id", "flow_uid", "error_class", "stack_digest"] as const;
 
 /** The 43 safe reductions of AgentFlowConfig, built by settingsSnapshot.ts.
  *
@@ -190,6 +208,7 @@ export interface SettingsSnapshot {
   merge_writes: boolean;
   merge_method: "squash" | "merge" | "rebase" | "invalid";
   orchestrator: boolean;
+  command_consent: "flow" | "command" | "invalid";
   child_worktrees: boolean;
   stamp_label_on_write: boolean;
   track_open_windows: boolean;
@@ -344,9 +363,25 @@ export type UsageEvent =
   // `auto-skip`. `"auto-skip"` is not a gesture: it is this window noticing,
   // mid-pass, that the flow was disarmed under it — at most once per flow per
   // pass, never once per skipped rule.
+  //
+  // This event carries the ADOPTION load for everything 0.68.0 shipped, because
+  // it is the one place that already holds a whole flow and already fires at a
+  // human-scale rate. The five `*_count` shape fields are `analyticsShape()`
+  // (model.ts) — how many of this flow's rules carry a deadline, a retry, or an
+  // output condition, and how many of its nodes are subflows. They are COUNTS of
+  // configured features and never the values: a deadline's minutes, a retry's
+  // backoff, an output condition's needle text and a subflow's template id all
+  // stay on the machine.
+  //
+  // `spend_total` is the flow's lifetime spend as `spendTally` derives it from
+  // the journal, sent on every arm and disarm so a ceiling's headroom is
+  // readable without a ceiling being set; `has_ceiling` says whether one is.
   | {
-      name: "flow_armed"; armed: boolean; node_count: number; edge_count: number;
+      name: "flow_armed"; armed: boolean; flow_uid: string; node_count: number; edge_count: number;
       unfirable_live: number; unfirable_pr_facts: number; unfirable_forge: number;
+      has_ceiling: boolean; spend_total: number;
+      rules_with_deadline: number; rules_with_retry: number; rules_with_output_condition: number;
+      subflow_node_count: number;
       // `ceiling`: the pass disarmed the flow itself because its next spend would
       // have taken it past `spendCeiling`. Not a gesture in any window.
       source: "toggle" | "resume-banner" | "auto-skip" | "ceiling";
@@ -358,16 +393,91 @@ export type UsageEvent =
   // (`dest`/`prompt_mode`/`repo_count`) is present only for a launch, whose
   // planned node carries all three. `"notify"` is reserved: a notify spends
   // nothing and is not performed through this seam, so nothing emits it today.
+  //
+  // `retries_used` is present only on a rule that carries a RETRY and has now
+  // settled: how many attempts it burned before this one. Absent means the rule
+  // has no retry configured, which is what every flow written before 0.68.0 has —
+  // deliberately distinguishable from a present `0` (a retry was configured and
+  // the first attempt succeeded). `depth` is present only on a rule inside a
+  // flow a subflow node started: 1 for a child, 2 for a grandchild, and the
+  // nesting stops at 3.
   | {
       name: "flow_edge_fired"; edge_action: "launch" | "seed" | "notify" | "run" | "spawn"; ok: boolean;
-      deferred: boolean; dest?: "worktree" | "new-window" | "current-window";
-      prompt_mode?: PromptModeProp; repo_count?: number;
+      flow_uid: string; deferred: boolean; dest?: "worktree" | "new-window" | "current-window";
+      prompt_mode?: PromptModeProp; repo_count?: number; retries_used?: number; depth?: number;
     }
   // The flow has nothing left to do: every edge is stamped or errored. Derived,
   // not stored — the model has no terminal state — and emitted on the TRANSITION
   // only, so a settled flow left armed on the board does not re-report it every
   // six seconds.
-  | { name: "flow_settled"; node_count: number; edge_count: number }
+  //
+  // The two counts turn "settled" into an OUTCOME rather than just an end: a flow
+  // whose rules all expired reached the same terminal state as one whose rules all
+  // fired, and only this split tells them apart. `expired_count + errored_count`
+  // against `edge_count` is the whole health read for a workflow.
+  | { name: "flow_settled"; flow_uid: string; node_count: number; edge_count: number; expired_count: number; errored_count: number }
+  // A rule that never got its condition and settled as EXPIRED — the third
+  // terminal state 0.68.0 added, and the one a fired/errored-only catalog cannot
+  // see at all. `within_min` is the rule's own WITHIN (the number the user typed,
+  // which is a duration and not a user string); `waited_ms` is how long it was
+  // genuinely waiting, which is not the same thing — the clock pauses while the
+  // flow is disarmed and restarts on re-arm, so a rule with a 60-minute deadline
+  // can expire after three days of wall time. The gap between the two is the
+  // measure of how much of a workflow's life is spent disarmed.
+  | { name: "flow_rule_expired"; flow_uid: string; edge_action: FlowActionProp; within_min: number; waited_ms: number }
+  // One per retry DECISION on a rule that carries a RETRY: `gave_up: false` is an
+  // attempt scheduled (the journal's `retrying` line), `gave_up: true` is the last
+  // failure with no attempts left. Retries are off by default, so the absence of
+  // this event across an install is itself the adoption answer.
+  | { name: "flow_rule_retried"; flow_uid: string; edge_action: FlowActionProp; attempt: number; max: number; gave_up: boolean }
+  // Every answer to a spend gate, under BOTH consent modes — `mode` is
+  // `agentFlow.commandConsent` as it stood when the modal opened, so the split
+  // between the default `flow` gate and the new per-command one is readable
+  // without joining to the settings snapshot.
+  //
+  // `answer` is the modal's own outcome: `once` / `batch` / `always` are the three
+  // approving buttons (`batch` is "Run the next 5" — the bound itself is not sent,
+  // being a constant of ours rather than a fact about the user), `disarm` is the
+  // refusing one, and `dismissed` is Escape. `disarm` is the single most useful
+  // property in this catalog for "where do people drop": a user who reads what a
+  // workflow is about to do and turns it off is telling us the workflow was
+  // mis-wired, and nothing else we send says that.
+  | {
+      name: "flow_consent_answered"; flow_uid: string; mode: "flow" | "command";
+      action: "launch" | "seed" | "run";
+      answer: "once" | "batch" | "always" | "disarm" | "dismissed";
+    }
+  // A subflow node's outcome. `spawned` is a child started (the fire itself is
+  // also a `flow_edge_fired` with `edge_action: "spawn"`; this adds the depth it
+  // reached), `finished` is the parent's "the subflow finished" condition being
+  // met, and `refused` is a start the model would not perform — `self` for a
+  // template that starts itself, `depth` for the three-deep stop. `flow_uid` is
+  // the PARENT's, so a refusal and the flow it refused in are one row.
+  //
+  // No template id and no flow name: a template id is a user-authored string.
+  | {
+      name: "flow_subflow"; flow_uid: string; event: "spawned" | "finished" | "refused";
+      depth: number; refusal?: "self" | "depth";
+    }
+  // One per orchestrator pass performed OUTSIDE the editor by `dist/tick.js`
+  // (cron, launchd). Nothing else reports these at all, so an install that runs
+  // its workflows headlessly is currently invisible in every funnel.
+  //
+  // A pass-level summary rather than per-rule events on purpose: the headless
+  // path is a short-lived process that must flush and exit, and one event per
+  // tick keeps that bounded whatever the flow count. Every count is a sum over
+  // the pass's own `FlowReport`s (headless/pass.ts), so this event says exactly
+  // what the tick printed to the cron log and nothing more.
+  //
+  // `needs_editor` is the number that says whether a headless setup is doing
+  // what its owner hoped: those are met rules the tick refuses outright (launch,
+  // seed and ask), and a user whose every tick reports nothing but those has
+  // scheduled a job that can never do anything.
+  | {
+      name: "headless_tick"; dry_run: boolean; flow_count: number; armed_count: number;
+      fired: number; notified: number; errored: number; expired: number;
+      needs_editor: number; needs_consent: number; disarmed_at_ceiling: number; duration_ms: number;
+    }
   // Fires on every open of the Marketplace panel. `revealed: true` is an
   // already-open panel refocused — its counts are the last scan's, kept on the
   // panel instance. A reveal that lands in the async window between the panel's

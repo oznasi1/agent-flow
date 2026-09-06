@@ -23,7 +23,9 @@ import { discoverRepos } from "../engine/repos";
 import { resolveForge } from "../engine/forge/registry";
 import { loadSettings } from "./settings";
 import { headlessStatuses, refreshWatchedPrs } from "./statuses";
-import { PassReport, runHeadlessPass } from "./pass";
+import { FlowReport, PassReport, runHeadlessPass } from "./pass";
+import type { UsageEvent } from "../telemetry/events";
+import { sendHeadless } from "./telemetry";
 
 export interface Args {
   settings?: string;
@@ -79,6 +81,36 @@ export function reportLines(r: PassReport, dryRun: boolean): string[] {
   return out;
 }
 
+/** The pass, summarised for telemetry — one event, whatever the flow count,
+ * because the tick is a short-lived process that must flush and exit.
+ *
+ * Pure and exported so the summary can be tested without driving `main()`, which
+ * would otherwise be the only way to reach it and would put a real network send
+ * one forgotten mock away from the unit suite.
+ *
+ * Every number is a sum over the pass's own `FlowReport`s, so this event says
+ * exactly what the tick printed to the cron log and nothing more — no flow id,
+ * no flow name, no rule sentence, no error text. */
+export function tickEvent(report: PassReport, flowsOnDisk: number, dryRun: boolean, durationMs: number): UsageEvent {
+  const sum = (pick: (f: FlowReport) => number) => report.flows.reduce((n, f) => n + pick(f), 0);
+  return {
+    name: "headless_tick", dry_run: dryRun,
+    // Every flow on disk against the ones this pass judged: the gap is how many
+    // workflows a user keeps around but leaves disarmed.
+    flow_count: flowsOnDisk, armed_count: report.flows.length,
+    fired: sum((f) => f.fired.length),
+    notified: sum((f) => f.notified.length),
+    errored: sum((f) => f.errored.length),
+    expired: sum((f) => f.expired.length),
+    needs_editor: sum((f) => f.needsEditor.length),
+    needs_consent: sum((f) => f.needsConsent.length),
+    // A flow disarms at its ceiling at most once per pass, so this counts flows,
+    // not lines.
+    disarmed_at_ceiling: sum((f) => (f.disarmedAtCeiling === undefined ? 0 : 1)),
+    duration_ms: durationMs,
+  };
+}
+
 export async function main(argv: string[], print: (l: string) => void = console.log): Promise<number> {
   const args = parseArgs(argv);
   if ("error" in args) {
@@ -102,6 +134,9 @@ export async function main(argv: string[], print: (l: string) => void = console.
   }
   const log = (m: string) => print(`  ${m}`);
   const nowMs = Date.now();
+  // The whole pass, forge fetch included, because that is what a cron schedule
+  // actually costs the machine — not just the part that touched flows.
+  const startedAt = Date.now();
   const flowsDir = defaultFlowsDir();
   const runs = readRuns(defaultRunsDir());
   const flows = readFlows(nodeFlowIo(), flowsDir);
@@ -144,6 +179,18 @@ export async function main(argv: string[], print: (l: string) => void = console.
     token: `tick-${process.pid}-${newFlowId(nowMs)}`,
   });
   for (const l of reportLines(report, args.dryRun)) print(l);
+  // Nothing at all when another process held the lock: no pass ran, so there is
+  // no pass to report, and a tick that fired every minute against a busy lock
+  // would otherwise report far more often than it ever did any work.
+  //
+  // Awaited before the exit code is returned — the process is about to end, and
+  // an unflushed event is a lost one. `sendHeadless` never throws and never
+  // sends without both consent gates and the extension's own identity file, so
+  // a machine that has not opted in does no work here beyond one absent-file
+  // read.
+  if (report.lock === "held") {
+    await sendHeadless(tickEvent(report, flows.length, args.dryRun, Date.now() - startedAt), { raw: loaded.raw, log });
+  }
   return report.lock === "busy" ? 2 : 0;
 }
 

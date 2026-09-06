@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   emptyFlow, isPlace, isPlanned, isNotify, isCommand, isGate, isSettled, isSpendAction, findNode, gateAskEdge,
-  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy, hasCeiling, overCeiling, spendTotal, isPerformedAction, isSubflow, subflowDone, bindSubflow, subflowDepth, MAX_SUBFLOW_DEPTH, SubflowNode,
+  incomingEdges, actionFor, edgeAction, condIncomplete, stripHostStamps, nextNodeId, nextEdgeId, hasDeadline, deadlineAt, outputContains, Condition, retryPending, retryPolicy, hasCeiling, overCeiling, spendTotal, isPerformedAction, isSubflow, subflowDone, bindSubflow, subflowDepth, MAX_SUBFLOW_DEPTH, SubflowNode, analyticsShape,
   Flow, FlowEdge, FlowNode, PlaceNode, PlannedNode, NotifyNode, GateNode,
 } from "../../../../src/engine/orchestrator/model";
 
@@ -513,5 +513,80 @@ describe("a subflow node", () => {
     const loopB: Flow = { ...emptyFlow("y", "y", 0), parentFlow: "x" };
     expect(subflowDepth(loopA, [loopA, loopB])).toBe(1);
     expect(MAX_SUBFLOW_DEPTH).toBe(3);
+  });
+});
+
+describe("analyticsShape", () => {
+  const cmd = (id: string): FlowNode => ({ id, kind: "command", x: 0, y: 0, join: "any", commandId: "deploy" });
+  const sub = (id: string): SubflowNode => ({ id, kind: "subflow", x: 0, y: 0, join: "any", templateId: "t1" });
+
+  it("counts nothing for a flow that uses none of it", () => {
+    const f: Flow = { ...emptyFlow("f1", "n", 1), nodes: [place("p1"), notify("n1")], edges: [edge("e1", "p1", "n1")] };
+    expect(analyticsShape(f)).toEqual({
+      withDeadline: 0, withRetry: 0, withOutputCondition: 0, subflowNodes: 0,
+    });
+  });
+
+  it("counts deadlines, output conditions and subflow nodes", () => {
+    const f: Flow = {
+      ...emptyFlow("f1", "n", 1),
+      nodes: [place("p1"), notify("n1"), cmd("c1"), sub("s1"), sub("s2")],
+      edges: [
+        edge("e1", "p1", "n1", { timeoutMinutes: 30 }),
+        edge("e2", "p1", "c1", { timeoutMinutes: 60, cond: { kind: "command-printed", text: "ROLLBACK" } }),
+        edge("e3", "p1", "s1"),
+      ],
+    };
+    expect(analyticsShape(f)).toEqual({
+      withDeadline: 2, withRetry: 0, withOutputCondition: 1, subflowNodes: 2,
+    });
+  });
+
+  it("ignores a deadline that is not a usable one", () => {
+    // A flow file is hand-editable and `validEdge` admits an edge on its `cond`
+    // alone, so `0`, a negative, and a string all reach here. `hasDeadline` reads
+    // every one of them as "no deadline", and this must agree with it — a count
+    // that disagreed with the engine would report adoption for rules that can
+    // never expire.
+    const f: Flow = {
+      ...emptyFlow("f1", "n", 1),
+      nodes: [place("p1"), notify("n1")],
+      edges: [
+        edge("e1", "p1", "n1", { timeoutMinutes: 0 }),
+        edge("e2", "p1", "n1", { timeoutMinutes: -5 }),
+        edge("e3", "p1", "n1", { timeoutMinutes: "10" as unknown as number }),
+      ],
+    };
+    expect(analyticsShape(f).withDeadline).toBe(0);
+  });
+
+  it("counts a retry only where the rule could actually take one", () => {
+    // The distinction the adoption read depends on. A RETRY typed onto a notify
+    // is inert — `retryPolicy` refuses it, `applyFired` never asks — and counting
+    // it would report uptake for a feature the user has not actually got. Same
+    // for a command without its explicit `retryOk` tick, which is the one case
+    // the feature is most careful about.
+    const f: Flow = {
+      ...emptyFlow("f1", "n", 1),
+      nodes: [place("p1"), planned("pl1"), notify("n1"), cmd("c1")],
+      edges: [
+        edge("e1", "p1", "pl1", { retry: { max: 3, backoffMs: 1_000 } }),
+        edge("e2", "p1", "n1", { retry: { max: 3, backoffMs: 1_000 } }),
+        edge("e3", "p1", "c1", { retry: { max: 3, backoffMs: 1_000 } }),
+        edge("e4", "p1", "c1", { retry: { max: 3, backoffMs: 1_000 }, retryOk: true }),
+      ],
+    };
+    expect(analyticsShape(f).withRetry).toBe(2);
+  });
+
+  it("counts a rule whose target is missing as carrying no retry", () => {
+    // `edgeAction` returns undefined for a dangling target, and `retryPolicy`
+    // refuses an undefined action — so this cannot throw and cannot over-count.
+    const f: Flow = {
+      ...emptyFlow("f1", "n", 1),
+      nodes: [place("p1")],
+      edges: [edge("e1", "p1", "gone", { retry: { max: 2, backoffMs: 0 } })],
+    };
+    expect(analyticsShape(f).withRetry).toBe(0);
   });
 });

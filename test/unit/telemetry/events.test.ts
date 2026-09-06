@@ -27,7 +27,7 @@ const SAMPLES = [
     remote_control: "off", default_filter: "mysprint", task_mode: "ask",
     seed_agent: true, filters_size: true, filters_status: true, filters_repo: true,
     filters_search: true, pr_review_auto_fix: true, pr_facts: true, review_requests: true,
-    open_agents: true, review_writes: false, merge_writes: false, merge_method: "squash", orchestrator: false, child_worktrees: false, stamp_label_on_write: true, track_open_windows: true,
+    open_agents: true, review_writes: false, merge_writes: false, merge_method: "squash", orchestrator: false, command_consent: "flow", child_worktrees: false, stamp_label_on_write: true, track_open_windows: true,
     batch_confirm_threshold: 6, repo_blocklist_count: 0, commands_count: 0,
     prompt_modes_count: 6, prompt_modes_overridden: 0, prompt_modes_custom: 0, prompt_modes_hidden: 0,
     explore_prompts_customized: false, environments_customized: false,
@@ -54,9 +54,19 @@ const SAMPLES = [
   { name: "explore_started", flow_id: "f1", mode: "debug", source: "command" },
   { name: "explore_completed", flow_id: "f1", outcome: "cancelled", mode: "debug", cancel_point: "topic", repo_count: 2, duration_ms: 30 },
   { name: "flow_action", action: "dry_run", edge_count: 3, fired_count: 1, blocked_count: 0 },
-  { name: "flow_armed", armed: true, node_count: 4, edge_count: 3, unfirable_live: 0, unfirable_pr_facts: 1, unfirable_forge: 0, source: "toggle" },
-  { name: "flow_edge_fired", edge_action: "launch", ok: true, deferred: false, dest: "worktree", prompt_mode: "implementation", repo_count: 1 },
-  { name: "flow_settled", node_count: 4, edge_count: 3 },
+  {
+    name: "flow_armed", armed: true, flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e",
+    node_count: 4, edge_count: 3, unfirable_live: 0, unfirable_pr_facts: 1, unfirable_forge: 0,
+    has_ceiling: true, spend_total: 6, rules_with_deadline: 2, rules_with_retry: 1,
+    rules_with_output_condition: 0, subflow_node_count: 1, source: "toggle",
+  },
+  { name: "flow_edge_fired", edge_action: "launch", ok: true, flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", deferred: false, dest: "worktree", prompt_mode: "implementation", repo_count: 1, retries_used: 2, depth: 1 },
+  { name: "flow_settled", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", node_count: 4, edge_count: 3, expired_count: 1, errored_count: 0 },
+  { name: "flow_rule_expired", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", edge_action: "run", within_min: 60, waited_ms: 3_600_000 },
+  { name: "flow_rule_retried", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", edge_action: "launch", attempt: 2, max: 3, gave_up: false },
+  { name: "flow_consent_answered", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", mode: "command", action: "run", answer: "batch" },
+  { name: "flow_subflow", flow_uid: "b9f1c2d4-5e6a-4b7c-8d9e-0f1a2b3c4d5e", event: "refused", depth: 3, refusal: "depth" },
+  { name: "headless_tick", dry_run: false, flow_count: 5, armed_count: 2, fired: 3, notified: 1, errored: 0, expired: 1, needs_editor: 2, needs_consent: 0, disarmed_at_ceiling: 0, duration_ms: 812 },
   { name: "marketplace_opened", revealed: false, asset_count: 7, plugin_count: 2, marketplace_count: 1, skills: 3, commands: 2, agents: 1, hooks: 1, not_set_up: false },
   { name: "marketplace_action", action: "read", truncated: true },
   { name: "tasks_fetched", filter: "sprint", lens: "mysprint", size: "any", task_count: 12, repo_count: 3, live_window_count: 2, authed: true },
@@ -85,7 +95,7 @@ describe("the event catalog", () => {
   it("covers every Phase 1 event exactly once", () => {
     const names = SAMPLES.map((e) => e.name);
     expect(new Set(names).size).toBe(names.length);
-    expect(names).toHaveLength(33);
+    expect(names).toHaveLength(38);
   });
 
   it("carries no free-form strings outside the allow-list", () => {
@@ -108,8 +118,13 @@ describe("the event catalog", () => {
     }
   });
 
-  it("allow-lists only the three opaque string properties", () => {
-    expect([...OPEN_STRING_PROPS].sort()).toEqual(["error_class", "flow_id", "stack_digest"].sort());
+  it("allow-lists only the four opaque string properties", () => {
+    // Both open ids are random UUIDs minted by us and derived from nothing about
+    // the user: `flow_id` per Take (telemetry.ts's `startFlow`), `flow_uid` per
+    // orchestrator workflow (`Flow.analyticsId`). Neither is the orchestrator's
+    // own clock-derived flow id, which is absent from this list because it is
+    // never sent in any form, hashed or otherwise.
+    expect([...OPEN_STRING_PROPS].sort()).toEqual(["error_class", "flow_id", "flow_uid", "stack_digest"].sort());
   });
 });
 

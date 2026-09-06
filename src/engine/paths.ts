@@ -7,6 +7,14 @@ import * as path from "path";
  * and the activity read cannot drift onto two different roots. A function
  * rather than a module-level const because `os.homedir()` at import time is a
  * needless load-order dependency in a module the extension host loads early. */
+/** `~/.agentflow` — the cross-window state root: `runs/`, `plans/`, `flows/`,
+ * and the headless identity file beside them. Each of those still builds its own
+ * path today; this exists for the one caller that wants the ROOT rather than a
+ * subdirectory, and is the honest place to name it. */
+export function agentFlowDir(): string {
+  return path.join(os.homedir(), ".agentflow");
+}
+
 export function claudeProjectsRoot(): string {
   return path.join(os.homedir(), ".claude", "projects");
 }

@@ -85,10 +85,21 @@ truncated to at most 20 frames and 2,048 bytes (`MAX_STACK_FRAMES` /
   *within* a single install's event stream (e.g. "did this same ticket's Take
   fail twice?") — cross-user or cross-install aggregation of a fingerprint is
   impossible by construction, not merely avoided by policy.
+- **`flow_uid`** (on the Orchestrator events) is a random UUID minted per
+  *workflow*, stored in that workflow's file under `~/.agentflow/flows`, and
+  derived from nothing about you, your machine or the workflow. It exists so a
+  workflow's own events join up — armed, fired, expired, settled — and it is the
+  **only** workflow identifier ever sent. The Orchestrator's own `Flow.id` is
+  built from a clock plus a short salt, so it is neither random nor ours: it is
+  never sent, not even as a hash, because hashing a low-entropy time-ordered
+  value is reversible by anyone who can guess the minute. A workflow's *name* is
+  user-authored text and is never sent either.
+- **`flow_id`** (on the Take and Explore funnels) is a different thing with a
+  similar name: a random UUID minted per *launch*, in memory, never stored.
 
 ## The event catalog
 
-33 event types ship today. Every property not listed under "always attached
+38 event types ship today. Every property not listed under "always attached
 automatically" below is specific to the event named.
 
 Attached automatically to **every** event, usage and error alike: `session_id`,
@@ -124,9 +135,14 @@ Suppressed entirely when `telemetry.telemetryLevel` is `"error"` (or lower).
 | `explore_started` | `flow_id`; `mode`: one of `"jiraTicket"`, `"knowledge"`, `"debug"`, `"general"`, `"supervise"`, `"verify"`, or `"custom"` (a user-authored `agentFlow.exploreActions` id collapses to this); `source`: `"command"` (the Explore command/action picker) \| `"notepad"` (a notepad item's Run button, which always carries `mode: "general"`, the topic-agnostic action it borrows) | Fires once a mode actually exists: right after the Explore action picker resolves, or immediately for a notepad run (whose mode is fixed). |
 | `explore_completed` | `flow_id`; `outcome`: `"launched"` \| `"cancelled"` \| `"failed"`; `mode` (same vocabulary as `explore_started`); `cancel_point?`: `"remote-control"` \| `"repos"` \| `"action"` \| `"topic"` \| `"env"` \| `"kickoff"` \| `"agent"` (present only for `outcome: "cancelled"`); `env_picked?`: `"listed"` \| `"custom"` (present only when the "verify" action's environment step ran); `destination?`; `provider?`; `seeded_in_place?: boolean`; `repo_count`, `duration_ms: number`; `failure_class?` | The Explore/notepad-run funnel's terminator — exactly one per call, from whichever exit it reaches. The two pre-mode cancels (`"remote-control"`, `"repos"`) report the CONFIGURED mode (`agentFlow.exploreMode`, `"ask"` collapsed to `"custom"`) rather than a picked one, since no mode has been chosen yet — `explore_started` does not fire for those two. The topic, slug, and environment name are user strings and never sent; `env_picked` records only listed-vs-custom, never the name itself. |
 | `flow_action` | `action`: one of `"create"`, `"rename"`, `"save"`, `"delete"`, `"add_planned"`, `"reset_edge"`, `"resume_approve"`, `"resume_disarm"`, `"save_command"`, `"dry_run"`, `"answer_gate"`, `"open_output"`, `"attach"`, `"detach"`, `"save_template"`, `"rename_template"`, `"delete_template"`, `"duplicate_template"`; `node_count?`, `edge_count?` (present for `save`); `edge_count?`, `fired_count?`, `blocked_count?` (present for `dry_run`) | One per orchestrator gesture that actually did something — a message naming a flow the host does not hold is refused and emits nothing. For `dry_run`, `blocked_count` is every *pending* rule that would not fire on this pass (waiting, held by the launch cap, unobservable, or configured with a blank parameter), so `fired_count + blocked_count` need not equal `edge_count`: a rule that has already fired is in neither. `open_output` fires only once an editor tab actually opened — a refusal (nothing journaled, this step never ran, or the run left no output) is a toast, never this event. `attach`/`detach`/`save_template`/`rename_template`/`delete_template`/`duplicate_template` (the workflow-template gestures) carry none of the counts above. The flow's id, its name, the template's id and name, the command text saved by `save_command`, the command's own output and every rule's own configuration stay on the machine. |
-| `flow_armed` | `armed: boolean`; `node_count`, `edge_count: number`; `unfirable_live`, `unfirable_pr_facts`, `unfirable_forge: number`; `source`: `"toggle"` (the drawer's Arm button) \| `"resume-banner"` (Disarm on a held flow) \| `"auto-skip"` | A flow is armed or disarmed. The three `unfirable_*` counts are the split of rules that can never fire as configured — the same numbers the arm warning shows — and are reported only where the code computes them, which is an arm from the toggle; every disarm reports zeroes, because nothing computes armability when a flow is being switched off. `"auto-skip"` is not a gesture: it is a poll in flight noticing that the flow was disarmed under it (from another window, say) and stopping before it spends anything — at most one per flow per pass, however many rules that pass had left to act on. |
-| `flow_edge_fired` | `edge_action`: `"launch"` \| `"seed"` \| `"notify"` \| `"run"`; `ok: boolean`; `deferred: boolean`; `dest?`: `"worktree"` \| `"new-window"` \| `"current-window"`; `prompt_mode?` (same vocabulary as `take_prompt_mode_picked`); `repo_count?: number` | One per rule an armed flow actually performed — at most three per six-second pass (the per-pass launch cap), never one per evaluation, and never for a rule merely stamped alongside one that acted. `deferred: true` means a pre-flight read failed, so nothing was spent and a later pass retries; `ok: false` with `deferred: false` is a rule that tried and latched. The launch trio (`dest`, `prompt_mode`, `repo_count`) comes from the planned node the rule points at and is present for launches only. `"notify"` is reserved and unused: a notify spends nothing and is not performed through this seam. Never carries the ticket key, the repo names, the command, or the receipt text. |
-| `flow_settled` | `node_count`, `edge_count: number` | The flow has nothing left to do — every rule has fired or errored. Derived rather than stored (the flow model has no terminal state) and emitted on the transition only, so a finished flow left armed on the board does not re-report itself on every poll. |
+| `flow_armed` | `armed: boolean`; `flow_uid` (see below); `node_count`, `edge_count: number`; `unfirable_live`, `unfirable_pr_facts`, `unfirable_forge: number`; `has_ceiling: boolean`; `spend_total: number`; `rules_with_deadline`, `rules_with_retry`, `rules_with_output_condition`, `subflow_node_count: number`; `source`: `"toggle"` (the drawer's Arm button) \| `"resume-banner"` (Disarm on a held flow) \| `"auto-skip"` \| `"ceiling"` | A flow is armed or disarmed. The three `unfirable_*` counts are the split of rules that can never fire as configured — the same numbers the arm warning shows — and are reported only where the code computes them, which is an arm from the toggle; every disarm reports zeroes, because nothing computes armability when a flow is being switched off. `"auto-skip"` is not a gesture: it is a poll in flight noticing that the flow was disarmed under it (from another window, say) and stopping before it spends anything — at most one per flow per pass, however many rules that pass had left to act on. `"ceiling"` is the pass disarming the flow itself because its next spend would cross `spendCeiling`. The four shape counts say how many of this workflow's rules carry a deadline, a retry or an output condition, and how many of its nodes are subflows — counts only, never a deadline's minutes, a retry's backoff, an output condition's text or a subflow's template id. `spend_total` is the flow's lifetime sessions-plus-commands as its own journal records them. |
+| `flow_edge_fired` | `edge_action`: `"launch"` \| `"seed"` \| `"notify"` \| `"run"` \| `"spawn"`; `ok: boolean`; `flow_uid`; `deferred: boolean`; `dest?`: `"worktree"` \| `"new-window"` \| `"current-window"`; `prompt_mode?` (same vocabulary as `take_prompt_mode_picked`); `repo_count?: number`; `retries_used?: number`; `depth?: number` | One per rule an armed flow actually performed — at most three per six-second pass (the per-pass launch cap), never one per evaluation, and never for a rule merely stamped alongside one that acted. `deferred: true` means a pre-flight read failed, so nothing was spent and a later pass retries; `ok: false` with `deferred: false` is a rule that tried and latched. The launch trio (`dest`, `prompt_mode`, `repo_count`) comes from the planned node the rule points at and is present for launches only. `"notify"` is reserved and unused: a notify spends nothing and is not performed through this seam. `retries_used` is present only on a rule that has a retry configured — absent means retries are not configured here, which is deliberately distinguishable from a present `0`. `depth` is present only inside a workflow a subflow node started. Never carries the ticket key, the repo names, the command, or the receipt text. |
+| `flow_settled` | `flow_uid`; `node_count`, `edge_count: number`; `expired_count`, `errored_count: number` | The flow has nothing left to do — every rule has fired, expired or errored. Derived rather than stored (the flow model has no terminal state) and emitted on the transition only, so a finished flow left armed on the board does not re-report itself on every poll. The two counts split the terminal states, which is what tells a workflow that finished from one that merely ran out of time. |
+| `flow_rule_expired` | `flow_uid`; `edge_action`; `within_min: number`; `waited_ms: number` | One per rule whose deadline (its **WITHIN**) ran out before its condition arrived — the third terminal state, beside fired and errored. `within_min` is the deadline the rule was given; `waited_ms` is how long it was genuinely waiting, which is not the same span: the clock pauses while the flow is disarmed and restarts on re-arm, so a 60-minute deadline can expire across days of wall time. No rule id, node id, or condition parameter. |
+| `flow_rule_retried` | `flow_uid`; `edge_action`; `attempt`, `max: number`; `gave_up: boolean` | One per retry decision on a rule that carries a **RETRY**: `gave_up: false` is another attempt scheduled, `gave_up: true` is the last failure with no attempts left. Only rules whose retry could actually be taken are reported, so a RETRY typed onto a rule that can never use one (a notify, or a command without its explicit *safe to re-run* tick) emits nothing. The backoff wait is not sent. |
+| `flow_consent_answered` | `flow_uid`; `mode`: `"flow"` \| `"command"`; `action`: `"launch"` \| `"seed"` \| `"run"`; `answer`: `"once"` \| `"batch"` \| `"always"` \| `"disarm"` \| `"dismissed"` | Every answer to a spend gate, under both consent modes (`agentFlow.commandConsent`). Emitted on all outcomes including Escape (`"dismissed"`), because a dismissed question writes nothing and would otherwise be indistinguishable from a window closed before the modal was read. In the default `flow` mode the single approving button reports as `"always"` — it approves every command that workflow will ever have. Never carries the command text, the workflow name, or the note. |
+| `flow_subflow` | `flow_uid` (the **parent's**); `event`: `"spawned"` \| `"finished"` \| `"refused"`; `depth: number`; `refusal?`: `"self"` \| `"depth"` | A subflow node's outcome: a child started, a child's rules all settled (the parent's *the subflow finished* condition being met), or a start the model refused — `"self"` for a template that starts itself, `"depth"` for the three-deep stop. Never carries the template id or either flow's name. |
+| `headless_tick` | `dry_run: boolean`; `flow_count`, `armed_count`, `fired`, `notified`, `errored`, `expired`, `needs_editor`, `needs_consent`, `disarmed_at_ceiling`, `duration_ms: number` | One per orchestrator pass performed outside the editor by `dist/tick.js` (cron, launchd). A pass-level summary rather than per-rule events, because the headless path is a short-lived process that must flush and exit. `needs_editor` counts rules the tick left alone because it cannot perform them at all (launch, seed and ask) — a tick reporting nothing else is a job that can never do anything. Every count is a sum over the same per-flow report the tick prints to your cron log. See [Headless passes](#headless-passes) below for how consent and identity work there. |
 | `marketplace_opened` | `revealed: boolean`; `asset_count`, `plugin_count`, `marketplace_count: number`; `skills`, `commands`, `agents`, `hooks: number` (`view.assets` grouped by `AssetType`); `not_set_up: boolean` | Every open of the Marketplace panel. `revealed: true` is an already-open panel refocused, reporting the last scan's counts kept on the panel instance; `revealed: false` fires once, at the first `render()` this panel instance completes — never on a later re-render (a stale re-focus, `mkt:refresh`). |
 | `marketplace_action` | `action`: one of `"open"`, `"reveal"`, `"read"`, `"copy"`, `"open_external"`; `allowed?: boolean` (present for `"open"`/`"reveal"` — whether the file was on the last scan's allow-list, emitted whether or not the case goes on to act); `truncated?: boolean` (present for `"read"` only, once the file was actually read — a refused read emits nothing) | Every `onMessage` click-shaped gesture on the Marketplace panel. No file path, asset name, or URL is ever a property. |
 | `tasks_fetched` | `filter` (requested, same vocabulary as `default_filter`'s non-sentinel values): `"unassigned"` \| `"mine"` \| `"mysprint"` \| `"sprint"` \| `"backlog"` \| `"all"`; `lens` (same vocabulary — what `effectiveFilter` actually clamped `filter` to); `size`: `"any"` \| `"s"` \| `"m"` \| `"l"`; `task_count`, `repo_count: number`; `live_window_count?: number` (present only when `agentFlow.trackOpenWindows` is on); `authed: boolean` | Every `fetch` — this **is** the lens-usage signal, since a lens/tab change re-fetches. `filter` and `lens` differ exactly when a webview left open across a `taskSource` change asks for a lens the new source cannot serve. The unauthenticated early return (no provider to clamp against) reports `lens` equal to the requested `filter`, zero counts, and `authed: false`. |
@@ -216,24 +232,56 @@ directly, so a per-task failure is still visible without waiting for
 the Take funnel accepts above, not a second classification of a different
 failure.
 
+### Headless passes
+
+`dist/tick.js` runs an orchestrator pass from cron or launchd, with no editor
+around it. It reports one `headless_tick` per pass, and nothing else — no
+per-rule events, because the tick is a short-lived process that must flush and
+exit, and one event per tick keeps that bounded whatever the flow count.
+
+Two things work differently out there, and both are deliberately stricter than
+the editor:
+
+- **Consent is read twice, from your `settings.json`.** In a window,
+  `TelemetryLogger` enforces your global `telemetry.telemetryLevel` before Agent
+  Flow Deck's own `agentFlow.telemetry.enabled` is ever consulted. Nothing does
+  that in a bare node process, so the tick reads **both** from the same settings
+  file it already loaded, and both must say yes: anything but
+  `telemetry.telemetryLevel: "all"` sends nothing.
+- **The tick mints no identifier.** It cannot read `vscode.env.machineId`, and it
+  will not invent an id — a tick that did would look like a brand-new user on
+  every cron run. It reads `distinct_id` from `~/.agentflow/telemetry.json`,
+  which the extension writes **only while telemetry is enabled**. No file, no
+  events. An install that has never run the extension with telemetry on is an
+  install the tick stays silent about, whatever its settings say.
+
+That file holds one value, `distinctId`, which is the same anonymous VS Code
+machine id every ordinary event already carries. The fingerprint salt is
+deliberately *not* stored there: a headless pass sends no fingerprinted value, so
+it has no business holding the salt that would let it.
+
+A pass that found the flows lock held by another Deck or tick reports nothing at
+all — no pass ran, so there is nothing to report.
+
 ### Settings snapshot
 
-`extension_activated` includes a 43-field reduction of your configuration,
+`extension_activated` includes a 44-field reduction of your configuration,
 built by `settingsSnapshot()`. Every field is either a boolean, a count, or a
 value drawn from a fixed, shipped set of choices — never a user-authored string:
 
 | Field | Values |
 |---|---|
 | `workspace_mode`, `open_in`, `review_open_in`, `agent_provider`, `agent_surface`, `explore_mode`, `worktree`, `remote_control`, `default_filter`, `task_source`, `forge` | One of that setting's shipped choices, or the literal string `"invalid"` |
+| `command_consent` | `"flow"` (the default), `"command"`, or `"invalid"` — which shell-consent gate this install runs |
 | `task_mode`, `review_mode` | `"ask"`, `"stock"` (pinned to a shipped mode), or `"custom"` |
 | `merge_method` | One of `"squash"`, `"merge"`, `"rebase"` — never `"invalid"` in practice: `getConfig()` itself already collapses an unrecognized `agentFlow.mergeMethod` to `"squash"` before this snapshot ever sees it |
 | `seed_agent`, `filters_size`, `filters_status`, `filters_repo`, `filters_search`, `pr_review_auto_fix`, `pr_facts`, `review_requests`, `open_agents`, `review_writes`, `merge_writes`, `orchestrator`, `child_worktrees`, `stamp_label_on_write`, `track_open_windows` | `true` / `false` |
 | `batch_confirm_threshold`, `repo_blocklist_count`, `commands_count`, `prompt_modes_count`, `review_modes_count`, `prompt_modes_overridden`, `prompt_modes_custom`, `prompt_modes_hidden`, `review_modes_overridden`, `review_modes_custom`, `review_modes_hidden` | Numbers |
 | `explore_prompts_customized`, `environments_customized`, `pr_review_prompt_customized` | `true` / `false` — *whether* the corresponding user-authored text was changed from the shipped default, never the text itself |
 
-**The `"invalid"` sentinel.** Eleven of the fields above (`workspace_mode`,
+**The `"invalid"` sentinel.** Twelve of the fields above (`workspace_mode`,
 `open_in`, `review_open_in`, `agent_provider`, `agent_surface`, `explore_mode`, `worktree`,
-`remote_control`, `default_filter`, `task_source`, `forge`) can report the literal
+`remote_control`, `default_filter`, `task_source`, `forge`, `command_consent`) can report the literal
 string `"invalid"` instead of a real value. VS Code's settings UI only ever
 offers a valid choice for these — the shipped enum for most of them, or, for
 `task_source`/`forge`, whichever task connectors/forges are actually registered — but a

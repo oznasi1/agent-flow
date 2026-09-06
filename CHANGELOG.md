@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Analytics for everything 0.68.0 shipped.** Deadlines, retries, per-command
+  consent, subflows and the headless tick went out with no telemetry at all, so
+  none of them could be judged. Five new anonymous events answer whether each is
+  used, whether it works, and where people give up: `flow_rule_expired` (the
+  third terminal state, with the wait a rule actually served — its clock pauses
+  while a workflow is disarmed, so that number and the deadline differ),
+  `flow_rule_retried` (each attempt scheduled, and the give-up),
+  `flow_consent_answered` (every answer to a spend gate under both consent
+  modes, including Escape and the **Disarm** that says a workflow was
+  mis-wired), `flow_subflow` (started, finished, and the two nestings the model
+  refuses), and `headless_tick` (one summary per `dist/tick.js` pass, which
+  reported nothing before). `flow_armed` now also carries how many of a
+  workflow's rules use each feature, and `flow_settled` splits its terminal
+  states so a workflow that finished is distinguishable from one that ran out of
+  time.
+
+  Counts and fixed choices only, as ever: no command text, no output-condition
+  needle, no retry backoff, no ceiling, no template id, no workflow name. The
+  events of one workflow join up under `flow_uid`, a random UUID stored in that
+  workflow's own file — the Orchestrator's own flow id is built from a clock and
+  is still never sent, not even hashed. `agentFlow.commandConsent` joins the
+  settings snapshot.
+
+  The headless tick is stricter than the editor about both: it reads consent
+  **twice** from your `settings.json` (its own setting and the editor's
+  `telemetry.telemetryLevel`, since there is no `TelemetryLogger` out there to
+  enforce the second), and it mints no identifier — with no
+  `~/.agentflow/telemetry.json`, which the extension writes only while telemetry
+  is enabled, it sends nothing at all. All of it is off when
+  `agentFlow.telemetry.enabled` is off. See [docs/TELEMETRY.md](docs/TELEMETRY.md).
+
 ## [0.68.1] — 2026-09-06
 
 ### Security
