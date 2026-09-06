@@ -1937,6 +1937,28 @@ describe("passthrough messages", () => {
     expect(env.openExternal).toHaveBeenCalled();
   });
 
+  // Mirrors deckView's and marketplaceView's own openExternal guard. The URLs that
+  // reach here are third-party text — a connector's `url`, an href inside a ticket
+  // description Markdown renders — and `env.openExternal` hands a scheme straight to
+  // the OS, where `vscode://<publisher>.<ext>/…` reaches another extension's
+  // UriHandler and `file:`/`mailto:` leave the browser entirely.
+  it.each([
+    ["vscode", "vscode://some.ext/run?cmd=evil"],
+    ["file", "file:///Users/me/.ssh/id_rsa"],
+    ["javascript", "javascript:fetch('//evil')"],
+    ["mailto", "mailto:someone@example.test"],
+  ])("refuses to hand a %s: URL to the OS", async (_scheme, url) => {
+    const { send } = setup();
+    await send({ type: "openExternal", url });
+    expect(env.openExternal).not.toHaveBeenCalled();
+  });
+
+  it("opens a plain http link", async () => {
+    const { send } = setup();
+    await send({ type: "openExternal", url: "http://jira.internal/browse/PROJ-1" });
+    expect(env.openExternal).toHaveBeenCalled();
+  });
+
   it("routes signIn to the command", async () => {
     const { send } = setup();
     await send({ type: "signIn" });
