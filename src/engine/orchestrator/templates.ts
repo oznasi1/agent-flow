@@ -285,3 +285,103 @@ export function toTemplate(
     flow: normalizedTemplateFlow(flow, name, nodes),
   };
 }
+
+// ── Leaving the machine ───────────────────────────────────────────────────────
+//
+// A template is already an envelope built to be copied — `validTemplate` refuses
+// a schema it does not know, `instantiate` mints fresh ids — so export is the
+// envelope written to a file and import is the envelope read back, checked, and
+// re-minted. The design question is what an imported template does about repos
+// and prompt modes, and the answer is the built-in starters' answer
+// (starters.ts): `repos: []`, `mode: ""`, `cwdRepo` absent, and `instantiate`
+// fills them from the card and the config at attach time. A shape cannot know
+// another install's checkout names or prompt-mode ids, and a template that
+// carried them would launch into a repo this machine does not have.
+
+/** The envelope as text, for a file: the same JSON the store writes, indented so
+ * it can be read and diffed, and with the inner flow normalized on the way out —
+ * a template written by an older build could in theory carry a stamp, and a
+ * stamp must not leave the machine any more than it may arrive on one. A
+ * built-in starter exports like any other: it is a valid envelope. */
+export function exportedTemplate(t: FlowTemplate): string {
+  const out: FlowTemplate = {
+    schema: TEMPLATE_SCHEMA,
+    id: t.id,
+    name: t.name,
+    params: {},
+    savedAt: t.savedAt,
+    flow: normalizedTemplateFlow(t.flow, t.name, t.flow.nodes),
+  };
+  return `${JSON.stringify(out, null, 2)}\n`;
+}
+
+/** A safe default filename for the save dialog: the name slugged to
+ * `[a-z0-9-]`, then the template extension. Spelled `agentflow` in one word on
+ * purpose — the product is "Agent Flow", and a filename is not UI copy. */
+export function templateFileName(t: FlowTemplate): string {
+  const slug = t.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return `${slug || "template"}.agentflow-template.json`;
+}
+
+/** A fresh envelope from a parsed template file, or a throw whose message is the
+ * toast.
+ *
+ * Three things are never taken from the file. The `id` — the caller mints one,
+ * because the file's may collide with a template already here or carry
+ * `BUILTIN_PREFIX` (starters.ts), which `readTemplates` would then skip as a
+ * shadowing file. The launch bindings — every planned node's `repos`, `mode` and
+ * `ticketKey` are cleared and every command node's `cwdRepo` deleted, for the
+ * starters' reason above. And any history — `normalizedTemplateFlow` rebuilds
+ * the inner flow's literal, so `launchConfirmedAt`/`commandConfirmedAt`/
+ * `fromTemplate` cannot survive, strips every edge's host stamps, and drops a
+ * subflow node's `childFlowId`. Consent is asked here, about this machine's
+ * commands, or not at all.
+ *
+ * A `place` node is refused rather than demoted: `toTemplate` demotes one only
+ * with a `DemotionChoice` the save dialog asked for, and a file has nobody to
+ * ask. A template file should never contain one anyway — the store writes only
+ * what `toTemplate`/`normalizedTemplateFlow` produced. */
+export function importedTemplate(parsed: unknown, id: string, nowMs: number): FlowTemplate {
+  // Read `schema` before `validTemplate` so the refusal can say WHICH reason: a
+  // newer build's file is a different situation from a file that is not a
+  // template at all, and "update the extension" is the fix for only one of them.
+  const schema = typeof parsed === "object" && parsed !== null ? (parsed as { schema?: unknown }).schema : undefined;
+  if (typeof schema === "number" && schema > TEMPLATE_SCHEMA) {
+    throw new Error(
+      `this file uses template schema ${schema}, newer than this build knows (${TEMPLATE_SCHEMA}) — update Agent Flow Deck to import it`,
+    );
+  }
+  const t = validTemplate(parsed);
+  if (!t) throw new Error("that file is not an Agent Flow template");
+  // `validTemplate` shape-checks the envelope, not each node — the store trusts
+  // its own writes. A file from anywhere earns no such trust.
+  const nodes = t.flow.nodes as unknown[];
+  if (!nodes.every((n) => typeof n === "object" && n !== null && typeof (n as { kind?: unknown }).kind === "string")) {
+    throw new Error("that file is not an Agent Flow template");
+  }
+  if (t.flow.nodes.some(isPlace)) {
+    throw new Error("a template carries planned steps, not live sessions — this file names a session on the machine it came from");
+  }
+  const name = t.name.trim() || "Imported template";
+  if (!canBindTicket(t.flow)) {
+    throw new Error(`template ${JSON.stringify(name)} has no planned step: nothing to bind a ticket to`);
+  }
+
+  const unbound: FlowNode[] = t.flow.nodes.map((n) => {
+    if (isPlanned(n)) return { ...n, ticketKey: "", repos: [], mode: "" };
+    if (n.kind === "command") {
+      const { cwdRepo: _drop, ...rest } = n;
+      return rest;
+    }
+    return n;
+  });
+
+  return {
+    schema: TEMPLATE_SCHEMA,
+    id,
+    name,
+    params: {},
+    savedAt: nowMs,
+    flow: normalizedTemplateFlow(t.flow, name, unbound),
+  };
+}

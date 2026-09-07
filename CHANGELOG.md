@@ -20,6 +20,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `answered` line names who decided. Reset clears the tally with the other
   stamps. One login behaves exactly as before, on disk and on the thread.
 
+- **A template can leave the machine that drew it.** Every row on the Templates
+  view — the built-in starters included — gains **Export**, which writes the
+  template to a file of your choosing, and the view gains **Import…**, which reads
+  one back as a new template. The file is the same envelope `~/.agentflow/templates/`
+  keeps, indented so it can be read and diffed. Import re-mints the id, clears every
+  planned step's repos and prompt mode and every command's checkout (the card and
+  your settings fill them when you attach, the way the starters already work — a
+  shape cannot know another install's checkout names or prompt-mode ids), and drops
+  every host stamp and both consents, so an approval given on one machine never
+  travels to another. A file that is not a template, one written by a newer build's
+  schema, or one with nothing to bind a ticket to is refused with the reason.
+
 ## [0.70.0] — 2026-09-07
 
 ### Added

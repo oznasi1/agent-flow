@@ -3,7 +3,8 @@ import * as path from "path";
 import type { Flow, FlowEdge, FlowNode } from "../../../../src/engine/orchestrator/model";
 import { stripHostStamps } from "../../../../src/engine/orchestrator/model";
 import {
-  canBindTicket, instantiate, normalizedTemplateFlow, placesToDemote, toTemplate, validTemplate, type FlowTemplate,
+  canBindTicket, exportedTemplate, importedTemplate, instantiate, normalizedTemplateFlow, placesToDemote,
+  templateFileName, toTemplate, validTemplate, type FlowTemplate,
 } from "../../../../src/engine/orchestrator/templates";
 import { FlowIo, readFlows, writeFlow } from "../../../../src/engine/orchestrator/store";
 
@@ -398,5 +399,180 @@ describe("subflows in templates", () => {
     };
     const out = normalizedTemplateFlow(flow, "n", flow.nodes);
     expect(out.nodes[0]).toEqual({ id: "s", kind: "subflow", x: 0, y: 0, join: "any", templateId: "other" });
+  });
+});
+
+// ── Export / import: a template leaving the machine that drew it ──────────────
+//
+// A template is already an envelope built to be copied; these pin what the copy
+// must lose on the way in. The rule is the starters' rule (starters.ts): a shape
+// cannot know another install's checkout names or prompt-mode ids, so `repos`,
+// `mode` and `cwdRepo` are cleared and `instantiate` fills them from the card and
+// the config at attach time; and consent must never travel, so every stamp goes.
+describe("importedTemplate", () => {
+  const T0 = 1_760_000_000_000;
+
+  /** A file as another machine would have written it: populated repos and mode
+   * on the planned nodes, a command pinned to one of that machine's checkouts,
+   * and — hand-edited — every stamp a live flow could carry. */
+  const foreign = (): unknown => ({
+    schema: 1, id: "k3f9-ship", name: "  Ship it  ", params: {}, savedAt: 1,
+    flow: {
+      id: "f-old", name: "Ship it", armed: true, createdAt: 99, fromTemplate: "elsewhere",
+      launchConfirmedAt: 5, commandConfirmedAt: 6,
+      nodes: [
+        { id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "OTHER-9", repos: ["their-repo"], mode: "their-mode", dest: "new-window" },
+        { id: "n2", x: 100, y: 0, join: "all", kind: "command", run: "npm test", cwdRepo: "their-repo" },
+        { id: "n3", x: 200, y: 0, join: "any", kind: "gate", question: "Ship?", askWho: "alice" },
+        { id: "n4", x: 300, y: 0, join: "any", kind: "notify", message: "shipped" },
+        { id: "n5", x: 400, y: 0, join: "any", kind: "subflow", templateId: "other", childFlowId: "c9" },
+      ],
+      edges: [
+        { id: "e1", from: "n1", to: "n2", cond: { kind: "agent-ended-turn" }, firedAt: 7, error: "boom", note: "keep me", timeoutMinutes: 30, retry: { max: 2, everyMinutes: 5 } },
+        { id: "e2", from: "n2", to: "n3", cond: { kind: "command-succeeded" }, gateAnswer: "approved", performed: true },
+      ],
+    },
+  });
+
+  it("returns a fresh envelope: the caller's id, the import clock, a trimmed name, empty params", () => {
+    const t = importedTemplate(foreign(), "fNEW", T0);
+    expect(validTemplate(t)).toBe(t);
+    expect(t).toMatchObject({ schema: 1, id: "fNEW", name: "Ship it", params: {}, savedAt: T0 });
+    expect(t.flow.name).toBe("Ship it");
+  });
+
+  it("never trusts the file's id — a built-in id in the file is replaced like any other", () => {
+    const t = importedTemplate({ ...(foreign() as object), id: "builtin-ship-it" }, "fNEW", T0);
+    expect(t.id).toBe("fNEW");
+  });
+
+  it("clears every planned node's repos, mode and ticket key — the card and the config fill them at attach time", () => {
+    const t = importedTemplate(foreign(), "fNEW", T0);
+    const n1 = t.flow.nodes.find((n) => n.id === "n1");
+    expect(n1).toEqual({ id: "n1", x: 0, y: 0, join: "any", kind: "planned", ticketKey: "", repos: [], mode: "", dest: "new-window" });
+  });
+
+  it("deletes a command node's cwdRepo — absent means the source place's repo, the only answer a shape can give", () => {
+    const t = importedTemplate(foreign(), "fNEW", T0);
+    const n2 = t.flow.nodes.find((n) => n.id === "n2");
+    expect(n2).toEqual({ id: "n2", x: 100, y: 0, join: "all", kind: "command", run: "npm test" });
+    expect(n2).not.toHaveProperty("cwdRepo");
+  });
+
+  it("keeps the shape: ids, positions, join, dest, askWho, question, message, subflow target, conditions, note, timeout and retry", () => {
+    const t = importedTemplate(foreign(), "fNEW", T0);
+    expect(t.flow.nodes.map((n) => n.id)).toEqual(["n1", "n2", "n3", "n4", "n5"]);
+    expect(t.flow.nodes[2]).toEqual({ id: "n3", x: 200, y: 0, join: "any", kind: "gate", question: "Ship?", askWho: "alice" });
+    expect(t.flow.nodes[3]).toEqual({ id: "n4", x: 300, y: 0, join: "any", kind: "notify", message: "shipped" });
+    expect(t.flow.nodes[4]).toEqual({ id: "n5", x: 400, y: 0, join: "any", kind: "subflow", templateId: "other" });
+    expect(t.flow.edges[0]).toEqual({
+      id: "e1", from: "n1", to: "n2", cond: { kind: "agent-ended-turn" }, note: "keep me", timeoutMinutes: 30, retry: { max: 2, everyMinutes: 5 },
+    });
+    expect(t.flow.edges[1]).toEqual({ id: "e2", from: "n2", to: "n3", cond: { kind: "command-succeeded" } });
+  });
+
+  it("loses every host stamp and both consents a hand-edited envelope carries", () => {
+    const t = importedTemplate(foreign(), "fNEW", T0);
+    expect(t.flow).not.toHaveProperty("launchConfirmedAt");
+    expect(t.flow).not.toHaveProperty("commandConfirmedAt");
+    expect(t.flow).not.toHaveProperty("fromTemplate");
+    expect(t.flow).toMatchObject({ id: "", armed: false, createdAt: 0 });
+    for (const e of t.flow.edges) {
+      expect(e).not.toHaveProperty("firedAt");
+      expect(e).not.toHaveProperty("error");
+      expect(e).not.toHaveProperty("gateAnswer");
+      expect(e).not.toHaveProperty("performed");
+    }
+    expect(t.flow.nodes[4]).not.toHaveProperty("childFlowId");
+  });
+
+  it("falls back to a name when the file's is blank", () => {
+    expect(importedTemplate({ ...(foreign() as object), name: "   " }, "fNEW", T0).name).toBe("Imported template");
+  });
+
+  it("is the same shape the starters ship — attaching resolves repos and mode from the card", () => {
+    const t = importedTemplate(foreign(), "fNEW", T0);
+    const f = instantiate(t, "PROJ-1", "f-live", T0, { repos: ["my-repo"], modes: ["my-mode"] });
+    expect(f.nodes[0]).toMatchObject({ kind: "planned", ticketKey: "PROJ-1", repos: ["my-repo"], mode: "my-mode" });
+  });
+
+  it("refuses a file that is not a template, by name", () => {
+    expect(() => importedTemplate({ id: "f1", name: "n", nodes: [], edges: [] }, "fNEW", T0)).toThrow(/not an Agent Flow template/);
+    expect(() => importedTemplate("just a string", "fNEW", T0)).toThrow(/not an Agent Flow template/);
+    expect(() => importedTemplate(null, "fNEW", T0)).toThrow(/not an Agent Flow template/);
+  });
+
+  it("refuses a schema newer than this build knows, naming the version", () => {
+    expect(() => importedTemplate({ ...(foreign() as object), schema: 7 }, "fNEW", T0)).toThrow(/schema 7\b.*newer than this build/);
+  });
+
+  it("refuses a file carrying a place node — a template carries planned steps, not live sessions", () => {
+    const withPlace = foreign() as { flow: { nodes: unknown[] } };
+    withPlace.flow.nodes.push({ id: "p1", x: 0, y: 0, join: "any", kind: "place", runKey: "PROJ-1", repo: "their-repo" });
+    expect(() => importedTemplate(withPlace, "fNEW", T0)).toThrow(/planned steps, not live sessions/);
+  });
+
+  it("refuses a file with nothing to bind a ticket to — it would be refused at every attach", () => {
+    const noPlanned = foreign() as { flow: { nodes: unknown[] } };
+    noPlanned.flow.nodes = noPlanned.flow.nodes.filter((n) => (n as { kind: string }).kind !== "planned");
+    expect(() => importedTemplate(noPlanned, "fNEW", T0)).toThrow(/no planned step/);
+  });
+
+  it("refuses a node that is not an object with a kind — hand-edited junk is not a template", () => {
+    const junk = foreign() as { flow: { nodes: unknown[] } };
+    junk.flow.nodes.push(null);
+    expect(() => importedTemplate(junk, "fNEW", T0)).toThrow(/not an Agent Flow template/);
+  });
+});
+
+describe("exportedTemplate", () => {
+  it("writes the envelope as indented JSON with a trailing newline", () => {
+    const text = exportedTemplate(template());
+    expect(text.endsWith("}\n")).toBe(true);
+    expect(text.split("\n").length).toBeGreaterThan(10);
+    expect(JSON.parse(text)).toMatchObject({ schema: 1, id: "k3f9-ship", name: "Ship it", params: {}, savedAt: 1756200000000 });
+  });
+
+  it("round-trips through validTemplate and importedTemplate", () => {
+    const back = importedTemplate(JSON.parse(exportedTemplate(template())), "fNEW", 5);
+    expect(validTemplate(JSON.parse(exportedTemplate(template())))).not.toBeNull();
+    expect(back.name).toBe("Ship it");
+    expect(back.flow.nodes.map((n) => n.id)).toEqual(["n1", "n2", "n3"]);
+    expect(back.flow.edges.map((e) => [e.from, e.to])).toEqual([["n1", "n3"], ["n2", "n3"]]);
+  });
+
+  it("normalizes the inner flow on the way out — an older build's stamps do not leave the machine", () => {
+    const t = template();
+    const dirty: FlowTemplate = {
+      ...t,
+      flow: {
+        ...t.flow, id: "stale", armed: true, createdAt: 9, launchConfirmedAt: 1, commandConfirmedAt: 2,
+        edges: t.flow.edges.map((e) => ({ ...e, firedAt: 3, error: "x" })),
+      },
+    };
+    const out = JSON.parse(exportedTemplate(dirty)) as FlowTemplate;
+    expect(out.flow).toMatchObject({ id: "", armed: false, createdAt: 0 });
+    expect(out.flow).not.toHaveProperty("launchConfirmedAt");
+    expect(out.flow).not.toHaveProperty("commandConfirmedAt");
+    expect(out.flow.edges.every((e) => !("firedAt" in e) && !("error" in e))).toBe(true);
+  });
+
+  it("exports a built-in starter as it is — a valid envelope is a valid envelope", () => {
+    const starter: FlowTemplate = template({ id: "builtin-ship-it", savedAt: 0 });
+    const out = JSON.parse(exportedTemplate(starter));
+    expect(validTemplate(out)).not.toBeNull();
+    expect(out.id).toBe("builtin-ship-it");
+  });
+});
+
+describe("templateFileName", () => {
+  it("slugs the name and adds the template extension", () => {
+    expect(templateFileName(template({ name: "Ship it" }))).toBe("ship-it.agentflow-template.json");
+    expect(templateFileName(template({ name: "  Deploy → Prod!! (v2) " }))).toBe("deploy-prod-v2.agentflow-template.json");
+  });
+
+  it("falls back to `template` when nothing survives the slug", () => {
+    expect(templateFileName(template({ name: "!!!" }))).toBe("template.agentflow-template.json");
+    expect(templateFileName(template({ name: "" }))).toBe("template.agentflow-template.json");
   });
 });

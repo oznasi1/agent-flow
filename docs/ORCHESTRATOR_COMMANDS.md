@@ -763,6 +763,11 @@ any other flow. The names never appear in the source: the code keeps `Flow`,
   set once by `instantiate` and never re-read for shape — its only reader is
   the Templates tab's own `on N cards` count (`OrchestratorDrawer.tsx`), which
   is why that count is exact rather than a guess by name and rule count.
+- **`flow:exportTemplate`** writes the named template to a file the user
+  chooses in a save dialog; **`flow:importTemplate`** reads a file the user
+  picks and saves it as a new template with a fresh id. See
+  [Moving a template between machines](#moving-a-template-between-machines)
+  for what the file is and what import clears.
 - **`flow:openOutput`** reads [the flow journal](FLOW_JOURNAL.md) for the
   named edge and opens its most recent `fired`/`errored` output in its own
   editor tab — never back across the wire to the drawer, since output can be
@@ -879,6 +884,53 @@ for why only one can exist at a time. The one exception: if what is open is a
 saved template being edited (not a new draft), **＋ New template…** mints a
 fresh blank rather than handing that template back under a new-template
 label.
+
+### Moving a template between machines
+
+**Export**, on every row of the Templates view — the built-in starters
+included — asks where to save and writes the template there, defaulting to
+`<name-as-a-slug>.agentflow-template.json` in the workspace folder. The file
+is the same envelope the store keeps under `~/.agentflow/templates/`
+(`schema`, `id`, `name`, `params`, `savedAt`, `flow`), indented so it can be
+read and diffed, with the inner flow passed through the same normalization
+every save path uses — so a template an older build wrote with a stray stamp
+still leaves clean. **Import…**, beside **＋ New template…**, picks a file,
+reads it, and saves it as a **new** template here.
+
+What import clears, and why:
+
+- **The id.** Re-minted, never taken from the file: the file's may collide with
+  a template already here, or carry the `builtin-` prefix, which the store
+  would then skip as a shadowing file.
+- **Every planned step's repos and prompt mode, and every command's checkout
+  (`cwdRepo`).** Cleared to the shape the [built-in starters](#built-in-starters)
+  ship — `repos: []`, `mode: ""`, `cwdRepo` absent — and filled the same way,
+  from the card and from `agentFlow.promptModes`, when the template is
+  attached. The starters' reason is this feature's reason: a shape cannot know
+  another install's checkout names or prompt-mode ids, and a template that
+  carried them would launch into a repo this machine does not have. A command
+  with no `cwdRepo` runs in the repo of the place its rule came from, which is
+  the only answer a shape can give.
+- **Every host stamp and both consents.** `firedAt`, `error`, `gateAnswer`,
+  `performed` and the rest of a rule's history, a subflow's `childFlowId`, the
+  flow's `launchConfirmedAt` and `commandConfirmedAt`, and `fromTemplate` —
+  none survive, even in a hand-edited file. Consent is asked here, about this
+  machine's commands, or not at all; an approval given on one machine must
+  never arrive on another as already granted.
+
+What it keeps is the shape: node ids, positions, join modes, each planned
+step's destination (`dest` is the extension's own vocabulary, not anyone's
+configuration), every gate's question and `askWho`, every notify's message,
+every command's `run` or `commandId`, every subflow's `templateId`, and every
+rule's condition, note, deadline and retry.
+
+Three files are refused, each with the reason as the toast: a file that is not
+a template at all (a bare flow file, a note, anything else), a file whose
+`schema` is newer than this build knows — named by number, since "update the
+extension" is the fix for that one and no other — and a file with nothing to
+bind a ticket to, which `instantiate` would refuse at every attach anyway. A
+file carrying a `place` node is refused too: a template carries planned steps,
+not live sessions, and the store never writes one.
 
 ### Reaching Templates from a stuck attach picker
 

@@ -4710,13 +4710,42 @@ describe("the Templates tab", () => {
     expect(within(row).queryByRole("button", { name: /detach/i })).toBeNull();
     // Edit is a TEMPLATE verb (it reopens the shape itself), not a workflow one,
     // so it belongs on this row exactly as Duplicate/Rename/Delete do.
-    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Edit", "Rename", "Delete"]);
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Export", "Edit", "Rename", "Delete"]);
   });
 
   it("duplicates a template", async () => {
     openTemplatesTab({ templates: [shipItTemplate()] });
     fireEvent.click(await screen.findByRole("button", { name: "Duplicate" }));
     expect(send).toHaveBeenCalledWith({ type: "flow:duplicateTemplate", templateId: "t1" });
+  });
+
+  // Export is on EVERY row, a built-in's included: a starter is a valid
+  // envelope, and exporting one is how a shape gets shared before anyone has
+  // changed it. That is the one row verb a built-in shares with a user
+  // template besides Duplicate — Edit/Rename/Delete stay absent on it.
+  it("exports a template from its own row, sending its id — built-in rows included", async () => {
+    openTemplatesTab({ templates: [shipItTemplate(), shipItTemplate({ id: "builtin-ship-it", name: "Starter" })] });
+    await screen.findByText("Starter");
+    const user = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
+    const builtin = screen.getByText("Starter").closest(".orch-tmpl-row") as HTMLElement;
+    fireEvent.click(within(user).getByRole("button", { name: "Export" }));
+    expect(send).toHaveBeenCalledWith({ type: "flow:exportTemplate", templateId: "t1" });
+    fireEvent.click(within(builtin).getByRole("button", { name: "Export" }));
+    expect(send).toHaveBeenCalledWith({ type: "flow:exportTemplate", templateId: "builtin-ship-it" });
+    // And a built-in row still offers nothing that would write to it.
+    expect(within(builtin).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Export"]);
+  });
+
+  it("offers Import… in the Templates bar, beside ＋ New template…, sending flow:importTemplate", async () => {
+    openTemplatesTab({ templates: [shipItTemplate()] });
+    const bar = (await screen.findByRole("button", { name: "＋ New template…" })).parentElement as HTMLElement;
+    fireEvent.click(within(bar).getByRole("button", { name: "Import…" }));
+    expect(send).toHaveBeenCalledWith({ type: "flow:importTemplate" });
+  });
+
+  it("the empty state names Import as a way in", async () => {
+    openTemplatesTab({ templates: [] });
+    expect(await screen.findByText(/No templates yet/)).toHaveTextContent(/Import/);
   });
 
   it("renames a template on blur, not per keystroke", async () => {
@@ -4802,7 +4831,7 @@ describe("the Templates tab", () => {
     openTemplatesTab({ templates: [starter] });
     await screen.findByText(starter.name);
     const row = screen.getByText(starter.name).closest(".orch-tmpl-row") as HTMLElement;
-    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate"]);
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Export"]);
   });
 
   // The counterpart to the built-in test above: the gate must not be "hide
@@ -4810,11 +4839,11 @@ describe("the Templates tab", () => {
   // full verb set. (The same shape `shipItTemplate()` already pins via the
   // "offers no way to attach…" test above; this one isolates just the
   // three-button claim under this task's own name.)
-  it("offers all four verbs — Duplicate, Edit, Rename, Delete — on a user template", async () => {
+  it("offers all five verbs — Duplicate, Export, Edit, Rename, Delete — on a user template", async () => {
     openTemplatesTab({ templates: [shipItTemplate()] });
     await screen.findByText("Ship it");
     const row = screen.getByText("Ship it").closest(".orch-tmpl-row") as HTMLElement;
-    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Edit", "Rename", "Delete"]);
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["Duplicate", "Export", "Edit", "Rename", "Delete"]);
   });
 
   // Edit is the other half of "directly authorable", and what makes the

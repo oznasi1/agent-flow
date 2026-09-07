@@ -9,7 +9,7 @@ import { CommandNode, Flow, FlowAction, FlowEdge, LaunchDest, MAX_SUBFLOW_DEPTH,
 import { defaultFlowsDir, defaultTemplatesDir, readFlows, writeFlow, removeFlow, readTemplates, writeTemplate, removeTemplate } from "./engine/orchestrator/store";
 import { nodeFlowIo, nodeLockIo, newFlowId, nodeJournalIo } from "./engine/orchestrator/flowIo";
 import { appendEvent, truncateOutput, findEdgeOutput, needsOutputVerdicts, printedVerdicts, readJournal, JournalEvent, JournalEventInput, spendTally } from "./engine/orchestrator/journal";
-import { canBindTicket, DemotionChoice, FlowTemplate, instantiate, normalizedTemplateFlow, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
+import { canBindTicket, DemotionChoice, exportedTemplate, FlowTemplate, importedTemplate, instantiate, normalizedTemplateFlow, templateFileName, TEMPLATE_SCHEMA, toTemplate } from "./engine/orchestrator/templates";
 import { STARTERS, isBuiltinTemplateId } from "./engine/orchestrator/starters";
 import { attachedWorkflows } from "./engine/orchestrator/attach";
 import { LOCK_TTL_MS, acquire, release, renew } from "./engine/orchestrator/lock";
@@ -5413,6 +5413,86 @@ export class DeckPanel {
         if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
         writeTemplate(this.flowIo, this.templatesDir, { ...existing, id, name: `${existing.name} copy`, savedAt: now });
         trackEvent({ name: "flow_action", action: "duplicate_template" });
+        this.postFlows();
+        return;
+      }
+      case "flow:exportTemplate": {
+        if (!getConfig().orchestrator) return;
+        // `allTemplates()`, like Duplicate: a starter is a valid envelope and
+        // exporting one is how a shape gets shared before anyone has changed it.
+        const existing = this.allTemplates().find((t) => t.id === m.templateId);
+        if (!existing) return;
+        const base = vscode.workspace.workspaceFolders?.[0]?.uri ?? vscode.Uri.file(os.homedir());
+        const target = await vscode.window.showSaveDialog({
+          defaultUri: vscode.Uri.joinPath(base, templateFileName(existing)),
+          filters: { "Agent Flow template": ["json"] },
+          saveLabel: "Export",
+        });
+        if (!target) return;
+        // `workspace.fs`, not Node's `fs`: the chosen Uri may live on a remote
+        // workspace's disk, which only the editor's own filesystem can reach.
+        try {
+          await vscode.workspace.fs.writeFile(target, Buffer.from(exportedTemplate(existing), "utf8"));
+        } catch (e) {
+          void vscode.window.showErrorMessage(
+            `Could not export "${existing.name}": ${e instanceof Error ? e.message : String(e)}`,
+          );
+          return;
+        }
+        void vscode.window.showInformationMessage(`Exported "${existing.name}" to ${target.fsPath}.`);
+        // Only the gesture: the path and the template's name stay on the machine.
+        trackEvent({ name: "flow_action", action: "export_template" });
+        return;
+      }
+      case "flow:importTemplate": {
+        if (!getConfig().orchestrator) return;
+        const picked = await vscode.window.showOpenDialog({
+          canSelectMany: false,
+          canSelectFolders: false,
+          filters: { "Agent Flow template": ["json"] },
+          openLabel: "Import",
+        });
+        const source = picked?.[0];
+        if (!source) return;
+        const fileName = path.basename(source.fsPath);
+        let text: string;
+        try {
+          text = Buffer.from(await vscode.workspace.fs.readFile(source)).toString("utf8");
+        } catch (e) {
+          void vscode.window.showErrorMessage(
+            `Could not read ${fileName}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+          return;
+        }
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          void vscode.window.showErrorMessage(`Could not import ${fileName}: it is not JSON.`);
+          return;
+        }
+        // The same re-mint-past-a-collision discipline `flow:duplicateTemplate`
+        // uses, and for the same reason. The file's own id is never considered:
+        // `importedTemplate` takes the id it is handed.
+        const now = Date.now();
+        const taken = new Set(readTemplates(this.flowIo, this.templatesDir).map((t) => t.id));
+        let id = newFlowId(now);
+        for (let i = 0; taken.has(id) && i < 8; i++) id = newFlowId(now + i + 1);
+        if (taken.has(id)) return; // 9 collisions in a row is broken, not unlucky
+        let imported: FlowTemplate;
+        try {
+          imported = importedTemplate(parsed, id, now);
+        } catch (e) {
+          void vscode.window.showErrorMessage(
+            `Could not import ${fileName}: ${e instanceof Error ? e.message : String(e)}`,
+          );
+          return;
+        }
+        writeTemplate(this.flowIo, this.templatesDir, imported);
+        void vscode.window.showInformationMessage(
+          `Imported "${imported.name}". Its steps take the card's repos and your configured prompt mode when attached.`,
+        );
+        trackEvent({ name: "flow_action", action: "import_template" });
         this.postFlows();
         return;
       }

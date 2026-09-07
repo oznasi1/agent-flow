@@ -253,7 +253,9 @@ function SaveCommandRow({ runNow }: { runNow: () => string }): JSX.Element {
  * still needs a reason shown somewhere (a title attribute, a tooltip) and
  * invites a second copy of that reason to drift from this comment. Duplicate
  * is the one supported path to owning an editable copy, and it stays enabled
- * unconditionally — see its own line below.
+ * unconditionally — see its own line below. Export is unconditional for the
+ * same reason Duplicate is: a starter is a valid envelope, and reading a
+ * template out to a file writes nothing to the template itself.
  *
  * `onCards` is a lookup the caller already did (`Flow.fromTemplate === t.id`),
  * never a guess from this row: matching on name or rule count would silently
@@ -269,11 +271,16 @@ function SaveCommandRow({ runNow }: { runNow: () => string }): JSX.Element {
  * survive switching tabs and leak a half-confirmed delete onto the wrong
  * template if the list re-orders under it. */
 function TemplateRow({
-  t, onCards, onDuplicate, onEdit, onRename, onDelete,
+  t, onCards, onDuplicate, onExport, onEdit, onRename, onDelete,
 }: {
   t: FlowTemplate;
   onCards: number;
   onDuplicate: () => void;
+  /** Write this template to a file the host asks the user to choose
+   * (`flow:exportTemplate`) — the same envelope the store keeps, so another
+   * machine's Import… reads it back. Offered on every row, a built-in's
+   * included. */
+  onExport: () => void;
   /** Open this template's own graph on Canvas to change it. Absent on a
    * built-in for the same reason Rename and Delete are — the host refuses
    * to overwrite one — and Duplicate is the way to an editable copy. */
@@ -337,6 +344,7 @@ function TemplateRow({
       ) : (
         <div className="row">
           <button type="button" className="orch-mini" onClick={onDuplicate}>Duplicate</button>
+          <button type="button" className="orch-mini" onClick={onExport}>Export</button>
           {/* Rename and Delete: absent, not disabled, on a built-in — see this
               component's own doc comment for why. */}
           {!builtin && (
@@ -915,20 +923,27 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                     leave this screen exactly as empty as before, and drop an
                     untitled WORKFLOW on the board instead. */}
                 <button type="button" className="orch-mini" onClick={p.onNewTemplate}>＋ New template…</button>
+                {/* The other way a template arrives: a file another machine's
+                    Export wrote. The host owns the picker, the read and every
+                    refusal (`flow:importTemplate`, deckView.ts), so this
+                    carries nothing but the gesture. */}
+                <button type="button" className="orch-mini" onClick={() => send({ type: "flow:importTemplate" })}>Import…</button>
               </div>
               <div className="orch-tmpl-list">
                 {/* A template is never attached from here — one entry point,
                     the card that needs a workflow, and this screen offering a
                     second, worse way to do what the card already does would be
                     a category error this feature's own naming rule calls out by
-                    name: this screen offers Duplicate/Rename/Delete and nothing
-                    that arms, disarms, or attaches anything. */}
+                    name: this screen offers Duplicate/Export/Edit/Rename/Delete
+                    on a row and Import… above them — template verbs all — and
+                    nothing that arms, disarms, or attaches anything. */}
                 {p.templates.map((t) => (
                   <TemplateRow
                     key={t.id}
                     t={t}
                     onCards={p.flows.filter((f) => f.fromTemplate === t.id).length}
                     onDuplicate={() => send({ type: "flow:duplicateTemplate", templateId: t.id })}
+                    onExport={() => send({ type: "flow:exportTemplate", templateId: t.id })}
                     onEdit={() => p.onEditTemplate(t.id)}
                     onRename={(name) => send({ type: "flow:renameTemplate", templateId: t.id, name })}
                     onDelete={() => send({ type: "flow:deleteTemplate", templateId: t.id })}
@@ -939,7 +954,8 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                 {p.templates.length === 0 && (
                   <div className="orch-empty">
                     No templates yet. Start with &ldquo;＋ New template&hellip;&rdquo;
-                    above, or build a workflow and use its own &ldquo;Save as
+                    above, Import&hellip; one exported from another machine, or
+                    build a workflow and use its own &ldquo;Save as
                     template&hellip;&rdquo; to keep the shape.
                   </div>
                 )}

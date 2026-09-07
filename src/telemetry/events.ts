@@ -129,7 +129,7 @@ export type FlowActionKind =
   | "create" | "rename" | "save" | "delete" | "add_planned" | "reset_edge"
   | "resume_approve" | "resume_disarm" | "save_command" | "dry_run" | "answer_gate" | "open_output"
   | "attach" | "detach" | "save_template" | "write_template" | "rename_template" | "delete_template"
-  | "duplicate_template";
+  | "duplicate_template" | "export_template" | "import_template";
 
 /** The six actions a rule can perform, as the orchestrator's own `FlowAction`
  * spells them, plus `"none"` for a rule that carries no action at all.
