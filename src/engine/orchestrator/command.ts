@@ -19,6 +19,16 @@ import type { FlowCommand } from "../../types";
  * cannot drift silently. */
 export const COMMAND_TIMEOUT_MS = 120_000;
 
+/** How often `runCommand` renews the flows lock while a command is still running.
+ * Must stay well under `LOCK_TTL_MS` (300 s): the lock's stamp is only ever as
+ * fresh as the last renewal, so a command allowed to run longer than the TTL
+ * (its own `timeoutMs`) is safe from another window's reaper exactly as long as
+ * a renewal lands inside every TTL window. Pinned against the real `LOCK_TTL_MS`
+ * by a test, like `COMMAND_TIMEOUT_MS` above. A command shorter than this never
+ * renews at all — the interval simply never fires — which is why the default
+ * 120 s command behaves byte for byte as it did before the heartbeat existed. */
+export const COMMAND_RENEW_INTERVAL_MS = 60_000;
+
 /** The exit code a `CommandRunner` MUST report for a command it had to KILL rather
  * than one that chose its own code — `timeout(1)`'s convention, so it reads as what
  * it is to anyone who has met a CI timeout.
@@ -48,8 +58,17 @@ export const COMMAND_KILLED_EXIT_CODE = 124;
  * at least fails loudly (the flows lock stays visibly held). The fix for a
  * runner that cannot honor its own timeout belongs in the runner. */
 export interface CommandRunner {
-  (command: string, opts: { cwd: string; timeoutMs: number }):
+  (command: string, opts: CommandRunOptions):
     Promise<{ code: number; stdout: string; stderr: string }>;
+}
+
+export interface CommandRunOptions {
+  cwd: string;
+  timeoutMs: number;
+  /** Variables laid OVER the process's own environment — never a replacement
+   * for it. Absent means the child inherits the host's environment untouched,
+   * which is what every command did before `FlowCommand.env` existed. */
+  env?: Record<string, string>;
 }
 
 export interface RunCommandRequest {
@@ -68,6 +87,15 @@ export interface RunCommandRequest {
 export type CommandOutcome =
   | { ok: true; code: 0; label: string; output: string }
   | { ok: false; message: string; label: string; output?: string };
+
+/** A configured command's `env`, rendered the way it would read inline —
+ * `AWS_PROFILE=prod` — one string per variable. This is what `neverAutoRun` is
+ * matched against alongside the command text: a pattern written to catch
+ * `AWS_PROFILE=prod deploy.sh` must catch the same deploy when the profile has
+ * moved out of the string and into `env`, or the field is a way around the brake. */
+export function envPairs(env: Record<string, string> | undefined): string[] {
+  return env ? Object.entries(env).map(([k, v]) => `${k}=${v}`) : [];
+}
 
 /** Substitute EVERY `{note}` occurrence slice-by-slice. NEVER `String.replace`:
  * its replacement argument interprets `$&`, `$1` and friends, and a note is
@@ -204,11 +232,21 @@ function fallbackLabel(node: CommandNode): string {
  * - and a node with BOTH a usable `commandId` and a usable `run` (picking one
  *   would make the drawer's display and what executes disagree, which is the
  *   failure mode this whole feature exists to remove). */
+export interface ResolvedCommand {
+  ok: true;
+  label: string;
+  text: string;
+  /** Only a CONFIGURED command carries these — a free-text node has nowhere to
+   * write them, and a node cannot borrow another command's environment. */
+  env?: Record<string, string>;
+  timeoutMs?: number;
+}
+
 export function resolveCommand(
   node: CommandNode,
   commands: FlowCommand[],
   note?: string,
-): { ok: true; label: string; text: string } | { ok: false; message: string } {
+): ResolvedCommand | { ok: false; message: string } {
   const hasId = isUsableText(node.commandId);
   const hasRun = isUsableText(node.run);
 
@@ -226,7 +264,13 @@ export function resolveCommand(
     if (!cmd) {
       return { ok: false, message: `no command named "${node.commandId}" is configured in agentFlow.commands.` };
     }
-    return { ok: true, label: cmd.label, text: withNote(cmd.run, note ?? "") };
+    return {
+      ok: true,
+      label: cmd.label,
+      text: withNote(cmd.run, note ?? ""),
+      ...(cmd.env ? { env: cmd.env } : {}),
+      ...(cmd.timeoutMs !== undefined ? { timeoutMs: cmd.timeoutMs } : {}),
+    };
   }
 
   if (isUsableText(node.run)) {
@@ -260,7 +304,19 @@ export function resolveCommand(
  * a rule that can't be resolved must not run SOMETHING anyway. */
 export async function runCommand(
   req: RunCommandRequest,
-  deps: { run: CommandRunner; log: (m: string) => void },
+  deps: {
+    run: CommandRunner;
+    log: (m: string) => void;
+    /** Renew the flows lock this pass holds; `false` means it is no longer ours.
+     * Called every `COMMAND_RENEW_INTERVAL_MS` while the command is still running
+     * — which is the only thing that makes a `timeoutMs` past `LOCK_TTL_MS` safe.
+     * OPTIONAL so a caller that holds no lock (a test, a preview) can omit it;
+     * the Deck's pass and the headless tick both pass one. A failed renewal is
+     * logged and the heartbeat stops (the lock is not ours to keep touching), but
+     * the command is NOT killed — `runCommand` holds no process handle, and the
+     * caller's own post-step renewal is what stops the pass. */
+    renew?: () => boolean;
+  },
 ): Promise<CommandOutcome> {
   const { node, commands, note, cwd, neverAutoRun } = req;
   try {
@@ -280,7 +336,10 @@ export async function runCommand(
     // dangerous one — and `withNote` splices unquoted by design, so the template is
     // exactly where the danger is absent. Before `deps.log`, like the refusal
     // above: nothing announces a command it is not going to run.
-    const blocked = blockedBy(resolved.text, neverAutoRun ?? []);
+    // The env is matched too, pair by pair, for the reason `envPairs` gives.
+    const blocked = [resolved.text, ...envPairs(resolved.env)]
+      .map((t) => blockedBy(t, neverAutoRun ?? []))
+      .find((b) => b !== undefined);
     if (blocked !== undefined) {
       return {
         ok: false,
@@ -296,11 +355,21 @@ export async function runCommand(
       };
     }
 
-    deps.log(`running: ${resolved.text}`);
+    // The env is named in the log, because the log is the only place it is
+    // visible: the receipt and the drawer show the command text, and `FOO=bar
+    // deploy.sh` and `deploy.sh` under `FOO=bar` are the same deploy — an
+    // unattended one whose environment a reader must be able to reconstruct.
+    const pairs = envPairs(resolved.env);
+    deps.log(`running: ${pairs.length > 0 ? `${pairs.join(" ")} ` : ""}${resolved.text}`);
+    const timeoutMs = resolved.timeoutMs ?? COMMAND_TIMEOUT_MS;
     // `timeoutMs` is passed as DATA to the injected runner; see CommandRunner's
     // doc comment for why enforcing it is entirely the runner's job, not
     // something this call can add a backstop for.
-    const { code, stdout, stderr } = await deps.run(resolved.text, { cwd, timeoutMs: COMMAND_TIMEOUT_MS });
+    const { code, stdout, stderr } = await withLockHeartbeat(
+      deps.run(resolved.text, { cwd, timeoutMs, ...(resolved.env ? { env: resolved.env } : {}) }),
+      deps.renew,
+      deps.log,
+    );
     // Joined with a newline, not concatenated bare: stdout with no trailing
     // newline would otherwise run into stderr's first line in both the log and
     // the receipt the drawer shows ("deployed" + "boom" -> "deployedboom").
@@ -320,7 +389,7 @@ export async function runCommand(
         ok: false,
         message:
           `"${resolved.label}" exited with code ${code} — the code reported for a command killed after ` +
-          `${COMMAND_TIMEOUT_MS} ms without finishing.`,
+          `${timeoutMs} ms without finishing.`,
         label: resolved.label,
         output,
       };
@@ -328,6 +397,36 @@ export async function runCommand(
     return { ok: false, message: `"${resolved.label}" exited with code ${code}.`, label: resolved.label, output };
   } catch (e) {
     return { ok: false, message: `Couldn't run ${fallbackLabel(node)}: ${e}`, label: fallbackLabel(node) };
+  }
+}
+
+/** Resolve `pending` while renewing the flows lock every `COMMAND_RENEW_INTERVAL_MS`
+ * until it settles. Without this, a command's deadline is bounded by the lock's
+ * TTL — the pass renews only AFTER each step, so a single step longer than
+ * `LOCK_TTL_MS` is reaped from under it and a second window runs the same
+ * command again (see `lock.ts`). With it, the bound is the interval, and a
+ * configured `timeoutMs` of an hour is as safe as the 120 s default.
+ *
+ * The first `false` ends the heartbeat: the lock is gone or another window's, and
+ * `renew` never steals, so further calls could only add log lines. The command is
+ * left to finish — there is no handle here to stop it, and the caller's own
+ * renewal after the step reports the loss and halts the pass. */
+async function withLockHeartbeat<T>(
+  pending: Promise<T>,
+  renew: (() => boolean) | undefined,
+  log: (m: string) => void,
+): Promise<T> {
+  if (!renew) return pending;
+  let timer: ReturnType<typeof setInterval> | undefined = setInterval(() => {
+    if (renew()) return;
+    log("the flows lock could not be renewed while the command was still running — another window may reap it; nothing further is performed after this step");
+    clearInterval(timer);
+    timer = undefined;
+  }, COMMAND_RENEW_INTERVAL_MS);
+  try {
+    return await pending;
+  } finally {
+    if (timer !== undefined) clearInterval(timer);
   }
 }
 

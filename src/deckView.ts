@@ -18,7 +18,7 @@ import { unfirableRules } from "./engine/orchestrator/armability";
 import { ActOutcome, applyClocks, applyFired, notifyLines } from "./engine/orchestrator/runner";
 import { promoteToPlace } from "./engine/orchestrator/promote";
 import { LaunchTicketDetail, launchPlanned } from "./engine/orchestrator/launch";
-import { chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "./engine/orchestrator/command";
+import { chainSourcePlace, envPairs, resolveCommand, runCommand, withSavedCommand } from "./engine/orchestrator/command";
 import { shellCommandRunner } from "./engine/orchestrator/shellRunner";
 import { blockedBy } from "./engine/orchestrator/neverAutoRun";
 import { CONSENT_BATCH, consentCovers, consumeConsent, grantConsent } from "./engine/orchestrator/consent";
@@ -1469,7 +1469,12 @@ export class DeckPanel {
             deferredTargets.add(f.edge.to);
             continue;
           }
-          const done = await this.performEdge(fresh, f.edge, runs, f.action);
+          const done = await this.performEdge(
+            fresh, f.edge, runs, f.action,
+            // The heartbeat a long command renews the lock with — against the real
+            // clock, like the post-step renewal below, and for the same reason.
+            () => renew(this.lockIo, this.flowsDir, token, Date.now()),
+          );
           // A bounded per-command approval is spent by the RUN, whatever its exit:
           // a command that ran and failed still ran. Recorded here, where the act's
           // own result says it was a `done` rather than a pre-flight `defer` that
@@ -1857,7 +1862,8 @@ export class DeckPanel {
       // That is not redundant: this is a decision about what to ASK, and the one in
       // `command.ts` is the guarantee. A future path that reached `performRun`
       // without coming through here would still be stopped.
-      if (blockedBy(resolved.text, cfg.neverAutoRun) !== undefined) return undefined;
+      // The env pairs too, as `runCommand` checks them — see `envPairs`.
+      if ([resolved.text, ...envPairs(resolved.env)].some((t) => blockedBy(t, cfg.neverAutoRun) !== undefined)) return undefined;
       return { action: "run", node, text: resolved.text, label: resolved.label, note: edge.note };
     }
     const node = this.placeTarget(flow, edge);
@@ -2117,9 +2123,14 @@ export class DeckPanel {
     edge: FlowEdge,
     statuses: RunStatus[],
     action: Exclude<FlowAction, "notify">,
+    /** Renews this pass's flows lock; threaded only into `run`, the one verb whose
+     * single step can outlast `LOCK_TTL_MS` (a command's own `timeoutMs`). See
+     * `runCommand`'s `renew`. Optional so the E2E and unit harnesses that call
+     * `performEdge` without a lock keep working. */
+    keepAlive?: () => boolean,
   ): Promise<EdgeResult> {
     if (action === "seed") return this.performSeed(flow, edge, statuses);
-    if (action === "run") return this.performRun(flow, edge, statuses);
+    if (action === "run") return this.performRun(flow, edge, statuses, keepAlive);
     if (action === "spawn") return this.performSpawn(flow, edge);
     const node = this.plannedTarget(flow, edge);
     if (!node) {
@@ -2404,7 +2415,9 @@ export class DeckPanel {
     };
   }
 
-  private async performRun(flow: Flow, edge: FlowEdge, statuses: RunStatus[]): Promise<EdgeResult> {
+  private async performRun(
+    flow: Flow, edge: FlowEdge, statuses: RunStatus[], keepAlive?: () => boolean,
+  ): Promise<EdgeResult> {
     const node = this.commandTarget(flow, edge);
     if (!node) {
       return {
@@ -2426,7 +2439,7 @@ export class DeckPanel {
       // stop the very next pass of a flow that is already armed and already
       // confirmed, without anyone reloading a window or re-saving a flow.
       { node, commands: cfg.commands, note: edge.note, cwd: where.cwd, neverAutoRun: cfg.neverAutoRun },
-      { run: shellCommandRunner, log: this.log },
+      { run: shellCommandRunner, log: this.log, ...(keepAlive ? { renew: keepAlive } : {}) },
     );
     if (!outcome.ok) {
       // Points at the channel only when there is actually something in it — a

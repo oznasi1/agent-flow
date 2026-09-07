@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A configured command can set its environment and its deadline.** An entry
+  in `agentFlow.commands` may carry `env` — variables laid over the editor's own
+  environment for that command only, so a deploy that needs one `AWS_PROFILE` can
+  say so without writing it into the command string — and `timeoutMs`, replacing
+  the 120 s default. A deadline longer than the flows lock's TTL is safe: while
+  the command runs, the pass renews the lock every 60 s, in the Deck and in the
+  scheduled tick alike, so another window cannot reap it and run the same command
+  again. Each `NAME=value` pair is matched against `agentFlow.neverAutoRun`
+  exactly as the command text is, and named on the `running:` line in the output
+  channel. Both fields live on the configured command, not on a free-text node;
+  a command that sets neither runs exactly as before. Non-string values, blank
+  names and anything but a positive whole number of milliseconds are dropped
+  rather than coerced.
+
+### Fixed
+
+- **The docs' own "You cannot" list caught up with the code.** Five entries in
+  `docs/ORCHESTRATOR_COMMANDS.md` described limits the last four releases had
+  removed — no picker for `branch CI passed`, no way to choose a command's
+  directory or a node's join from the UI, nothing a command could return to the
+  flow, no retry — and a page that promises the code wins was talking users out
+  of features that exist. Each moved to **You can**, and a test now asserts every
+  entry of the list against the model it describes.
+
 ## [0.71.0] — 2026-09-07
 
 ### Added

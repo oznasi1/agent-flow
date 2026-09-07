@@ -192,8 +192,10 @@ for what is specific to just this one rule.
 template yourself (`--env="{note}"`) does not close that off either, since a `"` inside the
 note still breaks out. That's inherent to letting a rule's free text reach a shell command at
 all, not a bug waiting on a fix: quoting is the template author's job. A command is killed
-120 seconds after it starts, but only the shell process it started — anything that process
-goes on to spawn can outlive the kill. Its captured output is capped at 1 MiB; a chattier
+120 seconds after it starts — or after its own `timeoutMs`, if the entry in `agentFlow.commands`
+sets one — but only the shell process it started — anything that process goes on to spawn can
+outlive the kill. That entry may also carry `env`, variables laid over the editor's own
+environment for that command alone. Its captured output is capped at 1 MiB; a chattier
 command is killed the same way and its rule latched as a failure. A failed command (like a
 failed launch or seed) latches and is never retried automatically until you click **Reset** —
 deliberately, so a broken deploy doesn't run again every six seconds. A rule can opt into a

@@ -24,7 +24,7 @@ import { evaluateDeadlines, evaluateFlow } from "../engine/orchestrator/evaluate
 import { ActOutcome, applyClocks, applyFired, notifyLines } from "../engine/orchestrator/runner";
 import { appendEvent, JournalEventInput, JournalIo, needsOutputVerdicts, printedVerdicts, readJournal, spendTally, truncateOutput } from "../engine/orchestrator/journal";
 import { acquire, LOCK_TTL_MS, LockIo, release, renew } from "../engine/orchestrator/lock";
-import { chainSourcePlace, CommandRunner, resolveCommand, runCommand } from "../engine/orchestrator/command";
+import { chainSourcePlace, CommandRunner, envPairs, resolveCommand, runCommand } from "../engine/orchestrator/command";
 import { blockedBy } from "../engine/orchestrator/neverAutoRun";
 import { suggestionFor } from "../engine/orchestrator/suggestions";
 import { consentCovers, consumeConsent } from "../engine/orchestrator/consent";
@@ -269,7 +269,10 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           }
           // The denylist outranks every approval, here as in the Deck — refused
           // before consent is even consulted, and again inside `runCommand`.
-          const blocked = blockedBy(resolved.text, d.settings.neverAutoRun);
+          // The env pairs too, as `runCommand` and the Deck's gate check them.
+          const blocked = [resolved.text, ...envPairs(resolved.env)]
+            .map((t) => blockedBy(t, d.settings.neverAutoRun))
+            .find((b) => b !== undefined);
           if (blocked !== undefined) {
             outcomes.set(f.edge.id, { ok: false, error: `"${resolved.text}" matches agentFlow.neverAutoRun pattern "${blocked}" — never run unattended.` });
             continue;
@@ -299,7 +302,9 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           }
           const outcome = await runCommand(
             { node, commands: d.settings.commands, note: f.edge.note, cwd: where.cwd, neverAutoRun: d.settings.neverAutoRun },
-            { run: d.run, log: d.log },
+            // `renew` keeps the lock alive under a command whose own `timeoutMs`
+            // outlasts the TTL — the same heartbeat the Deck's pass supplies.
+            { run: d.run, log: d.log, renew: () => renew(d.lockIo, d.flowsDir, d.token, d.now()) },
           );
           if (!renew(d.lockIo, d.flowsDir, d.token, d.now())) {
             d.log(`the flows lock was lost after ${f.edge.id} — nothing further is performed this pass`);
