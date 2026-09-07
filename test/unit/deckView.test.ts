@@ -9448,6 +9448,38 @@ describe("a met run rule acts", () => {
     expect(lastWrite().edges[0].firedNote).toBe("ran Deploy staging in aws-ops");
   });
 
+  // `exec`'s `env` REPLACES the child's environment; the runner must lay the
+  // command's variables over the host's, and pass nothing at all when the command
+  // sets none — so a command written before `env` existed still inherits
+  // `process.env` by reference rather than a copy taken at this moment.
+  it("threads a configured command's env into exec over the host's, and passes no env key otherwise", async () => {
+    h.commands = [{ id: "deploy", label: "Deploy staging", run: "make deploy", env: { AWS_PROFILE: "prod" } }];
+    const { send } = await warmed([withCommandNode({ commandId: "deploy" })]);
+    await send({ type: "deck:refresh" });
+    const opts = ran()[1] as unknown as { env?: Record<string, string>; timeout: number };
+    expect(opts.env).toMatchObject({ AWS_PROFILE: "prod", PATH: process.env.PATH });
+    expect(opts.timeout).toBe(COMMAND_TIMEOUT_MS);
+
+    h.commands = [{ id: "deploy", label: "Deploy staging", run: "make deploy", timeoutMs: 900_000 }];
+    const again = await warmed([withCommandNode({ commandId: "deploy" })]);
+    await again.send({ type: "deck:refresh" });
+    const plain = ran()[1] as unknown as { env?: Record<string, string>; timeout: number };
+    expect("env" in plain).toBe(false);
+    // The configured deadline reaches exec, not the constant.
+    expect(plain.timeout).toBe(900_000);
+  });
+
+  // The env is part of what the denylist judges, at the gate as well as at the
+  // shell: a pattern that catches `AWS_PROFILE=prod` inline catches it in `env`.
+  it("refuses at the consent gate a configured command whose env matches neverAutoRun", async () => {
+    h.commands = [{ id: "deploy", label: "Deploy prod", run: "make deploy", env: { AWS_PROFILE: "prod" } }];
+    setConfig({ orchestrator: true, neverAutoRun: ["AWS_PROFILE=prod"] });
+    const { send } = await warmed([withCommandNode({ commandId: "deploy" })]);
+    await send({ type: "deck:refresh" });
+    expect(h.exec).not.toHaveBeenCalled();
+    expect(lastWrite().edges[0].error).toContain("AWS_PROFILE=prod");
+  });
+
   it("splices the rule's note into the command at {note}", async () => {
     const { send } = await warmed([cmdFlow({
       nodes: [
