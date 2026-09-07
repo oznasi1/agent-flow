@@ -4128,3 +4128,46 @@ describe("workflowChipTrailer's defensive fallback", () => {
     expect(workflowChipTrailer(flow, state)).toBeUndefined();
   });
 });
+
+// The dry run's cap comes from the host on `deck:flows` — the webview cannot read
+// `agentFlow.launchesPerPass` itself — so the one thing this level can prove is
+// that the number on the wire is the number the drawer defers against and names.
+describe("the per-pass cap on deck:flows", () => {
+  /** Two met launches from two places into two planned nodes — two spends. */
+  const twoLaunches = (): Flow => ({
+    ...mkFlow("f1", "Ship the migration"),
+    nodes: [
+      { id: "n1", kind: "place", x: 24, y: 24, join: "any", runKey: "PROJ-1", repo: "svc" },
+      { id: "n2", kind: "place", x: 24, y: 140, join: "any", runKey: "PROJ-2", repo: "svc" },
+      { id: "n3", kind: "planned", x: 320, y: 24, join: "any", ticketKey: "PROJ-9", repos: ["svc"], mode: "quick", dest: "worktree" },
+      { id: "n4", kind: "planned", x: 320, y: 140, join: "any", ticketKey: "PROJ-10", repos: ["svc"], mode: "quick", dest: "worktree" },
+    ],
+    edges: [
+      { id: "e1", from: "n1", to: "n3", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" },
+      { id: "e2", from: "n2", to: "n4", cond: { kind: "pr-merged" }, action: "launch", mode: "quick" },
+    ],
+  });
+  const mergedRun = (key: string): RunStatus => mkStatus({
+    run: { ...mkStatus().run, key, url: `https://jira/${key}` },
+    prs: { svc: { facts: prFacts({ state: "MERGED" }), fetchedAt: 1 } },
+  });
+  const dryRunRow = (msg: OutboundMessage) => {
+    render(<DeckApp />);
+    host(msg);
+    host(runsMsg([mergedRun("PROJ-1"), mergedRun("PROJ-2")]));
+    fireEvent.click(document.querySelector(".card") as HTMLElement);
+    fireEvent.click(screen.getByRole("button", { name: "Open in Workflows ↗" }));
+    fireEvent.click(screen.getByRole("button", { name: /what would fire/i }));
+    return screen.getByTestId("orch-dryrun-e2").textContent ?? "";
+  };
+
+  it("defers the second launch against the cap the host sent, and names that number", () => {
+    const row = dryRunRow({ ...flowsMsg([twoLaunches()]), launchesPerPass: 1 } as OutboundMessage);
+    expect(row).toContain("deferred");
+    expect(row).toContain("1 is this pass's cap");
+  });
+
+  it("reads a payload without the field as the shipped cap of 3, so both fire — an older host changes nothing", () => {
+    expect(dryRunRow(flowsMsg([twoLaunches()]))).toContain("would fire");
+  });
+});

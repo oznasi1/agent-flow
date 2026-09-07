@@ -2,7 +2,7 @@ import * as vscode from "vscode";
 import * as os from "os";
 import * as path from "path";
 import { AgentProvider, FilterVisibility, FlowCommand, MergeMethod, PromptMode } from "./types";
-import { readCommandConsent, readCommands, readNeverAutoRun } from "./configReaders";
+import { readCommandConsent, readCommands, readLaunchesPerPass, readNeverAutoRun } from "./configReaders";
 // The destination vocabulary, defined beside the picker that reads it so the setting and
 // the code that acts on it cannot drift apart.
 import type { OpenInSetting } from "./engine/openTarget";
@@ -456,6 +456,18 @@ export interface AgentFlowConfig {
    * (`consentNotice.ts`) and offered the old mode. See
    * `engine/orchestrator/consent.ts`. */
   commandConsent: "flow" | "command";
+  /** `agentFlow.launchesPerPass` — how many sessions, seeds and commands one pass
+   * of one flow may start (`EvalInput.maxLaunches`); a notify is never counted.
+   * Per flow per pass, so N armed flows may spend N× it every six seconds — the
+   * flow's spend ceiling is the lifetime bound. Defaults to
+   * `MAX_LAUNCHES_PER_PASS` (3), the cap every release before it had; the
+   * headless tick reads the same setting. See `readLaunchesPerPass`.
+   *
+   * Optional in the TYPE, always set by `getConfig()`: `evaluateFlow` reads a
+   * missing value as the same default, and a required field here would force
+   * every test that builds a whole config literal to name a setting it does not
+   * exercise — the existing suite passes unmodified, as a new setting must. */
+  launchesPerPass?: number;
   /** Show the Deck header's "Tokens on board" total. Off by default: the figure
    * costs a board-wide transcript sweep, and the per-run breakdown in the detail
    * drawer is read lazily instead, so a default install parses nothing until a
@@ -734,6 +746,7 @@ export function getConfig(): AgentFlowConfig {
     // hand-typed `"per-command"` must not silently become the new mode, and
     // must not break the old one either.
     commandConsent: readCommandConsent(c),
+    launchesPerPass: readLaunchesPerPass(c),
     // `?? false` rather than `|| false`: an explicit `false` and an unset value
     // must both read false, and neither may be silently coerced by a truthiness
     // check the way the string settings above are.

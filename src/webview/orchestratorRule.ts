@@ -1438,9 +1438,16 @@ export function reasonWhy(reason: NonNullable<RulePreview["reason"]>): string {
  * orchestrator shipped and read by nothing — `evaluate.ts`'s own doc comment
  * claims the drawer's footer surfaces it, which was never true. The dry run
  * is its first consumer. */
-export function verdictWhy(v: RulePreview): string | null {
+export function verdictWhy(
+  v: RulePreview,
+  /** The per-pass cap as the host read `agentFlow.launchesPerPass` and carried it
+   * on `deck:flows` — the number the sentence names. Absent (an older host, a
+   * test) reads as `MAX_LAUNCHES_PER_PASS`, which is what the sentence always
+   * said before the setting existed. */
+  launchesPerPass: number = MAX_LAUNCHES_PER_PASS,
+): string | null {
   if (v.verdict === "defer") {
-    return `met, but ${MAX_LAUNCHES_PER_PASS} is this pass's cap — fires on a later pass`;
+    return `met, but ${launchesPerPass} is this pass's cap — fires on a later pass`;
   }
   // Names the fallback in the picker's own words, so a reader knows which
   // condition to reach for on the rule that should act on this.

@@ -44,6 +44,7 @@
 | `agentFlow.remoteControl` | `off` | Offer Claude Code's **Remote Control** for the session Agent Flow Deck opens (`off` / `on` / `ask`), so you can drive it from claude.ai or the Claude mobile app. |
 | `agentFlow.environments` | `["dev", "staging", "production"]` | Environments offered by the **Verify on an environment** Explore action. The picker also offers **Custom…** for a one-off. |
 | `agentFlow.orchestrator` | `false` | Show the Deck's Orchestrator drawer, where you wire in-flight sessions into a flow with a condition on each connection. |
+| `agentFlow.launchesPerPass` | `3` | How many sessions, seeds and commands one pass of one workflow may start (a notify is never counted). Per workflow per pass, so *N* armed workflows may spend *N*× it; the workflow's spend ceiling is the lifetime bound. The scheduled tick reads it too. Below `1`, a fraction or a non-number reads as `3`. See [ORCHESTRATOR_COMMANDS.md](ORCHESTRATOR_COMMANDS.md#the-ceiling). |
 
 Plus `agentFlow.workspaceMode`, `agentFlow.taskMode`, `agentFlow.promptModes`,
 `agentFlow.exploreMode`, `agentFlow.explorePrompts.*`, `agentFlow.prReviewPrompt`, and

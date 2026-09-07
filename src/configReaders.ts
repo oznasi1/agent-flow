@@ -5,6 +5,7 @@
 // `SettingsReader` structurally; `headless/settings.ts` builds one from a parsed
 // file. Nothing here may import `vscode`: this module is bundled into
 // `dist/tick.js`, which runs where no editor is.
+import { MAX_LAUNCHES_PER_PASS } from "./engine/orchestrator/evaluate";
 import { FlowCommand } from "./types";
 
 /** The one method both settings sources share. Keys are relative to the
@@ -77,4 +78,16 @@ export function readNeverAutoRun(c: SettingsReader): string[] {
  * lands in. */
 export function readCommandConsent(c: SettingsReader): "flow" | "command" {
   return c.get<string>("commandConsent") === "flow" ? "flow" : "command";
+}
+
+/** Read `agentFlow.launchesPerPass`: how many sessions, seeds and commands one
+ * pass of one flow may start (`EvalInput.maxLaunches`). A positive finite
+ * integer wins; anything else — absent, `0`, a negative, a fraction, a string —
+ * reads as `MAX_LAUNCHES_PER_PASS`, the cap every install had before the
+ * setting existed. The safer value is the one a bad value lands in: a
+ * hand-edited `settings.json` must never widen the cap to "unbounded" (nothing
+ * here is `Infinity`) or collapse it to "never fires" (`0` is refused). */
+export function readLaunchesPerPass(c: SettingsReader): number {
+  const raw = c.get<unknown>("launchesPerPass");
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= 1 ? raw : MAX_LAUNCHES_PER_PASS;
 }

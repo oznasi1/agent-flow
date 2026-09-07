@@ -364,6 +364,15 @@ describe("gate nodes in the pickers", () => {
     expect(verdictWhy({ verdict: "blocked", reason: "agent-state-unknown" } as RulePreview))
       .toBe("can't tell what the session is doing right now");
   });
+
+  it("names the per-pass cap the host carried on deck:flows, and the shipped 3 when none was", () => {
+    const held = { verdict: "defer", perform: true } as RulePreview;
+    expect(verdictWhy(held)).toBe("met, but 3 is this pass's cap — fires on a later pass");
+    expect(verdictWhy(held, 1)).toBe("met, but 1 is this pass's cap — fires on a later pass");
+    // A stale or absent value reads as the default rather than as "undefined is
+    // this pass's cap".
+    expect(verdictWhy(held, undefined)).toBe("met, but 3 is this pass's cap — fires on a later pass");
+  });
 });
 
 describe("deadlines in the rule module", () => {

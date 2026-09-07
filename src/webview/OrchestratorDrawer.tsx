@@ -473,6 +473,11 @@ export interface OrchestratorDrawerProps {
    * waiting while the engine fires it. Optional: a caller with no such rule
    * (and every existing test) passes nothing, which reads as "did not print". */
   printed?: Record<string, Record<string, boolean>>;
+  /** `agentFlow.launchesPerPass` as the host read it — the per-pass cap the next
+   * pass applies, carried on `deck:flows` because the webview cannot read the
+   * setting. The dry run defers against it and names it; absent (an older host,
+   * a test) reads as `MAX_LAUNCHES_PER_PASS`, as every dry run did before. */
+  launchesPerPass?: number;
   /** Branch-CI verdicts the host has fetched, keyed `repo#branch` — the same map
    * `evaluateFlow` is handed. Without it a `branch-ci-passed` rule's own
    * observation line reads "not checked yet" forever, even while the host knows
@@ -619,7 +624,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
   // template. A dry run is a verdict about being armed, and a template cannot
   // be armed, so it has nothing to verdict either way.
   const dry = dryRun && flow && !editingTemplate
-    ? previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id], p.flows)
+    ? previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id], p.flows, p.launchesPerPass)
     : [];
   const firing = dry.filter((v) => v.verdict === "fire").length;
   /** The Save-as-template dialog's own state: whether it is open, the name
@@ -2195,7 +2200,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
                       // held by the cap, unobservable or blank alike — which is why it and
                       // `fired` need not add up to `edges`: a settled rule is in neither.
                       if (!dryRun) {
-                        const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id], p.flows);
+                        const rows = previewFlow(flow, p.runs, Date.now(), p.branchCi, p.printed?.[flow.id], p.flows, p.launchesPerPass);
                         send({
                           type: "flow:dryRun",
                           edges: flow.edges.length,
@@ -2360,7 +2365,7 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               // the same pair, not a second phrasing of it.
               const observed = v.verdict === "waiting"
                 ? (observationOf(flow, e, p.runs, p.branchCi) ?? observationFallback(flow, e))
-                : verdictWhy(v);
+                : verdictWhy(v, p.launchesPerPass);
               // A running clock is the other half of "why is this still
               // waiting": the observation says what the card looks like, this
               // says how long the rule will keep looking. Same `Date.now()` the

@@ -35,6 +35,10 @@ export interface PassSettings {
   commands: FlowCommand[];
   neverAutoRun: string[];
   commandConsent: "flow" | "command";
+  /** `agentFlow.launchesPerPass` — the per-pass cap `evaluateFlow` applies, so a
+   * tick honours the same number the Deck does. Optional: a caller that names
+   * none (every existing test) gets `MAX_LAUNCHES_PER_PASS`, exactly as before. */
+  launchesPerPass?: number;
 }
 
 export interface PassDeps {
@@ -167,7 +171,7 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
           }
         }
 
-        const result = evaluateFlow({ flow: flowNow, statuses: d.statuses, nowMs: d.nowMs, printed, flows });
+        const result = evaluateFlow({ flow: flowNow, statuses: d.statuses, nowMs: d.nowMs, printed, flows, maxLaunches: d.settings.launchesPerPass });
         if (result.fired.length === 0) continue;
 
         const fresh = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
