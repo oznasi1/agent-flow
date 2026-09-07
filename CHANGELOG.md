@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **More than one name on a gate.** A routed gate's **Ask on PR** field takes
+  several forge logins — `alice, bob`, commas or spaces, `@` optional — and once
+  there are two or more a **NEEDS** control chooses **any of them** (the first
+  answer from any named person decides, which is what one name always did) or
+  **all of them** (every named person must approve; one `reject` from any of
+  them rejects at once). The comment on the pull request mentions everyone and
+  says which it is; each person's first answer is recorded on the rule as it
+  arrives, so the node reads `1 of 2 approved` while it waits, and the journal's
+  `answered` line names who decided. Reset clears the tally with the other
+  stamps. One login behaves exactly as before, on disk and on the thread.
+
 ## [0.70.0] — 2026-09-07
 
 ### Added
@@ -34,7 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the workflow's spend ceiling stays the lifetime bound. Default `3`, so
   nothing changes until you set it; anything below `1`, a fraction, or a
   non-number reads as `3`.
-
 ### Fixed
 
 - **The sidebar's "open externally" no longer hands an arbitrary scheme to the

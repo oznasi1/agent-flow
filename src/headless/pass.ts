@@ -28,7 +28,7 @@ import { chainSourcePlace, CommandRunner, resolveCommand, runCommand } from "../
 import { blockedBy } from "../engine/orchestrator/neverAutoRun";
 import { suggestionFor } from "../engine/orchestrator/suggestions";
 import { consentCovers, consumeConsent } from "../engine/orchestrator/consent";
-import { gateAnswerFrom, GateComment, gateSourcePlace, routedGatesAwaitingAnswer } from "../engine/orchestrator/gateRouting";
+import { collectRoutedAnswers, GateComment, gateLogins, gateMode, gateSourcePlace, gateVerdict, routedGatesAwaitingAnswer, sameRoutedAnswers } from "../engine/orchestrator/gateRouting";
 import { FlowCommand, RunStatus } from "../types";
 
 export interface PassSettings {
@@ -128,7 +128,9 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
         // Answers that arrived on a pull request, stamped before evaluation so the
         // rule they open fires in this pass — the same order the Deck keeps.
         // First answer wins, as on the node; a thread that cannot be read is
-        // skipped, never read as silence.
+        // skipped, never read as silence. With several names, each person's
+        // first answer is recorded as `routedAnswers` and `gateVerdict` says
+        // when they decide the gate (deckView.ts `pollRoutedGates` is the twin).
         if (d.gateReplies) {
           for (const { node, edge } of routedGatesAwaitingAnswer(flow)) {
             const place = gateSourcePlace(flow, node.id);
@@ -137,15 +139,23 @@ export async function runHeadlessPass(d: PassDeps): Promise<PassReport> {
             const facts = place ? status?.prs[place.repo]?.facts : undefined;
             if (!place || !repoPath || !facts) continue;
             const replies = await d.gateReplies(repoPath, facts.number, edge.routed!.at);
-            const hit = replies ? gateAnswerFrom(replies, edge.routed!.login, edge.routed!.at) : undefined;
-            if (!hit) continue;
-            report.answered.push(`${ruleName(flow, edge, "ask")}: @${edge.routed!.login} ${hit.answer}`);
+            if (!replies) continue;
+            const logins = gateLogins(node);
+            const mode = gateMode(node);
+            const since = edge.routed!.at;
+            if (Object.keys(collectRoutedAnswers(replies, logins, since, undefined)).length === 0) continue;
+            const seen = gateVerdict(mode, logins, collectRoutedAnswers(replies, logins, since, edge.routedAnswers));
+            if (seen) report.answered.push(`${ruleName(flow, edge, "ask")}: ${seen.by.map((l) => `@${l}`).join(", ")} ${seen.answer}`);
             if (d.dryRun) continue;
             const latest = readFlows(d.flowIo, d.flowsDir).find((f) => f.id === flow.id);
             const current = latest?.edges.find((e) => e.id === edge.id);
             if (!latest || !current || current.gateAnswer !== undefined) continue;
-            writeFlow(d.flowIo, d.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === edge.id ? { ...e, gateAnswer: hit.answer } : e)) });
-            journal(flow.id, { kind: "answered", edge: edge.id, answer: hit.answer, by: edge.routed!.login }, d.nowMs);
+            const answers = collectRoutedAnswers(replies, logins, since, current.routedAnswers);
+            const verdict = gateVerdict(mode, logins, answers);
+            if (!verdict && sameRoutedAnswers(answers, current.routedAnswers)) continue;
+            const stamped: FlowEdge = { ...current, routedAnswers: answers, ...(verdict ? { gateAnswer: verdict.answer } : {}) };
+            writeFlow(d.flowIo, d.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === edge.id ? stamped : e)) });
+            if (verdict) journal(flow.id, { kind: "answered", edge: edge.id, answer: verdict.answer, by: verdict.by.join(", ") }, d.nowMs);
           }
         }
         // Re-read: an answer just stamped must be what this pass evaluates.

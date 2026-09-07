@@ -5178,6 +5178,36 @@ describe("a routed gate in the drawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
     expect(screen.queryByTestId("orch-gate-routing")).toBeNull();
   });
+
+  it("offers a how-many-must-approve select only once two or more names are on the gate, and saving it writes or deletes askMode", () => {
+    const onSave = vi.fn();
+    const one = render(<OrchestratorDrawer {...props({ onSave, flows: [routedFlow({}, { askWho: "alice" })] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    expect(screen.queryByLabelText("How many must approve")).toBeNull();
+    expect((screen.getByLabelText("Ask on the pull request") as HTMLInputElement).placeholder).toContain("alice, bob");
+    one.unmount();
+    render(<OrchestratorDrawer {...props({ onSave, flows: [routedFlow({}, { askWho: "alice, bob" })] })} />);
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    const select = screen.getByLabelText("How many must approve") as HTMLSelectElement;
+    expect(select.value).toBe("any");
+    expect(Array.from(select.options).map((o) => o.textContent)).toEqual(["any of them", "all of them"]);
+    fireEvent.change(select, { target: { value: "all" } });
+    expect((onSave.mock.calls.at(-1)![0] as Flow).nodes[1]).toMatchObject({ kind: "gate", askMode: "all" });
+    fireEvent.change(select, { target: { value: "any" } });
+    expect("askMode" in (onSave.mock.calls.at(-1)![0] as Flow).nodes[1]).toBe(false);
+  });
+
+  it("shows the tally of an `all` gate on the node and in the inspector", () => {
+    const partial = routedFlow(
+      { firedAt: 5, performed: true, routed: { at: 5, login: "alice, bob" }, routedAnswers: { alice: { answer: "approved", at: 6 } } },
+      { askWho: "alice, bob", askMode: "all" },
+    );
+    render(<OrchestratorDrawer {...props({ flows: [partial] })} />);
+    expect(screen.getByTestId("orch-node-g").textContent).toContain("asked @alice, @bob on the pull request · 1 of 2 approved");
+    fireEvent.click(screen.getByRole("button", { name: "Configure gate" }));
+    expect(screen.getByTestId("orch-gate-routing").textContent).toBe("asked @alice, @bob on the pull request · 1 of 2 approved");
+    expect((screen.getByLabelText("How many must approve") as HTMLSelectElement).value).toBe("all");
+  });
 });
 
 describe("a command-result rule in the inspector", () => {

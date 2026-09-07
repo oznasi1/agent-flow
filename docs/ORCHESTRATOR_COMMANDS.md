@@ -592,7 +592,23 @@ seconds — and the first reply *from that login* whose first word is `approve`
 (or `approved`, `lgtm`, `yes`) or `reject` (`rejected`, `no`) answers the gate
 exactly as the node's own buttons do: stamped on the rule that asked,
 journaled as `answered` with `by: alice`, and the downstream rule fires on the
-next pass — the same one-pass latency `the command succeeded` has. The
+next pass — the same one-pass latency `the command succeeded` has.
+
+**Ask on PR** takes several names too — `alice, bob`, commas or spaces, `@`
+optional — and a **NEEDS** control appears beside it once there are two or
+more: **any of them** (the default, and what one name always did) or **all of
+them**. The comment mentions everyone and says which it is:
+
+> @alice @bob — **Ship it** is waiting on you: deploy to prod?
+> Each of you must reply `approve` here; a single `reject` decides. (Agent Flow Deck)
+
+With **any**, the earliest answer from any named person decides. With **all**,
+every named person must approve; one `reject` from any of them rejects the gate
+at once — a veto, not a vote. Each person's *first* answer is the one that
+counts, recorded on the asking rule as it arrives, so the node reads `1 of 2
+approved` while the gate waits and the `answered` line names who decided
+(`by: alice, bob`). Reset clears the tally with the rest of the rule's stamps
+and re-posts the question. The
 Deck reads the thread while it is open; the [headless tick](#a-pass-without-the-editor)
 reads it too, so an answer given from a phone at 2am opens the rule on the next
 scheduled pass with no editor anywhere. A tick never *poses* a gate — that
@@ -622,13 +638,14 @@ The answer path has to be real or the routing is worse than no routing, so:
 - **An unreadable thread is not silence.** A failed read is skipped and tried
   again next minute; it never reads as "nobody answered".
 
-What it deliberately is not: no reviewer lists, no quorum, no
-first-response-wins across several people. One login, one thread, one answer.
-The question is visible to everyone who can read the PR — do not route a gate
-whose question should not be.
+What it deliberately is not: no reviewer lists pulled from the forge, no
+quorum counts, no weights. The names on the gate and *any* or *all* are the
+whole vocabulary — one thread, one answer per person, and the first from each
+is final. The question is visible to everyone who can read the PR — do not
+route a gate whose question should not be.
 
-`askWho` is node configuration, so it travels into templates like the question
-does; every instance of the template asks the same person.
+`askWho` and `askMode` are node configuration, so they travel into templates
+like the question does; every instance of the template asks the same people.
 
 ## Deadlines
 

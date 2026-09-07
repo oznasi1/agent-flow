@@ -22,7 +22,7 @@ import { chainSourcePlace, resolveCommand, runCommand, withSavedCommand } from "
 import { shellCommandRunner } from "./engine/orchestrator/shellRunner";
 import { blockedBy } from "./engine/orchestrator/neverAutoRun";
 import { CONSENT_BATCH, consentCovers, consumeConsent, grantConsent } from "./engine/orchestrator/consent";
-import { GATE_POLL_MS, gateAnswerFrom, gateSourcePlace, isRouted, routedGateQuestion, routedGatesAwaitingAnswer } from "./engine/orchestrator/gateRouting";
+import { GATE_POLL_MS, collectRoutedAnswers, gateLogins, gateMode, gateSourcePlace, gateVerdict, isRouted, routedGateQuestion, routedGatesAwaitingAnswer, sameRoutedAnswers } from "./engine/orchestrator/gateRouting";
 import { buildRunStatus } from "./engine/status";
 import { UsageReader } from "./engine/usageFs";
 import { formatEq, weightedEq, type UsageTotals } from "./engine/usage";
@@ -533,7 +533,7 @@ export class DeckPanel {
    * — read off the SAME `readFlows` the pass evaluates, so polling costs no read
    * of its own (a second read per pass would also shift every test that
    * sequences `readFlows` returns). Drained after the lock is released. */
-  private pendingPolls: { flowId: string; flowName: string; edgeId: string; nodeId: string; question: string; login: string; since: number }[] = [];
+  private pendingPolls: { flowId: string; flowName: string; edgeId: string; nodeId: string; question: string; logins: string[]; mode: "any" | "all"; since: number }[] = [];
   /** Flow ids whose first post-start evaluation found rules already met, and which
    * are waiting for the user to approve or disarm. Per panel, deliberately not
    * persisted: the gate exists to protect the moment you come back, and asking on
@@ -803,14 +803,18 @@ export class DeckPanel {
     const gate = flow && edge ? findNode(flow, edge.to) : undefined;
     if (!flow || !edge || !gate || gate.kind !== "gate" || !isRouted(gate)) return;
     if (edge.performed !== true || edge.firedAt === undefined || edge.gateAnswer !== undefined || edge.routed !== undefined) return;
-    const login = gate.askWho!.trim().replace(/^@/, "");
+    // `routed.login` and the journal name who was asked: the parsed logins
+    // joined — one login stamps exactly what it always did.
+    const logins = gateLogins(gate);
+    const login = logins.join(", ");
+    const who = logins.map((l) => `@${l}`).join(", ");
     const at = Date.now();
     let routed: NonNullable<FlowEdge["routed"]>;
     const pr = this.gatePr(flow, gate.id, runs);
     if ("error" in pr) routed = { at, login, error: pr.error };
     else if (!this.forge.gates) routed = { at, login, error: `${this.forge.label} cannot carry a gate question — ask on the node instead` };
     else {
-      const posted = await this.forge.gates.post(pr.repoPath, pr.number, routedGateQuestion(flow.name, gate.question, login));
+      const posted = await this.forge.gates.post(pr.repoPath, pr.number, routedGateQuestion(flow.name, gate.question, logins, gateMode(gate)));
       routed = posted.ok ? { at, login, ...(posted.url ? { url: posted.url } : {}) } : { at, login, error: posted.message };
     }
     const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === flowId);
@@ -819,18 +823,22 @@ export class DeckPanel {
     writeFlow(this.flowIo, this.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === edgeId ? { ...e, routed } : e)) });
     this.journal(flowId, { kind: "routed", edge: edgeId, login, ...(routed.url ? { url: routed.url } : {}), ...(routed.error ? { error: routed.error } : {}) }, at);
     if (routed.error) {
-      this.log(`deck: flow ${flowId} could not route ${edgeId}'s question to @${login} — ${routed.error}`);
-      void vscode.window.showWarningMessage(`${flow.name}: the question for @${login} could not be posted (${routed.error}). Answer it on the node.`);
-    } else this.log(`deck: flow ${flowId} asked @${login} on the PR for ${edgeId}`);
+      this.log(`deck: flow ${flowId} could not route ${edgeId}'s question to ${who} — ${routed.error}`);
+      void vscode.window.showWarningMessage(`${flow.name}: the question for ${who} could not be posted (${routed.error}). Answer it on the node.`);
+    } else this.log(`deck: flow ${flowId} asked ${who} on the PR for ${edgeId}`);
   }
 
   /** Read each noted routed gate's thread — at most once per `GATE_POLL_MS` per
-   * gate — and stamp the first answer from the named login as `gateAnswer`,
-   * exactly as `flow:answerGate` would. FIRST ANSWER WINS: a gate answered on
-   * the node while the thread was being read keeps the node's answer, which is
-   * what the fresh read before the write is for. An unreadable thread is
-   * skipped, never read as "no answer". The PR is resolved off the flow as the
-   * pass read it (`polls` carries what it needs), so a miss here costs no read. */
+   * gate — record each named person's first answer as `routedAnswers`, and when
+   * those decide the gate (`gateVerdict`: the first voice for `any`, everyone or
+   * a veto for `all`) stamp `gateAnswer`, exactly as `flow:answerGate` would.
+   * FIRST ANSWER WINS: a gate answered on the node while the thread was being
+   * read keeps the node's answer, which is what the fresh read before the write
+   * is for; a person already recorded is never re-read either. An unreadable
+   * thread is skipped, never read as "no answer". The PR is resolved off the
+   * flow as the pass read it (`polls` carries what it needs), so a miss here
+   * costs no read — and a thread with nothing new on it costs no read of the
+   * flow file either. */
   private async pollRoutedGates(polls: typeof this.pendingPolls, runs: RunStatus[], nowMs: number): Promise<void> {
     if (!this.forge.gates || polls.length === 0) return;
     for (const poll of polls) {
@@ -851,15 +859,22 @@ export class DeckPanel {
         replies = null;
       }
       if (!replies) continue;
-      const hit = gateAnswerFrom(replies, poll.login, poll.since);
-      if (!hit) continue;
+      // Nothing from anyone named: no flow read, no write — the released cost
+      // of a poll that found silence.
+      if (Object.keys(collectRoutedAnswers(replies, poll.logins, poll.since, undefined)).length === 0) continue;
       const latest = readFlows(this.flowIo, this.flowsDir).find((f) => f.id === poll.flowId);
       const current = latest?.edges.find((e) => e.id === poll.edgeId);
       if (!latest || !current || current.performed !== true || current.firedAt === undefined || current.gateAnswer !== undefined) continue;
-      writeFlow(this.flowIo, this.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === poll.edgeId ? { ...e, gateAnswer: hit.answer } : e)) });
-      this.journal(poll.flowId, { kind: "answered", edge: poll.edgeId, answer: hit.answer, by: poll.login }, Date.now());
-      this.log(`deck: flow ${poll.flowId} — @${poll.login} ${hit.answer} "${poll.question}" on the PR`);
-      void vscode.window.showInformationMessage(`${poll.flowName}: @${poll.login} ${hit.answer} "${poll.question}" on the pull request.`);
+      const answers = collectRoutedAnswers(replies, poll.logins, poll.since, current.routedAnswers);
+      const verdict = gateVerdict(poll.mode, poll.logins, answers);
+      if (!verdict && sameRoutedAnswers(answers, current.routedAnswers)) continue;
+      const stamped: FlowEdge = { ...current, routedAnswers: answers, ...(verdict ? { gateAnswer: verdict.answer } : {}) };
+      writeFlow(this.flowIo, this.flowsDir, { ...latest, edges: latest.edges.map((e) => (e.id === poll.edgeId ? stamped : e)) });
+      if (!verdict) continue;
+      const who = verdict.by.map((l) => `@${l}`).join(", ");
+      this.journal(poll.flowId, { kind: "answered", edge: poll.edgeId, answer: verdict.answer, by: verdict.by.join(", ") }, Date.now());
+      this.log(`deck: flow ${poll.flowId} — ${who} ${verdict.answer} "${poll.question}" on the PR`);
+      void vscode.window.showInformationMessage(`${poll.flowName}: ${who} ${verdict.answer} "${poll.question}" on the pull request.`);
     }
   }
 
@@ -1036,7 +1051,7 @@ export class DeckPanel {
       for (const f of flows) {
         if (!f.armed) continue;
         for (const { node, edge } of routedGatesAwaitingAnswer(f)) {
-          this.pendingPolls.push({ flowId: f.id, flowName: f.name, edgeId: edge.id, nodeId: node.id, question: node.question, login: edge.routed!.login, since: edge.routed!.at });
+          this.pendingPolls.push({ flowId: f.id, flowName: f.name, edgeId: edge.id, nodeId: node.id, question: node.question, logins: gateLogins(node), mode: gateMode(node), since: edge.routed!.at });
         }
       }
     }

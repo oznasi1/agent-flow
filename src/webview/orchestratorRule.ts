@@ -36,6 +36,7 @@ import {
   SpendTally,
   spendTotal,
 } from "../engine/orchestrator/model";
+import { gateLogins, gateMode, gateVerdict } from "../engine/orchestrator/gateRouting";
 import { hasNote } from "../engine/prompt";
 import { formatEq } from "../engine/usage";
 import { BranchCiStatus, FlowCommand, FlowPromptMode, RunStatus } from "../types";
@@ -1177,12 +1178,17 @@ export function withNodeGateQuestion(flow: Flow, id: string, question: string): 
 
 /** The aria-label of a gate's "ask on the PR as" field. */
 export const GATE_ASK_WHO_ARIA_LABEL = "Ask on the pull request";
+/** The aria-label of the how-many-must-approve select, shown once two or more
+ * names are on the gate. */
+export const GATE_ASK_MODE_ARIA_LABEL = "How many must approve";
 
 /** Write who a gate is routed to (`GateNode.askWho`), or DELETE the field for a
- * blank — never store `""`, because absent is a meaning (a local gate). A
- * leading `@` is dropped: a login is stored bare and shown with the sigil. */
+ * blank — never store `""`, because absent is a meaning (a local gate). Each
+ * name's leading `@` is dropped and the names are stored as `a, b`: a login is
+ * stored bare and shown with the sigil, and the field reads the same whether
+ * it was typed with commas, spaces or both. */
 export function withNodeGateAskWho(flow: Flow, id: string, who: string): Flow {
-  const login = who.trim().replace(/^@/, "");
+  const login = who.split(/[,\s]+/).map((l) => l.replace(/^@/, "")).filter((l) => l !== "").join(", ");
   return {
     ...flow,
     nodes: flow.nodes.map((n) => {
@@ -1196,17 +1202,48 @@ export function withNodeGateAskWho(flow: Flow, id: string, who: string): Flow {
   };
 }
 
+/** Write how many of a gate's people must approve (`GateNode.askMode`): `"all"`
+ * is stored, `"any"` DELETES the field — absent is the meaning, and what every
+ * gate written before the field does. */
+export function withNodeGateAskMode(flow: Flow, id: string, mode: "any" | "all"): Flow {
+  return {
+    ...flow,
+    nodes: flow.nodes.map((n) => {
+      if (n.id !== id || n.kind !== "gate") return n;
+      if (mode !== "all") {
+        const { askMode: _drop, ...rest } = n;
+        return rest;
+      }
+      return { ...n, askMode: "all" };
+    }),
+  };
+}
+
 /** One line about where a routed gate's question went, for the node and the
  * inspector: asked on the PR, could not be posted (and why), or — before the
- * ask has fired — who it will go to. `undefined` for a local gate. */
+ * ask has fired — who it will go to. `undefined` for a local gate. With several
+ * names it names them all, tallies an `all` gate while it waits (`1 of 2
+ * approved`), and once answered names who decided. */
 export function gateRoutingNote(flow: Flow, node: GateNode): string | undefined {
-  if (typeof node.askWho !== "string" || node.askWho.trim() === "") return undefined;
-  const who = `@${node.askWho.trim().replace(/^@/, "")}`;
+  const logins = gateLogins(node);
+  if (logins.length === 0) return undefined;
+  const who = logins.map((l) => `@${l}`).join(", ");
   const ask = gateAskEdge(flow, node.id);
   if (!ask) return `will ask ${who} on the pull request`;
   if (!ask.routed) return `asking ${who} on the pull request…`;
   if (ask.routed.error) return `could not ask ${who} on the pull request — ${ask.routed.error}`;
-  return ask.gateAnswer ? `${who} answered on the pull request` : `asked ${who} on the pull request`;
+  const mode = gateMode(node);
+  if (ask.gateAnswer) {
+    // Who decided, when the thread did; the whole list when the node did (or
+    // before this stamp existed) — the one-login line either way.
+    const by = gateVerdict(mode, logins, ask.routedAnswers ?? {})?.by ?? logins;
+    return `${by.map((l) => `@${l}`).join(", ")} answered on the pull request`;
+  }
+  if (logins.length === 1) return `asked ${who} on the pull request`;
+  const tally = mode === "all"
+    ? `${logins.filter((l) => ask.routedAnswers?.[l.toLowerCase()]?.answer === "approved").length} of ${logins.length} approved`
+    : logins.length === 2 ? "waiting on either" : "waiting on any of them";
+  return `asked ${who} on the pull request · ${tally}`;
 }
 
 /** Which repo's checkout a command node runs in. `""` CLEARS the field rather

@@ -13440,6 +13440,69 @@ describe("a routed gate", () => {
     expect(h.flows[0].edges[0].gateAnswer).toBe("approved");
     expect(ghCalls().some((a) => a[1]?.includes("/comments?since="))).toBe(false);
   });
+
+  describe("routed to several people", () => {
+    const both = (askMode?: "any" | "all") => ({ askWho: "alice, bob", ...(askMode ? { askMode } : {}) });
+    const asked = (over: Partial<FlowEdge> = {}): Partial<FlowEdge> => ({ firedAt: 5, performed: true, routed: { at: 1_000, login: "alice, bob" }, ...over });
+    const thread = (list: { login: string; body: string; at: string }[]) => {
+      h.ghRun.mockImplementation(async (_f: string, args: string[]) => (args[1]?.includes("/comments?since=") ? comments(list) : "[]"));
+    };
+    const polled = async (flow: Flow) => {
+      setConfig({ orchestrator: true });
+      h.flows = [flow];
+      h.buildRunStatus.mockReturnValue(openStatus("PROJ-1", "aws-ops"));
+      const opened = await openPanel();
+      await settle();
+      return opened;
+    };
+
+    it("posts one comment mentioning everyone and saying how many must answer", async () => {
+      h.ghRun.mockImplementation(async (_f: string, args: string[]) =>
+        args[1]?.includes("/comments") && args[2] === "-f" ? JSON.stringify({ html_url: "https://gh/c/1" }) : "[]");
+      const { send } = await warmed(routedFlow({}, both("all")));
+      await send({ type: "deck:refresh" });
+      const post = ghCalls().find((a) => a[0] === "api" && a[1] === "repos/{owner}/{repo}/issues/1/comments" && a[2] === "-f");
+      expect(post![3]).toContain("@alice @bob");
+      expect(post![3]).toContain("Each of you must reply");
+      expect(h.flows[0].edges[0].routed).toEqual({ at: expect.any(Number), login: "alice, bob", url: "https://gh/c/1" });
+      expect(journal().filter((e) => e.kind === "routed").at(-1)).toMatchObject({ edge: "ask1", login: "alice, bob" });
+    });
+
+    it("an `all` gate with one approval stays open and stamps the partial answer", async () => {
+      thread([{ login: "alice", body: "approve", at: "2026-09-06T10:00:00Z" }]);
+      await polled(routedFlow(asked(), both("all")));
+      expect(h.flows[0].edges[0].gateAnswer).toBeUndefined();
+      expect(h.flows[0].edges[0].routedAnswers).toEqual({ alice: { answer: "approved", at: Date.parse("2026-09-06T10:00:00Z"), url: "https://gh/c/1" } });
+      expect(journal().some((e) => e.kind === "answered")).toBe(false);
+      expect(window.showInformationMessage).not.toHaveBeenCalledWith(expect.stringMatching(/approved/));
+    });
+
+    it("the second approval answers an `all` gate, naming both in the journal and the toast", async () => {
+      const alice = { answer: "approved" as const, at: Date.parse("2026-09-06T10:00:00Z") };
+      thread([{ login: "alice", body: "approve", at: "2026-09-06T10:00:00Z" }, { login: "Bob", body: "yes", at: "2026-09-06T10:05:00Z" }]);
+      await polled(routedFlow(asked({ routedAnswers: { alice } }), both("all")));
+      expect(h.flows[0].edges[0].gateAnswer).toBe("approved");
+      expect(h.flows[0].edges[0].routedAnswers).toEqual({ alice, bob: { answer: "approved", at: Date.parse("2026-09-06T10:05:00Z"), url: "https://gh/c/1" } });
+      expect(journal().filter((e) => e.kind === "answered").at(-1)).toMatchObject({ edge: "ask1", answer: "approved", by: "alice, bob" });
+      expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/@alice, @bob approved/));
+    });
+
+    it("one reject from either vetoes an `all` gate at once", async () => {
+      thread([{ login: "alice", body: "approve", at: "2026-09-06T10:00:00Z" }, { login: "bob", body: "reject", at: "2026-09-06T10:01:00Z" }]);
+      await polled(routedFlow(asked(), both("all")));
+      expect(h.flows[0].edges[0].gateAnswer).toBe("rejected");
+      expect(journal().filter((e) => e.kind === "answered").at(-1)).toMatchObject({ answer: "rejected", by: "bob" });
+      expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/@bob rejected/));
+    });
+
+    it("an `any` gate is answered by whichever named person speaks first — the second-named here", async () => {
+      thread([{ login: "carol", body: "approve", at: "2026-09-06T09:00:00Z" }, { login: "bob", body: "approve", at: "2026-09-06T10:00:00Z" }, { login: "alice", body: "reject", at: "2026-09-06T10:05:00Z" }]);
+      await polled(routedFlow(asked(), both()));
+      expect(h.flows[0].edges[0].gateAnswer).toBe("approved");
+      expect(journal().filter((e) => e.kind === "answered").at(-1)).toMatchObject({ answer: "approved", by: "bob" });
+      expect(window.showInformationMessage).toHaveBeenCalledWith(expect.stringMatching(/@bob approved/));
+    });
+  });
 });
 
 describe("a command-result rule", () => {

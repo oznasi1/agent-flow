@@ -240,11 +240,13 @@ describe("stripHostStamps", () => {
     firedAt: 1756200000000, firedNote: "ran · exit 0", performed: true,
     gateAnswer: "approved", error: "exit 1",
     routed: { at: 1, login: "alice", url: "https://gh/c/1" },
+    routedAnswers: { alice: { answer: "approved", at: 2 } },
   };
 
   it("drops every host-owned stamp", () => {
     const out = stripHostStamps(stamped);
     expect(out.routed).toBeUndefined();
+    expect(out.routedAnswers).toBeUndefined();
     expect(out.firedAt).toBeUndefined();
     expect(out.firedNote).toBeUndefined();
     expect(out.performed).toBeUndefined();

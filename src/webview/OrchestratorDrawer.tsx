@@ -3,6 +3,7 @@ import { placeActivity } from "../engine/orchestrator/conditions";
 import { previewFlow } from "../engine/orchestrator/preview";
 import { anchor, edgePath, labelPoint, GATE_H, NODE_H, NODE_W, snap, tidy } from "../engine/orchestrator/layout";
 import { Condition, edgeAction, Flow, FlowEdge, FlowNode, gateAskEdge, GateNode, incomingEdges, isSettled, isSpendAction, JoinMode, LaunchDest, PlaceNode, PlannedNode, retryPending, hasCeiling, hasTokenCeiling, SpendTally } from "../engine/orchestrator/model";
+import { gateLogins, gateMode } from "../engine/orchestrator/gateRouting";
 import { isBuiltinTemplateId } from "../engine/orchestrator/starters";
 import { suggestionFor } from "../engine/orchestrator/suggestions";
 import { canBindTicket, DemotionChoice, FlowTemplate, placesToDemote } from "../engine/orchestrator/templates";
@@ -91,8 +92,10 @@ import {
   withNodeCwdRepo,
   withNodeGateQuestion,
   withNodeGateAskWho,
+  withNodeGateAskMode,
   gateRoutingNote,
   GATE_ASK_WHO_ARIA_LABEL,
+  GATE_ASK_MODE_ARIA_LABEL,
   withNodeJoin,
   withNodeNotifyMessage,
   withNote,
@@ -1834,12 +1837,12 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               onBlur={(ev) => p.onSave(withNodeGateQuestion(flow, nodeInsp.id, ev.currentTarget.value))}
             />
           </div>
-          {/* Who else may answer: a forge login. Set, the ask also posts the
-              question on the card's pull request mentioning them, and their
-              `approve` / `reject` there answers the gate (gateRouting.ts). The
-              note below says where the question actually went — an error here
-              is the honest half of routing: a gate nobody sees must not look
-              routed. */}
+          {/* Who else may answer: one or more forge logins. Set, the ask also
+              posts the question on the card's pull request mentioning them, and
+              their `approve` / `reject` there answers the gate (gateRouting.ts).
+              The note below says where the question actually went — an error
+              here is the honest half of routing: a gate nobody sees must not
+              look routed. */}
           <div className="orch-clause">
             <span className="orch-kw">ASK ON PR</span>
             <input
@@ -1847,10 +1850,26 @@ export function OrchestratorDrawer(p: OrchestratorDrawerProps): JSX.Element | nu
               aria-label={GATE_ASK_WHO_ARIA_LABEL}
               key={`${nodeInsp.id}-who`}
               defaultValue={nodeInsp.askWho ?? ""}
-              placeholder="a forge login, e.g. alice — blank asks here only"
+              placeholder="forge logins, e.g. alice, bob — blank asks here only"
               onBlur={(ev) => p.onSave(withNodeGateAskWho(flow, nodeInsp.id, ev.currentTarget.value))}
             />
           </div>
+          {/* With two or more names, how many must approve. Not shown for one:
+              there is nobody else for "all of them" to mean, and `askMode` is
+              inert on a one-login gate anyway (gateRouting.ts `gateMode`). */}
+          {gateLogins(nodeInsp).length > 1 && (
+            <div className="orch-clause">
+              <span className="orch-kw">NEEDS</span>
+              <select
+                aria-label={GATE_ASK_MODE_ARIA_LABEL}
+                value={gateMode(nodeInsp)}
+                onChange={(ev) => p.onSave(withNodeGateAskMode(flow, nodeInsp.id, ev.currentTarget.value === "all" ? "all" : "any"))}
+              >
+                <option value="any">any of them</option>
+                <option value="all">all of them</option>
+              </select>
+            </div>
+          )}
           {(() => {
             const note = gateRoutingNote(flow, nodeInsp);
             // The step sits BESIDE the note rather than inside it: `gateRoutingNote`
