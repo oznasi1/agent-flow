@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.72.0] — 2026-09-08
+
 ### Added
 
 - **A configured command can set its environment and its deadline.** An entry
