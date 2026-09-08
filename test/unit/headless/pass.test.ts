@@ -1,6 +1,7 @@
-import { describe, it, expect, vi } from "vitest";
+import { afterEach, describe, it, expect, vi } from "vitest";
 import * as path from "path";
 import { commandCwd, PassDeps, runHeadlessPass } from "../../../src/headless/pass";
+import { COMMAND_RENEW_INTERVAL_MS } from "../../../src/engine/orchestrator/command";
 import { FlowIo, writeFlow } from "../../../src/engine/orchestrator/store";
 import { LockIo, lockPath } from "../../../src/engine/orchestrator/lock";
 import { JournalIo, appendEvent, readJournal } from "../../../src/engine/orchestrator/journal";
@@ -102,6 +103,61 @@ describe("runHeadlessPass — run", () => {
     expect(r.flows[0].fired[0]).toMatch(/ran deploy\.sh staging in aws-ops/);
     expect(w.flowsNow().edges[0].firedAt).toBe(NOW);
     expect(w.events()[0]).toMatchObject({ kind: "fired", action: "run", output: "DEPLOYED\n" });
+  });
+
+  const configured = (over: Partial<Flow> = {}) => armed(
+    [place("n1", "PROJ-1"), { id: "n2", kind: "command", x: 0, y: 0, join: "any", commandId: "aws" }],
+    [edge("e1", "n1", "n2")],
+    { commandConfirmedAt: 5, ...over },
+  );
+
+  it("hands a configured command's env and timeoutMs to the runner", async () => {
+    const w = world([configured()]);
+    await runHeadlessPass(w.deps({ settings: {
+      commands: [{ id: "aws", label: "AWS", run: "deploy.sh", env: { AWS_PROFILE: "prod" }, timeoutMs: 900_000 }],
+      neverAutoRun: [], commandConsent: "flow",
+    } }));
+    expect(w.runner).toHaveBeenCalledWith("deploy.sh", expect.objectContaining({ env: { AWS_PROFILE: "prod" }, timeoutMs: 900_000 }));
+  });
+
+  it("refuses a configured command whose env matches neverAutoRun, before consent is consulted", async () => {
+    const w = world([configured({ commandConfirmedAt: undefined })]);
+    const r = await runHeadlessPass(w.deps({ settings: {
+      commands: [{ id: "aws", label: "AWS", run: "deploy.sh", env: { AWS_PROFILE: "prod" } }],
+      neverAutoRun: ["AWS_PROFILE=prod"], commandConsent: "flow",
+    } }));
+    expect(w.runner).not.toHaveBeenCalled();
+    expect(r.flows[0].needsConsent).toEqual([]);
+    expect(w.flowsNow().edges[0].error).toContain("AWS_PROFILE=prod");
+  });
+
+  describe("under a long command", () => {
+    afterEach(() => vi.useRealTimers());
+
+    // The tick's lock is stamped when the pass starts and renewed after each
+    // step; a command allowed to run past the TTL would be reaped mid-flight
+    // without this. The stamp is read WHILE the command is still running, since
+    // the pass releases the lock once it finishes.
+    it("renews the flows lock every COMMAND_RENEW_INTERVAL_MS while the command runs", async () => {
+      vi.useFakeTimers();
+      const w = world([configured()]);
+      let stampMidCommand: string | undefined;
+      w.runner.mockImplementationOnce(() => new Promise((resolve) => {
+        setTimeout(() => {
+          stampMidCommand = w.files[lockPath(DIR)];
+          resolve({ code: 0, stdout: "", stderr: "" });
+        }, COMMAND_RENEW_INTERVAL_MS + 1);
+      }));
+      const pending = runHeadlessPass(w.deps({ settings: {
+        commands: [{ id: "aws", label: "AWS", run: "deploy.sh", timeoutMs: 900_000 }], neverAutoRun: [], commandConsent: "flow",
+      } }));
+      // Acquired at `nowMs`; a renewal re-stamps with `now()`, which the fixture
+      // deliberately sets one tick later.
+      await vi.advanceTimersByTimeAsync(COMMAND_RENEW_INTERVAL_MS + 5);
+      const r = await pending;
+      expect(stampMidCommand).toBe(`${NOW + 1}:t1`);
+      expect(r.flows[0].fired[0]).toMatch(/ran AWS in aws-ops/);
+    });
   });
 
   it("journals the JSON object a command reports on its last line as `result`, parsed before truncation", async () => {

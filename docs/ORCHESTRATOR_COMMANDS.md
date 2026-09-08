@@ -157,12 +157,42 @@ undo.
 ```js
 child_process.exec(command, {
   cwd,                      // resolved above — never a guess
-  timeout: 120_000,         // Node arms this; nothing else can kill the child
+  env,                      // the host's, with the command's own `env` laid over it — or untouched
+  timeout: 120_000,         // or the command's own `timeoutMs`; Node arms this, nothing else can kill the child
   killSignal: "SIGKILL",    // a script that traps TERM still dies
   maxBuffer: 1 MiB,         // more output than this counts as a failure
   windowsHide: true,
 })
 ```
+
+Both knobs live on the configured command, not on the node:
+
+```jsonc
+"agentFlow.commands": [{
+  "id": "deploy-prod",
+  "label": "Deploy to prod",
+  "run": "deploy.sh --env={note}",
+  "env": { "AWS_PROFILE": "prod" },   // strings only; laid over the editor's environment
+  "timeoutMs": 900000                  // 15 min; default 120000
+}]
+```
+
+`env` **extends** the environment the extension host has — `PATH` and `HOME`
+are still there — and is named on the `running:` line in the output channel,
+because the receipt shows only the command text and `deploy.sh` under
+`AWS_PROFILE=prod` is a different deploy from `deploy.sh`. Each pair is also
+matched against `agentFlow.neverAutoRun`, exactly as the text is. A value that
+is not a string, or a name that is blank, is dropped rather than coerced.
+
+`timeoutMs` **may exceed the flows lock's TTL** (300 s), and that is not an
+oversight in the numbers table: while a command is running, the pass renews
+the lock every 60 s, so another window cannot reap it and run the same
+command a second time — the hazard the 120 s default was sized against. A
+renewal that fails stops the heartbeat and, once the command settles, the
+pass; the command itself is not killed (nothing here holds its handle
+besides Node's own timer). Anything but a positive whole number of
+milliseconds reads as "not set". The killed rule's error names the deadline
+that actually applied.
 
 stdout and stderr go to the Deck's output channel, and — for any armed flow —
 into [the flow journal](FLOW_JOURNAL.md) alongside the `fired`/`errored` line
@@ -252,7 +282,8 @@ exactly as the editor reads them. Workspace-level settings are not: a tick has n
   tick never asks and never invents an approval; an unconsented command is left
   pending and named in the report. `agentFlow.neverAutoRun` is honoured before
   consent is even consulted, and the command runs through the same runner, with
-  the same 120 s deadline, as it would in the Deck.
+  the same deadline (120 s, or the command's own `timeoutMs`), as it would in
+  the Deck — and renews the lock under a long one the same way.
 - **`launch`, `seed` and `ask` are refused**, not degraded. They need an editor
   and a person. Their met rules are left exactly as met as they were — not
   stamped, not errored — and named as `needs an editor, left pending`, so the next
@@ -969,30 +1000,40 @@ there, which closes the picker and opens the drawer's Templates view instead.
 - **Refuse the whole thing** — the command gate is separate from the session
   gate, so approving session launches never silently approved shell.
 - **Put commands out of reach entirely** — `agentFlow.neverAutoRun` patterns
-  outrank every approval, and no answer to any modal overrides one.
+  outrank every approval, and no answer to any modal overrides one. A configured
+  command's `env` is checked pair by pair (`AWS_PROFILE=prod`) alongside its
+  text, so moving a value out of the string does not move it past the brake.
+- **Wait on another branch's CI, a quiet session, or a ticket status from the
+  UI.** `branch CI passed` asks for the repo and the branch, `session idle
+  over…` for the minutes, `ticket status is…` for the status — each on a row
+  under the condition, offered where the condition applies.
+- **Choose the directory.** A command node's inspector has a **Runs in** field
+  (`cwdRepo` in the flow file); left blank, the directory is inherited from the
+  rule's source, as before.
+- **Wait for several conditions.** A node two or more rules reach shows a
+  **JOINS** control — *any of them* (the default) or *all of them*.
+- **Read what a command printed, or a value it reported.** `the command
+  printed…` fires on a substring of the captured output; `the command
+  reported…` compares one field of a JSON object the command printed as its
+  last line. See [Reading what a command printed](#reading-what-a-command-printed).
+- **Retry a rule that spends.** Opt in per rule with a **RETRY** count and wait;
+  a command's retry also needs its **safe to re-run** tick. Off, a failure is
+  still the full stop it always was. See [Retry](#retry).
+- **Give a configured command its own environment and deadline.** An entry in
+  `agentFlow.commands` may carry `env` — variables laid over the editor's own
+  environment for that command only — and `timeoutMs`, replacing the 120 s
+  default. A deadline longer than the flows lock's TTL is safe: the pass renews
+  the lock every 60 s while the command runs. See
+  [Then, the process](#then-the-process).
 
 ### You cannot
 
-- **Wait on another branch's CI from the UI.** `branch CI passed` takes a
-  repo *and* a branch, and no picker asks for them — so "wait for the build
-  to pass on master, then deploy" has to be hand-written in the flow file
-  today. Same for `session idle over…` and `ticket status is…`. Hand-authored
-  rules do render and do run.
-- **Choose the directory from the UI.** `cwdRepo` is respected by the engine
-  but has no control; without it the directory is inherited from the rule's
-  source.
-- **Wait for several conditions.** A node's `join` is always "any" — the
-  model has "all", the drawer has no way to set it.
-- **Exceed two minutes.** At 120 s the child is SIGKILLed and the rule
-  latches errored. Long deploys need to be fire-and-check, not
-  fire-and-wait.
-- **Return data to the flow.** Later rules see only succeeded or failed.
-  Output over 1 MiB is itself a failure.
-- **Retry automatically.** A failed command never runs again until you
-  Reset it. There is no backoff.
-- **Control the environment.** No env-var editing, no shell choice, no
-  argument array — one string, your default shell, the extension host's
-  environment.
+- **Set `env` or a deadline on a free-text node.** Both live on a configured
+  command in `agentFlow.commands`; a one-off typed on the node runs with the
+  editor's environment and the 120 s default. Name it under **Save to
+  settings** and add the fields there.
+- **Choose the shell or pass an argument array.** One string, handed to your
+  default shell (`/bin/sh` on macOS and Linux — see below).
 - **Launch, seed or ask with the Deck closed.** The Deck's pass is a timer on
   the panel; closing the window stops it. A scheduled `node dist/tick.js`
   (see [A pass without the editor](#a-pass-without-the-editor)) performs
@@ -1007,7 +1048,8 @@ there, which closes the picker and opens the drawer's Templates view instead.
 |-------------------------------|----------------|------------------------------------------------------------------------------|
 | Poll interval                  | 6 s            | The Deck's own refresh; evaluation is free once the statuses exist.         |
 | Launches per pass              | 3 per flow, `agentFlow.launchesPerPass` | Sessions, seeds and commands one pass of one flow may start; a notify is free. Per flow, so *N* armed flows may spend *N*× it; the spend ceiling is the lifetime bound. Below 1 or non-integer reads as 3. |
-| Command timeout                | 120 s          | Well under the lock TTL, so a command cannot outlive the lock protecting it. |
+| Command timeout                | 120 s, or the command's `timeoutMs` | The default is well under the lock TTL. A longer configured deadline relies on the renewal below. |
+| Lock renewal under a command   | every 60 s     | While a command runs, the pass renews the flows lock, so a deadline past the TTL cannot be reaped from under it. Never fires for a command shorter than that. |
 | Flows lock TTL                 | 300 s          | Held across a whole pass; a stale lock is reaped, never stolen.             |
 | Max output                     | 1 MiB          | Beyond it the process is torn down and the rule latches errored.            |
 | Kill signal                    | SIGKILL        | A script that traps TERM would otherwise run past its own deadline.        |

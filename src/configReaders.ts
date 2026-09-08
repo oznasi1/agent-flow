@@ -46,9 +46,40 @@ export function readCommands(c: SettingsReader): FlowCommand[] {
     if (!id || !run || seen.has(id)) continue;
     seen.add(id);
     const label = typeof e.label === "string" && e.label.trim() ? e.label.trim() : id;
-    out.push({ id, label, run, ...(typeof e.detail === "string" && e.detail.trim() ? { detail: e.detail.trim() } : {}) });
+    const env = readEnv(e.env);
+    const timeoutMs = readTimeoutMs(e.timeoutMs);
+    out.push({
+      id, label, run,
+      ...(typeof e.detail === "string" && e.detail.trim() ? { detail: e.detail.trim() } : {}),
+      ...(env ? { env } : {}),
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
+    });
   }
   return out;
+}
+
+/** A command's `env`: a plain object of string values, or nothing. Non-string
+ * values and blank names are dropped rather than coerced — `PORT: 8080` written
+ * by hand would otherwise reach the shell as the string `"8080"` on one runtime
+ * and throw on another, and an env this reader invented is worse than one it
+ * refused. An object that ends up empty reads as absent, so the command's shape
+ * on disk (`env` present or not) never depends on how many entries survived. */
+function readEnv(raw: unknown): Record<string, string> | undefined {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+    if (k.trim() === "" || typeof v !== "string") continue;
+    out[k] = v;
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+/** A command's `timeoutMs`: a positive finite integer, or nothing. Same posture
+ * as `readLaunchesPerPass` — anything else reads as "not set", which is the
+ * 120 s default, never `0` (a command that can only be killed) and never
+ * `Infinity` (a command that can never be). */
+function readTimeoutMs(raw: unknown): number | undefined {
+  return typeof raw === "number" && Number.isInteger(raw) && raw > 0 ? raw : undefined;
 }
 
 /** Read `agentFlow.neverAutoRun`. Trims each entry and drops anything blank or

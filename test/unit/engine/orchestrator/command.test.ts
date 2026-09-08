@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { COMMAND_KILLED_EXIT_CODE, COMMAND_TIMEOUT_MS, chainSourcePlace, commandIdFrom, resolveCommand, runCommand, withSavedCommand } from "../../../../src/engine/orchestrator/command";
+import { afterEach, describe, it, expect, vi } from "vitest";
+import { COMMAND_KILLED_EXIT_CODE, COMMAND_RENEW_INTERVAL_MS, COMMAND_TIMEOUT_MS, chainSourcePlace, commandIdFrom, envPairs, resolveCommand, runCommand, withSavedCommand } from "../../../../src/engine/orchestrator/command";
 import { emptyFlow } from "../../../../src/engine/orchestrator/model";
 import type { CommandNode, Flow, FlowEdge, FlowNode } from "../../../../src/engine/orchestrator/model";
 import { LOCK_TTL_MS } from "../../../../src/engine/orchestrator/lock";
@@ -20,6 +20,128 @@ const COMMANDS = [
 // instead of only in a production incident.
 it("keeps COMMAND_TIMEOUT_MS well under the flows lock TTL", () => {
   expect(COMMAND_TIMEOUT_MS).toBeLessThan(LOCK_TTL_MS);
+});
+
+// A command's own `timeoutMs` may exceed the TTL only because the lock is renewed
+// while it runs; that is only true if a renewal lands inside every TTL window, so
+// the interval has to be well under the TTL — pinned the same way.
+it("keeps COMMAND_RENEW_INTERVAL_MS well under the flows lock TTL", () => {
+  expect(COMMAND_RENEW_INTERVAL_MS * 2).toBeLessThanOrEqual(LOCK_TTL_MS);
+});
+
+const ENV_COMMANDS = [
+  ...COMMANDS,
+  { id: "aws", label: "AWS deploy", run: "deploy.sh", env: { AWS_PROFILE: "prod", REGION: "eu-west-1" } },
+  { id: "slow", label: "Slow migrate", run: "migrate.sh", timeoutMs: 900_000 },
+];
+
+describe("resolveCommand — env and deadline", () => {
+  it("carries a configured command's env and timeoutMs through", () => {
+    expect(resolveCommand(node({ commandId: "aws" }), ENV_COMMANDS)).toEqual({
+      ok: true, label: "AWS deploy", text: "deploy.sh", env: { AWS_PROFILE: "prod", REGION: "eu-west-1" },
+    });
+    expect(resolveCommand(node({ commandId: "slow" }), ENV_COMMANDS)).toEqual({
+      ok: true, label: "Slow migrate", text: "migrate.sh", timeoutMs: 900_000,
+    });
+  });
+
+  // No `env: undefined` / `timeoutMs: undefined` keys: callers spread the result
+  // into runner options and a present-but-undefined key would read as "set".
+  it("omits both keys when the command sets neither, and for a free-text node", () => {
+    expect(resolveCommand(node({ commandId: "plain" }), ENV_COMMANDS)).toEqual({ ok: true, label: "Plain", text: "echo hi" });
+    expect(resolveCommand(node({ run: "echo free" }), ENV_COMMANDS)).toEqual({ ok: true, label: "echo free", text: "echo free" });
+  });
+});
+
+describe("envPairs", () => {
+  it("renders each variable the way it would read inline", () => {
+    expect(envPairs({ AWS_PROFILE: "prod", REGION: "eu-west-1" })).toEqual(["AWS_PROFILE=prod", "REGION=eu-west-1"]);
+    expect(envPairs(undefined)).toEqual([]);
+  });
+});
+
+describe("runCommand — env and deadline", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("hands the command's env to the runner, and no env key at all when it has none", async () => {
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" });
+    await runCommand({ node: node({ commandId: "aws" }), commands: ENV_COMMANDS, cwd: "/repo" }, { run, log: () => {} });
+    expect(run).toHaveBeenCalledWith("deploy.sh", { cwd: "/repo", timeoutMs: COMMAND_TIMEOUT_MS, env: { AWS_PROFILE: "prod", REGION: "eu-west-1" } });
+    run.mockClear();
+    await runCommand({ node: node({ commandId: "plain" }), commands: ENV_COMMANDS, cwd: "/repo" }, { run, log: () => {} });
+    expect(run).toHaveBeenCalledWith("echo hi", { cwd: "/repo", timeoutMs: COMMAND_TIMEOUT_MS });
+    expect("env" in run.mock.calls[0][1]).toBe(false);
+  });
+
+  it("uses the command's own timeoutMs, and names THAT deadline when the command is killed", async () => {
+    const run = vi.fn().mockResolvedValue({ code: COMMAND_KILLED_EXIT_CODE, stdout: "", stderr: "" });
+    const out = await runCommand({ node: node({ commandId: "slow" }), commands: ENV_COMMANDS, cwd: "/repo" }, { run, log: () => {} });
+    expect(run).toHaveBeenCalledWith("migrate.sh", { cwd: "/repo", timeoutMs: 900_000 });
+    expect((out as { message: string }).message).toContain("900000");
+    expect((out as { message: string }).message).not.toContain(String(COMMAND_TIMEOUT_MS));
+  });
+
+  // The log is the only surface that shows the environment a command ran under.
+  it("names the env pairs in the running: line", async () => {
+    const log = vi.fn();
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" });
+    await runCommand({ node: node({ commandId: "aws" }), commands: ENV_COMMANDS, cwd: "/repo" }, { run, log });
+    expect(log).toHaveBeenCalledWith("running: AWS_PROFILE=prod REGION=eu-west-1 deploy.sh");
+  });
+
+  // Moving `AWS_PROFILE=prod` out of the command string and into `env` must not be
+  // a way around the brake: the pattern that caught it inline catches it here.
+  it("refuses a command whose env matches a neverAutoRun pattern, without running it", async () => {
+    const run = vi.fn();
+    const out = await runCommand(
+      { node: node({ commandId: "aws" }), commands: ENV_COMMANDS, cwd: "/repo", neverAutoRun: ["AWS_PROFILE=prod"] },
+      { run, log: () => {} },
+    );
+    expect(out.ok).toBe(false);
+    expect((out as { message: string }).message).toContain("AWS_PROFILE=prod");
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it("renews the lock every COMMAND_RENEW_INTERVAL_MS while the command runs, and stops when it settles", async () => {
+    vi.useFakeTimers();
+    let settle!: (v: { code: number; stdout: string; stderr: string }) => void;
+    const run = vi.fn(() => new Promise<{ code: number; stdout: string; stderr: string }>((r) => { settle = r; }));
+    const renew = vi.fn(() => true);
+    const pending = runCommand({ node: node({ commandId: "slow" }), commands: ENV_COMMANDS, cwd: "/repo" }, { run, log: () => {}, renew });
+    expect(renew).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(COMMAND_RENEW_INTERVAL_MS * 3);
+    expect(renew).toHaveBeenCalledTimes(3);
+    settle({ code: 0, stdout: "", stderr: "" });
+    await pending;
+    await vi.advanceTimersByTimeAsync(COMMAND_RENEW_INTERVAL_MS * 3);
+    expect(renew).toHaveBeenCalledTimes(3);
+  });
+
+  // The default 120 s command never reaches the first tick, so a caller that
+  // passes `renew` sees no calls for it — the heartbeat is inert for every
+  // command written before it existed.
+  it("never renews under a command that finishes before the first interval", async () => {
+    vi.useFakeTimers();
+    const run = vi.fn().mockResolvedValue({ code: 0, stdout: "", stderr: "" });
+    const renew = vi.fn(() => true);
+    await runCommand({ node: node({ commandId: "plain" }), commands: ENV_COMMANDS, cwd: "/repo" }, { run, log: () => {}, renew });
+    await vi.advanceTimersByTimeAsync(COMMAND_RENEW_INTERVAL_MS * 3);
+    expect(renew).not.toHaveBeenCalled();
+  });
+
+  it("stops renewing after the first failed renewal, logs it, and still returns the command's outcome", async () => {
+    vi.useFakeTimers();
+    let settle!: (v: { code: number; stdout: string; stderr: string }) => void;
+    const run = vi.fn(() => new Promise<{ code: number; stdout: string; stderr: string }>((r) => { settle = r; }));
+    const renew = vi.fn(() => false);
+    const log = vi.fn();
+    const pending = runCommand({ node: node({ commandId: "slow" }), commands: ENV_COMMANDS, cwd: "/repo" }, { run, log, renew });
+    await vi.advanceTimersByTimeAsync(COMMAND_RENEW_INTERVAL_MS * 3);
+    expect(renew).toHaveBeenCalledTimes(1);
+    expect(log.mock.calls.some(([m]) => /lock could not be renewed/.test(m))).toBe(true);
+    settle({ code: 0, stdout: "done", stderr: "" });
+    expect(await pending).toMatchObject({ ok: true, code: 0 });
+  });
 });
 
 describe("resolveCommand", () => {

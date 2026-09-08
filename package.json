@@ -711,7 +711,7 @@
                 "run": "echo verify the feature on {note}"
               }
             ],
-            "markdownDescription": "Commands an Orchestrator rule can run when its condition is met — a deploy, a webhook call, a smoke test. Each has an `id`, a `label` shown in the picker, the `run` command itself, and an optional `detail` line. The Orchestrator drawer can append to this list for you: type a one-off command on a node, then name it under **Save to settings**. `run` may contain `{note}`, replaced with the rule's own free text — **spliced in unquoted**, exactly as typed, so the note can extend the command (`--env={note}` plus a note of `prod; rm -rf ~` runs both); quoting it yourself (`--env=\"{note}\"`) does not fully neutralise it either, since a `\"` inside the note still breaks out. Only use `{note}` where you trust whoever fills in a rule's note. **These run unattended on your machine**, so a workflow asks before each distinct command text it runs — or, with `agentFlow.commandConsent: flow`, once before its first command — and then runs on its own. That question is separate from the one a launch asks: approving a workflow's launches never approves its commands, so a workflow you already armed and confirmed still asks before it runs anything in a shell. The one default here is an inert example (`echo`, cannot fail or mutate anything) so the picker has something to show; replace or remove it, or clear the list entirely, to run your own.\n\nSee `agentFlow.neverAutoRun` for the brake: command text listed there is refused whatever you have approved.",
+            "markdownDescription": "Commands an Orchestrator rule can run when its condition is met — a deploy, a webhook call, a smoke test. Each has an `id`, a `label` shown in the picker, the `run` command itself, and optionally a `detail` line, an `env` object of variables for that command alone, and a `timeoutMs` deadline replacing the 120 s default. The Orchestrator drawer can append to this list for you: type a one-off command on a node, then name it under **Save to settings**. `run` may contain `{note}`, replaced with the rule's own free text — **spliced in unquoted**, exactly as typed, so the note can extend the command (`--env={note}` plus a note of `prod; rm -rf ~` runs both); quoting it yourself (`--env=\"{note}\"`) does not fully neutralise it either, since a `\"` inside the note still breaks out. Only use `{note}` where you trust whoever fills in a rule's note. **These run unattended on your machine**, so a workflow asks before each distinct command text it runs — or, with `agentFlow.commandConsent: flow`, once before its first command — and then runs on its own. That question is separate from the one a launch asks: approving a workflow's launches never approves its commands, so a workflow you already armed and confirmed still asks before it runs anything in a shell. The one default here is an inert example (`echo`, cannot fail or mutate anything) so the picker has something to show; replace or remove it, or clear the list entirely, to run your own.\n\nSee `agentFlow.neverAutoRun` for the brake: command text listed there is refused whatever you have approved.",
             "items": {
               "type": "object",
               "required": [
@@ -734,6 +734,18 @@
                 "run": {
                   "type": "string",
                   "description": "The command to run. May contain {note}, spliced in unquoted and verbatim — quoting it in the template does not fully sanitise it."
+                },
+                "env": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "description": "Environment variables laid over the editor's own environment for this command only, e.g. { \"AWS_PROFILE\": \"prod\" }. Values must be strings. `agentFlow.neverAutoRun` patterns are checked against each NAME=value pair as well as the command."
+                },
+                "timeoutMs": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "This command's own deadline in milliseconds (default 120000). The child is SIGKILLed when it expires. Longer than the default is allowed: the running pass keeps the flows lock alive while the command runs, so no other window advances the flow meanwhile."
                 }
               }
             }

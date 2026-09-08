@@ -41,7 +41,7 @@ const OFF_BOARD_HINT = "The card left the board — bring it back or rewire the 
 const WRONG_KIND_HINT = "Re-point the rule at a step of the right kind, or delete it.";
 // 120 s, spelt out: `COMMAND_TIMEOUT_MS` lives in `command.ts`, which this
 // webview-safe module must not import. The test pins the two figures together.
-const TIMEOUT_HINT = "Make the command finish inside 120 s or move the long part out of the rule, then Reset.";
+const TIMEOUT_HINT = "Make the command finish inside its deadline (120 s unless the command's own timeoutMs in agentFlow.commands says otherwise), raise that deadline, or move the long part out of the rule, then Reset.";
 
 const includes = (literal: string) => (error: string) => error.includes(literal);
 

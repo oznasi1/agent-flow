@@ -88,6 +88,14 @@ export interface FlowCommand {
   label: string;
   run: string;
   detail?: string;
+  /** Variables laid over the extension host's environment for this command only
+   * (`{ AWS_PROFILE: "prod" }`). Absent means the host's environment untouched —
+   * every command written before this field existed runs exactly as it did. */
+  env?: Record<string, string>;
+  /** This command's own deadline in milliseconds, replacing `COMMAND_TIMEOUT_MS`
+   * (120 s). Absent means the default. It may exceed the flows lock's TTL: the
+   * runner renews the lock while the command runs (see `runCommand`). */
+  timeoutMs?: number;
 }
 
 // ── The Deck: in-flight orchestration board ─────────────────────────────────────

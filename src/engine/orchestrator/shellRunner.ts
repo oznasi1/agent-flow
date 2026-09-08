@@ -38,6 +38,11 @@ export const shellCommandRunner: CommandRunner = (command, opts) =>
       command,
       {
         cwd: opts.cwd,
+        // Laid OVER the host's environment, never instead of it: a command that
+        // sets `AWS_PROFILE` still needs `PATH` and `HOME`. Left undefined when
+        // the command sets nothing, so `exec` inherits `process.env` exactly as it
+        // always did rather than receiving a copy taken at this moment.
+        ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
         // The contract. Node kills the child here; nothing else in this feature can.
         timeout: opts.timeoutMs,
         killSignal: "SIGKILL",
