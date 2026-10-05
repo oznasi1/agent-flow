@@ -191,6 +191,20 @@ for (const patch of patches) {
   }
   const expectSubstring = readFileSync(expectFile, "utf8").trim();
   console.log(`\n=== sabotage: ${journey} ===`);
+  // A patch whose context drifted with the source must count as one failure
+  // and let the loop go on — thrown out of here, it aborted the whole run at
+  // the first stale patch and every patch after it went unchecked for weeks.
+  // `--check` touches nothing, so the tree is still clean when we skip.
+  try {
+    execFileSync("git", ["apply", "--check", join(DIR, patch)], { stdio: "pipe" });
+  } catch (err) {
+    console.error(
+      `sabotage: ${patch} no longer applies — regenerate it against the current source\n` +
+        String(err.stderr ?? err.message).trim(),
+    );
+    failures++;
+    continue;
+  }
   // Record which patch is about to go on disk BEFORE applying it, so a hard
   // kill anywhere between here and the revert below leaves a trail. Written
   // ahead of `git apply` on purpose: the mutation itself is what dirties the
