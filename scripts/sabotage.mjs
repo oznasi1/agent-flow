@@ -167,10 +167,21 @@ if (dirty()) {
 }
 
 const only = process.argv[2];
-const patches = readdirSync(DIR).filter((f) => f.endsWith(".patch"))
-  .filter((f) => !only || f === `${only}.patch`);
+// SABOTAGE_SHARD="i/n" (1-based) runs every n-th patch, so CI can split the
+// lane across parallel jobs: at ~4 minutes a journey, 38 patches in one job
+// outran its 90-minute timeout. Round-robin over the sorted list spreads the
+// slow deck-* and orchestrator-* journeys rather than handing one shard a run.
+const shard = process.env.SABOTAGE_SHARD;
+const shardMatch = shard ? /^(\d+)\/(\d+)$/.exec(shard) : null;
+if (shard && (!shardMatch || +shardMatch[1] < 1 || +shardMatch[1] > +shardMatch[2])) {
+  console.error(`sabotage: SABOTAGE_SHARD must be "i/n" with 1 <= i <= n, got "${shard}"`);
+  process.exit(1);
+}
+const patches = readdirSync(DIR).filter((f) => f.endsWith(".patch")).sort()
+  .filter((f) => !only || f === `${only}.patch`)
+  .filter((_, i) => !shardMatch || i % +shardMatch[2] === +shardMatch[1] - 1);
 if (patches.length === 0) {
-  console.error(`sabotage: no patches matched${only ? ` "${only}"` : ""} in ${DIR}`);
+  console.error(`sabotage: no patches matched${only ? ` "${only}"` : ""}${shard ? ` in shard ${shard}` : ""} in ${DIR}`);
   process.exit(1);
 }
 

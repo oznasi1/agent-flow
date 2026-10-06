@@ -11,13 +11,18 @@ on:
 jobs:
   sabotage:
     runs-on: ubuntu-latest
-    # 9 patches today, each rebuilding and running one journey spec with CI
-    # retries:1 (playwright-e2e.config.ts) — a target test that fails via a
-    # multi-minute expect-timeout (test.setTimeout runs up to 360s in some
-    # journeys) is doubled by the retry, and a healthy run still completes in
-    # well under 30 minutes. 90 minutes leaves several times that much
-    # headroom for slow patches while bounding a stuck run far short of the
-    # 360-minute GitHub Actions default.
+    # Each patch rebuilds and runs one journey spec with CI retries:1
+    # (playwright-e2e.config.ts) — a target test that fails via a multi-minute
+    # expect-timeout is doubled by the retry, so a journey averages ~4 minutes
+    # and the slowest take 13. One job ran out its 90-minute timeout 22 patches
+    # into 38 (2026-10-06), so the lane is split round-robin across shards
+    # (SABOTAGE_SHARD in scripts/sabotage.mjs): ~7 patches, ~30 minutes each.
+    # fail-fast is off so one vacuous journey does not hide the other shards'.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6]
+    name: sabotage (${{ matrix.shard }}/6)
     timeout-minutes: 90
     permissions:
       contents: read
@@ -39,3 +44,5 @@ jobs:
           key: vscode-test-${{ runner.os }}-${{ hashFiles('test-e2e/_helpers/host.ts', 'test-e2e/_helpers/claudeCode.ts', 'test-e2e/_helpers/copilotChat.ts') }}
       # A real Electron workbench needs a display; xvfb provides one headlessly.
       - run: xvfb-run -a npm run sabotage
+        env:
+          SABOTAGE_SHARD: ${{ matrix.shard }}/6
